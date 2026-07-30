@@ -319,6 +319,39 @@ def request_verification(from_sector, to_sector, subject, body, blocking=True, t
     return None
 
 
+# ----------------------------------------------------------------------------
+# SITE QUEUE — read-only mode: record a change instead of making it
+# ----------------------------------------------------------------------------
+
+def queue_site_change(agent, kind, detail):
+    """
+    In read-only mode a site-touching agent records what it WOULD change here,
+    for the owner to approve, rather than reaching the site. Returns the row id.
+    """
+    with _conn() as c:
+        cur = c.execute(
+            "INSERT INTO site_queue(agent,kind,detail,status,queued_at)"
+            " VALUES(?,?,?, 'pending', ?)",
+            (agent, kind, json.dumps(detail)[:2000], _now()),
+        )
+        return cur.lastrowid
+
+
+def pending_site_changes():
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM site_queue WHERE status='pending' ORDER BY queued_at"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def decide_site_change(change_id, decision):
+    """Owner approves/rejects a queued change. decision: 'approved' | 'rejected'."""
+    with _conn() as c:
+        c.execute("UPDATE site_queue SET status=?, decided_at=? WHERE id=?",
+                  (decision, _now(), change_id))
+
+
 if __name__ == "__main__":
     # tiny smoke test
     from init_db import init

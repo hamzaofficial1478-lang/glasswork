@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glassworks Agency — Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
+  --wall:#33484f; --walltop:#3f5860;
+  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
+  --text:#e7eff3; --muted:#7d919c; --faint:#54666f;
+  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.15);
+  --amber:#eaa543; --amber-dim:rgba(234,165,67,.15);
+  --danger:#e5565b; --danger-dim:rgba(229,86,91,.14); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
+}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(900px 500px at 70% -60px,rgba(84,203,217,.05),transparent 60%),var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
+.etch{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
+a{color:var(--glass);text-decoration:none}
+button{font-family:inherit}
+
+header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:rgba(12,18,22,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.brand{display:flex;flex-direction:column;gap:2px}.brand b{font-size:14px}.brand span{font-size:9px}
+.badge{display:flex;align-items:center;gap:9px;padding:7px 13px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2);font-size:13px}
+.badge .fav{width:20px;height:20px;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
+.spacer{flex:1}
+.htab{padding:7px 14px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
+.htab.on{background:var(--glass-dim);border-color:var(--glass);color:var(--glass)}
+.htab:hover{color:var(--text)}
+
+main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
+.title{font-size:22px;font-weight:600;margin:0 0 6px}
+.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 24px;max-width:60ch}
+
+.summary{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;padding:18px;margin-bottom:20px;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
+.summary .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.summary .count{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:var(--glass)}
+.summary .modechip{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 10px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
+.summary .modechip.ro{border-color:var(--glass);color:var(--glass);background:var(--glass-dim)}
+.summary .modechip.full{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+.bar{height:8px;border-radius:5px;background:var(--line);margin-top:14px;overflow:hidden}
+.bar > span{display:block;height:8px;border-radius:5px;background:linear-gradient(90deg,var(--glass),var(--ok));transition:width .4s ease}
+
+.rows{display:flex;flex-direction:column;gap:10px}
+.check{display:flex;gap:13px;align-items:flex-start;background:linear-gradient(180deg,rgba(20,32,38,.6),rgba(10,16,20,.45));border:1px solid var(--line);border-radius:12px;padding:14px 15px}
+.check.ok{border-color:rgba(92,192,136,.35)}
+.check.no{border-color:rgba(229,86,91,.35)}
+.mark{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;margin-top:1px}
+.mark.ok{background:var(--ok-dim);color:var(--ok);border:1px solid var(--ok)}
+.mark.no{background:var(--danger-dim);color:var(--danger);border:1px solid var(--danger)}
+.check .body{flex:1;min-width:0}
+.check .label{font-size:14px;font-weight:600;margin-bottom:2px}
+.check .detail{font-size:12.5px;color:var(--text)}
+.check.no .detail{color:#f2b6b8}
+.check .hint{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45}
+
+.actions{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap}
+.btn{padding:12px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:14px;cursor:pointer;text-align:center}
+.btn.ghost{border-color:var(--line2);background:transparent;color:var(--muted)}
+.btn:hover{filter:brightness(1.12)}
+.empty{color:var(--muted);font-size:13px;padding:30px 0;text-align:center}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><b>Glassworks Agency</b><span class="etch">Status</span></div>
+  <div class="badge"><span class="fav">GD</span><span>What's connected</span></div>
+  <div class="spacer"></div>
+  <a class="htab" href="/">Office</a>
+  <a class="htab" href="/setup">Setup</a>
+  <a class="htab" href="/control">Control room</a>
+</header>
+
+<main>
+  <h1 class="title">What's connected</h1>
+  <p class="lead">A plain-English check of what the agency has, and what it's still waiting on from you. Green tick means it's ready; red cross means it's missing. Fill anything red on the setup screen — you never need to touch a file.</p>
+
+  <div class="summary" id="summary">
+    <div class="top">
+      <span class="count" id="count">—</span>
+      <span style="color:var(--muted);font-size:13px" id="countLabel">Checking…</span>
+      <span class="modechip" id="modeChip">—</span>
+    </div>
+    <div class="bar"><span id="barFill" style="width:0%"></span></div>
+  </div>
+
+  <div class="rows" id="rows"><div class="empty">Loading status…</div></div>
+
+  <div class="actions">
+    <a class="btn" href="/setup">Open setup</a>
+    <button class="btn ghost" onclick="load()">Refresh</button>
+  </div>
+</main>
+
+<script>
+const $ = (s)=>document.querySelector(s);
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function load(){
+  try{
+    const r = await fetch('/api/status', {cache:'no-store'});
+    const j = await r.json();
+    render(j);
+  }catch(e){
+    $('#rows').innerHTML = '<div class="empty">Couldn’t reach the server. Is it running? '+esc(e.message)+'</div>';
+  }
+}
+
+function render(j){
+  $('#count').textContent = j.done + '/' + j.total;
+  $('#countLabel').textContent = j.done === j.total ? 'Everything is connected 🎉'
+    : (j.total - j.done) + ' still to set up';
+  $('#barFill').style.width = Math.round(j.done / j.total * 100) + '%';
+
+  const chip = $('#modeChip');
+  if(j.mode === 'full'){ chip.textContent = 'FULL ACCESS'; chip.className = 'modechip full'; }
+  else { chip.textContent = 'READ-ONLY'; chip.className = 'modechip ro'; }
+
+  $('#rows').innerHTML = (j.checks||[]).map(c=>`
+    <div class="check ${c.ok?'ok':'no'}">
+      <div class="mark ${c.ok?'ok':'no'}">${c.ok?'✓':'✕'}</div>
+      <div class="body">
+        <div class="label">${esc(c.label)}</div>
+        <div class="detail">${esc(c.detail)}</div>
+        ${c.ok?'':'<div class="hint">'+esc(c.hint)+'</div>'}
+      </div>
+    </div>`).join('');
+}
+
+load();
+</script>
+</body>
+</html>

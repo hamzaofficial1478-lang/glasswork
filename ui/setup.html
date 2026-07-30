@@ -82,6 +82,7 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
   <div class="badge"><span class="fav">GD</span><span>First-time setup</span></div>
   <div class="spacer"></div>
   <a class="htab" href="/">Office</a>
+  <a class="htab" href="/status">Status</a>
   <a class="htab" href="/control">Control room</a>
 </header>
 
@@ -93,44 +94,31 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 
     <!-- WEBSITE ------------------------------------------------------------ -->
     <section class="card">
-      <div class="card-h"><div class="ic">◧</div><div><b>Website</b><small>Which site the agents watch and publish to</small></div></div>
+      <div class="card-h"><div class="ic">◧</div><div><b>Website</b><small>Your site, and how much the agents may touch it</small></div></div>
       <div class="card-b">
-        <span style="display:block;font-size:12px;font-weight:500;margin-bottom:6px">Platform</span>
-        <div class="seg" id="platformSeg">
-          <button type="button" data-platform="wordpress" class="on"><span class="dot"></span>WordPress</button>
-          <button type="button" data-platform="custom"><span class="dot"></span>Custom backend</button>
-        </div>
-        <p class="hint" style="margin-top:-8px;margin-bottom:16px">Pick <b>WordPress</b> if your site runs WordPress. Pick <b>Custom backend</b> if you built your own site with its own admin API.</p>
-
         <div class="field">
-          <label for="siteUrl">Website URL</label>
+          <label for="siteUrl">Website address</label>
           <input id="siteUrl" name="siteUrl" placeholder="https://glassworks.ae" inputmode="url">
-          <div class="hint">The public address of your site, including <code>https://</code>.</div>
+          <div class="hint">The address people type to reach your site, including <code>https://</code>.</div>
         </div>
 
-        <div id="wpFields">
-          <div class="field">
-            <label for="wpUser">WordPress username</label>
-            <input id="wpUser" name="wpUser" placeholder="admin">
-            <div class="hint">The username you log in to WordPress admin with.</div>
-          </div>
-          <div class="field">
-            <label for="wpPassword">WordPress application password</label>
-            <input id="wpPassword" name="wpPassword" type="password" placeholder="xxxx xxxx xxxx xxxx">
-            <div class="hint">In WordPress: <b>Users → Profile → Application Passwords</b>. Not your normal login password — generate a new one there and paste it (spaces are fine).</div>
-          </div>
+        <span style="display:block;font-size:12px;font-weight:500;margin-bottom:6px">Website mode</span>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-mode="readonly" class="on"><span class="dot"></span>Read-only</button>
+          <button type="button" data-mode="full"><span class="dot"></span>Full access</button>
         </div>
+        <p class="hint" id="modeHint" style="margin-top:-8px;margin-bottom:16px"><b>Read-only (recommended to start):</b> the agents plan, track and report, but never change your site — anything they'd change is queued for you to approve. Nothing touches your site until you're ready.</p>
 
-        <div id="customFields" class="hidden">
+        <div id="fullFields" class="hidden">
           <div class="field">
-            <label for="apiBase">Custom API base URL</label>
+            <label for="apiBase">Admin API address</label>
             <input id="apiBase" name="apiBase" placeholder="https://glassworks.ae/api/admin" inputmode="url">
-            <div class="hint">The base URL of your backend's admin API — the endpoints the connector calls, such as <code>/health</code> and <code>/pages</code>.</div>
+            <div class="hint">Only for full access. The address of the small admin API on your site the agents use to read and update pages. Don't have one yet? Stay on Read-only.</div>
           </div>
           <div class="field">
-            <label for="apiToken">Custom API token</label>
+            <label for="apiToken">Admin API token</label>
             <input id="apiToken" name="apiToken" type="password" placeholder="your secret token">
-            <div class="hint">The bearer token your backend expects in the <code>Authorization</code> header.</div>
+            <div class="hint">Only for full access. The secret token your site checks before it allows any change.</div>
           </div>
         </div>
       </div>
@@ -205,26 +193,30 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 
 <script>
 const $ = (s)=>document.querySelector(s);
-let platform = "wordpress";
+let mode = "readonly";
 
-// platform toggle
-$('#platformSeg').addEventListener('click', (e)=>{
-  const btn = e.target.closest('button[data-platform]');
+const MODE_HINTS = {
+  readonly: "<b>Read-only (recommended to start):</b> the agents plan, track and report, but never change your site — anything they’d change is queued for you to approve. Nothing touches your site until you’re ready.",
+  full: "<b>Full access:</b> the agents can read and update your site directly through its admin API. Fill in the two boxes below. Only choose this once your site has an admin API ready."
+};
+
+// website-mode toggle
+$('#modeSeg').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-mode]');
   if(!btn) return;
-  platform = btn.dataset.platform;
-  [...$('#platformSeg').children].forEach(b=>b.classList.toggle('on', b===btn));
-  $('#wpFields').classList.toggle('hidden', platform!=='wordpress');
-  $('#customFields').classList.toggle('hidden', platform!=='custom');
+  mode = btn.dataset.mode;
+  [...$('#modeSeg').children].forEach(b=>b.classList.toggle('on', b===btn));
+  $('#fullFields').classList.toggle('hidden', mode!=='full');
+  $('#modeHint').innerHTML = MODE_HINTS[mode];
 });
 
-const SECRET_IDS = ['wpPassword','apiToken','anthropicKey','dfsPassword','telegramToken'];
+const SECRET_IDS = ['apiToken','anthropicKey','dfsPassword','telegramToken'];
 
 function collect(){
   const val = (id)=>{ const el=$('#'+id); return el ? el.value.trim() : ""; };
   return {
-    platform,
+    mode,
     siteUrl: val('siteUrl'),
-    wpUser: val('wpUser'), wpPassword: val('wpPassword'),
     apiBase: val('apiBase'), apiToken: val('apiToken'),
     anthropicKey: val('anthropicKey'),
     dfsLogin: val('dfsLogin'), dfsPassword: val('dfsPassword'),
@@ -255,12 +247,12 @@ $('#setupForm').addEventListener('submit', async (e)=>{
     });
     const j = await r.json();
     if(!r.ok || !j.ok) throw new Error(j.error || 'Save failed.');
-    const plat = j.platform==='wordpress' ? 'WordPress' : 'Custom backend';
+    const modeLabel = j.mode==='full' ? 'Full access' : 'Read-only';
     showBanner('ok',
-      '<b>✓ Setup saved.</b> Wrote <code>.env</code> and <code>mcp/site_connector/connector.py</code> on the server '+
-      'for <b>'+esc(j.siteUrl)+'</b> ('+plat+'). Your keys stay on the server — never shown here or committed to git.'+
-      '<br><br>Next: run <code>python3 coordination/init_db.py</code>, then restart the server and open the '+
-      '<a href="/">office</a>.');
+      '<b>✓ Setup saved.</b> Your details were saved on the server for <b>'+esc(j.siteUrl)+'</b> '+
+      '(<b>'+modeLabel+'</b> mode), and the filing cabinet is <b>'+esc(j.database||'ready')+'</b>. '+
+      'Your keys stay on the server — never shown here or committed to git.'+
+      '<br><br>See what’s connected and what’s still missing on the <a href="/status">status page</a>.');
     // never keep secrets in the DOM after save
     SECRET_IDS.forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });
   }catch(err){

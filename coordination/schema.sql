@@ -147,6 +147,19 @@ CREATE TABLE IF NOT EXISTS lighthouse (
   url TEXT, perf INTEGER, seo INTEGER, a11y INTEGER, best INTEGER, at INTEGER
 );
 
+-- ---- queued site changes (read-only mode) --------------------------------
+-- When the owner is in read-only mode the site-touching agents record what
+-- they WOULD change here instead of changing the site, for the owner to approve.
+CREATE TABLE IF NOT EXISTS site_queue (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent      TEXT,
+  kind       TEXT,                        -- upsert_page | release | rollback | form_test | ...
+  detail     TEXT,
+  status     TEXT DEFAULT 'pending',      -- pending | approved | rejected | applied
+  queued_at  INTEGER,
+  decided_at INTEGER
+);
+
 -- ---- security -------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS security_events (

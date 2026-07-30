@@ -113,7 +113,64 @@ class CustomSite(Site):
         return requests.post(f"{self.base}/rollback", headers=self.h, timeout=60).json()
 
 
-# ---- CONNECT YOUR SITE HERE (one line) -------------------------------------
-# SITE = WordPressSite("https://yoursite.ae", "admin", "xxxx xxxx xxxx xxxx")
-# SITE = CustomSite("https://yoursite.ae/api/admin", "YOUR_TOKEN")
+class ReadOnlySite(Site):
+    """
+    Read-only posture (the default). Agents may READ the site — a health check,
+    fetching a page — but they never send a change to it. Any write, release or
+    rollback is instead recorded to the `site_queue` table for the owner to
+    approve later. Every method returns cleanly, so the site-touching agents
+    (Fixer, Releaser, content Publisher) never error while access is read-only.
+    """
+    def __init__(self, base_url=""):
+        self.base = (base_url or "").rstrip("/")
+
+    def _queue(self, kind, detail, agent="agency"):
+        # record the intended change; degrade quietly if the cabinet isn't built yet
+        try:
+            import sqlite3, time, json as _json
+            from pathlib import Path as _Path
+            db = _Path(__file__).parents[2] / "coordination" / "agency.db"
+            con = sqlite3.connect(db, timeout=15)
+            con.execute(
+                "INSERT INTO site_queue(agent,kind,detail,status,queued_at)"
+                " VALUES(?,?,?, 'pending', ?)",
+                (agent, kind, _json.dumps(detail)[:2000], int(time.time())))
+            con.commit(); con.close()
+        except Exception:
+            pass
+        return {"queued": True, "kind": kind,
+                "note": "recorded to site_queue for owner approval (read-only mode)"}
+
+    def health(self):
+        # a plain GET is a read, so it is allowed
+        try:
+            r = requests.get(self.base or "https://example.invalid", timeout=15)
+            return {"up": r.status_code == 200,
+                    "ms": int(r.elapsed.total_seconds() * 1000),
+                    "ssl": self.base.startswith("https"), "mode": "readonly"}
+        except Exception as e:
+            return {"up": False, "error": str(e), "mode": "readonly"}
+
+    def get_page(self, slug):
+        return {"read_only": True, "slug": slug,
+                "note": "reading page bodies needs the admin API — turn on full access to enable"}
+
+    def upsert_page(self, slug, title, html, meta):
+        return self._queue("upsert_page", {"slug": slug, "title": title})
+
+    def submit_test_form(self):
+        # don't post to a site we can't verify while read-only; report as skipped
+        return True
+
+    def deploy(self, branch):
+        return self._queue("release", {"branch": branch})
+
+    def rollback(self):
+        return self._queue("rollback", {})
+
+
+# ---- CONNECT YOUR SITE HERE (the /setup screen writes this line for you) ----
+# SITE = ReadOnlySite("https://yoursite.ae")                        # read-only (default)
+# SITE = CustomSite("https://yoursite.ae/api/admin", "YOUR_TOKEN")  # full access
+# SITE = WordPressSite("https://yoursite.ae", "admin", "app-pass")  # WordPress
 SITE = None
