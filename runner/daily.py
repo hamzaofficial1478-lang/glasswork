@@ -7,10 +7,12 @@ It launches Claude Code non-interactively with the MD, who runs the daily rhythm
 from CLAUDE.md: sense -> reason -> critic -> delegate. Then the sector leads (also
 scheduled, or spawned as an Agent Team) claim and work their tasks.
 """
-import subprocess, sys
+import os, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(ROOT / "coordination"))
+import ai_keys  # noqa: E402  (resolves the MD's provider/model/key from .env)
 
 PROMPT = (
     "You are the Managing Director. Run one full daily cycle exactly as CLAUDE.md "
@@ -21,11 +23,18 @@ PROMPT = (
 )
 
 def main():
-    # headless Claude Code run, pinned to the MD's context
-    subprocess.run(
-        ["claude", "-p", PROMPT, "--append-system-prompt", (ROOT / "CLAUDE.md").read_text()],
-        cwd=ROOT, check=False,
-    )
+    # the MD (and Critic) run on the MD key, falling back to the FALLBACK key
+    ai_env, slot = ai_keys.as_claude_env("managing-director")
+    if not slot.get("api_key"):
+        sys.exit("No MD key set. Open /setup and fill the MD slot (or a Fallback key).")
+    env = {**os.environ, **ai_env}
+
+    cmd = ["claude", "-p", PROMPT, "--append-system-prompt", (ROOT / "CLAUDE.md").read_text()]
+    if slot.get("model"):
+        cmd += ["--model", slot["model"]]
+
+    # headless Claude Code run, pinned to the MD's context and provider
+    subprocess.run(cmd, cwd=ROOT, check=False, env=env)
 
 if __name__ == "__main__":
     main()

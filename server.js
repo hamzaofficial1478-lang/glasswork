@@ -70,6 +70,21 @@ function ensureDb() {
   }
 }
 
+// AI key slots — one brain per slot. Each is provider / base URL / model / key
+// in .env. MD runs the Managing Director + Critic; FALLBACK backs up everyone;
+// the rest are one per sector. (Kept in sync with coordination/ai_keys.py.)
+const AI_SLOTS = [
+  { key: "MD", label: "Managing Director & Critic" },
+  { key: "FALLBACK", label: "Fallback (backup for all agents)" },
+  { key: "IT", label: "IT sector" },
+  { key: "CONTENT", label: "Content sector" },
+  { key: "SEO", label: "SEO sector" },
+  { key: "LEADS", label: "Leads sector" },
+  { key: "REPORT", label: "Report sector" },
+  { key: "SECURITY", label: "Security sector" },
+];
+const SECTOR_SLOTS = ["IT", "CONTENT", "SEO", "LEADS", "REPORT", "SECURITY"];
+
 // SETUP — the /setup screen posts the config here; we write .env and the
 // connector's SITE line, then build the cabinet, so the owner edits nothing.
 app.post("/api/setup", (req, res) => {
@@ -96,20 +111,43 @@ app.post("/api/setup", (req, res) => {
 
     // one clean line per value; strip newlines so nobody can inject extra keys.
     const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
+
+    // AI key slots (provider / base URL / model / key per brain)
+    const ai = (b.ai && typeof b.ai === "object") ? b.ai : {};
+    let aiKeysSet = 0;
+    const aiLines = [];
+    for (const slot of AI_SLOTS) {
+      const s = ai[slot.key] || {};
+      const key = one(s.key);
+      if (key) aiKeysSet++;
+      aiLines.push(
+        `${slot.key}_PROVIDER=${one(s.provider)}`,
+        `${slot.key}_BASE_URL=${one(s.baseUrl)}`,
+        `${slot.key}_MODEL=${one(s.model)}`,
+        `${slot.key}_API_KEY=${key}`,
+      );
+    }
+
     const envText = [
       "# Written by the setup screen (/setup). Secrets are stored here only — keep it out of git.",
       `SITE_MODE=${mode}`,
       `SITE_URL=${one(siteUrl)}`,
-      `ANTHROPIC_API_KEY=${one(b.anthropicKey)}`,
+      "",
+      "# AI providers — one slot per brain (provider / base URL / model / key)",
+      ...aiLines,
+      "",
+      "# Optional extras (not required to start)",
       `DATAFORSEO_LOGIN=${one(b.dfsLogin)}`,
       `DATAFORSEO_PASSWORD=${one(b.dfsPassword)}`,
       `TELEGRAM_BOT_TOKEN=${one(b.telegramToken)}`,
       `TELEGRAM_CHAT_ID=${one(b.telegramChatId)}`,
-      `SITE_API_BASE=${one(mode === "full" ? apiBase : "")}`,
-      `SITE_API_TOKEN=${one(mode === "full" ? apiToken : "")}`,
       `OUTREACH_DOMAIN=${one(b.outreachDomain)}`,
       `DAILY_SPEND_CAP_USD=${one(b.spendCap) || "15"}`,
       `OUTREACH_DAILY_CAP=${one(b.outreachCap) || "25"}`,
+      "",
+      "# Website full-access (only used in full mode)",
+      `SITE_API_BASE=${one(mode === "full" ? apiBase : "")}`,
+      `SITE_API_TOKEN=${one(mode === "full" ? apiToken : "")}`,
       `PORT=${process.env.PORT || "3000"}`,
       "",
     ].join("\n");
@@ -138,6 +176,7 @@ app.post("/api/setup", (req, res) => {
     return res.json({
       ok: true, mode, siteUrl,
       wrote: [".env", "mcp/site_connector/connector.py"],
+      aiKeysSet, aiKeysTotal: AI_SLOTS.length,
       database: db.built ? "ready" : "not built",
     });
   } catch (e) {
@@ -152,42 +191,66 @@ app.get("/api/status", (_q, res) => {
   const has = (k) => !!(e[k] && e[k].trim());
   const mode = String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly";
   const fullReady = has("SITE_API_BASE") && has("SITE_API_TOKEN");
+
+  // which brain (provider + model) each sector and the MD is using
+  const fallbackKeyed = has("FALLBACK_API_KEY");
+  const fallbackPM = [e.FALLBACK_PROVIDER, e.FALLBACK_MODEL].filter(Boolean).join(" · ");
+  const brains = AI_SLOTS.map((slot) => {
+    const keyed = has(slot.key + "_API_KEY");
+    const provider = e[slot.key + "_PROVIDER"] || "";
+    const model = e[slot.key + "_MODEL"] || "";
+    const pm = [provider, model].filter(Boolean).join(" · ");
+    let ok, detail;
+    if (keyed) {
+      ok = true;
+      detail = pm || "key set (add the provider + model for a clearer view)";
+    } else if (slot.key === "FALLBACK") {
+      ok = false;
+      detail = "No fallback key — if a sector key fails, that agent stops";
+    } else if (fallbackKeyed) {
+      ok = false; // still a red warning per sector, but note the safety net
+      detail = "No key set — will fall back to the Fallback key" + (fallbackPM ? " (" + fallbackPM + ")" : "");
+    } else {
+      ok = false;
+      detail = "No key set — this agent can't run yet";
+    }
+    return { key: slot.key, label: slot.label, provider, model, ok, detail };
+  });
+  const mdKeyed = has("MD_API_KEY");
+  const sectorsKeyed = SECTOR_SLOTS.filter((k) => has(k + "_API_KEY")).length;
+  const brainsReady = (mdKeyed ? 1 : 0) + sectorsKeyed;   // MD + 6 sectors
+  const brainsTotal = 1 + SECTOR_SLOTS.length;
+
   const checks = [
-    { label: "Website", ok: has("SITE_URL"),
+    { label: "Website", optional: false, ok: has("SITE_URL"),
       detail: has("SITE_URL")
-        ? (mode === "full"
-            ? "Full access — agents can read and update your site"
-            : "Read-only — agents plan and track; any change is queued for your approval")
+        ? (mode === "full" ? "Full access — agents can read and update your site"
+                           : "Read-only — agents plan and track; any change is queued for your approval")
         : "No website address saved yet",
       hint: "Set this on the setup screen under Website." },
-    { label: "Site access (only for full mode)", ok: mode !== "full" ? true : fullReady,
-      detail: mode !== "full"
-        ? "Not needed — you're in read-only mode"
+    { label: "Site access (full mode only)", optional: false, ok: mode !== "full" ? true : fullReady,
+      detail: mode !== "full" ? "Not needed — you're in read-only mode"
         : (fullReady ? "Admin API address and token saved" : "Full access is on, but the admin API address/token is missing"),
       hint: "Only needed if you switch Website mode to Full access." },
-    { label: "Anthropic API key", ok: has("ANTHROPIC_API_KEY"),
-      detail: has("ANTHROPIC_API_KEY") ? "Saved" : "Missing — the agents can't think without this",
-      hint: "console.anthropic.com → API Keys." },
-    { label: "DataForSEO (rank tracking)", ok: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD"),
-      detail: (has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD")) ? "Login and password saved" : "Missing — rankings won't be tracked",
-      hint: "Login + API password from your DataForSEO dashboard." },
-    { label: "Telegram (your approvals)", ok: has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID"),
-      detail: (has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID")) ? "Bot token and chat ID saved" : "Missing — the agency can't reach you to approve things",
-      hint: "Bot token from @BotFather, chat ID from @userinfobot." },
-    { label: "Sending domain", ok: has("OUTREACH_DOMAIN"),
-      detail: has("OUTREACH_DOMAIN") ? e.OUTREACH_DOMAIN : "Not set — outreach stays off until this is set",
-      hint: "A subdomain you send cold email from." },
-    { label: "Spend & outreach caps", ok: has("DAILY_SPEND_CAP_USD") && has("OUTREACH_DAILY_CAP"),
-      detail: (has("DAILY_SPEND_CAP_USD") && has("OUTREACH_DAILY_CAP"))
-        ? `$${e.DAILY_SPEND_CAP_USD}/day spend, ${e.OUTREACH_DAILY_CAP} messages/day`
-        : "Using safe defaults",
-      hint: "Safety limits the Overseer enforces." },
-    { label: "Filing cabinet (database)", ok: dbBuilt(),
+    { label: "Filing cabinet (database)", optional: false, ok: dbBuilt(),
       detail: dbBuilt() ? "Built and ready" : "Not built yet — it builds itself when you save the setup form",
       hint: "No action needed — created for you on first save." },
+    { label: "DataForSEO (rank tracking)", optional: true, ok: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD"),
+      detail: (has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD")) ? "Login and password saved" : "Not set — rankings aren't tracked",
+      hint: "Login + API password from your DataForSEO dashboard." },
+    { label: "Telegram (your approvals)", optional: true, ok: has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID"),
+      detail: (has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID")) ? "Bot token and chat ID saved" : "Not set — you won't get Telegram approvals yet",
+      hint: "Bot token from @BotFather, chat ID from @userinfobot." },
+    { label: "Sending domain", optional: true, ok: has("OUTREACH_DOMAIN"),
+      detail: has("OUTREACH_DOMAIN") ? e.OUTREACH_DOMAIN : "Not set — outreach stays off",
+      hint: "A subdomain you send cold email from." },
+    { label: "Spend & outreach caps", optional: true, ok: has("DAILY_SPEND_CAP_USD") && has("OUTREACH_DAILY_CAP"),
+      detail: (has("DAILY_SPEND_CAP_USD") && has("OUTREACH_DAILY_CAP"))
+        ? `$${e.DAILY_SPEND_CAP_USD}/day spend, ${e.OUTREACH_DAILY_CAP} messages/day` : "Using safe defaults (15/day, 25/day)",
+      hint: "Safety limits the Overseer enforces." },
   ];
-  const done = checks.filter((c) => c.ok).length;
-  res.json({ ok: true, mode, done, total: checks.length, checks });
+
+  res.json({ ok: true, mode, brains, brainsReady, brainsTotal, checks });
 });
 
 const PORT = process.env.PORT || 3000;

@@ -29,14 +29,13 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .badge .fav{width:20px;height:20px;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
 .spacer{flex:1}
 .htab{padding:7px 14px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
-.htab.on{background:var(--glass-dim);border-color:var(--glass);color:var(--glass)}
 .htab:hover{color:var(--text)}
 
 main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 .title{font-size:22px;font-weight:600;margin:0 0 6px}
-.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 24px;max-width:60ch}
+.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 24px;max-width:62ch}
 
-.summary{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;padding:18px;margin-bottom:20px;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
+.summary{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;padding:18px;margin-bottom:24px;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
 .summary .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .summary .count{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:var(--glass)}
 .summary .modechip{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 10px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
@@ -45,20 +44,28 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 .bar{height:8px;border-radius:5px;background:var(--line);margin-top:14px;overflow:hidden}
 .bar > span{display:block;height:8px;border-radius:5px;background:linear-gradient(90deg,var(--glass),var(--ok));transition:width .4s ease}
 
+.sec-h{margin:24px 0 12px}
+.sec-h b{font-size:14px}
+.sec-h .note{color:var(--muted);font-size:12px;margin-left:8px}
 .rows{display:flex;flex-direction:column;gap:10px}
 .check{display:flex;gap:13px;align-items:flex-start;background:linear-gradient(180deg,rgba(20,32,38,.6),rgba(10,16,20,.45));border:1px solid var(--line);border-radius:12px;padding:14px 15px}
 .check.ok{border-color:rgba(92,192,136,.35)}
-.check.no{border-color:rgba(229,86,91,.35)}
+.check.no{border-color:rgba(229,86,91,.45)}
+.check.opt{border-style:dashed;border-color:var(--line)}
 .mark{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;margin-top:1px}
 .mark.ok{background:var(--ok-dim);color:var(--ok);border:1px solid var(--ok)}
 .mark.no{background:var(--danger-dim);color:var(--danger);border:1px solid var(--danger)}
+.mark.opt{background:var(--panel2);color:var(--muted);border:1px solid var(--line2)}
 .check .body{flex:1;min-width:0}
-.check .label{font-size:14px;font-weight:600;margin-bottom:2px}
+.check .label{font-size:14px;font-weight:600;margin-bottom:2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.check .opttag{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:1px 7px}
 .check .detail{font-size:12.5px;color:var(--text)}
 .check.no .detail{color:#f2b6b8}
+.check.opt .detail{color:var(--muted)}
+.check .mono{font-family:'IBM Plex Mono',monospace;font-size:12px}
 .check .hint{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45}
 
-.actions{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap}
+.actions{display:flex;gap:10px;margin-top:26px;flex-wrap:wrap}
 .btn{padding:12px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:14px;cursor:pointer;text-align:center}
 .btn.ghost{border-color:var(--line2);background:transparent;color:var(--muted)}
 .btn:hover{filter:brightness(1.12)}
@@ -78,7 +85,7 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 
 <main>
   <h1 class="title">What's connected</h1>
-  <p class="lead">A plain-English check of what the agency has, and what it's still waiting on from you. Green tick means it's ready; red cross means it's missing. Fill anything red on the setup screen — you never need to touch a file.</p>
+  <p class="lead">A plain-English check of what the agency has and what it's still waiting on. Green tick means ready; red cross means a brain has no key; a dashed grey row is optional. Fill anything red on the setup screen — you never touch a file.</p>
 
   <div class="summary" id="summary">
     <div class="top">
@@ -89,7 +96,11 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
     <div class="bar"><span id="barFill" style="width:0%"></span></div>
   </div>
 
-  <div class="rows" id="rows"><div class="empty">Loading status…</div></div>
+  <div class="sec-h"><b>The brains</b><span class="note">which AI provider &amp; model runs each part</span></div>
+  <div class="rows" id="brains"><div class="empty">Loading…</div></div>
+
+  <div class="sec-h"><b>Everything else</b><span class="note">website, database, and optional extras</span></div>
+  <div class="rows" id="checks"></div>
 
   <div class="actions">
     <a class="btn" href="/setup">Open setup</a>
@@ -104,32 +115,48 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;'
 async function load(){
   try{
     const r = await fetch('/api/status', {cache:'no-store'});
-    const j = await r.json();
-    render(j);
+    render(await r.json());
   }catch(e){
-    $('#rows').innerHTML = '<div class="empty">Couldn’t reach the server. Is it running? '+esc(e.message)+'</div>';
+    $('#brains').innerHTML = '<div class="empty">Couldn’t reach the server. Is it running? '+esc(e.message)+'</div>';
   }
 }
 
+function brainRow(b){
+  return `<div class="check ${b.ok?'ok':'no'}">
+    <div class="mark ${b.ok?'ok':'no'}">${b.ok?'✓':'✕'}</div>
+    <div class="body">
+      <div class="label">${esc(b.label)}</div>
+      <div class="detail ${b.ok?'mono':''}">${esc(b.detail)}</div>
+    </div>
+  </div>`;
+}
+
+function checkRow(c){
+  const state = c.ok ? 'ok' : (c.optional ? 'opt' : 'no');
+  const glyph = c.ok ? '✓' : (c.optional ? '–' : '✕');
+  return `<div class="check ${state}">
+    <div class="mark ${state}">${glyph}</div>
+    <div class="body">
+      <div class="label">${esc(c.label)}${c.optional?'<span class="opttag">optional</span>':''}</div>
+      <div class="detail">${esc(c.detail)}</div>
+      ${(!c.ok && !c.optional)?'<div class="hint">'+esc(c.hint)+'</div>':''}
+    </div>
+  </div>`;
+}
+
 function render(j){
-  $('#count').textContent = j.done + '/' + j.total;
-  $('#countLabel').textContent = j.done === j.total ? 'Everything is connected 🎉'
-    : (j.total - j.done) + ' still to set up';
-  $('#barFill').style.width = Math.round(j.done / j.total * 100) + '%';
+  $('#count').textContent = j.brainsReady + '/' + j.brainsTotal;
+  $('#countLabel').textContent = j.brainsReady === j.brainsTotal
+    ? 'Every sector and the MD has a key 🎉'
+    : (j.brainsTotal - j.brainsReady) + ' brain' + ((j.brainsTotal-j.brainsReady)===1?'':'s') + ' still need a key (MD + 6 sectors)';
+  $('#barFill').style.width = Math.round(j.brainsReady / j.brainsTotal * 100) + '%';
 
   const chip = $('#modeChip');
   if(j.mode === 'full'){ chip.textContent = 'FULL ACCESS'; chip.className = 'modechip full'; }
   else { chip.textContent = 'READ-ONLY'; chip.className = 'modechip ro'; }
 
-  $('#rows').innerHTML = (j.checks||[]).map(c=>`
-    <div class="check ${c.ok?'ok':'no'}">
-      <div class="mark ${c.ok?'ok':'no'}">${c.ok?'✓':'✕'}</div>
-      <div class="body">
-        <div class="label">${esc(c.label)}</div>
-        <div class="detail">${esc(c.detail)}</div>
-        ${c.ok?'':'<div class="hint">'+esc(c.hint)+'</div>'}
-      </div>
-    </div>`).join('');
+  $('#brains').innerHTML = (j.brains||[]).map(brainRow).join('');
+  $('#checks').innerHTML = (j.checks||[]).map(checkRow).join('');
 }
 
 load();

@@ -34,13 +34,15 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 
 main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 .title{font-size:22px;font-weight:600;margin:0 0 6px}
-.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 26px;max-width:60ch}
+.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 26px;max-width:62ch}
 
 .card{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;margin-bottom:20px;overflow:hidden;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
+.card.optional{border-style:dashed;border-color:var(--line)}
 .card-h{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
 .card-h .ic{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
 .card-h b{font-size:14px;display:block}
 .card-h small{color:var(--muted);font-size:11px}
+.optpill{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);border:1px solid var(--amber);background:var(--amber-dim);border-radius:999px;padding:3px 9px}
 .card-b{padding:18px}
 
 .field{margin:0 0 16px}
@@ -51,7 +53,7 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 .field input:focus,.field select:focus{outline:none;border-color:var(--glass);box-shadow:0 0 0 3px var(--glass-dim)}
 .hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45}
 .row{display:flex;gap:14px;flex-wrap:wrap}
-.row .field{flex:1;min-width:200px}
+.row .field{flex:1;min-width:180px}
 
 .seg{display:flex;gap:8px;margin-bottom:16px}
 .seg button{flex:1;padding:11px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px}
@@ -59,6 +61,15 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 .seg button.on{border-color:var(--glass);background:var(--glass-dim);color:var(--glass)}
 .seg button.on .dot{background:var(--glass);box-shadow:0 0 8px var(--glass)}
 .hidden{display:none}
+
+.grp-h{margin:6px 0 12px;padding-top:2px}
+.slot{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:rgba(24,37,48,.4)}
+.slot.md{border-color:var(--glass);background:var(--glass-dim)}
+.slot-h{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.slot-h b{font-size:13.5px}
+.slot-h .tag{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:2px 8px}
+.slot.md .slot-h .tag{color:var(--glass);border-color:var(--glass)}
+.slot > .hint{margin-top:0;margin-bottom:12px}
 
 .pbtn{width:100%;padding:13px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:14px;cursor:pointer;margin-top:2px}
 .pbtn:disabled{opacity:.55;cursor:default}
@@ -88,7 +99,7 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 
 <main>
   <h1 class="title">Wire up the agency</h1>
-  <p class="lead">Fill this in once. On save it writes your <code style="font-family:'IBM Plex Mono',monospace">.env</code> and the website connector on the server for you — no editing files by hand. Nothing here is shown back or committed to git.</p>
+  <p class="lead">Fill this in once. On save it writes your <code style="font-family:'IBM Plex Mono',monospace">.env</code> and the website connector on the server for you — no editing files by hand. Nothing here is shown back or committed to git. Only the AI keys and your website are needed to start; the rest is optional.</p>
 
   <form id="setupForm" autocomplete="off">
 
@@ -124,61 +135,58 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
       </div>
     </section>
 
-    <!-- KEYS --------------------------------------------------------------- -->
+    <!-- AI PROVIDERS ------------------------------------------------------- -->
     <section class="card">
-      <div class="card-h"><div class="ic">🔑</div><div><b>Keys</b><small>Credentials the agents use for brains, rankings and your Telegram</small></div></div>
+      <div class="card-h"><div class="ic">🧠</div><div><b>AI providers (the brains)</b><small>One key slot per brain. Use any provider — Forge, Agent Router, OpenRouter, Anthropic, OpenAI…</small></div></div>
       <div class="card-b">
-        <div class="field">
-          <label for="anthropicKey">Anthropic API key</label>
-          <input id="anthropicKey" name="anthropicKey" type="password" placeholder="sk-ant-...">
-          <div class="hint">From <b>console.anthropic.com → API Keys</b>. This is what powers every agent. Starts with <code>sk-ant-</code>.</div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="dfsLogin">DataForSEO login</label>
-            <input id="dfsLogin" name="dfsLogin" placeholder="you@email.com">
-            <div class="hint">Your DataForSEO account login (for rank tracking).</div>
-          </div>
-          <div class="field">
-            <label for="dfsPassword">DataForSEO password</label>
-            <input id="dfsPassword" name="dfsPassword" type="password" placeholder="API password">
-            <div class="hint">The <b>API</b> password from your DataForSEO dashboard — not your website password.</div>
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="telegramToken">Telegram bot token</label>
-            <input id="telegramToken" name="telegramToken" type="password" placeholder="123456:ABC-DEF...">
-            <div class="hint">From <b>@BotFather</b> when you create the bot. This is how the agency messages you.</div>
-          </div>
-          <div class="field">
-            <label for="telegramChatId">Telegram chat ID</label>
-            <input id="telegramChatId" name="telegramChatId" placeholder="123456789">
-            <div class="hint">Your own chat ID so messages reach you — get it from <b>@userinfobot</b>.</div>
-          </div>
-        </div>
+        <p class="hint" style="margin-top:0;margin-bottom:16px">Each slot takes a <b>provider name</b>, a <b>base URL</b> (the endpoint address — providers like Forge and Agent Router need this), a <b>model</b>, and the <b>API key</b>. At minimum fill the <b>MD</b> slot to start; unfilled sectors automatically use the Fallback key.</p>
+        <div id="aiSlots"></div>
       </div>
     </section>
 
-    <!-- OUTREACH ----------------------------------------------------------- -->
-    <section class="card">
-      <div class="card-h"><div class="ic">✉</div><div><b>Outreach</b><small>The limits that keep sending safe and on-budget</small></div></div>
+    <!-- OPTIONAL ----------------------------------------------------------- -->
+    <section class="card optional">
+      <div class="card-h"><div class="ic">➕</div><div><b>Optional extras</b><small>Not required to start — add these whenever you're ready</small></div><span class="optpill">Optional</span></div>
       <div class="card-b">
-        <div class="field">
-          <label for="outreachDomain">Sending domain</label>
-          <input id="outreachDomain" name="outreachDomain" placeholder="mail.glassworks.ae">
-          <div class="hint">The domain cold email is sent from. Use a subdomain, not your main site domain, to protect its reputation.</div>
+        <div class="row">
+          <div class="field">
+            <label for="dfsLogin">DataForSEO login <span style="color:var(--faint)">(optional)</span></label>
+            <input id="dfsLogin" name="dfsLogin" placeholder="you@email.com">
+            <div class="hint">For rank tracking. Leave blank to skip — the agency still plans and reports without it.</div>
+          </div>
+          <div class="field">
+            <label for="dfsPassword">DataForSEO password <span style="color:var(--faint)">(optional)</span></label>
+            <input id="dfsPassword" name="dfsPassword" type="password" placeholder="API password">
+            <div class="hint">The API password from your DataForSEO dashboard — not your website password.</div>
+          </div>
         </div>
         <div class="row">
           <div class="field">
-            <label for="spendCap">Daily spend cap (USD)</label>
-            <input id="spendCap" name="spendCap" type="number" min="0" step="1" placeholder="15">
-            <div class="hint">Hard ceiling on agency spend per day. The Overseer stops everything at this number.</div>
+            <label for="telegramToken">Telegram bot token <span style="color:var(--faint)">(optional)</span></label>
+            <input id="telegramToken" name="telegramToken" type="password" placeholder="123456:ABC-DEF...">
+            <div class="hint">From <b>@BotFather</b>. Lets the agency message you for approvals. Skip for now if you like.</div>
           </div>
           <div class="field">
-            <label for="outreachCap">Daily outreach cap</label>
+            <label for="telegramChatId">Telegram chat ID <span style="color:var(--faint)">(optional)</span></label>
+            <input id="telegramChatId" name="telegramChatId" placeholder="123456789">
+            <div class="hint">Your own chat ID — get it from <b>@userinfobot</b>.</div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="outreachDomain">Sending domain <span style="color:var(--faint)">(optional)</span></label>
+          <input id="outreachDomain" name="outreachDomain" placeholder="mail.glassworks.ae">
+          <div class="hint">Only needed once you want cold outreach. Use a subdomain to protect your main domain's reputation.</div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="spendCap">Daily spend cap, USD <span style="color:var(--faint)">(optional)</span></label>
+            <input id="spendCap" name="spendCap" type="number" min="0" step="1" placeholder="15">
+            <div class="hint">Hard ceiling on spend per day. Defaults to 15 if left blank.</div>
+          </div>
+          <div class="field">
+            <label for="outreachCap">Daily outreach cap <span style="color:var(--faint)">(optional)</span></label>
             <input id="outreachCap" name="outreachCap" type="number" min="0" step="1" placeholder="25">
-            <div class="hint">Max cold emails/DMs sent per day. Nothing goes out above this.</div>
+            <div class="hint">Most messages sent per day. Defaults to 25 if left blank.</div>
           </div>
         </div>
       </div>
@@ -200,7 +208,6 @@ const MODE_HINTS = {
   full: "<b>Full access:</b> the agents can read and update your site directly through its admin API. Fill in the two boxes below. Only choose this once your site has an admin API ready."
 };
 
-// website-mode toggle
 $('#modeSeg').addEventListener('click', (e)=>{
   const btn = e.target.closest('button[data-mode]');
   if(!btn) return;
@@ -210,15 +217,63 @@ $('#modeSeg').addEventListener('click', (e)=>{
   $('#modeHint').innerHTML = MODE_HINTS[mode];
 });
 
-const SECRET_IDS = ['apiToken','anthropicKey','dfsPassword','telegramToken'];
+// ---- AI key slots ----------------------------------------------------------
+const CORE = [
+  {key:"MD", label:"MD key", tag:"MD & Critic", md:true,
+   hint:"Your most advanced model — it runs the Managing Director and the Critic, the planning brain. Fill this one first."},
+  {key:"FALLBACK", label:"Fallback key", tag:"backup for all",
+   hint:"Used automatically if any other key fails, and as spare capacity for the MD. Make it a reliable general model."},
+];
+const SECTORS = [
+  {key:"IT", label:"IT sector key", tag:"IT agents", hint:"Runs the IT agents — site health, fixes and releases."},
+  {key:"CONTENT", label:"Content sector key", tag:"Content agents", hint:"Runs the Content agents — writing, case studies and publishing."},
+  {key:"SEO", label:"SEO sector key", tag:"SEO agents", hint:"Runs the SEO agents — rankings and keyword strategy."},
+  {key:"LEADS", label:"Leads sector key", tag:"Leads agents", hint:"Runs the Leads agents — finding, screening and replying to leads."},
+  {key:"REPORT", label:"Report sector key", tag:"Reporter", hint:"Runs the Reporter — daily scoring and your digest."},
+  {key:"SECURITY", label:"Security sector key", tag:"Security", hint:"Runs the Security screener — scam, fraud and injection checks."},
+];
+const ALL_SLOTS = [...CORE, ...SECTORS];
+
+const FH = {
+  provider:"Who supplies this model — e.g. Forge, Agent Router, OpenRouter, Anthropic, OpenAI. Just a label.",
+  baseUrl:"The API endpoint address your provider gives you (e.g. https://api.forge.tld/v1). Needed for Forge, Agent Router and similar. Leave blank only for official Anthropic.",
+  model:"The exact model name to call at this provider — e.g. claude-opus-4-8 or gpt-4o.",
+  key:"Your secret key for this provider. Stored on the server only, never shown back."
+};
+
+function slotHtml(s){
+  return `<div class="slot ${s.md?'md':''}">
+    <div class="slot-h"><b>${s.label}</b><span class="tag">${s.tag}</span></div>
+    <p class="hint">${s.hint}</p>
+    <div class="row">
+      <div class="field"><label>Provider name</label>
+        <input id="${s.key}_provider" placeholder="e.g. Forge"><div class="hint">${FH.provider}</div></div>
+      <div class="field"><label>Model</label>
+        <input id="${s.key}_model" placeholder="e.g. claude-opus-4-8"><div class="hint">${FH.model}</div></div>
+    </div>
+    <div class="field"><label>Base URL</label>
+      <input id="${s.key}_baseUrl" placeholder="https://api.provider.tld/v1" inputmode="url"><div class="hint">${FH.baseUrl}</div></div>
+    <div class="field"><label>API key</label>
+      <input id="${s.key}_key" type="password" placeholder="paste key"><div class="hint">${FH.key}</div></div>
+  </div>`;
+}
+$('#aiSlots').innerHTML =
+  '<div class="grp-h etch">Core</div>' + CORE.map(slotHtml).join('') +
+  '<div class="grp-h etch">Per sector</div>' + SECTORS.map(slotHtml).join('');
+
+// ---- collect + submit ------------------------------------------------------
+const val = (id)=>{ const el=$('#'+id); return el ? el.value.trim() : ""; };
+const SECRET_IDS = ['apiToken','dfsPassword','telegramToken', ...ALL_SLOTS.map(s=>s.key+'_key')];
 
 function collect(){
-  const val = (id)=>{ const el=$('#'+id); return el ? el.value.trim() : ""; };
+  const ai = {};
+  ALL_SLOTS.forEach(s=>{ ai[s.key] = {
+    provider: val(s.key+'_provider'), baseUrl: val(s.key+'_baseUrl'),
+    model: val(s.key+'_model'), key: val(s.key+'_key'),
+  };});
   return {
-    mode,
-    siteUrl: val('siteUrl'),
-    apiBase: val('apiBase'), apiToken: val('apiToken'),
-    anthropicKey: val('anthropicKey'),
+    mode, siteUrl: val('siteUrl'), apiBase: val('apiBase'), apiToken: val('apiToken'),
+    ai,
     dfsLogin: val('dfsLogin'), dfsPassword: val('dfsPassword'),
     telegramToken: val('telegramToken'), telegramChatId: val('telegramChatId'),
     outreachDomain: val('outreachDomain'),
@@ -226,12 +281,9 @@ function collect(){
   };
 }
 
-function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function showBanner(kind, html){
-  const b = $('#banner');
-  b.className = 'banner show ' + kind;
-  b.innerHTML = html;
+  const b = $('#banner'); b.className = 'banner show ' + kind; b.innerHTML = html;
   b.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
@@ -242,19 +294,16 @@ $('#setupForm').addEventListener('submit', async (e)=>{
   $('#banner').className = 'banner';
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
-    const r = await fetch('/api/setup', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
-    });
+    const r = await fetch('/api/setup', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
     const j = await r.json();
     if(!r.ok || !j.ok) throw new Error(j.error || 'Save failed.');
     const modeLabel = j.mode==='full' ? 'Full access' : 'Read-only';
     showBanner('ok',
-      '<b>✓ Setup saved.</b> Your details were saved on the server for <b>'+esc(j.siteUrl)+'</b> '+
-      '(<b>'+modeLabel+'</b> mode), and the filing cabinet is <b>'+esc(j.database||'ready')+'</b>. '+
+      '<b>✓ Setup saved.</b> Saved on the server for <b>'+esc(j.siteUrl)+'</b> (<b>'+modeLabel+'</b> mode). '+
+      '<b>'+esc(j.aiKeysSet)+'</b> of '+esc(j.aiKeysTotal)+' AI keys stored; the filing cabinet is <b>'+esc(j.database||'ready')+'</b>. '+
       'Your keys stay on the server — never shown here or committed to git.'+
-      '<br><br>See what’s connected and what’s still missing on the <a href="/status">status page</a>.');
-    // never keep secrets in the DOM after save
-    SECRET_IDS.forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });
+      '<br><br>See which brain each sector is using on the <a href="/status">status page</a>.');
+    SECRET_IDS.forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });  // never keep secrets in the DOM
   }catch(err){
     showBanner('err', '<b>Couldn’t save.</b> '+esc(err.message));
   }finally{
