@@ -1,0 +1,18 @@
+# Push to main -> SSH into the box -> pull and restart. Hands-off deploys.
+# Add repo secrets: SSH_HOST, SSH_USER, SSH_KEY
+name: deploy
+on: { push: { branches: [main] } }
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/agency
+            git pull origin main
+            npm install --omit=dev
+            pm2 restart agency || pm2 start server.js --name agency

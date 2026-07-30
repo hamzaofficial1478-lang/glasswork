@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash|Write|Edit|WebFetch|mcp__.*",
+        "hooks": [ { "type": "command", "command": "python3 .claude/hooks/pre_tool_use.py" } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": ".*",
+        "hooks": [ { "type": "command", "command": "python3 .claude/hooks/post_tool_use.py" } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "python3 .claude/hooks/subagent_stop.py" } ] }
+    ]
+  },
+  "permissions": {
+    "deny": [ "Bash(rm -rf*)", "Bash(git push*)" ]
+  }
+}

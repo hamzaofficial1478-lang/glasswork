@@ -1,0 +1,9 @@
+# secrets NEVER go to GitHub — put these on the server only
+.env
+*.db
+*.db-wal
+*.db-shm
+node_modules/
+logs/*.log
+__pycache__/
+*.pyc

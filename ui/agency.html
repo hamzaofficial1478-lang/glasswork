@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glassworks Agency — Control Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0d1418; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
+    --line:#25343c; --line2:#39505b; --etch:#7fa0ae;
+    --text:#e6eef2; --muted:#7d919c; --faint:#54666f;
+    --glass:#52c7d6; --glass-dim:rgba(82,199,214,.14);
+    --amber:#e8a23d; --amber-dim:rgba(232,162,61,.14);
+    --danger:#e5565b; --danger-dim:rgba(229,86,91,.13);
+    --ok:#5bbf86;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(82,199,214,.06), transparent 60%),
+      var(--bg);
+    color:var(--text); font-family:'Space Grotesk',sans-serif;
+    -webkit-font-smoothing:antialiased; letter-spacing:.1px;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .etch{
+    font-family:'IBM Plex Mono',monospace; text-transform:uppercase;
+    letter-spacing:.22em; color:var(--etch); font-size:11px;
+    text-shadow:0 1px 0 rgba(0,0,0,.5);
+  }
+  a{color:inherit}
+
+  /* ---- top director bar ---- */
+  header{
+    position:sticky; top:0; z-index:40;
+    display:flex; align-items:center; gap:28px;
+    padding:16px 26px; background:rgba(13,20,24,.82); backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex; flex-direction:column; gap:3px; min-width:190px}
+  .brand b{font-size:16px; font-weight:700; letter-spacing:.5px}
+  .md-pill{
+    display:flex; align-items:center; gap:9px; padding:7px 14px;
+    border:1px solid var(--line2); border-radius:999px; background:var(--panel2);
+    font-size:13px;
+  }
+  .md-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--glass);
+    box-shadow:0 0 0 4px var(--glass-dim); animation:pulse 2.4s infinite}
+  .metrics{display:flex; gap:26px; margin-left:auto}
+  .metric{display:flex;flex-direction:column;gap:2px;text-align:right}
+  .metric .v{font-size:19px;font-weight:600;font-family:'IBM Plex Mono',monospace}
+  .metric .v.glass{color:var(--glass)} .metric .v.amber{color:var(--amber)}
+  .clock{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--muted);min-width:74px;text-align:right}
+
+  /* ---- layout ---- */
+  .wrap{display:grid; grid-template-columns:1fr 340px; gap:22px; padding:24px 26px; max-width:1500px; margin:0 auto}
+  @media(max-width:1080px){.wrap{grid-template-columns:1fr} .desk{order:-1}}
+
+  .floor-label{display:flex;align-items:center;gap:14px;margin:2px 0 16px}
+  .floor-label .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent)}
+
+  /* ---- rooms grid ---- */
+  .rooms{display:grid; grid-template-columns:repeat(2,1fr); gap:18px}
+  @media(max-width:680px){.rooms{grid-template-columns:1fr}}
+  .room{
+    position:relative; border:1px solid var(--line); border-radius:14px;
+    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    overflow:hidden; transition:transform .18s ease, border-color .18s ease;
+  }
+  .room:hover{transform:translateY(-3px); border-color:var(--line2)}
+  .room-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:15px 17px; background:
+      linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,0));
+    border-bottom:1px solid var(--line);
+    backdrop-filter:blur(3px);
+  }
+  .room-title{display:flex;flex-direction:column;gap:5px}
+  .room-title b{font-size:15px;font-weight:600;letter-spacing:.3px}
+  .ring{position:relative;width:44px;height:44px}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600}
+  .agents{padding:8px 8px 12px}
+  .agent{
+    display:grid; grid-template-columns:14px 1fr auto; align-items:center; gap:11px;
+    padding:9px 10px; border-radius:9px;
+  }
+  .agent:hover{background:rgba(255,255,255,.025)}
+  .agent .sd{width:9px;height:9px;border-radius:50%}
+  .sd.working{background:var(--glass);box-shadow:0 0 0 3px var(--glass-dim);animation:pulse 1.8s infinite}
+  .sd.waiting{background:var(--amber);box-shadow:0 0 0 3px var(--amber-dim)}
+  .sd.idle{background:var(--faint)}
+  .sd.blocked{background:var(--danger);box-shadow:0 0 0 3px var(--danger-dim)}
+  .agent .who{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .agent .who b{font-size:13px;font-weight:500}
+  .agent .who span{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .agent .st{font-size:10px;font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .room-foot{padding:11px 17px;border-top:1px solid var(--line);display:flex;justify-content:space-between;
+    font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
+  .room-foot b{color:var(--text)}
+
+  /* security room accent */
+  .room.sec{border-color:rgba(229,86,91,.3)}
+  .room.sec .room-head{border-bottom-color:rgba(229,86,91,.25)}
+  .scanline{position:absolute;left:0;right:0;height:24px;pointer-events:none;
+    background:linear-gradient(180deg,transparent,rgba(229,86,91,.10),transparent);
+    animation:scan 4s linear infinite}
+
+  /* ---- the desk (right rail) ---- */
+  .desk{display:flex;flex-direction:column;gap:18px}
+  .card{border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+  .card > .ch{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .card > .ch b{font-size:13px;font-weight:600}
+  .badge{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 8px;border-radius:999px}
+  .badge.amber{background:var(--amber-dim);color:var(--amber)}
+  .badge.danger{background:var(--danger-dim);color:var(--danger)}
+
+  .approval{padding:13px 16px;border-bottom:1px solid var(--line)}
+  .approval:last-child{border-bottom:none}
+  .approval .lvl{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--amber);margin-bottom:6px}
+  .approval p{margin:0 0 4px;font-size:13.5px;line-height:1.4}
+  .approval .why{font-size:12px;color:var(--muted);margin-bottom:11px}
+  .btns{display:flex;gap:8px}
+  .btn{flex:1;padding:8px 0;border-radius:8px;border:1px solid var(--line2);background:transparent;
+    color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:12.5px;font-weight:500;cursor:pointer;
+    transition:.15s}
+  .btn.ok{border-color:rgba(91,191,134,.4);color:var(--ok)}
+  .btn.ok:hover{background:rgba(91,191,134,.12)}
+  .btn.no:hover{background:rgba(229,86,91,.1);border-color:var(--danger);color:var(--danger)}
+  .empty{padding:22px 16px;text-align:center;color:var(--faint);font-size:12.5px}
+
+  .sec-event{display:flex;gap:11px;padding:11px 16px;border-bottom:1px solid var(--line);font-size:12.5px}
+  .sec-event:last-child{border:none}
+  .sec-event .tag{width:6px;border-radius:3px;flex:none}
+  .sec-event .tag.hi{background:var(--danger)} .sec-event .tag.mid{background:var(--amber)} .sec-event .tag.lo{background:var(--muted)}
+  .sec-event .txt b{display:block;font-weight:500;margin-bottom:2px}
+  .sec-event .txt span{color:var(--muted)}
+  .sec-event time{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--faint);flex:none}
+
+  /* ---- connections ---- */
+  .conns{padding:6px 16px 16px}
+  .conn{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .conn:last-child{border:none}
+  .conn .ic{width:30px;height:30px;border-radius:8px;background:var(--panel2);border:1px solid var(--line2);
+    display:flex;align-items:center;justify-content:center;font-size:14px;flex:none}
+  .conn .nm{flex:1}
+  .conn .nm b{display:block;font-size:13px;font-weight:500}
+  .conn .nm span{font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace}
+  .toggle{width:42px;height:24px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);
+    position:relative;cursor:pointer;transition:.2s;flex:none}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;
+    background:var(--faint);transition:.2s}
+  .toggle.on{background:var(--glass-dim);border-color:var(--glass)}
+  .toggle.on::after{left:20px;background:var(--glass)}
+  .add-row{display:flex;gap:8px;margin-top:14px}
+  .add-row input{flex:1;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;
+    color:var(--text);padding:9px 11px;font-family:'IBM Plex Mono',monospace;font-size:12px}
+  .add-row input:focus{outline:none;border-color:var(--glass)}
+  .add-row button{padding:0 16px;border-radius:8px;border:1px solid var(--glass);background:var(--glass-dim);
+    color:var(--glass);font-weight:600;cursor:pointer;font-size:13px}
+
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes scan{0%{top:-24px}100%{top:100%}}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important}}
+  footer{padding:26px;text-align:center;color:var(--faint);font-size:11.5px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <b>GLASSWORKS AGENCY</b>
+    <span class="etch">Control Room · UAE</span>
+  </div>
+  <div class="md-pill">
+    <span class="dot"></span>
+    <span>Director&nbsp;·&nbsp;<b id="mdState">planning today</b></span>
+  </div>
+  <div class="metrics">
+    <div class="metric"><span class="etch">Agency health</span><span class="v glass" id="mHealth">—</span></div>
+    <div class="metric"><span class="etch">Leads today</span><span class="v" id="mLeads">—</span></div>
+    <div class="metric"><span class="etch">Awaiting you</span><span class="v amber" id="mPend">—</span></div>
+    <div class="metric"><span class="etch">Spend today</span><span class="v mono" id="mSpend">—</span></div>
+  </div>
+  <div class="clock mono" id="clock">--:--</div>
+</header>
+
+<div class="wrap">
+  <main>
+    <div class="floor-label">
+      <span class="etch">The floor · six rooms</span><span class="rule"></span>
+    </div>
+    <div class="rooms" id="rooms"></div>
+  </main>
+
+  <aside class="desk">
+    <div class="card">
+      <div class="ch"><b>Your desk · Telegram bridge</b><span class="badge amber" id="pendBadge">0</span></div>
+      <div id="approvals"></div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><b>Security feed</b><span class="badge danger" id="secBadge">0</span></div>
+      <div id="secfeed"></div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><b>Connections</b><span class="etch" id="connCount">—</span></div>
+      <div class="conns" id="conns"></div>
+    </div>
+  </aside>
+</div>
+
+<footer>The brain plans, it never touches the hands · reading from the filing cabinet · claim, don't grab · append, don't overwrite</footer>
+
+<script>
+/* ---------------------------------------------------------------------------
+   STATE. Right now this is mock data so you can see the room working.
+   To go live, point fetchState() at your VPS: return fetch('/api/state').json()
+   Everything below renders from whatever fetchState() returns — no other change.
+--------------------------------------------------------------------------- */
+const MOCK = {
+  md:{state:"planning today"},
+  metrics:{health:82, leads:6, spend:"$4.12"},
+  rooms:[
+    {key:"IT", name:"IT & Site Health", score:88, foot:["12 checks passed","1 ticket open"], agents:[
+      {n:"Watcher", t:"Contact-form test passed 07:02", s:"working"},
+      {n:"Fixer", t:"Patching slow gallery on /pergolas", s:"working"},
+      {n:"Releaser", t:"Holding — waiting on tests", s:"idle"},
+    ]},
+    {key:"Content", name:"Content & Social", score:74, foot:["2 drafts in review","4 posts queued"], agents:[
+      {n:"Scout", t:"Trend: frameless glass balustrades", s:"working"},
+      {n:"Writer", t:"Case study — Marina villa railing", s:"working"},
+      {n:"Illustrator", t:"Rendering 3 images", s:"working"},
+      {n:"Publisher", t:"Waiting Auditor sign-off", s:"waiting"},
+    ]},
+    {key:"SEO", name:"SEO & Rankings", score:69, foot:["312 keywords tracked","+3 positions wk"], agents:[
+      {n:"Auditor", t:"Schema check on 8 pages", s:"working"},
+      {n:"Rank & Rival", t:"Competitor sitemap: 2 new pages", s:"working"},
+      {n:"Strategist", t:"Gap: 'aluminium doors Al Barsha'", s:"working"},
+    ]},
+    {key:"Leads", name:"Leads & Outreach", score:79, foot:["6 valid today","3 replies"], agents:[
+      {n:"Hunter", t:"41 fit-out firms, Business Bay", s:"working"},
+      {n:"Verifier", t:"38 valid · 3 bounced", s:"working"},
+      {n:"Outreach", t:"18/25 sent · under cap", s:"working"},
+      {n:"Responder", t:"Reply from Aster Interiors", s:"waiting"},
+      {n:"Nurture", t:"Idle — no offers pending", s:"idle"},
+    ]},
+    {key:"Report", name:"Reports & Scorecard", score:91, foot:["MD hit-rate 71%","digest 07:15"], agents:[
+      {n:"Reporter", t:"Scored 9 decisions overnight", s:"working"},
+    ]},
+    {key:"Security", name:"Security", score:95, foot:["0 intrusions","2 leads flagged"], sec:true, agents:[
+      {n:"Screener", t:"Flagged 2 scam leads", s:"working"},
+      {n:"Injection guard", t:"Scraped text quarantined ×1", s:"working"},
+      {n:"Site watch", t:"SSL ok · logins normal", s:"idle"},
+    ]},
+  ],
+  approvals:[
+    {lvl:"amber · Leads", text:"Offer 10% off to Aster Interiors, who went quiet after a quote?",
+     why:"MD confidence 0.6 — a price concession is a red line, so it's yours to call."},
+    {lvl:"amber · IT", text:"Deploy the gallery speed fix to the live pergolas page?",
+     why:"Tests pass. Touches a core template, so the Releaser is holding for your nod."},
+    {lvl:"amber · Content", text:"Publish the Marina villa case study to site + Instagram?",
+     why:"Passed the Auditor. Real job, real photos — strong piece."},
+  ],
+  security:[
+    {sev:"hi", title:"Scam lead blocked", sub:"Advance-fee pattern · 'buildcorp-uae@gmail'", time:"08:41"},
+    {sev:"mid",title:"Prompt injection caught", sub:"Hidden instruction in scraped competitor page", time:"08:12"},
+    {sev:"lo", title:"Login attempts normal", sub:"No spikes overnight", time:"07:00"},
+  ],
+  connections:[
+    {ic:"◧", name:"Website", sub:"yoursite.ae · custom", on:true},
+    {ic:"⌕", name:"DataForSEO", sub:"rank tracking", on:true},
+    {ic:"✈", name:"Telegram bridge", sub:"@owner", on:true},
+    {ic:"⌾", name:"Instagram", sub:"not connected", on:false},
+    {ic:"♪", name:"TikTok", sub:"not connected", on:false},
+    {ic:"✉", name:"Outreach domain", sub:"mail.yoursite.ae", on:true},
+  ],
+};
+
+async function fetchState(){
+  // return await (await fetch('/api/state')).json();   // <-- flip to this when live
+  return MOCK;
+}
+
+/* ---- render ---- */
+const $=(s)=>document.querySelector(s);
+
+function ring(score){
+  const r=18, c=2*Math.PI*r, off=c*(1-score/100);
+  const col = score>=85?'var(--ok)':score>=70?'var(--glass)':'var(--amber)';
+  return `<div class="ring"><svg width="44" height="44">
+    <circle cx="22" cy="22" r="${r}" fill="none" stroke="var(--line)" stroke-width="4"/>
+    <circle cx="22" cy="22" r="${r}" fill="none" stroke="${col}" stroke-width="4"
+      stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}"/>
+  </svg><div class="num" style="color:${col}">${score}</div></div>`;
+}
+
+function renderRooms(st){
+  $('#rooms').innerHTML = st.rooms.map(rm=>`
+    <div class="room ${rm.sec?'sec':''}">
+      ${rm.sec?'<div class="scanline"></div>':''}
+      <div class="room-head">
+        <div class="room-title"><b>${rm.name}</b><span class="etch">${rm.key} room</span></div>
+        ${ring(rm.score)}
+      </div>
+      <div class="agents">
+        ${rm.agents.map(a=>`
+          <div class="agent">
+            <span class="sd ${a.s}"></span>
+            <div class="who"><b>${a.n}</b><span>${a.t}</span></div>
+            <span class="st">${a.s}</span>
+          </div>`).join('')}
+      </div>
+      <div class="room-foot"><span>${rm.foot[0]}</span><b>${rm.foot[1]}</b></div>
+    </div>`).join('');
+}
+
+function renderApprovals(st){
+  const box=$('#approvals');
+  if(!st.approvals.length){ box.innerHTML='<div class="empty">Nothing waiting on you. The agency&rsquo;s running clean.</div>'; }
+  else box.innerHTML = st.approvals.map((a,i)=>`
+    <div class="approval" data-i="${i}">
+      <span class="lvl">${a.lvl}</span>
+      <p>${a.text}</p>
+      <div class="why">${a.why}</div>
+      <div class="btns">
+        <button class="btn ok" onclick="resolve(${i},true)">Approve</button>
+        <button class="btn no" onclick="resolve(${i},false)">Not now</button>
+      </div>
+    </div>`).join('');
+  $('#pendBadge').textContent = st.approvals.length;
+  $('#mPend').textContent = st.approvals.length;
+}
+
+function renderSecurity(st){
+  $('#secfeed').innerHTML = st.security.map(e=>`
+    <div class="sec-event">
+      <span class="tag ${e.sev}"></span>
+      <div class="txt"><b>${e.title}</b><span>${e.sub}</span></div>
+      <time>${e.time}</time>
+    </div>`).join('');
+  $('#secBadge').textContent = st.security.filter(e=>e.sev!=='lo').length;
+}
+
+function renderConns(st){
+  $('#conns').innerHTML = st.connections.map((c,i)=>`
+    <div class="conn">
+      <div class="ic">${c.ic}</div>
+      <div class="nm"><b>${c.name}</b><span>${c.sub}</span></div>
+      <div class="toggle ${c.on?'on':''}" onclick="this.classList.toggle('on')"></div>
+    </div>`).join('') + `
+    <div class="add-row">
+      <input id="connIn" placeholder="paste a social link or API key…">
+      <button onclick="addConn()">Add</button>
+    </div>`;
+  const on=st.connections.filter(c=>c.on).length;
+  $('#connCount').textContent = on+'/'+st.connections.length+' live';
+}
+
+/* ---- interactions (in-memory) ---- */
+let STATE;
+function resolve(i,ok){
+  const el=document.querySelector(`.approval[data-i="${i}"]`);
+  el.style.opacity=.35; el.querySelector('.btns').innerHTML =
+    `<span class="mono" style="font-size:12px;color:${ok?'var(--ok)':'var(--muted)'}">${ok?'✓ approved — sent to the agent':'✗ held'}</span>`;
+  STATE.approvals[i]._done=true;
+  const left=STATE.approvals.filter(a=>!a._done).length;
+  $('#pendBadge').textContent=left; $('#mPend').textContent=left;
+}
+function addConn(){
+  const v=$('#connIn').value.trim(); if(!v) return;
+  STATE.connections.push({ic:"＋",name:v.slice(0,22),sub:"pending verify",on:false});
+  renderConns(STATE);
+}
+
+/* ---- boot ---- */
+(async()=>{
+  STATE=await fetchState();
+  $('#mHealth').textContent=STATE.metrics.health;
+  $('#mLeads').textContent=STATE.metrics.leads;
+  $('#mSpend').textContent=STATE.metrics.spend;
+  $('#mdState').textContent=STATE.md.state;
+  renderRooms(STATE); renderApprovals(STATE); renderSecurity(STATE); renderConns(STATE);
+})();
+
+setInterval(()=>{
+  const d=new Date();
+  $('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+},1000);
+</script>
+</body>
+</html>
