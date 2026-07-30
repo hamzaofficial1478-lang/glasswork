@@ -1,5 +1,8 @@
 # secrets NEVER go to GitHub — put these on the server only
 .env
+# the filled site connector holds live credentials; the tracked template is
+# connector.example.py, and the setup screen writes the real connector.py
+mcp/site_connector/connector.py
 *.db
 *.db-wal
 *.db-shm

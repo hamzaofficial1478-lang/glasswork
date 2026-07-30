@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glassworks Agency — Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
+  --wall:#33484f; --walltop:#3f5860;
+  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
+  --text:#e7eff3; --muted:#7d919c; --faint:#54666f;
+  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.15);
+  --amber:#eaa543; --amber-dim:rgba(234,165,67,.15);
+  --danger:#e5565b; --danger-dim:rgba(229,86,91,.14); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
+}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(900px 500px at 70% -60px,rgba(84,203,217,.05),transparent 60%),var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
+.etch{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
+a{color:var(--glass);text-decoration:none}
+button{font-family:inherit}
+
+header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:rgba(12,18,22,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.brand{display:flex;flex-direction:column;gap:2px}.brand b{font-size:14px}.brand span{font-size:9px}
+.badge{display:flex;align-items:center;gap:9px;padding:7px 13px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2);font-size:13px}
+.badge .fav{width:20px;height:20px;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
+.spacer{flex:1}
+.htab{padding:7px 14px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
+.htab.on{background:var(--glass-dim);border-color:var(--glass);color:var(--glass)}
+.htab:hover{color:var(--text)}
+
+main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
+.title{font-size:22px;font-weight:600;margin:0 0 6px}
+.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 26px;max-width:60ch}
+
+.card{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;margin-bottom:20px;overflow:hidden;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
+.card-h{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.card-h .ic{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
+.card-h b{font-size:14px;display:block}
+.card-h small{color:var(--muted);font-size:11px}
+.card-b{padding:18px}
+
+.field{margin:0 0 16px}
+.field:last-child{margin-bottom:0}
+.field label{display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:6px}
+.field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:'IBM Plex Mono',monospace}
+.field input::placeholder{color:var(--faint)}
+.field input:focus,.field select:focus{outline:none;border-color:var(--glass);box-shadow:0 0 0 3px var(--glass-dim)}
+.hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45}
+.row{display:flex;gap:14px;flex-wrap:wrap}
+.row .field{flex:1;min-width:200px}
+
+.seg{display:flex;gap:8px;margin-bottom:16px}
+.seg button{flex:1;padding:11px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px}
+.seg button .dot{width:9px;height:9px;border-radius:50%;background:var(--faint)}
+.seg button.on{border-color:var(--glass);background:var(--glass-dim);color:var(--glass)}
+.seg button.on .dot{background:var(--glass);box-shadow:0 0 8px var(--glass)}
+.hidden{display:none}
+
+.pbtn{width:100%;padding:13px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:14px;cursor:pointer;margin-top:2px}
+.pbtn:disabled{opacity:.55;cursor:default}
+.pbtn:hover:not(:disabled){background:rgba(84,203,217,.22)}
+
+.banner{margin-top:16px;padding:14px 15px;border-radius:10px;font-size:13px;line-height:1.5;display:none}
+.banner.show{display:block}
+.banner.ok{border:1px solid var(--ok);background:var(--ok-dim);color:#bfe9cf}
+.banner.ok b{color:var(--ok)}
+.banner.err{border:1px solid var(--danger);background:var(--danger-dim);color:#f2b6b8}
+.banner code{font-family:'IBM Plex Mono',monospace;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;font-size:12px}
+
+.foot{margin-top:22px;display:flex;align-items:flex-start;gap:8px;color:var(--muted);font-size:11.5px;line-height:1.5}
+.foot .lock{color:var(--glass)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><b>Glassworks Agency</b><span class="etch">Setup</span></div>
+  <div class="badge"><span class="fav">GD</span><span>First-time setup</span></div>
+  <div class="spacer"></div>
+  <a class="htab" href="/">Office</a>
+  <a class="htab" href="/control">Control room</a>
+</header>
+
+<main>
+  <h1 class="title">Wire up the agency</h1>
+  <p class="lead">Fill this in once. On save it writes your <code style="font-family:'IBM Plex Mono',monospace">.env</code> and the website connector on the server for you — no editing files by hand. Nothing here is shown back or committed to git.</p>
+
+  <form id="setupForm" autocomplete="off">
+
+    <!-- WEBSITE ------------------------------------------------------------ -->
+    <section class="card">
+      <div class="card-h"><div class="ic">◧</div><div><b>Website</b><small>Which site the agents watch and publish to</small></div></div>
+      <div class="card-b">
+        <span style="display:block;font-size:12px;font-weight:500;margin-bottom:6px">Platform</span>
+        <div class="seg" id="platformSeg">
+          <button type="button" data-platform="wordpress" class="on"><span class="dot"></span>WordPress</button>
+          <button type="button" data-platform="custom"><span class="dot"></span>Custom backend</button>
+        </div>
+        <p class="hint" style="margin-top:-8px;margin-bottom:16px">Pick <b>WordPress</b> if your site runs WordPress. Pick <b>Custom backend</b> if you built your own site with its own admin API.</p>
+
+        <div class="field">
+          <label for="siteUrl">Website URL</label>
+          <input id="siteUrl" name="siteUrl" placeholder="https://glassworks.ae" inputmode="url">
+          <div class="hint">The public address of your site, including <code>https://</code>.</div>
+        </div>
+
+        <div id="wpFields">
+          <div class="field">
+            <label for="wpUser">WordPress username</label>
+            <input id="wpUser" name="wpUser" placeholder="admin">
+            <div class="hint">The username you log in to WordPress admin with.</div>
+          </div>
+          <div class="field">
+            <label for="wpPassword">WordPress application password</label>
+            <input id="wpPassword" name="wpPassword" type="password" placeholder="xxxx xxxx xxxx xxxx">
+            <div class="hint">In WordPress: <b>Users → Profile → Application Passwords</b>. Not your normal login password — generate a new one there and paste it (spaces are fine).</div>
+          </div>
+        </div>
+
+        <div id="customFields" class="hidden">
+          <div class="field">
+            <label for="apiBase">Custom API base URL</label>
+            <input id="apiBase" name="apiBase" placeholder="https://glassworks.ae/api/admin" inputmode="url">
+            <div class="hint">The base URL of your backend's admin API — the endpoints the connector calls, such as <code>/health</code> and <code>/pages</code>.</div>
+          </div>
+          <div class="field">
+            <label for="apiToken">Custom API token</label>
+            <input id="apiToken" name="apiToken" type="password" placeholder="your secret token">
+            <div class="hint">The bearer token your backend expects in the <code>Authorization</code> header.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KEYS --------------------------------------------------------------- -->
+    <section class="card">
+      <div class="card-h"><div class="ic">🔑</div><div><b>Keys</b><small>Credentials the agents use for brains, rankings and your Telegram</small></div></div>
+      <div class="card-b">
+        <div class="field">
+          <label for="anthropicKey">Anthropic API key</label>
+          <input id="anthropicKey" name="anthropicKey" type="password" placeholder="sk-ant-...">
+          <div class="hint">From <b>console.anthropic.com → API Keys</b>. This is what powers every agent. Starts with <code>sk-ant-</code>.</div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="dfsLogin">DataForSEO login</label>
+            <input id="dfsLogin" name="dfsLogin" placeholder="you@email.com">
+            <div class="hint">Your DataForSEO account login (for rank tracking).</div>
+          </div>
+          <div class="field">
+            <label for="dfsPassword">DataForSEO password</label>
+            <input id="dfsPassword" name="dfsPassword" type="password" placeholder="API password">
+            <div class="hint">The <b>API</b> password from your DataForSEO dashboard — not your website password.</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="telegramToken">Telegram bot token</label>
+            <input id="telegramToken" name="telegramToken" type="password" placeholder="123456:ABC-DEF...">
+            <div class="hint">From <b>@BotFather</b> when you create the bot. This is how the agency messages you.</div>
+          </div>
+          <div class="field">
+            <label for="telegramChatId">Telegram chat ID</label>
+            <input id="telegramChatId" name="telegramChatId" placeholder="123456789">
+            <div class="hint">Your own chat ID so messages reach you — get it from <b>@userinfobot</b>.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OUTREACH ----------------------------------------------------------- -->
+    <section class="card">
+      <div class="card-h"><div class="ic">✉</div><div><b>Outreach</b><small>The limits that keep sending safe and on-budget</small></div></div>
+      <div class="card-b">
+        <div class="field">
+          <label for="outreachDomain">Sending domain</label>
+          <input id="outreachDomain" name="outreachDomain" placeholder="mail.glassworks.ae">
+          <div class="hint">The domain cold email is sent from. Use a subdomain, not your main site domain, to protect its reputation.</div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="spendCap">Daily spend cap (USD)</label>
+            <input id="spendCap" name="spendCap" type="number" min="0" step="1" placeholder="15">
+            <div class="hint">Hard ceiling on agency spend per day. The Overseer stops everything at this number.</div>
+          </div>
+          <div class="field">
+            <label for="outreachCap">Daily outreach cap</label>
+            <input id="outreachCap" name="outreachCap" type="number" min="0" step="1" placeholder="25">
+            <div class="hint">Max cold emails/DMs sent per day. Nothing goes out above this.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <button type="submit" class="pbtn" id="saveBtn">Save setup</button>
+    <div class="banner" id="banner"></div>
+
+    <div class="foot"><span class="lock">🔒</span><span>Everything you enter is written to <code>.env</code> and the site connector <b>on the server only</b>. Secrets are never shown back on this screen and are kept out of git.</span></div>
+  </form>
+</main>
+
+<script>
+const $ = (s)=>document.querySelector(s);
+let platform = "wordpress";
+
+// platform toggle
+$('#platformSeg').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-platform]');
+  if(!btn) return;
+  platform = btn.dataset.platform;
+  [...$('#platformSeg').children].forEach(b=>b.classList.toggle('on', b===btn));
+  $('#wpFields').classList.toggle('hidden', platform!=='wordpress');
+  $('#customFields').classList.toggle('hidden', platform!=='custom');
+});
+
+const SECRET_IDS = ['wpPassword','apiToken','anthropicKey','dfsPassword','telegramToken'];
+
+function collect(){
+  const val = (id)=>{ const el=$('#'+id); return el ? el.value.trim() : ""; };
+  return {
+    platform,
+    siteUrl: val('siteUrl'),
+    wpUser: val('wpUser'), wpPassword: val('wpPassword'),
+    apiBase: val('apiBase'), apiToken: val('apiToken'),
+    anthropicKey: val('anthropicKey'),
+    dfsLogin: val('dfsLogin'), dfsPassword: val('dfsPassword'),
+    telegramToken: val('telegramToken'), telegramChatId: val('telegramChatId'),
+    outreachDomain: val('outreachDomain'),
+    spendCap: val('spendCap'), outreachCap: val('outreachCap'),
+  };
+}
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function showBanner(kind, html){
+  const b = $('#banner');
+  b.className = 'banner show ' + kind;
+  b.innerHTML = html;
+  b.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+$('#setupForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const data = collect();
+  const btn = $('#saveBtn');
+  $('#banner').className = 'banner';
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    const r = await fetch('/api/setup', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+    });
+    const j = await r.json();
+    if(!r.ok || !j.ok) throw new Error(j.error || 'Save failed.');
+    const plat = j.platform==='wordpress' ? 'WordPress' : 'Custom backend';
+    showBanner('ok',
+      '<b>✓ Setup saved.</b> Wrote <code>.env</code> and <code>mcp/site_connector/connector.py</code> on the server '+
+      'for <b>'+esc(j.siteUrl)+'</b> ('+plat+'). Your keys stay on the server — never shown here or committed to git.'+
+      '<br><br>Next: run <code>python3 coordination/init_db.py</code>, then restart the server and open the '+
+      '<a href="/">office</a>.');
+    // never keep secrets in the DOM after save
+    SECRET_IDS.forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });
+  }catch(err){
+    showBanner('err', '<b>Couldn’t save.</b> '+esc(err.message));
+  }finally{
+    btn.disabled = false; btn.textContent = 'Save setup';
+  }
+});
+</script>
+</body>
+</html>

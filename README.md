@@ -20,7 +20,7 @@ agency/
 │   ├── init_db.py             build the cabinet
 │   └── board.py               claim tasks · resource locks · request board  <-- the anti-override core
 ├── mcp/site_connector/
-│   └── connector.py           the ONE swappable adapter to your website
+│   └── connector.example.py   template for the ONE site adapter (setup writes connector.py)
 ├── runner/
 │   ├── daily.py               the cron clock — wakes the MD each morning
 │   └── service.py             the always-on crew (Reception, Watcher, Security)
@@ -45,17 +45,21 @@ npm install -g @anthropic-ai/claude-code # if not already
 
 ## Connect your website (the only per-stack step)
 
-Open `mcp/site_connector/connector.py`. At the bottom, pick one line:
+Easiest: open the **setup screen** at `/setup` (served by `server.js`) and fill in
+the form — it writes your `.env` and the site connector for you, no hand-editing.
+
+Prefer to do it by hand? The tracked template is
+`mcp/site_connector/connector.example.py`. Copy it to `connector.py` and set one line:
 
 ```python
 SITE = WordPressSite("https://yoursite.ae", "admin", "app-password")   # WordPress
 SITE = CustomSite("https://yoursite.ae/api/admin", "YOUR_TOKEN")       # custom backend
 ```
 
-If custom, expose five small protected endpoints on your backend
-(`/health`, `/pages`, `/contact`, `/deploy`, `/rollback`) and you're wired in.
-Every agent that touches the site goes through this one adapter — nothing else
-changes. Tell me which stack you're on and I'll finish this file for you.
+For a custom backend, expose the small protected endpoints the adapter calls
+(`/health`, `/pages`, `/contact`, and the release hooks) and you're wired in.
+Every agent that touches the site goes through this one adapter — nothing else changes.
+The filled `connector.py` is git-ignored, so your credentials never leave the box.
 
 ## Run order
 
