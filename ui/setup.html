@@ -22,6 +22,7 @@ body{margin:0;background:radial-gradient(900px 500px at 70% -60px,rgba(84,203,21
 .etch{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
 a{color:var(--glass);text-decoration:none}
 button{font-family:inherit}
+code{font-family:'IBM Plex Mono',monospace}
 
 header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:rgba(12,18,22,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .brand{display:flex;flex-direction:column;gap:2px}.brand b{font-size:14px}.brand span{font-size:9px}
@@ -29,12 +30,11 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .badge .fav{width:20px;height:20px;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
 .spacer{flex:1}
 .htab{padding:7px 14px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
-.htab.on{background:var(--glass-dim);border-color:var(--glass);color:var(--glass)}
 .htab:hover{color:var(--text)}
 
-main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
+main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 .title{font-size:22px;font-weight:600;margin:0 0 6px}
-.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 26px;max-width:62ch}
+.lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 26px;max-width:64ch}
 
 .card{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;margin-bottom:20px;overflow:hidden;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
 .card.optional{border-style:dashed;border-color:var(--line)}
@@ -45,43 +45,54 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 .optpill{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);border:1px solid var(--amber);background:var(--amber-dim);border-radius:999px;padding:3px 9px}
 .card-b{padding:18px}
 
-.field{margin:0 0 16px}
-.field:last-child{margin-bottom:0}
+.field{margin:0 0 14px}.field:last-child{margin-bottom:0}
 .field label{display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:6px}
 .field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:'IBM Plex Mono',monospace}
 .field input::placeholder{color:var(--faint)}
 .field input:focus,.field select:focus{outline:none;border-color:var(--glass);box-shadow:0 0 0 3px var(--glass-dim)}
 .hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45}
-.row{display:flex;gap:14px;flex-wrap:wrap}
-.row .field{flex:1;min-width:180px}
+.row{display:flex;gap:12px;flex-wrap:wrap}.row .field{flex:1;min-width:150px}
 
-.seg{display:flex;gap:8px;margin-bottom:16px}
+.seg{display:flex;gap:8px;margin-bottom:14px}
 .seg button{flex:1;padding:11px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px}
 .seg button .dot{width:9px;height:9px;border-radius:50%;background:var(--faint)}
 .seg button.on{border-color:var(--glass);background:var(--glass-dim);color:var(--glass)}
 .seg button.on .dot{background:var(--glass);box-shadow:0 0 8px var(--glass)}
 .hidden{display:none}
 
-.grp-h{margin:6px 0 12px;padding-top:2px}
-.slot{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:rgba(24,37,48,.4)}
-.slot.md{border-color:var(--glass);background:var(--glass-dim)}
-.slot-h{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-.slot-h b{font-size:13.5px}
-.slot-h .tag{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:2px 8px}
-.slot.md .slot-h .tag{color:var(--glass);border-color:var(--glass)}
-.slot > .hint{margin-top:0;margin-bottom:12px}
+.pbtn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:13.5px;cursor:pointer}
+.pbtn:disabled{opacity:.55;cursor:default}.pbtn:hover:not(:disabled){background:rgba(84,203,217,.22)}
+.mini{padding:7px 11px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--text);font-size:12px;cursor:pointer}
+.mini:hover{border-color:var(--glass);color:var(--glass)}
+.mini.del{border-color:rgba(229,86,91,.4);color:var(--danger)}
+.mini.del:hover{background:var(--danger-dim)}
+.btnrow{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
 
-.pbtn{width:100%;padding:13px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:14px;cursor:pointer;margin-top:2px}
-.pbtn:disabled{opacity:.55;cursor:default}
-.pbtn:hover:not(:disabled){background:rgba(84,203,217,.22)}
+.inl{font-size:12px;margin-left:auto}
+.inl.ok{color:var(--ok)}.inl.err{color:var(--danger)}.inl.dim{color:var(--muted)}
 
-.banner{margin-top:16px;padding:14px 15px;border-radius:10px;font-size:13px;line-height:1.5;display:none}
+.cred{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:rgba(24,37,48,.4)}
+.cred-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.cred-h b{font-size:13.5px}.cred-h .mono{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
+.endpoint{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--etch);margin:2px 0 10px;word-break:break-all}
+.models{margin-top:12px;border-top:1px dashed var(--line);padding-top:12px}
+.model{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:9px;background:var(--panel2)}
+.model-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.model-top .mid{font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500}
+.tagchip{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:1px 7px}
+.tagchip.paid{color:var(--amber);border-color:var(--amber)}
+.tagchip.free{color:var(--ok);border-color:var(--ok)}
+.caps{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px}
+.caps .y{color:var(--ok)}.caps .n{color:var(--danger)}.caps .q{color:var(--amber)}
+.testout{margin-top:8px;font-size:12px;line-height:1.5}
+.testout.ok{color:#bfe9cf}.testout.err{color:#f2b6b8}
+.testout pre{background:#0d1418;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:11px;color:var(--muted);max-height:240px;white-space:pre-wrap;word-break:break-word}
+details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
+
+.banner{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:12.5px;line-height:1.5;display:none}
 .banner.show{display:block}
-.banner.ok{border:1px solid var(--ok);background:var(--ok-dim);color:#bfe9cf}
-.banner.ok b{color:var(--ok)}
+.banner.ok{border:1px solid var(--ok);background:var(--ok-dim);color:#bfe9cf}.banner.ok b{color:var(--ok)}
 .banner.err{border:1px solid var(--danger);background:var(--danger-dim);color:#f2b6b8}
-.banner code{font-family:'IBM Plex Mono',monospace;background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;font-size:12px}
-
 .foot{margin-top:22px;display:flex;align-items:flex-start;gap:8px;color:var(--muted);font-size:11.5px;line-height:1.5}
 .foot .lock{color:var(--glass)}
 </style>
@@ -99,217 +110,329 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 
 <main>
   <h1 class="title">Wire up the agency</h1>
-  <p class="lead">Fill this in once. On save it writes your <code style="font-family:'IBM Plex Mono',monospace">.env</code> and the website connector on the server for you — no editing files by hand. Nothing here is shown back or committed to git. Only the AI keys and your website are needed to start; the rest is optional.</p>
+  <p class="lead">Each section below has its <b>own Save button</b> — saving one never touches another. Add your AI providers, point each part of the agency at one, and you're running. Secrets are written on the server only, masked after saving, and never committed to git.</p>
 
-  <form id="setupForm" autocomplete="off">
-
-    <!-- WEBSITE ------------------------------------------------------------ -->
-    <section class="card">
-      <div class="card-h"><div class="ic">◧</div><div><b>Website</b><small>Your site, and how much the agents may touch it</small></div></div>
-      <div class="card-b">
-        <div class="field">
-          <label for="siteUrl">Website address</label>
-          <input id="siteUrl" name="siteUrl" placeholder="https://glassworks.ae" inputmode="url">
-          <div class="hint">The address people type to reach your site, including <code>https://</code>.</div>
-        </div>
-
-        <span style="display:block;font-size:12px;font-weight:500;margin-bottom:6px">Website mode</span>
-        <div class="seg" id="modeSeg">
-          <button type="button" data-mode="readonly" class="on"><span class="dot"></span>Read-only</button>
-          <button type="button" data-mode="full"><span class="dot"></span>Full access</button>
-        </div>
-        <p class="hint" id="modeHint" style="margin-top:-8px;margin-bottom:16px"><b>Read-only (recommended to start):</b> the agents plan, track and report, but never change your site — anything they'd change is queued for you to approve. Nothing touches your site until you're ready.</p>
-
-        <div id="fullFields" class="hidden">
-          <div class="field">
-            <label for="apiBase">Admin API address</label>
-            <input id="apiBase" name="apiBase" placeholder="https://glassworks.ae/api/admin" inputmode="url">
-            <div class="hint">Only for full access. The address of the small admin API on your site the agents use to read and update pages. Don't have one yet? Stay on Read-only.</div>
-          </div>
-          <div class="field">
-            <label for="apiToken">Admin API token</label>
-            <input id="apiToken" name="apiToken" type="password" placeholder="your secret token">
-            <div class="hint">Only for full access. The secret token your site checks before it allows any change.</div>
-          </div>
-        </div>
+  <!-- WEBSITE ------------------------------------------------------------- -->
+  <section class="card">
+    <div class="card-h"><div class="ic">◧</div><div><b>1 · Website</b><small>Your site, and how much the agents may touch it</small></div></div>
+    <div class="card-b">
+      <div class="field">
+        <label for="siteUrl">Website address</label>
+        <input id="siteUrl" placeholder="https://glassworks.ae" inputmode="url">
+        <div class="hint">The address people type to reach your site, including <code>https://</code>.</div>
       </div>
-    </section>
-
-    <!-- AI PROVIDERS ------------------------------------------------------- -->
-    <section class="card">
-      <div class="card-h"><div class="ic">🧠</div><div><b>AI providers (the brains)</b><small>One key slot per brain. Use any provider — Forge, Agent Router, OpenRouter, Anthropic, OpenAI…</small></div></div>
-      <div class="card-b">
-        <p class="hint" style="margin-top:0;margin-bottom:16px">Each slot takes a <b>provider name</b>, a <b>base URL</b> (the endpoint address — providers like Forge and Agent Router need this), a <b>model</b>, and the <b>API key</b>. At minimum fill the <b>MD</b> slot to start; unfilled sectors automatically use the Fallback key.</p>
-        <div id="aiSlots"></div>
+      <span style="display:block;font-size:12px;font-weight:500;margin-bottom:6px">Website mode</span>
+      <div class="seg" id="modeSeg">
+        <button type="button" data-mode="readonly" class="on"><span class="dot"></span>Read-only</button>
+        <button type="button" data-mode="full"><span class="dot"></span>Full access</button>
       </div>
-    </section>
-
-    <!-- OPTIONAL ----------------------------------------------------------- -->
-    <section class="card optional">
-      <div class="card-h"><div class="ic">➕</div><div><b>Optional extras</b><small>Not required to start — add these whenever you're ready</small></div><span class="optpill">Optional</span></div>
-      <div class="card-b">
-        <div class="row">
-          <div class="field">
-            <label for="dfsLogin">DataForSEO login <span style="color:var(--faint)">(optional)</span></label>
-            <input id="dfsLogin" name="dfsLogin" placeholder="you@email.com">
-            <div class="hint">For rank tracking. Leave blank to skip — the agency still plans and reports without it.</div>
-          </div>
-          <div class="field">
-            <label for="dfsPassword">DataForSEO password <span style="color:var(--faint)">(optional)</span></label>
-            <input id="dfsPassword" name="dfsPassword" type="password" placeholder="API password">
-            <div class="hint">The API password from your DataForSEO dashboard — not your website password.</div>
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="telegramToken">Telegram bot token <span style="color:var(--faint)">(optional)</span></label>
-            <input id="telegramToken" name="telegramToken" type="password" placeholder="123456:ABC-DEF...">
-            <div class="hint">From <b>@BotFather</b>. Lets the agency message you for approvals. Skip for now if you like.</div>
-          </div>
-          <div class="field">
-            <label for="telegramChatId">Telegram chat ID <span style="color:var(--faint)">(optional)</span></label>
-            <input id="telegramChatId" name="telegramChatId" placeholder="123456789">
-            <div class="hint">Your own chat ID — get it from <b>@userinfobot</b>.</div>
-          </div>
-        </div>
-        <div class="field">
-          <label for="outreachDomain">Sending domain <span style="color:var(--faint)">(optional)</span></label>
-          <input id="outreachDomain" name="outreachDomain" placeholder="mail.glassworks.ae">
-          <div class="hint">Only needed once you want cold outreach. Use a subdomain to protect your main domain's reputation.</div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="spendCap">Daily spend cap, USD <span style="color:var(--faint)">(optional)</span></label>
-            <input id="spendCap" name="spendCap" type="number" min="0" step="1" placeholder="15">
-            <div class="hint">Hard ceiling on spend per day. Defaults to 15 if left blank.</div>
-          </div>
-          <div class="field">
-            <label for="outreachCap">Daily outreach cap <span style="color:var(--faint)">(optional)</span></label>
-            <input id="outreachCap" name="outreachCap" type="number" min="0" step="1" placeholder="25">
-            <div class="hint">Most messages sent per day. Defaults to 25 if left blank.</div>
-          </div>
-        </div>
+      <p class="hint" id="modeHint" style="margin-top:-6px;margin-bottom:14px"><b>Read-only (recommended to start):</b> the agents plan, track and report, but never change your site — anything they'd change is queued for you to approve.</p>
+      <div id="fullFields" class="hidden">
+        <div class="field"><label for="apiBase">Admin API address</label>
+          <input id="apiBase" placeholder="https://glassworks.ae/api/admin" inputmode="url">
+          <div class="hint">Only for full access. The admin API on your site the agents use to read/update pages.</div></div>
+        <div class="field"><label for="siteApiToken">Admin API token</label>
+          <input id="siteApiToken" type="password" placeholder="leave blank to keep the saved one">
+          <div class="hint">Only for full access. The secret token your site checks before any change.</div></div>
       </div>
-    </section>
+      <div class="btnrow"><button class="pbtn" id="saveWebsite">Save website</button><span class="inl dim" id="siteMsg"></span></div>
+    </div>
+  </section>
 
-    <button type="submit" class="pbtn" id="saveBtn">Save setup</button>
-    <div class="banner" id="banner"></div>
+  <!-- AI PROVIDERS -------------------------------------------------------- -->
+  <section class="card">
+    <div class="card-h"><div class="ic">🧠</div><div><b>2 · AI providers</b><small>One credential (base URL + key) can hold many models. Use any provider.</small></div></div>
+    <div class="card-b">
+      <div id="credList"><p class="hint">Loading providers…</p></div>
 
-    <div class="foot"><span class="lock">🔒</span><span>Everything you enter is written to <code>.env</code> and the site connector <b>on the server only</b>. Secrets are never shown back on this screen and are kept out of git.</span></div>
-  </form>
+      <div class="cred" style="border-style:dashed">
+        <div class="cred-h"><b>Add a provider</b></div>
+        <div class="row">
+          <div class="field"><label>Provider name</label><input id="np_name" placeholder="e.g. Forge"><div class="hint">Just a label for you.</div></div>
+          <div class="field"><label>Auth style</label>
+            <select id="np_auth"><option value="bearer">Bearer (most common)</option><option value="x-api-key">x-api-key (Anthropic)</option><option value="token">Token</option><option value="custom">Custom header…</option></select>
+            <div class="hint">How the provider expects the key. Bearer works for most.</div></div>
+        </div>
+        <div class="field np_customwrap hidden"><label>Custom header name</label><input id="np_custom" placeholder="X-Api-Key"></div>
+        <div class="field"><label>Base URL</label><input id="np_base" placeholder="https://api.forge.tld/v1" inputmode="url">
+          <div class="hint">The endpoint address the provider gave you. Paste the whole thing — it's tidied to the base automatically. Leave blank only for official Anthropic.</div></div>
+        <div class="field"><label>API key</label><input id="np_key" type="password" placeholder="paste key">
+          <div class="hint">Stored on the server only, masked after saving.</div></div>
+        <div class="field"><label>Credit / balance note (optional)</label><input id="np_note" placeholder="e.g. 20 USD promo credit"><div class="hint">Handy for promo gateways with odd credit limits.</div></div>
+        <div class="btnrow"><button class="pbtn" id="addCred">Save provider</button><span class="inl dim" id="addCredMsg"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ROUTING ------------------------------------------------------------- -->
+  <section class="card">
+    <div class="card-h"><div class="ic">🔀</div><div><b>3 · Who runs what</b><small>Point each part of the agency at a model. Each row saves on its own.</small></div></div>
+    <div class="card-b">
+      <p class="hint" style="margin-top:0;margin-bottom:14px">Add at least one provider and model above first — they'll appear in these dropdowns. The <b>MD</b> row is the most important (it runs the Managing Director &amp; Critic). A <b>fallback</b> is used if the first choice fails.</p>
+      <div id="routeList"><p class="hint">Loading…</p></div>
+    </div>
+  </section>
+
+  <!-- OPTIONAL ------------------------------------------------------------ -->
+  <section class="card optional">
+    <div class="card-h"><div class="ic">➕</div><div><b>4 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
+    <div class="card-b">
+      <div class="row">
+        <div class="field"><label>DataForSEO login</label><input id="dfsLogin" placeholder="you@email.com"><div class="hint">For rank tracking. Skip to run without it.</div></div>
+        <div class="field"><label>DataForSEO password</label><input id="dfsPassword" type="password" placeholder="leave blank to keep saved"><div class="hint">API password from the DataForSEO dashboard.</div></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Telegram bot token</label><input id="telegramToken" type="password" placeholder="leave blank to keep saved"><div class="hint">From @BotFather — lets the agency message you.</div></div>
+        <div class="field"><label>Telegram chat ID</label><input id="telegramChatId" placeholder="123456789"><div class="hint">Your chat ID from @userinfobot.</div></div>
+      </div>
+      <div class="field"><label>Outreach domain</label><input id="outreachDomain" placeholder="mail.glassworks.ae"><div class="hint">Only needed for cold outreach. Use a subdomain, not your main domain.</div></div>
+      <div class="row">
+        <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15.</div></div>
+        <div class="field"><label>Daily outreach cap</label><input id="outreachCap" type="number" min="0" step="1" placeholder="25"><div class="hint">Defaults to 25.</div></div>
+      </div>
+      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><span class="inl dim" id="optMsg"></span></div>
+    </div>
+  </section>
+
+  <div class="foot"><span class="lock">🔒</span><span>Keys are written to the server only (a git-ignored file), shown back masked as <code>****1234</code>, and never committed. Check the <a href="/status">status page</a> to see which provider each part is using.</span></div>
 </main>
 
 <script>
 const $ = (s)=>document.querySelector(s);
-let mode = "readonly";
+const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(method, url, body){
+  const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store'});
+  let j={}; try{ j=await r.json(); }catch(_){}
+  if(!r.ok && !j.error) j.error = 'Request failed ('+r.status+')';
+  return j;
+}
+function inl(el,kind,msg){ el.className='inl '+kind; el.textContent=msg; }
 
-const MODE_HINTS = {
-  readonly: "<b>Read-only (recommended to start):</b> the agents plan, track and report, but never change your site — anything they’d change is queued for you to approve. Nothing touches your site until you’re ready.",
-  full: "<b>Full access:</b> the agents can read and update your site directly through its admin API. Fill in the two boxes below. Only choose this once your site has an admin API ready."
+const TASKS = [
+  {task:'md',label:'Managing Director & Critic'},
+  {task:'it',label:'IT sector'},{task:'content',label:'Content sector'},
+  {task:'seo',label:'SEO sector'},{task:'leads',label:'Leads sector'},
+  {task:'report',label:'Report sector'},{task:'security',label:'Security sector'},
+];
+const CATS = ['LLM','Vision','ASR','TTS','OCR','Embedding'];
+const TIERS = ['unknown','free','paid'];
+
+let STORE = {credentials:[], routing:{}};
+
+/* ---- website ---- */
+let mode='readonly';
+const MODE_HINTS={
+  readonly:"<b>Read-only (recommended to start):</b> the agents plan, track and report, but never change your site — anything they’d change is queued for you to approve.",
+  full:"<b>Full access:</b> the agents can read and update your site through its admin API. Fill the two boxes below."
+};
+$('#modeSeg').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(!b)return;
+  mode=b.dataset.mode;[...$('#modeSeg').children].forEach(x=>x.classList.toggle('on',x===b));
+  $('#fullFields').classList.toggle('hidden',mode!=='full');$('#modeHint').innerHTML=MODE_HINTS[mode];});
+$('#saveWebsite').onclick=async()=>{
+  const btn=$('#saveWebsite');btn.disabled=true;inl($('#siteMsg'),'dim','Saving…');
+  const j=await api('POST','/api/website',{mode,siteUrl:$('#siteUrl').value.trim(),
+    apiBase:$('#apiBase').value.trim(),apiToken:$('#siteApiToken').value});
+  btn.disabled=false;
+  if(j.ok){ inl($('#siteMsg'),'ok','✓ Saved ('+(j.mode==='full'?'Full access':'Read-only')+', database '+(j.database||'ready')+')'); $('#siteApiToken').value=''; }
+  else inl($('#siteMsg'),'err','✕ '+(j.error||'failed'));
 };
 
-$('#modeSeg').addEventListener('click', (e)=>{
-  const btn = e.target.closest('button[data-mode]');
-  if(!btn) return;
-  mode = btn.dataset.mode;
-  [...$('#modeSeg').children].forEach(b=>b.classList.toggle('on', b===btn));
-  $('#fullFields').classList.toggle('hidden', mode!=='full');
-  $('#modeHint').innerHTML = MODE_HINTS[mode];
-});
-
-// ---- AI key slots ----------------------------------------------------------
-const CORE = [
-  {key:"MD", label:"MD key", tag:"MD & Critic", md:true,
-   hint:"Your most advanced model — it runs the Managing Director and the Critic, the planning brain. Fill this one first."},
-  {key:"FALLBACK", label:"Fallback key", tag:"backup for all",
-   hint:"Used automatically if any other key fails, and as spare capacity for the MD. Make it a reliable general model."},
-];
-const SECTORS = [
-  {key:"IT", label:"IT sector key", tag:"IT agents", hint:"Runs the IT agents — site health, fixes and releases."},
-  {key:"CONTENT", label:"Content sector key", tag:"Content agents", hint:"Runs the Content agents — writing, case studies and publishing."},
-  {key:"SEO", label:"SEO sector key", tag:"SEO agents", hint:"Runs the SEO agents — rankings and keyword strategy."},
-  {key:"LEADS", label:"Leads sector key", tag:"Leads agents", hint:"Runs the Leads agents — finding, screening and replying to leads."},
-  {key:"REPORT", label:"Report sector key", tag:"Reporter", hint:"Runs the Reporter — daily scoring and your digest."},
-  {key:"SECURITY", label:"Security sector key", tag:"Security", hint:"Runs the Security screener — scam, fraud and injection checks."},
-];
-const ALL_SLOTS = [...CORE, ...SECTORS];
-
-const FH = {
-  provider:"Who supplies this model — e.g. Forge, Agent Router, OpenRouter, Anthropic, OpenAI. Just a label.",
-  baseUrl:"The API endpoint address your provider gives you (e.g. https://api.forge.tld/v1). Needed for Forge, Agent Router and similar. Leave blank only for official Anthropic.",
-  model:"The exact model name to call at this provider — e.g. claude-opus-4-8 or gpt-4o.",
-  key:"Your secret key for this provider. Stored on the server only, never shown back."
+/* ---- providers ---- */
+$('#np_auth').onchange=()=>document.querySelector('.np_customwrap').classList.toggle('hidden',$('#np_auth').value!=='custom');
+$('#addCred').onclick=async()=>{
+  const btn=$('#addCred');btn.disabled=true;inl($('#addCredMsg'),'dim','Saving…');
+  const j=await api('POST','/api/providers/credential',{
+    name:$('#np_name').value.trim(),auth_style:$('#np_auth').value,
+    auth_header_name:$('#np_custom').value.trim(),base_url:$('#np_base').value.trim(),
+    api_key:$('#np_key').value,credit_note:$('#np_note').value.trim()});
+  btn.disabled=false;
+  if(j.ok){ ['np_name','np_base','np_key','np_note','np_custom'].forEach(id=>$('#'+id).value='');
+    inl($('#addCredMsg'),'ok','✓ Provider saved'); await loadProviders(); }
+  else inl($('#addCredMsg'),'err','✕ '+(j.error||'failed'));
 };
 
-function slotHtml(s){
-  return `<div class="slot ${s.md?'md':''}">
-    <div class="slot-h"><b>${s.label}</b><span class="tag">${s.tag}</span></div>
-    <p class="hint">${s.hint}</p>
-    <div class="row">
-      <div class="field"><label>Provider name</label>
-        <input id="${s.key}_provider" placeholder="e.g. Forge"><div class="hint">${FH.provider}</div></div>
-      <div class="field"><label>Model</label>
-        <input id="${s.key}_model" placeholder="e.g. claude-opus-4-8"><div class="hint">${FH.model}</div></div>
-    </div>
-    <div class="field"><label>Base URL</label>
-      <input id="${s.key}_baseUrl" placeholder="https://api.provider.tld/v1" inputmode="url"><div class="hint">${FH.baseUrl}</div></div>
-    <div class="field"><label>API key</label>
-      <input id="${s.key}_key" type="password" placeholder="paste key"><div class="hint">${FH.key}</div></div>
-  </div>`;
-}
-$('#aiSlots').innerHTML =
-  '<div class="grp-h etch">Core</div>' + CORE.map(slotHtml).join('') +
-  '<div class="grp-h etch">Per sector</div>' + SECTORS.map(slotHtml).join('');
-
-// ---- collect + submit ------------------------------------------------------
-const val = (id)=>{ const el=$('#'+id); return el ? el.value.trim() : ""; };
-const SECRET_IDS = ['apiToken','dfsPassword','telegramToken', ...ALL_SLOTS.map(s=>s.key+'_key')];
-
-function collect(){
-  const ai = {};
-  ALL_SLOTS.forEach(s=>{ ai[s.key] = {
-    provider: val(s.key+'_provider'), baseUrl: val(s.key+'_baseUrl'),
-    model: val(s.key+'_model'), key: val(s.key+'_key'),
-  };});
-  return {
-    mode, siteUrl: val('siteUrl'), apiBase: val('apiBase'), apiToken: val('apiToken'),
-    ai,
-    dfsLogin: val('dfsLogin'), dfsPassword: val('dfsPassword'),
-    telegramToken: val('telegramToken'), telegramChatId: val('telegramChatId'),
-    outreachDomain: val('outreachDomain'),
-    spendCap: val('spendCap'), outreachCap: val('outreachCap'),
-  };
+function modelOptions(selected){
+  let opts='<option value="">— none —</option>';
+  STORE.credentials.forEach(c=>c.models.forEach(m=>{
+    const label=esc(c.name+' · '+m.api_model_id+' ('+m.cost_tier+')');
+    opts+='<option value="'+m.id+'"'+(m.id===selected?' selected':'')+'>'+label+'</option>';
+  }));
+  return opts;
 }
 
-function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function showBanner(kind, html){
-  const b = $('#banner'); b.className = 'banner show ' + kind; b.innerHTML = html;
-  b.scrollIntoView({behavior:'smooth', block:'nearest'});
+function capLine(caps){
+  if(!caps||!Object.keys(caps).length) return '';
+  const g=v=>v===true?'<span class="y">✓</span>':v===false?'<span class="n">✗</span>':'<span class="q">?</span>';
+  return '<div class="caps">'+Object.entries(caps).map(([k,v])=>k+' '+g(v)).join('&nbsp;&nbsp;')+'</div>';
 }
 
-$('#setupForm').addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const data = collect();
-  const btn = $('#saveBtn');
-  $('#banner').className = 'banner';
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try{
-    const r = await fetch('/api/setup', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
-    const j = await r.json();
-    if(!r.ok || !j.ok) throw new Error(j.error || 'Save failed.');
-    const modeLabel = j.mode==='full' ? 'Full access' : 'Read-only';
-    showBanner('ok',
-      '<b>✓ Setup saved.</b> Saved on the server for <b>'+esc(j.siteUrl)+'</b> (<b>'+modeLabel+'</b> mode). '+
-      '<b>'+esc(j.aiKeysSet)+'</b> of '+esc(j.aiKeysTotal)+' AI keys stored; the filing cabinet is <b>'+esc(j.database||'ready')+'</b>. '+
-      'Your keys stay on the server — never shown here or committed to git.'+
-      '<br><br>See which brain each sector is using on the <a href="/status">status page</a>.');
-    SECRET_IDS.forEach(id=>{ const el=$('#'+id); if(el) el.value=''; });  // never keep secrets in the DOM
-  }catch(err){
-    showBanner('err', '<b>Couldn’t save.</b> '+esc(err.message));
-  }finally{
-    btn.disabled = false; btn.textContent = 'Save setup';
-  }
-});
+function renderCredentials(){
+  const host=$('#credList');
+  if(!STORE.credentials.length){ host.innerHTML='<p class="hint">No providers yet — add one below.</p>'; return; }
+  host.innerHTML = STORE.credentials.map(c=>{
+    const models=(c.models||[]).map(m=>{
+      const tier=m.cost_tier||'unknown';
+      return `<div class="model" data-cid="${c.id}" data-mid="${m.id}">
+        <div class="model-top">
+          <span class="mid">${esc(m.api_model_id)}</span>
+          <span class="tagchip">${esc(m.category||'LLM')}</span>
+          <span class="tagchip ${tier}">${esc(tier)}</span>
+          <button class="mini test">Test &amp; detect</button>
+          <button class="mini del delModel">Delete</button>
+        </div>
+        ${capLine(m.detected_capabilities)}
+        <div class="testout"></div>
+      </div>`;
+    }).join('');
+    return `<div class="cred" data-cid="${c.id}">
+      <div class="cred-h"><b>${esc(c.name)}</b><span class="mono">${esc(c.key_masked||'no key')} · ${esc(c.auth_style)}</span></div>
+      <div class="endpoint">${esc(c.base_url||'(no base url)')}${c.base_url?' → '+esc(c.base_url)+'/chat/completions':''}</div>
+      <div class="row">
+        <div class="field"><label>Name</label><input class="c_name" value="${esc(c.name)}"></div>
+        <div class="field"><label>Auth style</label><select class="c_auth">
+          ${['bearer','x-api-key','token','custom'].map(a=>`<option value="${a}"${a===c.auth_style?' selected':''}>${a}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="field"><label>Base URL</label><input class="c_base" value="${esc(c.base_url)}"></div>
+      <div class="field"><label>API key</label><input class="c_key" type="password" placeholder="leave blank to keep ${esc(c.key_masked||'')}"></div>
+      <div class="field"><label>Credit note</label><input class="c_note" value="${esc(c.credit_note||'')}"></div>
+      <div class="btnrow">
+        <button class="pbtn saveCred">Save this provider</button>
+        <button class="mini del delCred">Delete provider</button>
+        <span class="inl dim credMsg"></span>
+      </div>
+      <div class="models">
+        <div class="hint" style="margin-bottom:8px"><b>Models under this provider</b></div>
+        ${models||'<p class="hint">No models yet.</p>'}
+        <div class="row" style="margin-top:8px">
+          <div class="field"><label>Model id (exact)</label><input class="m_id" list="ml_${c.id}" placeholder="e.g. claude-opus-4-8">
+            <datalist id="ml_${c.id}"></datalist></div>
+          <div class="field"><label>Category</label><select class="m_cat">${CATS.map(x=>`<option>${x}</option>`).join('')}</select></div>
+          <div class="field"><label>Cost</label><select class="m_tier">${TIERS.map(x=>`<option>${x}</option>`).join('')}</select></div>
+        </div>
+        <div class="btnrow">
+          <button class="mini addModel">Add model</button>
+          <button class="mini fetchModels">Fetch available models</button>
+          <span class="inl dim mMsg"></span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  wireCredEvents();
+}
+
+function wireCredEvents(){
+  document.querySelectorAll('#credList .cred').forEach(card=>{
+    const cid=card.dataset.cid;
+    const msg=card.querySelector('.credMsg');
+    card.querySelector('.saveCred').onclick=async()=>{
+      inl(msg,'dim','Saving…');
+      const j=await api('POST','/api/providers/credential',{id:cid,
+        name:card.querySelector('.c_name').value.trim(),auth_style:card.querySelector('.c_auth').value,
+        base_url:card.querySelector('.c_base').value.trim(),api_key:card.querySelector('.c_key').value,
+        credit_note:card.querySelector('.c_note').value.trim()});
+      if(j.ok){ inl(msg,'ok','✓ Saved'); await loadProviders(); } else inl(msg,'err','✕ '+(j.error||'failed'));
+    };
+    card.querySelector('.delCred').onclick=async()=>{
+      if(!confirm('Delete this provider and its models?'))return;
+      const j=await api('POST','/api/providers/credential/delete',{id:cid});
+      if(j.ok) await loadProviders(); else inl(msg,'err','✕ '+(j.error||'failed'));
+    };
+    const mMsg=card.querySelector('.mMsg');
+    card.querySelector('.addModel').onclick=async()=>{
+      const mid=card.querySelector('.m_id').value.trim();
+      if(!mid){ inl(mMsg,'err','Enter a model id'); return; }
+      inl(mMsg,'dim','Adding…');
+      const j=await api('POST','/api/providers/model',{credential_id:cid,model:{
+        api_model_id:mid,category:card.querySelector('.m_cat').value,cost_tier:card.querySelector('.m_tier').value}});
+      if(j.ok){ inl(mMsg,'ok','✓ Added'); await loadProviders(); } else inl(mMsg,'err','✕ '+(j.error||'failed'));
+    };
+    card.querySelector('.fetchModels').onclick=async()=>{
+      inl(mMsg,'dim','Fetching…');
+      const j=await api('POST','/api/providers/fetch-models',{credential_id:cid});
+      if(j.ok && j.models && j.models.length){
+        const dl=card.querySelector('#ml_'+cid); dl.innerHTML=j.models.map(m=>`<option value="${esc(m)}">`).join('');
+        inl(mMsg,'ok','✓ '+j.models.length+' models — type in the box to pick');
+      } else inl(mMsg,'err','✕ '+(j.error||('status '+(j.status||'?')+' — enter the model id manually')));
+    };
+    card.querySelectorAll('.model').forEach(row=>{
+      const mid=row.dataset.mid, out=row.querySelector('.testout');
+      row.querySelector('.delModel').onclick=async()=>{
+        const j=await api('POST','/api/providers/model/delete',{credential_id:cid,model_id:mid});
+        if(j.ok) await loadProviders();
+      };
+      row.querySelector('.test').onclick=async()=>{
+        out.className='testout'; out.textContent='Testing…';
+        const j=await api('POST','/api/providers/test',{credential_id:cid,model_id:mid});
+        if(!j.ok){ out.className='testout err'; out.textContent='✕ '+(j.error||'failed'); return; }
+        const t=j.test||{};
+        if(t.ok){ out.className='testout ok'; out.innerHTML='✓ Reply: '+esc((t.output||'').slice(0,200)); }
+        else if(t.ok===null){ out.className='testout'; out.innerHTML=esc(t.cause||'Detected by signature'); }
+        else {
+          out.className='testout err';
+          out.innerHTML='✕ '+esc(t.cause||('status '+t.status))+
+            '<details><summary>Raw request / response</summary><pre>'+esc(JSON.stringify(t.raw||{},null,2))+'</pre></details>';
+        }
+        await loadProviders();
+      };
+    });
+  });
+}
+
+/* ---- routing ---- */
+function renderRouting(){
+  const host=$('#routeList');
+  host.innerHTML = TASKS.map(t=>{
+    const r=STORE.routing[t.task]||{};
+    return `<div class="cred" data-task="${t.task}">
+      <div class="cred-h"><b>${esc(t.label)}</b></div>
+      <div class="row">
+        <div class="field"><label>Primary model</label><select class="r_primary">${modelOptions(r.primary)}</select></div>
+        <div class="field"><label>Fallback model</label><select class="r_fallback">${modelOptions((r.fallback&&r.fallback[0])||'')}</select></div>
+      </div>
+      <div class="btnrow">
+        <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><input type="checkbox" class="r_paid" ${r.paid_allowed!==false?'checked':''}> allow paid providers</label>
+        <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><input type="checkbox" class="r_enabled" ${r.enabled!==false?'checked':''}> enabled</label>
+        <button class="pbtn saveRoute">Save</button>
+        <span class="inl dim rMsg"></span>
+      </div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('#routeList .cred').forEach(row=>{
+    const task=row.dataset.task, msg=row.querySelector('.rMsg');
+    row.querySelector('.saveRoute').onclick=async()=>{
+      inl(msg,'dim','Saving…');
+      const fb=row.querySelector('.r_fallback').value;
+      const j=await api('POST','/api/routing',{task,route:{
+        primary:row.querySelector('.r_primary').value,
+        fallback:fb?[fb]:[],
+        paid_allowed:row.querySelector('.r_paid').checked,
+        enabled:row.querySelector('.r_enabled').checked}});
+      if(j.ok){ inl(msg,'ok','✓ Saved'); STORE.routing[task]=j.route; } else inl(msg,'err','✕ '+(j.error||'failed'));
+    };
+  });
+}
+
+/* ---- optional ---- */
+$('#saveOptional').onclick=async()=>{
+  const btn=$('#saveOptional');btn.disabled=true;inl($('#optMsg'),'dim','Saving…');
+  const j=await api('POST','/api/optional',{dfsLogin:$('#dfsLogin').value.trim(),dfsPassword:$('#dfsPassword').value,
+    telegramToken:$('#telegramToken').value,telegramChatId:$('#telegramChatId').value.trim(),
+    outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim()});
+  btn.disabled=false;
+  if(j.ok){ inl($('#optMsg'),'ok','✓ Saved'); ['dfsPassword','telegramToken'].forEach(id=>$('#'+id).value=''); }
+  else inl($('#optMsg'),'err','✕ '+(j.error||'failed'));
+};
+
+/* ---- load ---- */
+async function loadProviders(){
+  const p=await api('GET','/api/providers');
+  const r=await api('GET','/api/routing');
+  STORE.credentials=(p&&p.credentials)||[];
+  STORE.routing=(r&&r.routing)||{};
+  renderCredentials(); renderRouting();
+}
+loadProviders();
 </script>
 </body>
 </html>

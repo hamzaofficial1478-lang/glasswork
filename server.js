@@ -1,11 +1,13 @@
 /*
- * server.js — the one Node app you host. Serves both UIs and the shared state.
+ * server.js — the one Node app you host. Serves the UIs and the shared state.
  *   /          -> the Virtual Office (front of house)
  *   /control   -> the Control Room dashboard (back office)
- *   /api/state -> the live state both UIs read (wire this to the filing cabinet)
- *   /api/chat  -> talk to an agent (wire to Claude / the Agent SDK)
+ *   /setup     -> the setup screen (website, AI providers, routing, optional)
+ *   /status    -> plain-language "what's connected" view
  *
- * Run on your Node box under pm2:  pm2 start server.js --name agency
+ * AI provider config is owned by the Python module in providers/*.py. This server
+ * NEVER builds an API client itself — it shells into `python3 -m providers.api`
+ * so the UI and the agents share ONE code path. Run under pm2: pm2 start server.js
  */
 const express = require("express");
 const path = require("path");
@@ -22,14 +24,12 @@ app.get("/status", (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html
 
 // STATE — right now returns a snapshot; swap the body to read coordination/agency.db
 app.get("/api/state", (_q, res) => {
-  // e.g. read tasks, leads, site_issues, decisions from SQLite and shape them here
   res.json({ ok: true, note: "wire me to the filing cabinet", ts: Date.now() });
 });
 
 // CHAT — the office sends {agent, message}; forward to Claude / the Agent SDK
 app.post("/api/chat", async (req, res) => {
   const { agent, message } = req.body || {};
-  // TODO: route to the matching agent via the board; return its reply
   res.json({ agent, reply: `(${agent}) received: ${message}` });
 });
 
@@ -37,8 +37,18 @@ app.post("/api/chat", async (req, res) => {
 const ENV_PATH = path.join(__dirname, ".env");
 const DB_PATH = path.join(__dirname, "coordination", "agency.db");
 
-// read .env into a { KEY: value } map. Values never leave the server as-is;
-// the status endpoint only reports whether each key is filled.
+// the agency's tasks — each binds to a provider on the Routing screen
+const AGENCY_TASKS = [
+  { task: "md", label: "Managing Director & Critic" },
+  { task: "it", label: "IT sector" },
+  { task: "content", label: "Content sector" },
+  { task: "seo", label: "SEO sector" },
+  { task: "leads", label: "Leads sector" },
+  { task: "report", label: "Report sector" },
+  { task: "security", label: "Security sector" },
+];
+
+// read .env into a { KEY: value } map (used only to report what's filled)
 function readEnv() {
   const map = {};
   if (fs.existsSync(ENV_PATH)) {
@@ -50,7 +60,27 @@ function readEnv() {
   return map;
 }
 
-// the cabinet counts as "built" if the file exists and carries the core tables
+// merge keys into .env WITHOUT disturbing the rest — this is why saving one
+// section never wipes another (the bug the owner hit with the old single button).
+function updateEnv(partial) {
+  const merged = { ...readEnv(), ...partial };
+  if (!merged.PORT) merged.PORT = process.env.PORT || "3000";
+  const order = [
+    "SITE_MODE", "SITE_URL", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
+    "DAILY_SPEND_CAP_USD", "OUTREACH_DAILY_CAP", "SITE_API_BASE", "SITE_API_TOKEN", "PORT",
+  ];
+  const keys = [...order.filter((k) => k in merged),
+                ...Object.keys(merged).filter((k) => !order.includes(k))];
+  const body = [
+    "# Written by the setup screen — secrets stored here only, never committed.",
+    ...keys.map((k) => `${k}=${String(merged[k] == null ? "" : merged[k]).replace(/[\r\n]+/g, " ")}`),
+    "",
+  ].join("\n");
+  fs.writeFileSync(ENV_PATH, body, { mode: 0o600 });
+  try { fs.chmodSync(ENV_PATH, 0o600); } catch (_) {}
+}
+
 function dbBuilt() {
   if (!fs.existsSync(DB_PATH)) return false;
   try {
@@ -59,7 +89,6 @@ function dbBuilt() {
   } catch (_) { return false; }
 }
 
-// build the cabinet from schema.sql if it isn't built yet (runs init_db.py)
 function ensureDb() {
   if (dbBuilt()) return { built: true, ran: false };
   try {
@@ -70,156 +99,119 @@ function ensureDb() {
   }
 }
 
-// AI key slots — one brain per slot. Each is provider / base URL / model / key
-// in .env. MD runs the Managing Director + Critic; FALLBACK backs up everyone;
-// the rest are one per sector. (Kept in sync with coordination/ai_keys.py.)
-const AI_SLOTS = [
-  { key: "MD", label: "Managing Director & Critic" },
-  { key: "FALLBACK", label: "Fallback (backup for all agents)" },
-  { key: "IT", label: "IT sector" },
-  { key: "CONTENT", label: "Content sector" },
-  { key: "SEO", label: "SEO sector" },
-  { key: "LEADS", label: "Leads sector" },
-  { key: "REPORT", label: "Report sector" },
-  { key: "SECURITY", label: "Security sector" },
-];
-const SECTOR_SLOTS = ["IT", "CONTENT", "SEO", "LEADS", "REPORT", "SECURITY"];
+// shell into the Python provider module (the single code path for provider ops)
+function pyProvider(command, payload) {
+  const r = spawnSync("python3", ["-m", "providers.api", command], {
+    cwd: __dirname, input: JSON.stringify(payload || {}),
+    timeout: 120000, maxBuffer: 8 * 1024 * 1024,
+  });
+  const out = String(r.stdout || "");
+  if (!out) return { ok: false, error: "provider module error: " + String(r.stderr || r.error || "no output") };
+  try { return JSON.parse(out); }
+  catch (_) { return { ok: false, error: "bad provider output: " + out.slice(0, 300) }; }
+}
 
-// SETUP — the /setup screen posts the config here; we write .env and the
-// connector's SITE line, then build the cabinet, so the owner edits nothing.
-app.post("/api/setup", (req, res) => {
+// ---- website (its own Save button) -----------------------------------------
+app.post("/api/website", (req, res) => {
   try {
     const b = req.body || {};
+    const cur = readEnv();
     const mode = String(b.mode || "readonly").toLowerCase() === "full" ? "full" : "readonly";
     const siteUrl = String(b.siteUrl || "").trim();
-    if (!siteUrl)
-      return res.status(400).json({ ok: false, error: "Enter your website URL." });
+    if (!siteUrl) return res.status(400).json({ ok: false, error: "Enter your website URL." });
 
-    // JSON.stringify yields a safely-escaped double-quoted string that is also a
-    // valid Python string literal — so odd characters in a token can't break the file.
+    // JSON.stringify -> a safely-escaped string that is also a valid Python literal
     const py = (v) => JSON.stringify(String(v == null ? "" : v));
     let siteLine, apiBase = "", apiToken = "";
     if (mode === "full") {
-      apiBase = String(b.apiBase || "").trim();
-      apiToken = String(b.apiToken || "");
+      apiBase = String(b.apiBase || "").trim() || cur.SITE_API_BASE || "";
+      apiToken = String(b.apiToken || "").trim() || cur.SITE_API_TOKEN || "";  // keyless re-save keeps it
       if (!apiBase || !apiToken)
         return res.status(400).json({ ok: false, error: "Full access needs your site's admin API URL and token." });
       siteLine = `SITE = CustomSite(${py(apiBase)}, ${py(apiToken)})`;
     } else {
       siteLine = `SITE = ReadOnlySite(${py(siteUrl)})`;
     }
+    updateEnv({
+      SITE_MODE: mode, SITE_URL: siteUrl,
+      SITE_API_BASE: mode === "full" ? apiBase : "",
+      SITE_API_TOKEN: mode === "full" ? apiToken : "",
+    });
 
-    // one clean line per value; strip newlines so nobody can inject extra keys.
-    const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
-
-    // AI key slots (provider / base URL / model / key per brain)
-    const ai = (b.ai && typeof b.ai === "object") ? b.ai : {};
-    let aiKeysSet = 0;
-    const aiLines = [];
-    for (const slot of AI_SLOTS) {
-      const s = ai[slot.key] || {};
-      const key = one(s.key);
-      if (key) aiKeysSet++;
-      aiLines.push(
-        `${slot.key}_PROVIDER=${one(s.provider)}`,
-        `${slot.key}_BASE_URL=${one(s.baseUrl)}`,
-        `${slot.key}_MODEL=${one(s.model)}`,
-        `${slot.key}_API_KEY=${key}`,
-      );
-    }
-
-    const envText = [
-      "# Written by the setup screen (/setup). Secrets are stored here only — keep it out of git.",
-      `SITE_MODE=${mode}`,
-      `SITE_URL=${one(siteUrl)}`,
-      "",
-      "# AI providers — one slot per brain (provider / base URL / model / key)",
-      ...aiLines,
-      "",
-      "# Optional extras (not required to start)",
-      `DATAFORSEO_LOGIN=${one(b.dfsLogin)}`,
-      `DATAFORSEO_PASSWORD=${one(b.dfsPassword)}`,
-      `TELEGRAM_BOT_TOKEN=${one(b.telegramToken)}`,
-      `TELEGRAM_CHAT_ID=${one(b.telegramChatId)}`,
-      `OUTREACH_DOMAIN=${one(b.outreachDomain)}`,
-      `DAILY_SPEND_CAP_USD=${one(b.spendCap) || "15"}`,
-      `OUTREACH_DAILY_CAP=${one(b.outreachCap) || "25"}`,
-      "",
-      "# Website full-access (only used in full mode)",
-      `SITE_API_BASE=${one(mode === "full" ? apiBase : "")}`,
-      `SITE_API_TOKEN=${one(mode === "full" ? apiToken : "")}`,
-      `PORT=${process.env.PORT || "3000"}`,
-      "",
-    ].join("\n");
-    fs.writeFileSync(ENV_PATH, envText, { mode: 0o600 });
-    try { fs.chmodSync(ENV_PATH, 0o600); } catch (_) {}
-
-    // Rewrite the single active SITE = line in the connector (never the # examples).
-    // connector.py is git-ignored and generated from connector.example.py.
     const dir = path.join(__dirname, "mcp", "site_connector");
     const connPath = path.join(dir, "connector.py");
     const examplePath = path.join(dir, "connector.example.py");
     let conn = fs.existsSync(connPath) ? fs.readFileSync(connPath, "utf8")
-             : fs.existsSync(examplePath) ? fs.readFileSync(examplePath, "utf8")
-             : null;
-    if (conn === null)
-      return res.status(500).json({ ok: false, error: "Connector template not found." });
+             : fs.existsSync(examplePath) ? fs.readFileSync(examplePath, "utf8") : null;
+    if (conn === null) return res.status(500).json({ ok: false, error: "Connector template not found." });
     conn = /^SITE\s*=.*$/m.test(conn)
       ? conn.replace(/^SITE\s*=.*$/m, siteLine)
       : conn.replace(/\s*$/, "\n") + siteLine + "\n";
     fs.writeFileSync(connPath, conn);
 
-    // build the filing cabinet if it isn't already
     const db = ensureDb();
-
-    // never echo secrets back to the screen
-    return res.json({
-      ok: true, mode, siteUrl,
-      wrote: [".env", "mcp/site_connector/connector.py"],
-      aiKeysSet, aiKeysTotal: AI_SLOTS.length,
-      database: db.built ? "ready" : "not built",
-    });
+    return res.json({ ok: true, mode, siteUrl, database: db.built ? "ready" : "not built" });
   } catch (e) {
     return res.status(500).json({ ok: false, error: "Could not save: " + e.message });
   }
 });
 
-// STATUS — plain-language read of what's connected and what's still missing.
-// Reports only whether each field is filled; it never returns a secret value.
+// ---- optional extras (its own Save button; blank fields are left untouched) --
+app.post("/api/optional", (req, res) => {
+  try {
+    const b = req.body || {};
+    const cur = readEnv();
+    const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
+    const partial = {};
+    const set = (k, v) => { const x = one(v); if (x) partial[k] = x; };  // only overwrite when given
+    set("DATAFORSEO_LOGIN", b.dfsLogin);
+    set("DATAFORSEO_PASSWORD", b.dfsPassword);
+    set("TELEGRAM_BOT_TOKEN", b.telegramToken);
+    set("TELEGRAM_CHAT_ID", b.telegramChatId);
+    set("OUTREACH_DOMAIN", b.outreachDomain);
+    partial.DAILY_SPEND_CAP_USD = one(b.spendCap) || cur.DAILY_SPEND_CAP_USD || "15";
+    partial.OUTREACH_DAILY_CAP = one(b.outreachCap) || cur.OUTREACH_DAILY_CAP || "25";
+    updateEnv(partial);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "Could not save: " + e.message });
+  }
+});
+
+// ---- AI providers (each credential saves independently) --------------------
+app.get("/api/providers", (_q, res) => res.json(pyProvider("view", {})));
+app.post("/api/providers/credential", (req, res) => res.json(pyProvider("save_credential", req.body)));
+app.post("/api/providers/credential/delete", (req, res) => res.json(pyProvider("delete_credential", req.body)));
+app.post("/api/providers/model", (req, res) => res.json(pyProvider("save_model", req.body)));
+app.post("/api/providers/model/delete", (req, res) => res.json(pyProvider("delete_model", req.body)));
+app.post("/api/providers/fetch-models", (req, res) => res.json(pyProvider("fetch_models", req.body)));
+app.post("/api/providers/test", (req, res) => res.json(pyProvider("test_model", req.body)));
+
+// ---- per-task routing ------------------------------------------------------
+app.get("/api/routing", (_q, res) => res.json(pyProvider("get_routing", {})));
+app.post("/api/routing", (req, res) => res.json(pyProvider("save_route", req.body)));
+app.get("/api/tasks", (_q, res) => res.json({ ok: true, tasks: AGENCY_TASKS }));
+
+// ---- status ----------------------------------------------------------------
 app.get("/api/status", (_q, res) => {
   const e = readEnv();
   const has = (k) => !!(e[k] && e[k].trim());
   const mode = String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly";
   const fullReady = has("SITE_API_BASE") && has("SITE_API_TOKEN");
 
-  // which brain (provider + model) each sector and the MD is using
-  const fallbackKeyed = has("FALLBACK_API_KEY");
-  const fallbackPM = [e.FALLBACK_PROVIDER, e.FALLBACK_MODEL].filter(Boolean).join(" · ");
-  const brains = AI_SLOTS.map((slot) => {
-    const keyed = has(slot.key + "_API_KEY");
-    const provider = e[slot.key + "_PROVIDER"] || "";
-    const model = e[slot.key + "_MODEL"] || "";
-    const pm = [provider, model].filter(Boolean).join(" · ");
-    let ok, detail;
-    if (keyed) {
-      ok = true;
-      detail = pm || "key set (add the provider + model for a clearer view)";
-    } else if (slot.key === "FALLBACK") {
-      ok = false;
-      detail = "No fallback key — if a sector key fails, that agent stops";
-    } else if (fallbackKeyed) {
-      ok = false; // still a red warning per sector, but note the safety net
-      detail = "No key set — will fall back to the Fallback key" + (fallbackPM ? " (" + fallbackPM + ")" : "");
-    } else {
-      ok = false;
-      detail = "No key set — this agent can't run yet";
-    }
-    return { key: slot.key, label: slot.label, provider, model, ok, detail };
+  // which provider + model each task (MD + sectors) resolves to
+  const ps = pyProvider("status", {});
+  const tasks = (ps && ps.tasks) || {};
+  const brains = AGENCY_TASKS.map((t) => {
+    const s = tasks[t.task];
+    const ok = !!(s && s.ok);
+    return {
+      key: t.task, label: t.label, ok,
+      detail: ok ? s.detail : ((s && s.detail) || "No provider chosen yet — pick one on the Routing screen"),
+    };
   });
-  const mdKeyed = has("MD_API_KEY");
-  const sectorsKeyed = SECTOR_SLOTS.filter((k) => has(k + "_API_KEY")).length;
-  const brainsReady = (mdKeyed ? 1 : 0) + sectorsKeyed;   // MD + 6 sectors
-  const brainsTotal = 1 + SECTOR_SLOTS.length;
+  const brainsReady = brains.filter((b) => b.ok).length;
+  const brainsTotal = brains.length;
 
   const checks = [
     { label: "Website", optional: false, ok: has("SITE_URL"),
@@ -233,7 +225,7 @@ app.get("/api/status", (_q, res) => {
         : (fullReady ? "Admin API address and token saved" : "Full access is on, but the admin API address/token is missing"),
       hint: "Only needed if you switch Website mode to Full access." },
     { label: "Filing cabinet (database)", optional: false, ok: dbBuilt(),
-      detail: dbBuilt() ? "Built and ready" : "Not built yet — it builds itself when you save the setup form",
+      detail: dbBuilt() ? "Built and ready" : "Not built yet — it builds itself when you save the website form",
       hint: "No action needed — created for you on first save." },
     { label: "DataForSEO (rank tracking)", optional: true, ok: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD"),
       detail: (has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD")) ? "Login and password saved" : "Not set — rankings aren't tracked",
@@ -250,7 +242,11 @@ app.get("/api/status", (_q, res) => {
       hint: "Safety limits the Overseer enforces." },
   ];
 
-  res.json({ ok: true, mode, brains, brainsReady, brainsTotal, checks });
+  res.json({
+    ok: true, mode,
+    providers: { credentials: (ps && ps.credentials) || 0, models: (ps && ps.models) || 0 },
+    brains, brainsReady, brainsTotal, checks,
+  });
 });
 
 const PORT = process.env.PORT || 3000;

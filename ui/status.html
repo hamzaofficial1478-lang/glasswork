@@ -85,7 +85,7 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
 
 <main>
   <h1 class="title">What's connected</h1>
-  <p class="lead">A plain-English check of what the agency has and what it's still waiting on. Green tick means ready; red cross means a brain has no key; a dashed grey row is optional. Fill anything red on the setup screen — you never touch a file.</p>
+  <p class="lead">A plain-English check of what the agency has and what it's still waiting on. Green tick means ready; red cross means that part has no provider chosen yet; a dashed grey row is optional. Fix anything red on the setup screen — you never touch a file.</p>
 
   <div class="summary" id="summary">
     <div class="top">
@@ -147,8 +147,8 @@ function checkRow(c){
 function render(j){
   $('#count').textContent = j.brainsReady + '/' + j.brainsTotal;
   $('#countLabel').textContent = j.brainsReady === j.brainsTotal
-    ? 'Every sector and the MD has a key 🎉'
-    : (j.brainsTotal - j.brainsReady) + ' brain' + ((j.brainsTotal-j.brainsReady)===1?'':'s') + ' still need a key (MD + 6 sectors)';
+    ? 'Every sector and the MD has a provider 🎉'
+    : (j.brainsTotal - j.brainsReady) + ' of ' + j.brainsTotal + ' still need a provider (MD + 6 sectors)';
   $('#barFill').style.width = Math.round(j.brainsReady / j.brainsTotal * 100) + '%';
 
   const chip = $('#modeChip');
