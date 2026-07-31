@@ -168,7 +168,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
   <section class="card">
     <div class="card-h"><div class="ic">🔀</div><div><b>3 · Who runs what</b><small>Point each part of the agency at a model. Each row saves on its own.</small></div></div>
     <div class="card-b">
-      <p class="hint" style="margin-top:0;margin-bottom:14px">Add at least one provider and model above first — they'll appear in these dropdowns. The <b>MD</b> row is the most important (it runs the Managing Director &amp; Critic). A <b>fallback</b> is used if the first choice fails.</p>
+      <p class="hint" style="margin-top:0;margin-bottom:14px">Each sector's brain is a <b>text (LLM) model</b>, so only your LLM models appear here — image and embedding models live on <b>the shelf</b> below, borrowed when needed. The <b>MD</b> row is the most important (it runs the Managing Director &amp; Critic). A <b>fallback</b> is used if the first choice fails.</p>
       <div id="routeList"><p class="hint">Loading…</p></div>
     </div>
   </section>
@@ -220,9 +220,49 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
     </div>
   </section>
 
+  <!-- THE SHELF (shared API cabinet) ------------------------------------- -->
+  <section class="card">
+    <div class="card-h"><div class="ic">🗄️</div><div><b>5 · The shelf (shared API cabinet)</b><small>Shared capability APIs any agent can borrow — one holder at a time, everyone else queues</small></div></div>
+    <div class="card-b">
+      <p class="hint" style="margin-top:0">Each sector has its own brain (set above). Everything else — SEO data, stock graphics, email delivery, the crawler — lives here and is <b>borrowed</b>: an agent takes a shelf's lock, uses it, hands it back. Different shelves run at once; two agents wanting the same shelf take turns. Outside data is flagged for Security; spend counts against the cap.</p>
+
+      <div class="cred">
+        <div class="cred-h"><b>Live shelf board</b>
+          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-left:auto"><input type="checkbox" id="shelfAuto" checked> auto-refresh</label>
+          <button class="mini" id="shelfRefresh">Refresh</button>
+        </div>
+        <div id="shelfBoard"><p class="hint">Loading…</p></div>
+      </div>
+
+      <div class="hint" style="margin:14px 0 8px"><b>Tool APIs on the shelf</b> — add the 3rd-party services here; each sits on a capability shelf.</div>
+      <div id="toolList"><p class="hint">Loading…</p></div>
+
+      <div class="cred" style="border-style:dashed">
+        <div class="cred-h"><b>Add a tool API to a shelf</b></div>
+        <div class="row">
+          <div class="field"><label>Shelf</label><select id="nt_shelf"></select><div class="hint">Which capability this API provides.</div></div>
+          <div class="field"><label>Name</label><input id="nt_name" placeholder="e.g. DataForSEO"><div class="hint">A label for you.</div></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Auth style</label>
+            <select id="nt_auth"><option value="bearer">Bearer (most common)</option><option value="x-api-key">x-api-key</option><option value="token">Token</option><option value="custom">Custom header…</option></select></div>
+          <div class="field nt_customwrap hidden"><label>Custom header name</label><input id="nt_custom" placeholder="X-Api-Key"></div>
+        </div>
+        <div class="field"><label>Base URL</label><input id="nt_base" placeholder="https://api.dataforseo.com/v3" inputmode="url"></div>
+        <div class="field"><label>API key</label><input id="nt_key" type="password" placeholder="paste key"><div class="hint">Stored on the server only, masked after saving.</div></div>
+        <div class="row">
+          <div class="field"><label>Cost</label><select id="nt_tier"><option>unknown</option><option>free</option><option>paid</option></select></div>
+          <div class="field"><label>Daily cap (USD, 0 = none)</label><input id="nt_cap" type="number" min="0" step="1" placeholder="0"></div>
+        </div>
+        <div class="field"><label>Notes (optional)</label><input id="nt_notes" placeholder="what it's for"></div>
+        <div class="btnrow"><button class="pbtn" id="addTool">Add to shelf</button><span class="inl dim" id="addToolMsg"></span></div>
+      </div>
+    </div>
+  </section>
+
   <!-- OPTIONAL ------------------------------------------------------------ -->
   <section class="card optional">
-    <div class="card-h"><div class="ic">➕</div><div><b>5 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
+    <div class="card-h"><div class="ic">➕</div><div><b>6 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
     <div class="card-b">
       <div class="row">
         <div class="field"><label>DataForSEO login</label><input id="dfsLogin" placeholder="you@email.com"><div class="hint">For rank tracking. Skip to run without it.</div></div>
@@ -264,7 +304,7 @@ const TASKS = [
 const CATS = ['LLM','Image','Embedding'];  // Vision is auto-detected as an LLM capability
 const TIERS = ['unknown','free','paid'];
 
-let STORE = {credentials:[], routing:{}};
+let STORE = {credentials:[], routing:{}, tools:[], toolShelves:[]};
 
 /* ---- website ---- */
 let mode='readonly';
@@ -302,6 +342,7 @@ $('#addCred').onclick=async()=>{
 function modelOptions(selected){
   let opts='<option value="">— none —</option>';
   STORE.credentials.forEach(c=>c.models.forEach(m=>{
+    if((m.category||'LLM').toUpperCase()!=='LLM') return;  // a sector's brain is a text model only
     const label=esc(c.name+' · '+m.api_model_id+' ('+m.cost_tier+')');
     opts+='<option value="'+m.id+'"'+(m.id===selected?' selected':'')+'>'+label+'</option>';
   }));
@@ -470,6 +511,109 @@ function renderRouting(){
   });
 }
 
+/* ---- the shelf (shared API cabinet) ---- */
+const TOOL_AUTH=['bearer','x-api-key','token','custom'];
+function fillToolShelfSelect(){
+  const sel=$('#nt_shelf'); if(!sel) return;
+  sel.innerHTML=(STORE.toolShelves||[]).map(s=>`<option>${esc(s)}</option>`).join('');
+}
+function toolShelfOptions(cur){
+  return (STORE.toolShelves||[]).map(s=>`<option${s===cur?' selected':''}>${esc(s)}</option>`).join('');
+}
+function renderTools(){
+  const host=$('#toolList'); if(!host) return;
+  const tools=STORE.tools||[];
+  if(!tools.length){ host.innerHTML='<p class="hint">No tool APIs on the shelf yet — add one below.</p>'; return; }
+  host.innerHTML=tools.map(t=>`<div class="cred" data-tid="${t.id}">
+    <div class="cred-h"><b>${esc(t.name)}</b><span class="tagchip">${esc(t.shelf)}</span><span class="tagchip ${esc(t.cost_tier)}">${esc(t.cost_tier)}</span><span class="mono">${esc(t.key_masked||'no key')} · ${esc(t.auth_style)}</span></div>
+    <div class="row">
+      <div class="field"><label>Name</label><input class="t_name" value="${esc(t.name)}"></div>
+      <div class="field"><label>Shelf</label><select class="t_shelf">${toolShelfOptions(t.shelf)}</select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Auth style</label><select class="t_auth">${TOOL_AUTH.map(a=>`<option${a===t.auth_style?' selected':''}>${a}</option>`).join('')}</select></div>
+      <div class="field"><label>Custom header name</label><input class="t_custom" value="${esc(t.auth_header_name||'')}" placeholder="only for custom auth"></div>
+    </div>
+    <div class="field"><label>Base URL</label><input class="t_base" value="${esc(t.base_url||'')}"></div>
+    <div class="field"><label>API key</label><input class="t_key" type="password" placeholder="leave blank to keep ${esc(t.key_masked||'')}"></div>
+    <div class="row">
+      <div class="field"><label>Cost</label><select class="t_tier">${TIERS.map(x=>`<option${x===t.cost_tier?' selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="field"><label>Daily cap (USD)</label><input class="t_cap" type="number" min="0" step="1" value="${esc(t.daily_cap||0)}"></div>
+    </div>
+    <div class="btnrow">
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><input type="checkbox" class="t_enabled" ${t.enabled!==false?'checked':''}> enabled</label>
+      <button class="pbtn saveTool">Save</button>
+      <button class="mini del delTool">Delete</button>
+      <span class="inl dim tMsg"></span>
+    </div>
+  </div>`).join('');
+  host.querySelectorAll('.cred').forEach(card=>{
+    const tid=card.dataset.tid, msg=card.querySelector('.tMsg');
+    card.querySelector('.saveTool').onclick=async()=>{
+      inl(msg,'dim','Saving…');
+      const j=await api('POST','/api/providers/tool',{tool:{id:tid,
+        name:card.querySelector('.t_name').value.trim(),shelf:card.querySelector('.t_shelf').value,
+        auth_style:card.querySelector('.t_auth').value,auth_header_name:card.querySelector('.t_custom').value.trim(),
+        base_url:card.querySelector('.t_base').value.trim(),api_key:card.querySelector('.t_key').value,
+        cost_tier:card.querySelector('.t_tier').value,daily_cap:card.querySelector('.t_cap').value,
+        enabled:card.querySelector('.t_enabled').checked}});
+      if(j.ok){ inl(msg,'ok','✓ Saved'); await loadProviders(); } else inl(msg,'err','✕ '+(j.error||'failed'));
+    };
+    card.querySelector('.delTool').onclick=async()=>{
+      if(!confirm('Remove this tool from the shelf?'))return;
+      const j=await api('POST','/api/providers/tool/delete',{id:tid});
+      if(j.ok) await loadProviders(); else inl(msg,'err','✕ '+(j.error||'failed'));
+    };
+  });
+}
+$('#nt_auth').onchange=()=>document.querySelector('.nt_customwrap').classList.toggle('hidden',$('#nt_auth').value!=='custom');
+$('#addTool').onclick=async()=>{
+  const name=$('#nt_name').value.trim();
+  if(!name){ inl($('#addToolMsg'),'err','Enter a name'); return; }
+  const btn=$('#addTool'); btn.disabled=true; inl($('#addToolMsg'),'dim','Saving…');
+  const j=await api('POST','/api/providers/tool',{tool:{
+    shelf:$('#nt_shelf').value,name:name,
+    auth_style:$('#nt_auth').value,auth_header_name:$('#nt_custom').value.trim(),
+    base_url:$('#nt_base').value.trim(),api_key:$('#nt_key').value,
+    cost_tier:$('#nt_tier').value,daily_cap:$('#nt_cap').value,notes:$('#nt_notes').value.trim()}});
+  btn.disabled=false;
+  if(j.ok){ ['nt_name','nt_base','nt_key','nt_custom','nt_cap','nt_notes'].forEach(id=>$('#'+id).value='');
+    inl($('#addToolMsg'),'ok','✓ Added to shelf'); await loadProviders(); }
+  else inl($('#addToolMsg'),'err','✕ '+(j.error||'failed'));
+};
+
+function fmtDur(s){ s=Math.max(0,s|0); if(s<60)return s+'s'; const m=Math.floor(s/60); return m+'m '+(s%60)+'s'; }
+function renderShelfBoard(shelves){
+  const host=$('#shelfBoard'); if(!host) return;
+  if(!shelves||!shelves.length){ host.innerHTML='<p class="hint">No shelves configured yet.</p>'; return; }
+  host.innerHTML=shelves.map(s=>{
+    const st=s.state||{}, h=st.holder;
+    const holderTxt=h
+      ? `<span class="y">● in use</span> by <b>${esc(h.agent)}</b> · held ${fmtDur(h.held_for_s)} · ${fmtDur(h.expires_in_s)} left`
+      : `<span class="q">○ free</span>`;
+    const items=(s.items||[]).length
+      ? (s.items||[]).map(it=>`<span class="tagchip${it.enabled?'':' n'}">${esc(it.name)}</span>`).join(' ')
+      : '<span class="hint">no APIs on this shelf yet</span>';
+    const queue=(st.queue||[]).length
+      ? `<div class="caps"><b>Queue:</b> ${st.queue.map((q,i)=>`${i+1}. ${esc(q.agent)} <span class="mono">(${esc(q.reason||'')}${q.data_class==='external'?' · ⚑external':''})</span> waiting ${fmtDur(q.waited_s)}`).join(' &nbsp; ')}</div>`
+      : '';
+    const recent=(st.recent||[]).slice(0,3).map(b=>`${esc(b.agent)}→${esc(b.item||b.shelf||'')} <span class="mono">${(b.approval==='escalate'||b.approval==='escalated')?'⚑':''}${esc(b.status)}${b.usd_cost?(' $'+b.usd_cost):''}</span>`).join(' · ');
+    return `<div class="model">
+      <div class="model-top"><span class="mid">${esc(s.shelf)}</span><span class="tagchip">${esc(s.kind)}</span>${holderTxt}<span class="dim" style="margin-left:auto;font-size:12px">today $${(st.today_spend||0)}</span></div>
+      <div class="caps">${items}</div>
+      ${queue}
+      ${recent?`<div class="testout">recent: ${recent}</div>`:''}
+    </div>`;
+  }).join('');
+}
+async function loadShelves(){
+  const j=await api('GET','/api/shelves');
+  if(j&&j.ok) renderShelfBoard(j.shelves);
+  else { const host=$('#shelfBoard'); if(host) host.innerHTML='<p class="hint">Could not load the shelf board.</p>'; }
+}
+if($('#shelfRefresh')) $('#shelfRefresh').onclick=loadShelves;
+setInterval(()=>{ const a=$('#shelfAuto'); if(a&&a.checked) loadShelves(); },5000);
+
 /* ---- optional ---- */
 $('#saveOptional').onclick=async()=>{
   const btn=$('#saveOptional');btn.disabled=true;inl($('#optMsg'),'dim','Saving…');
@@ -531,8 +675,11 @@ async function loadProviders(){
   const p=await api('GET','/api/providers');
   const r=await api('GET','/api/routing');
   STORE.credentials=(p&&p.credentials)||[];
+  STORE.tools=(p&&p.tools)||[];
+  STORE.toolShelves=(p&&p.tool_shelves)||[];
   STORE.routing=(r&&r.routing)||{};
-  renderCredentials(); renderRouting();
+  renderCredentials(); renderRouting(); renderTools(); fillToolShelfSelect();
+  loadShelves();
 }
 loadSettings();
 loadProviders();
