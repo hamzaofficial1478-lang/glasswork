@@ -211,6 +211,11 @@
     </div>
 
     <div class="card">
+      <div class="ch"><b>The shelf · shared APIs</b><span class="etch" id="shelfCount">—</span></div>
+      <div class="conns" id="shelfmini"></div>
+    </div>
+
+    <div class="card">
       <div class="ch"><b>Connections</b><span class="etch" id="connCount">—</span></div>
       <div class="conns" id="conns"></div>
     </div>
@@ -221,9 +226,9 @@
 
 <script>
 /* ---------------------------------------------------------------------------
-   STATE. Right now this is mock data so you can see the room working.
-   To go live, point fetchState() at your VPS: return fetch('/api/state').json()
-   Everything below renders from whatever fetchState() returns — no other change.
+   STATE. fetchState() reads /api/state (the filing cabinet, through the server).
+   MOCK below is only a fallback if that call fails; everything renders from
+   whatever fetchState() returns.
 --------------------------------------------------------------------------- */
 const MOCK = {
   md:{state:"planning today"},
@@ -250,7 +255,7 @@ const MOCK = {
       {n:"Verifier", t:"38 valid · 3 bounced", s:"working"},
       {n:"Outreach", t:"18/25 sent · under cap", s:"working"},
       {n:"Responder", t:"Reply from Aster Interiors", s:"waiting"},
-      {n:"Nurture", t:"Idle — no offers pending", s:"idle"},
+      {n:"Nurture", t:"Idle — no notes pending", s:"idle"},
     ]},
     {key:"Report", name:"Reports & Scorecard", score:91, foot:["MD hit-rate 71%","digest 07:15"], agents:[
       {n:"Reporter", t:"Scored 9 decisions overnight", s:"working"},
@@ -262,9 +267,7 @@ const MOCK = {
     ]},
   ],
   approvals:[
-    {lvl:"amber · Leads", text:"Offer 10% off to Aster Interiors, who went quiet after a quote?",
-     why:"MD confidence 0.6 — a price concession is a red line, so it's yours to call."},
-    {lvl:"amber · IT", text:"Deploy the gallery speed fix to the live pergolas page?",
+    {lvl:"amber · IT", text:"Ship the gallery speed fix to the pergolas page?",
      why:"Tests pass. Touches a core template, so the Releaser is holding for your nod."},
     {lvl:"amber · Content", text:"Publish the Marina villa case study to site + Instagram?",
      why:"Passed the Auditor. Real job, real photos — strong piece."},
@@ -278,14 +281,25 @@ const MOCK = {
     {ic:"◧", name:"Website", sub:"yoursite.ae · custom", on:true},
     {ic:"⌕", name:"DataForSEO", sub:"rank tracking", on:true},
     {ic:"✈", name:"Telegram bridge", sub:"@owner", on:true},
-    {ic:"⌾", name:"Instagram", sub:"not connected", on:false},
+    {ic:"♾", name:"Instagram", sub:"not connected", on:false},
     {ic:"♪", name:"TikTok", sub:"not connected", on:false},
     {ic:"✉", name:"Outreach domain", sub:"mail.yoursite.ae", on:true},
   ],
 };
 
+function normalise(j){
+  j.md=j.md||{state:'—'}; j.metrics=j.metrics||{health:0,leads:0,spend:'$0.00'};
+  j.rooms=j.rooms||[]; j.approvals=j.approvals||[]; j.security=j.security||[];
+  j.connections=j.connections||[]; j.shelf=j.shelf||[];
+  return j;
+}
 async function fetchState(){
-  // return await (await fetch('/api/state')).json();   // <-- flip to this when live
+  // reads the filing cabinet through the server; MOCK is only a fallback if that's down
+  try{
+    const r=await fetch('/api/state',{cache:'no-store'});
+    const j=await r.json();
+    if(j && j.ok) return normalise(j);
+  }catch(_){}
   return MOCK;
 }
 
@@ -361,7 +375,22 @@ function renderConns(st){
       <button onclick="addConn()">Add</button>
     </div>`;
   const on=st.connections.filter(c=>c.on).length;
-  $('#connCount').textContent = on+'/'+st.connections.length+' live';
+  $('#connCount').textContent = on+'/'+st.connections.length+' on';
+}
+
+function renderShelf(st){
+  const box=$('#shelfmini'); if(!box) return;
+  const shelves=st.shelf||[];
+  const busy=shelves.filter(s=>s.holder||s.queue);
+  const rows = busy.length ? busy : shelves.filter(s=>s.spend);
+  if(!rows.length){ box.innerHTML='<div class="empty">All shelves free · nothing borrowing right now.</div>'; }
+  else box.innerHTML = rows.map(s=>`
+    <div class="conn">
+      <div class="ic">${s.holder?'●':'○'}</div>
+      <div class="nm"><b>${s.shelf}</b><span>${s.holder?('in use · '+s.holder):'free'}${s.queue?(' · '+s.queue+' queued'):''}</span></div>
+      <span class="etch">$${(s.spend||0)}</span>
+    </div>`).join('');
+  $('#shelfCount').textContent = busy.length ? (busy.length+' in use') : 'all free';
 }
 
 /* ---- interactions (in-memory) ---- */
@@ -387,7 +416,7 @@ function addConn(){
   $('#mLeads').textContent=STATE.metrics.leads;
   $('#mSpend').textContent=STATE.metrics.spend;
   $('#mdState').textContent=STATE.md.state;
-  renderRooms(STATE); renderApprovals(STATE); renderSecurity(STATE); renderConns(STATE);
+  renderRooms(STATE); renderApprovals(STATE); renderSecurity(STATE); renderConns(STATE); renderShelf(STATE);
 })();
 
 setInterval(()=>{
