@@ -261,6 +261,13 @@ app.post("/api/providers/model/delete", (req, res) => res.json(pyProvider("delet
 app.post("/api/providers/fetch-models", (req, res) => res.json(pyProvider("fetch_models", req.body)));
 app.post("/api/providers/test", (req, res) => res.json(pyProvider("test_model", req.body)));
 
+// ---- the shelf (shared API cabinet) ----------------------------------------
+// Tool APIs (SEO data, stock graphics, email, crawler…) are shelf items; the
+// shelf board shows who holds each shelf, who's queued, and today's spend.
+app.post("/api/providers/tool", (req, res) => res.json(pyProvider("save_tool", req.body)));
+app.post("/api/providers/tool/delete", (req, res) => res.json(pyProvider("delete_tool", req.body)));
+app.get("/api/shelves", (_q, res) => res.json(pyProvider("shelves", {})));
+
 // ---- per-task routing ------------------------------------------------------
 app.get("/api/routing", (_q, res) => res.json(pyProvider("get_routing", {})));
 app.post("/api/routing", (req, res) => res.json(pyProvider("save_route", req.body)));
@@ -348,7 +355,7 @@ app.get("/api/status", (_q, res) => {
       hint: "Safety limits the Overseer enforces." },
     { label: "Email sending", optional: true, ok: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS"),
       detail: (has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS"))
-        ? `SMTP ready (${e.SMTP_HOST})` : "Not set — outreach and graphical emails can't be delivered yet",
+        ? `SMTP ready (${e.SMTP_HOST})` : "Not set — outreach and graphical emails can't be sent yet",
       hint: "Your mail SMTP host, username and password, plus a from-address." },
     { label: "WhatsApp Business", optional: true, ok: has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN"),
       detail: (has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN"))
