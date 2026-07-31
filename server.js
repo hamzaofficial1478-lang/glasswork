@@ -22,9 +22,13 @@ app.get("/control", (_q, r) => r.sendFile(path.join(__dirname, "ui", "agency.htm
 app.get("/setup", (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
 app.get("/status", (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
 
-// STATE — right now returns a snapshot; swap the body to read coordination/agency.db
+// STATE — the Control Room's snapshot. Reads the filing cabinet via Python
+// (coordination/state.py), then merges in the .env-derived connections here.
 app.get("/api/state", (_q, res) => {
-  res.json({ ok: true, note: "wire me to the filing cabinet", ts: Date.now() });
+  const st = pyState();
+  if (!st || !st.ok) return res.json({ ok: false, error: (st && st.error) || "state unavailable" });
+  st.connections = readConnections();
+  res.json(st);
 });
 
 // CHAT — the office sends {agent, message}; forward to Claude / the Agent SDK
@@ -144,6 +148,34 @@ function pyProvider(command, payload) {
   if (!out) return { ok: false, error: "provider module error: " + String(r.stderr || "no output") };
   try { return JSON.parse(out); }
   catch (_) { return { ok: false, error: "bad provider output: " + out.slice(0, 300) }; }
+}
+
+// shell into the state reader (same single code path — the server reads no DB itself)
+function pyState() {
+  const py = resolvePython();
+  if (!py) return { ok: false, error: NO_PY };
+  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.state"], {
+    cwd: __dirname, timeout: 30000, maxBuffer: 8 * 1024 * 1024,
+  });
+  if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
+  const out = String(r.stdout || "");
+  if (!out) return { ok: false, error: "state module error: " + String(r.stderr || "no output") };
+  try { return JSON.parse(out); }
+  catch (_) { return { ok: false, error: "bad state output: " + out.slice(0, 300) }; }
+}
+
+// the outside-world connections, from .env — what's wired and what isn't
+function readConnections() {
+  const e = readEnv();
+  const has = (k) => !!(e[k] && e[k].trim());
+  return [
+    { ic: "◧", name: "Website", sub: e.SITE_URL || "not set", on: has("SITE_URL") },
+    { ic: "⌕", name: "DataForSEO", sub: "rank tracking", on: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD") },
+    { ic: "✈", name: "Telegram bridge", sub: has("TELEGRAM_CHAT_ID") ? "connected" : "not connected", on: has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID") },
+    { ic: "✉", name: "Email (SMTP)", sub: e.SMTP_HOST || "not set", on: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS") },
+    { ic: "▤", name: "WhatsApp", sub: has("WHATSAPP_TOKEN") ? "connected" : "not connected", on: has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN") },
+    { ic: "⌗", name: "Search Console", sub: e.GSC_PROPERTY || "not set", on: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH) },
+  ];
 }
 
 // ---- website (its own Save button) -----------------------------------------
