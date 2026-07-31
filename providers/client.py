@@ -24,6 +24,8 @@ def _likely_cause(status, err_text):
         return "401/403 — auth problem: check the API key and auth style."
     if status == 404:
         return "404 — wrong URL: check the base URL and that this model id exists here."
+    if status == 402:
+        return "402 — the provider needs payment/credit for this model. A billing issue on their side, not your setup; sort it out with the provider."
     if status == 429:
         return "429 — rate limited or out of credit."
     if status == 0 and "timed out" in (err_text or "").lower():
