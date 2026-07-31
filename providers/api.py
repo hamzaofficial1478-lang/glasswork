@@ -12,6 +12,11 @@ import time
 
 from . import auth, client, routing, store
 
+try:  # the cabinet lives in the coordination package; degrade gracefully if absent
+    from coordination import cabinet
+except Exception:  # pragma: no cover
+    cabinet = None
+
 
 def _in():
     raw = sys.stdin.read()
@@ -93,12 +98,40 @@ def cmd_status(_):
             "tasks": tasks, "usage": data["usage"]}
 
 
+def cmd_save_tool(a):
+    return {"ok": True, "tool": store.upsert_tool(a.get("tool", {}))}
+
+
+def cmd_delete_tool(a):
+    return {"ok": store.delete_tool(a.get("id", ""))}
+
+
+def cmd_shelves(_):
+    """
+    The shelf board: every shelf, what's on it (catalogue), and its live state
+    (holder / queue / today's spend / recent checkouts). Model shelves come from
+    model categories; tool shelves from the tools list.
+    """
+    cat = store.shelf_catalogue()
+    names = sorted(set(cat) | set(store.TOOL_SHELVES) | {"llm", "image", "embedding"})
+    state = cabinet.shelf_state(names) if cabinet else {}
+    shelves = []
+    for name in names:
+        items = cat.get(name, [])
+        kind = "model" if name in ("llm", "image", "embedding") else "tool"
+        shelves.append({"shelf": name, "kind": kind, "items": items,
+                        "state": state.get(name, {"holder": None, "queue": [],
+                                                   "today_spend": 0, "recent": []})})
+    return {"ok": True, "shelves": shelves, "cabinet": bool(cabinet)}
+
+
 DISPATCH = {
     "view": cmd_view, "save_credential": cmd_save_credential,
     "delete_credential": cmd_delete_credential, "save_model": cmd_save_model,
     "delete_model": cmd_delete_model, "fetch_models": cmd_fetch_models,
     "test_model": cmd_test_model, "get_routing": cmd_get_routing,
     "save_route": cmd_save_route, "status": cmd_status,
+    "save_tool": cmd_save_tool, "delete_tool": cmd_delete_tool, "shelves": cmd_shelves,
 }
 
 

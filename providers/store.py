@@ -19,7 +19,12 @@ from .urls import normalize_base
 
 STORE = Path(__file__).parents[1] / "config" / "providers.local.json"
 
-_EMPTY = {"credentials": [], "routing": {}, "usage": {}}
+_EMPTY = {"credentials": [], "routing": {}, "usage": {}, "tools": []}
+
+# tool shelves are the non-model capabilities the cabinet lends out. Kept here as
+# data so new 3rd-party APIs are added, not coded. Model shelves (llm/image/
+# embedding) come from each model's category instead.
+TOOL_SHELVES = ["seo_data", "stock_images", "email", "crawler", "whatsapp", "other"]
 
 
 def _load() -> dict:
@@ -154,6 +159,99 @@ def find_model(mid: str):
     return None, None
 
 
+# ---- tools (shelf items — 3rd-party capability APIs) -----------------------
+# Same incremental discipline as credentials: a save touches only the one tool,
+# and a blank key on an update keeps the stored key (never erases a secret).
+
+def upsert_tool(tool: dict) -> dict:
+    data = _load()
+    tools = data.setdefault("tools", [])
+    tid = tool.get("id") or _new_id("tool")
+    existing = next((t for t in tools if t["id"] == tid), None)
+
+    key_in = (tool.get("api_key") or "").strip()
+    if existing and not key_in:
+        key_in = existing.get("api_key", "")
+
+    record = {
+        "id": tid,
+        "shelf": (tool.get("shelf") or "other").strip().lower(),
+        "name": (tool.get("name") or "").strip() or "Unnamed tool",
+        "base_url": normalize_base(tool.get("base_url", "")),
+        "api_key": key_in,
+        "auth_style": (tool.get("auth_style") or "bearer").strip().lower(),
+        "auth_header_name": (tool.get("auth_header_name") or "").strip(),
+        "cost_tier": (tool.get("cost_tier") or "unknown").strip(),
+        "daily_cap": float(tool.get("daily_cap", 0) or 0),
+        "priority": int(tool.get("priority", 100)),
+        "enabled": bool(tool.get("enabled", True)),
+        "notes": (tool.get("notes") or "").strip(),
+        "created_at": existing.get("created_at") if existing else int(time.time()),
+    }
+    if existing:
+        tools[tools.index(existing)] = record
+    else:
+        tools.append(record)
+    _save(data)
+    return _redact_tool(record)
+
+
+def delete_tool(tid: str) -> bool:
+    data = _load()
+    before = len(data.get("tools", []))
+    data["tools"] = [t for t in data.get("tools", []) if t["id"] != tid]
+    _save(data)
+    return len(data["tools"]) < before
+
+
+def get_tool(tid: str):
+    return next((t for t in _load().get("tools", []) if t["id"] == tid), None)
+
+
+def list_tools() -> list:
+    return list(_load().get("tools", []))
+
+
+def tools_on_shelf(shelf: str) -> list:
+    """Enabled tools on a shelf, best (lowest priority number) first — the
+    fallback order the cabinet hands back when an agent borrows that shelf."""
+    shelf = (shelf or "").strip().lower()
+    ts = [t for t in _load().get("tools", []) if t.get("shelf") == shelf and t.get("enabled", True)]
+    return sorted(ts, key=lambda t: t.get("priority", 100))
+
+
+def shelf_catalogue() -> dict:
+    """
+    What sits on every shelf, for the dashboard and for the cabinet's fallback
+    resolution. Model shelves come from each model's category (llm/image/
+    embedding); tool shelves come from the tools list. Nothing secret here.
+    """
+    data = _load()
+    cat = {}
+    for c in data["credentials"]:
+        for m in c.get("models", []):
+            shelf = (m.get("category") or "LLM").strip().lower()
+            cat.setdefault(shelf, []).append({
+                "kind": "model", "id": m["id"],
+                "name": f'{c["name"]} · {m.get("api_model_id", "")}',
+                "cost_tier": m.get("cost_tier", "unknown"),
+                "enabled": bool(m.get("enabled", True)),
+                "priority": int(m.get("priority", 100)),
+            })
+    for t in data.get("tools", []):
+        cat.setdefault(t["shelf"], []).append({
+            "kind": "tool", "id": t["id"], "name": t["name"],
+            "base_url": t.get("base_url", ""),
+            "cost_tier": t.get("cost_tier", "unknown"),
+            "daily_cap": t.get("daily_cap", 0),
+            "enabled": bool(t.get("enabled", True)),
+            "priority": int(t.get("priority", 100)),
+        })
+    for shelf in cat:
+        cat[shelf].sort(key=lambda i: i.get("priority", 100))
+    return cat
+
+
 # ---- routing ----------------------------------------------------------------
 
 def get_routing() -> dict:
@@ -205,6 +303,19 @@ def _redact_cred(c: dict) -> dict:
     }
 
 
+def _redact_tool(t: dict) -> dict:
+    return {
+        "id": t["id"], "shelf": t.get("shelf", "other"), "name": t["name"],
+        "base_url": t.get("base_url", ""), "auth_style": t.get("auth_style", "bearer"),
+        "auth_header_name": t.get("auth_header_name", ""),
+        "cost_tier": t.get("cost_tier", "unknown"), "daily_cap": t.get("daily_cap", 0),
+        "priority": t.get("priority", 100), "enabled": bool(t.get("enabled", True)),
+        "notes": t.get("notes", ""),
+        "key_set": bool(t.get("api_key")), "key_masked": auth.mask(t.get("api_key", "")),
+        "created_at": t.get("created_at"),
+    }
+
+
 def redacted_view() -> dict:
     """The whole store with keys masked — safe to send to the UI."""
     data = _load()
@@ -212,4 +323,6 @@ def redacted_view() -> dict:
         "credentials": [_redact_cred(c) for c in data["credentials"]],
         "routing": data["routing"],
         "usage": data["usage"],
+        "tools": [_redact_tool(t) for t in data.get("tools", [])],
+        "tool_shelves": TOOL_SHELVES,
     }
