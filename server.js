@@ -89,10 +89,35 @@ function dbBuilt() {
   } catch (_) { return false; }
 }
 
+// find a working Python 3, once. Tries PYTHON_BIN, then python3 / python / py -3,
+// so it works on Linux, macOS and Windows without the owner configuring anything.
+let PY; // {cmd, prefix} once resolved, or null if none found
+function resolvePython() {
+  if (PY !== undefined) return PY;
+  const cands = [];
+  if (process.env.PYTHON_BIN) cands.push({ cmd: process.env.PYTHON_BIN, prefix: [] });
+  cands.push({ cmd: "python3", prefix: [] }, { cmd: "python", prefix: [] }, { cmd: "py", prefix: ["-3"] });
+  for (const c of cands) {
+    try {
+      const r = spawnSync(c.cmd, [...c.prefix, "--version"], { timeout: 5000 });
+      if (!r.error && r.status === 0 && /Python\s+3\./.test(String(r.stdout || "") + String(r.stderr || ""))) {
+        PY = c;
+        return PY;
+      }
+    } catch (_) { /* try next */ }
+  }
+  PY = null;
+  return PY;
+}
+const NO_PY = "Python 3 wasn't found on this computer. Install Python 3 (python.org) and " +
+  "restart the server, or set PYTHON_BIN to the full path of your python.exe / python3.";
+
 function ensureDb() {
   if (dbBuilt()) return { built: true, ran: false };
+  const py = resolvePython();
+  if (!py) return { built: false, ran: false, error: NO_PY };
   try {
-    const r = spawnSync("python3", ["coordination/init_db.py"], { cwd: __dirname, timeout: 20000 });
+    const r = spawnSync(py.cmd, [...py.prefix, "coordination/init_db.py"], { cwd: __dirname, timeout: 20000 });
     return { built: dbBuilt(), ran: true, error: r.status === 0 ? null : String(r.stderr || "") };
   } catch (e) {
     return { built: dbBuilt(), ran: true, error: e.message };
@@ -101,12 +126,15 @@ function ensureDb() {
 
 // shell into the Python provider module (the single code path for provider ops)
 function pyProvider(command, payload) {
-  const r = spawnSync("python3", ["-m", "providers.api", command], {
+  const py = resolvePython();
+  if (!py) return { ok: false, error: NO_PY };
+  const r = spawnSync(py.cmd, [...py.prefix, "-m", "providers.api", command], {
     cwd: __dirname, input: JSON.stringify(payload || {}),
     timeout: 120000, maxBuffer: 8 * 1024 * 1024,
   });
+  if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
   const out = String(r.stdout || "");
-  if (!out) return { ok: false, error: "provider module error: " + String(r.stderr || r.error || "no output") };
+  if (!out) return { ok: false, error: "provider module error: " + String(r.stderr || "no output") };
   try { return JSON.parse(out); }
   catch (_) { return { ok: false, error: "bad provider output: " + out.slice(0, 300) }; }
 }
@@ -191,6 +219,31 @@ app.post("/api/providers/test", (req, res) => res.json(pyProvider("test_model", 
 app.get("/api/routing", (_q, res) => res.json(pyProvider("get_routing", {})));
 app.post("/api/routing", (req, res) => res.json(pyProvider("save_route", req.body)));
 app.get("/api/tasks", (_q, res) => res.json({ ok: true, tasks: AGENCY_TASKS }));
+
+// ---- current settings (to pre-fill the setup form) -------------------------
+// Returns only non-secret values, plus a boolean for each secret so the form can
+// show "saved — leave blank to keep" instead of an empty box.
+app.get("/api/settings", (_q, res) => {
+  const e = readEnv();
+  const v = (k) => e[k] || "";
+  const set = (k) => !!(e[k] && e[k].trim());
+  res.json({
+    ok: true,
+    configured: set("SITE_URL"),
+    website: {
+      mode: String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly",
+      siteUrl: v("SITE_URL"),
+      apiBase: v("SITE_API_BASE"),
+      apiTokenSet: set("SITE_API_TOKEN"),
+    },
+    optional: {
+      dfsLogin: v("DATAFORSEO_LOGIN"), dfsPasswordSet: set("DATAFORSEO_PASSWORD"),
+      telegramTokenSet: set("TELEGRAM_BOT_TOKEN"), telegramChatId: v("TELEGRAM_CHAT_ID"),
+      outreachDomain: v("OUTREACH_DOMAIN"),
+      spendCap: v("DAILY_SPEND_CAP_USD"), outreachCap: v("OUTREACH_DAILY_CAP"),
+    },
+  });
+});
 
 // ---- status ----------------------------------------------------------------
 app.get("/api/status", (_q, res) => {

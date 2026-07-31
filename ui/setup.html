@@ -114,7 +114,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 
   <!-- WEBSITE ------------------------------------------------------------- -->
   <section class="card">
-    <div class="card-h"><div class="ic">◧</div><div><b>1 · Website</b><small>Your site, and how much the agents may touch it</small></div></div>
+    <div class="card-h"><div class="ic">◧</div><div><b>1 · Your website</b><small>Your one website — saved values load here; edit any time to change them</small></div></div>
     <div class="card-b">
       <div class="field">
         <label for="siteUrl">Website address</label>
@@ -225,9 +225,10 @@ const MODE_HINTS={
   readonly:"<b>Read-only (recommended to start):</b> the agents plan, track and report, but never change your site — anything they’d change is queued for you to approve.",
   full:"<b>Full access:</b> the agents can read and update your site through its admin API. Fill the two boxes below."
 };
-$('#modeSeg').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(!b)return;
-  mode=b.dataset.mode;[...$('#modeSeg').children].forEach(x=>x.classList.toggle('on',x===b));
-  $('#fullFields').classList.toggle('hidden',mode!=='full');$('#modeHint').innerHTML=MODE_HINTS[mode];});
+function setMode(m){ mode=(m==='full')?'full':'readonly';
+  [...$('#modeSeg').children].forEach(x=>x.classList.toggle('on',x.dataset.mode===mode));
+  $('#fullFields').classList.toggle('hidden',mode!=='full');$('#modeHint').innerHTML=MODE_HINTS[mode];}
+$('#modeSeg').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(b)setMode(b.dataset.mode);});
 $('#saveWebsite').onclick=async()=>{
   const btn=$('#saveWebsite');btn.disabled=true;inl($('#siteMsg'),'dim','Saving…');
   const j=await api('POST','/api/website',{mode,siteUrl:$('#siteUrl').value.trim(),
@@ -424,7 +425,25 @@ $('#saveOptional').onclick=async()=>{
   else inl($('#optMsg'),'err','✕ '+(j.error||'failed'));
 };
 
-/* ---- load ---- */
+/* ---- load saved values so nothing looks unsaved after a restart ---- */
+async function loadSettings(){
+  const j=await api('GET','/api/settings');
+  if(!j||!j.ok) return;
+  const w=j.website||{}, o=j.optional||{};
+  $('#siteUrl').value=w.siteUrl||'';
+  setMode(w.mode||'readonly');
+  $('#apiBase').value=w.apiBase||'';
+  if(w.apiTokenSet) $('#siteApiToken').placeholder='saved — leave blank to keep';
+  if(j.configured) inl($('#siteMsg'),'ok','✓ Saved ('+(w.mode==='full'?'Full access':'Read-only')+') — edit and re-save to change');
+  $('#dfsLogin').value=o.dfsLogin||'';
+  $('#telegramChatId').value=o.telegramChatId||'';
+  $('#outreachDomain').value=o.outreachDomain||'';
+  $('#spendCap').value=o.spendCap||'';
+  $('#outreachCap').value=o.outreachCap||'';
+  if(o.dfsPasswordSet) $('#dfsPassword').placeholder='saved — leave blank to keep';
+  if(o.telegramTokenSet) $('#telegramToken').placeholder='saved — leave blank to keep';
+}
+
 async function loadProviders(){
   const p=await api('GET','/api/providers');
   const r=await api('GET','/api/routing');
@@ -432,6 +451,7 @@ async function loadProviders(){
   STORE.routing=(r&&r.routing)||{};
   renderCredentials(); renderRouting();
 }
+loadSettings();
 loadProviders();
 </script>
 </body>
