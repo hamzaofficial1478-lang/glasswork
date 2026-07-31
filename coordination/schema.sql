@@ -169,6 +169,42 @@ CREATE TABLE IF NOT EXISTS security_events (
   action TEXT, at INTEGER
 );
 
+-- ---- the shelf (shared API cabinet) ---------------------------------------
+-- The cabinet holds shared capability APIs (SEO data, stock graphics, email,
+-- crawler, image/embedding models). An agent BORROWS a shelf: it takes the
+-- shelf's single-holder lock (see the locks table, resource='shelf:<name>'),
+-- so only one agent uses a given capability at a time, while other shelves run
+-- in parallel. Who is waiting is recorded here; every checkout is logged below.
+
+-- the waiting line for each shelf (the "who's in queue" the owner asked to see)
+CREATE TABLE IF NOT EXISTS shelf_queue (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  shelf       TEXT NOT NULL,              -- seo_data | stock_images | email | crawler | llm | image ...
+  agent       TEXT NOT NULL,
+  sector      TEXT,
+  reason      TEXT,                       -- the "strong reason" every borrow must carry
+  data_class  TEXT DEFAULT 'internal',   -- internal | external (external => Security screens)
+  status      TEXT DEFAULT 'waiting',    -- waiting | granted | cancelled
+  enqueued_at INTEGER,
+  granted_at  INTEGER
+);
+
+-- every checkout — the audit + cost trail (feeds the Overseer's spend cap)
+CREATE TABLE IF NOT EXISTS borrows (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  shelf       TEXT NOT NULL,
+  item        TEXT,                       -- which model/tool the shelf resolved to
+  agent       TEXT NOT NULL,
+  sector      TEXT,
+  reason      TEXT,
+  data_class  TEXT DEFAULT 'internal',
+  approval    TEXT DEFAULT 'auto',        -- auto | escalated (needs MD/Security) | denied
+  status      TEXT DEFAULT 'active',      -- active | done | denied
+  usd_cost    REAL DEFAULT 0,
+  granted_at  INTEGER,
+  released_at INTEGER
+);
+
 -- ---- the daily digest -----------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS daily_reports (
