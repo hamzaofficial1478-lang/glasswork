@@ -3,6 +3,9 @@
 # the filled site connector holds live credentials; the tracked template is
 # connector.example.py, and the setup screen writes the real connector.py
 mcp/site_connector/connector.py
+# provider credentials + keys written by the /setup screen — never commit
+config/providers.local.json
+config/*.local.json
 *.db
 *.db-wal
 *.db-shm
