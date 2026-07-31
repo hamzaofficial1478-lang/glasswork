@@ -308,10 +308,13 @@ function modelOptions(selected){
   return opts;
 }
 
+function capsInner(caps){
+  const g=v=>v===true?'<span class="y">✓</span>':v===false?'<span class="n">✗</span>':'<span class="q">?</span>';
+  return Object.entries(caps||{}).map(([k,v])=>k+' '+g(v)).join('&nbsp;&nbsp;');
+}
 function capLine(caps){
   if(!caps||!Object.keys(caps).length) return '';
-  const g=v=>v===true?'<span class="y">✓</span>':v===false?'<span class="n">✗</span>':'<span class="q">?</span>';
-  return '<div class="caps">'+Object.entries(caps).map(([k,v])=>k+' '+g(v)).join('&nbsp;&nbsp;')+'</div>';
+  return '<div class="caps">'+capsInner(caps)+'</div>';
 }
 
 function renderCredentials(){
@@ -413,15 +416,21 @@ function wireCredEvents(){
         out.className='testout'; out.textContent='Testing…';
         const j=await api('POST','/api/providers/test',{credential_id:cid,model_id:mid});
         if(!j.ok){ out.className='testout err'; out.textContent='✕ '+(j.error||'failed'); return; }
+        // update the capability line in place — do NOT re-render (that would wipe this result)
+        if(j.capabilities){
+          let capsEl=row.querySelector('.caps');
+          if(!capsEl){ capsEl=document.createElement('div'); capsEl.className='caps'; row.querySelector('.model-top').insertAdjacentElement('afterend',capsEl); }
+          capsEl.innerHTML=capsInner(j.capabilities);
+        }
         const t=j.test||{};
         if(t.ok){ out.className='testout ok'; out.innerHTML='✓ Reply: '+esc((t.output||'').slice(0,200)); }
         else if(t.ok===null){ out.className='testout'; out.innerHTML=esc(t.cause||'Detected by signature'); }
         else {
           out.className='testout err';
-          out.innerHTML='✕ '+esc(t.cause||('status '+t.status))+
-            '<details><summary>Raw request / response</summary><pre>'+esc(JSON.stringify(t.raw||{},null,2))+'</pre></details>';
+          const status=(t.status===0||t.status==null)?'no HTTP response (couldn’t connect)':('HTTP '+t.status);
+          out.innerHTML='✕ '+esc(status)+' — '+esc(t.cause||'')+
+            '<details open><summary>Raw request / response</summary><pre>'+esc(JSON.stringify(t.raw||{},null,2))+'</pre></details>';
         }
-        await loadProviders();
       };
     });
   });
