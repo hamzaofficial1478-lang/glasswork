@@ -173,9 +173,56 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
     </div>
   </section>
 
+  <!-- INTEGRATIONS -------------------------------------------------------- -->
+  <section class="card">
+    <div class="card-h"><div class="ic">🔌</div><div><b>4 · Integrations</b><small>How the agency reaches the outside world — email, WhatsApp and Search Console</small></div></div>
+    <div class="card-b">
+
+      <div class="cred">
+        <div class="cred-h"><b>Email delivery (SMTP)</b></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Lets the agency deliver cold outreach, replies and graphical emails from your own domain. Works with Hostinger, Zoho, Gmail, and the like.</p>
+        <div class="row">
+          <div class="field"><label>SMTP host</label><input id="em_host" placeholder="smtp.hostinger.com"><div class="hint">From your mail provider.</div></div>
+          <div class="field"><label>Port</label><input id="em_port" placeholder="465"><div class="hint">Usually 465 or 587.</div></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Username</label><input id="em_user" placeholder="hello@glassworks.ae"></div>
+          <div class="field"><label>Password</label><input id="em_pass" type="password" placeholder="leave blank to keep saved"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>From address</label><input id="em_from" placeholder="hello@glassworks.ae"></div>
+          <div class="field"><label>From name</label><input id="em_fromname" placeholder="Glassworks Dubai"></div>
+        </div>
+        <div class="btnrow"><button class="pbtn" id="saveEmail">Save email</button><span class="inl dim" id="emailMsg"></span></div>
+      </div>
+
+      <div class="cred">
+        <div class="cred-h"><b>WhatsApp Business</b></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">The UAE's main enquiry channel — fast replies here win jobs. From Meta's WhatsApp Cloud API (developers.facebook.com).</p>
+        <div class="row">
+          <div class="field"><label>Phone number ID</label><input id="wa_phone" placeholder="1234567890"></div>
+          <div class="field"><label>Business account ID (optional)</label><input id="wa_biz" placeholder="optional"></div>
+        </div>
+        <div class="field"><label>Access token</label><input id="wa_token" type="password" placeholder="leave blank to keep saved"><div class="hint">The permanent access token from your Meta app.</div></div>
+        <div class="btnrow"><button class="pbtn" id="saveWa">Save WhatsApp</button><span class="inl dim" id="waMsg"></span></div>
+      </div>
+
+      <div class="cred">
+        <div class="cred-h"><b>Google Search Console</b></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Your site's real search clicks and queries. Create a Google service account, give it access to your property, then paste its JSON key.</p>
+        <div class="field"><label>Property</label><input id="gsc_prop" placeholder="sc-domain:glassworks.ae"><div class="hint">Either <code>sc-domain:yoursite.ae</code> or the full <code>https://…</code> property.</div></div>
+        <div class="field"><label>Service-account JSON key</label>
+          <textarea id="gsc_json" rows="4" placeholder="leave blank to keep saved" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:12px;font-family:'IBM Plex Mono',monospace"></textarea>
+          <div class="hint">Paste the whole JSON file. Kept in a git-ignored file on the server, never shown back.</div></div>
+        <div class="btnrow"><button class="pbtn" id="saveGsc">Save Search Console</button><span class="inl dim" id="gscMsg"></span></div>
+      </div>
+
+    </div>
+  </section>
+
   <!-- OPTIONAL ------------------------------------------------------------ -->
   <section class="card optional">
-    <div class="card-h"><div class="ic">➕</div><div><b>4 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
+    <div class="card-h"><div class="ic">➕</div><div><b>5 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
     <div class="card-b">
       <div class="row">
         <div class="field"><label>DataForSEO login</label><input id="dfsLogin" placeholder="you@email.com"><div class="hint">For rank tracking. Skip to run without it.</div></div>
@@ -214,7 +261,7 @@ const TASKS = [
   {task:'seo',label:'SEO sector'},{task:'leads',label:'Leads sector'},
   {task:'report',label:'Report sector'},{task:'security',label:'Security sector'},
 ];
-const CATS = ['LLM','Vision','ASR','TTS','OCR','Embedding'];
+const CATS = ['LLM','Image','Embedding'];  // Vision is auto-detected as an LLM capability
 const TIERS = ['unknown','free','paid'];
 
 let STORE = {credentials:[], routing:{}};
@@ -425,6 +472,25 @@ $('#saveOptional').onclick=async()=>{
   else inl($('#optMsg'),'err','✕ '+(j.error||'failed'));
 };
 
+/* ---- integrations ---- */
+async function saveIntegration(group, values, btn, msg, clearIds){
+  btn.disabled=true; inl(msg,'dim','Saving…');
+  const j=await api('POST','/api/integration',{group,values});
+  btn.disabled=false;
+  if(j.ok){ inl(msg,'ok','✓ Saved'); (clearIds||[]).forEach(id=>{const el=$('#'+id); if(el) el.value='';}); }
+  else inl(msg,'err','✕ '+(j.error||'failed'));
+}
+$('#saveEmail').onclick=()=>saveIntegration('email',{
+  SMTP_HOST:$('#em_host').value.trim(),SMTP_PORT:$('#em_port').value.trim(),SMTP_USER:$('#em_user').value.trim(),
+  SMTP_PASS:$('#em_pass').value,MAIL_FROM:$('#em_from').value.trim(),MAIL_FROM_NAME:$('#em_fromname').value.trim()
+},$('#saveEmail'),$('#emailMsg'),['em_pass']);
+$('#saveWa').onclick=()=>saveIntegration('whatsapp',{
+  WHATSAPP_PHONE_ID:$('#wa_phone').value.trim(),WHATSAPP_BUSINESS_ID:$('#wa_biz').value.trim(),WHATSAPP_TOKEN:$('#wa_token').value
+},$('#saveWa'),$('#waMsg'),['wa_token']);
+$('#saveGsc').onclick=()=>saveIntegration('gsc',{
+  GSC_PROPERTY:$('#gsc_prop').value.trim(),GSC_SERVICE_ACCOUNT_JSON:$('#gsc_json').value
+},$('#saveGsc'),$('#gscMsg'),['gsc_json']);
+
 /* ---- load saved values so nothing looks unsaved after a restart ---- */
 async function loadSettings(){
   const j=await api('GET','/api/settings');
@@ -442,6 +508,14 @@ async function loadSettings(){
   $('#outreachCap').value=o.outreachCap||'';
   if(o.dfsPasswordSet) $('#dfsPassword').placeholder='saved — leave blank to keep';
   if(o.telegramTokenSet) $('#telegramToken').placeholder='saved — leave blank to keep';
+  const ig=j.integrations||{}, em=ig.email||{}, wa=ig.whatsapp||{}, gsc=ig.gsc||{};
+  $('#em_host').value=em.host||''; $('#em_port').value=em.port||''; $('#em_user').value=em.user||'';
+  $('#em_from').value=em.from||''; $('#em_fromname').value=em.fromName||'';
+  if(em.passSet) $('#em_pass').placeholder='saved — leave blank to keep';
+  $('#wa_phone').value=wa.phoneId||''; $('#wa_biz').value=wa.businessId||'';
+  if(wa.tokenSet) $('#wa_token').placeholder='saved — leave blank to keep';
+  $('#gsc_prop').value=gsc.property||'';
+  if(gsc.serviceAccountSet) $('#gsc_json').placeholder='saved — leave blank to keep';
 }
 
 async function loadProviders(){

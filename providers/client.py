@@ -109,37 +109,53 @@ def fetch_models(cred, timeout=30):
 
 def probe_model(cred, model, timeout=60):
     """
-    Test & detect for a model, using a request VALID FOR ITS CATEGORY. Signature
-    table gives instant flags for known vendors; a live probe confirms/handles the
-    unknown. Undetectable capabilities are reported as None (unknown) and the
-    feature degrades off — never blocks.
+    Test & detect for a model, using a request VALID FOR ITS CATEGORY:
+      LLM       -> a tiny chat completion (+ a multimodal image probe)
+      Image     -> a tiny image-generation request
+      Embedding -> a tiny embeddings request
+    Signature table gives instant flags for known vendors; the live probe confirms.
+    Anything undetectable is reported as None (unknown) and degrades off — never blocks.
     """
-    caps = {"chat": None, "multimodal": None, "streaming": None}
-    sig = signatures.match(cred.get("base_url", ""), model.get("api_model_id", ""))
-    if sig:
-        caps.update({k: v for k, v in sig["caps"].items()})
-
     category = (model.get("category") or "LLM").upper()
-    diag = {"endpoint": chat_endpoint(cred.get("base_url", "")), "category": category,
-            "vendor": sig["vendor"] if sig else "unknown"}
+    sig = signatures.match(cred.get("base_url", ""), model.get("api_model_id", ""))
+    diag = {"category": category, "vendor": sig["vendor"] if sig else "unknown",
+            "endpoint": chat_endpoint(cred.get("base_url", ""))}
 
-    if category in ("LLM", "VISION"):
-        messages = [{"role": "user", "content": "Reply with the single word: ok"}]
-        res = chat(cred, model, messages, max_tokens=5, timeout=timeout)
+    if category == "LLM":
+        caps = {"chat": None, "multimodal": None}
+        if sig:
+            caps.update({k: v for k, v in sig["caps"].items() if k in caps})
+        res = chat(cred, model, [{"role": "user", "content": "Reply with the single word: ok"}],
+                   max_tokens=5, timeout=timeout)
         caps["chat"] = bool(res["ok"])
         result = {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
                   "output": res.get("output", ""), "raw": res["raw"]}
-        # multimodal probe only if the text probe worked and we don't already know
-        if res["ok"] and caps.get("multimodal") is None:
+        if res["ok"] and caps.get("multimodal") is None:  # Vision = an LLM capability, detected here
             mm = [{"role": "user", "content": [
                 {"type": "text", "text": "what colour is this? one word"},
                 {"type": "image_url", "image_url": {"url": _TINY_PNG}}]}]
-            mmres = chat(cred, model, mm, max_tokens=5, timeout=timeout)
-            caps["multimodal"] = bool(mmres["ok"])
-    else:
-        # non-LLM categories: rely on signature only for now; unknown -> degrade off
-        result = {"ok": None, "status": None,
-                  "cause": f"Live detection for {category} not run; using signature/unknown.",
-                  "output": "", "raw": diag}
+            caps["multimodal"] = bool(chat(cred, model, mm, max_tokens=5, timeout=timeout)["ok"])
+        return {"capabilities": caps, "detect": diag, "test": result}
 
-    return {"capabilities": caps, "detect": diag, "test": result}
+    if category == "IMAGE":
+        url, headers, body = build_request(cred, "images/generations", {
+            "model": model["api_model_id"], "prompt": "a small blue circle on a white background",
+            "n": 1, "size": "256x256"})
+        res = _execute(cred, url, headers, body, timeout)
+        diag["endpoint"] = url
+        return {"capabilities": {"images": bool(res["ok"])}, "detect": diag,
+                "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
+                         "output": "image generated" if res["ok"] else "", "raw": res["raw"]}}
+
+    if category == "EMBEDDING":
+        url, headers, body = build_request(cred, "embeddings", {
+            "model": model["api_model_id"], "input": "ping"})
+        res = _execute(cred, url, headers, body, timeout)
+        diag["endpoint"] = url
+        return {"capabilities": {"embeddings": bool(res["ok"])}, "detect": diag,
+                "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
+                         "output": "embedding returned" if res["ok"] else "", "raw": res["raw"]}}
+
+    return {"capabilities": {"supported": None}, "detect": diag,
+            "test": {"ok": None, "status": None, "output": "",
+                     "cause": f"No live probe for {category}; leaving it as unknown.", "raw": diag}}

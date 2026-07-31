@@ -36,6 +36,13 @@ app.post("/api/chat", async (req, res) => {
 // ---- helpers ---------------------------------------------------------------
 const ENV_PATH = path.join(__dirname, ".env");
 const DB_PATH = path.join(__dirname, "coordination", "agency.db");
+const GSC_SA_PATH = path.join(__dirname, "config", "gsc-service-account.local.json");
+
+// external service integrations stored in .env (secrets flagged for keyless re-save)
+const INTEGRATIONS = {
+  email: { fields: ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_FROM_NAME"], secret: ["SMTP_PASS"] },
+  whatsapp: { fields: ["WHATSAPP_PHONE_ID", "WHATSAPP_TOKEN", "WHATSAPP_BUSINESS_ID"], secret: ["WHATSAPP_TOKEN"] },
+};
 
 // the agency's tasks — each binds to a provider on the Routing screen
 const AGENCY_TASKS = [
@@ -206,6 +213,45 @@ app.post("/api/optional", (req, res) => {
   }
 });
 
+// ---- external integrations (each saves on its own; secrets kept on blank) ---
+app.post("/api/integration", (req, res) => {
+  try {
+    const b = req.body || {};
+    const group = String(b.group || "");
+    const vals = b.values || {};
+    const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
+
+    if (group === "email" || group === "whatsapp") {
+      const map = INTEGRATIONS[group];
+      const partial = {};
+      for (const f of map.fields) {
+        const x = one(vals[f]);
+        if (map.secret.includes(f)) { if (x) partial[f] = x; }  // keyless re-save keeps it
+        else partial[f] = x;
+      }
+      updateEnv(partial);
+      return res.json({ ok: true });
+    }
+
+    if (group === "gsc") {
+      updateEnv({ GSC_PROPERTY: one(vals.GSC_PROPERTY) });
+      const sa = String(vals.GSC_SERVICE_ACCOUNT_JSON || "").trim();
+      if (sa) {  // big JSON blob -> its own git-ignored file, not .env
+        try { JSON.parse(sa); } catch (_) {
+          return res.status(400).json({ ok: false, error: "The service-account key must be the full JSON file (it isn't valid JSON)." });
+        }
+        fs.mkdirSync(path.dirname(GSC_SA_PATH), { recursive: true });
+        fs.writeFileSync(GSC_SA_PATH, sa, { mode: 0o600 });
+        try { fs.chmodSync(GSC_SA_PATH, 0o600); } catch (_) {}
+      }
+      return res.json({ ok: true });
+    }
+    return res.status(400).json({ ok: false, error: "Unknown integration." });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "Could not save: " + e.message });
+  }
+});
+
 // ---- AI providers (each credential saves independently) --------------------
 app.get("/api/providers", (_q, res) => res.json(pyProvider("view", {})));
 app.post("/api/providers/credential", (req, res) => res.json(pyProvider("save_credential", req.body)));
@@ -241,6 +287,13 @@ app.get("/api/settings", (_q, res) => {
       telegramTokenSet: set("TELEGRAM_BOT_TOKEN"), telegramChatId: v("TELEGRAM_CHAT_ID"),
       outreachDomain: v("OUTREACH_DOMAIN"),
       spendCap: v("DAILY_SPEND_CAP_USD"), outreachCap: v("OUTREACH_DAILY_CAP"),
+    },
+    integrations: {
+      email: { host: v("SMTP_HOST"), port: v("SMTP_PORT"), user: v("SMTP_USER"),
+               from: v("MAIL_FROM"), fromName: v("MAIL_FROM_NAME"), passSet: set("SMTP_PASS") },
+      whatsapp: { phoneId: v("WHATSAPP_PHONE_ID"), businessId: v("WHATSAPP_BUSINESS_ID"),
+                  tokenSet: set("WHATSAPP_TOKEN") },
+      gsc: { property: v("GSC_PROPERTY"), serviceAccountSet: fs.existsSync(GSC_SA_PATH) },
     },
   });
 });
@@ -293,6 +346,18 @@ app.get("/api/status", (_q, res) => {
       detail: (has("DAILY_SPEND_CAP_USD") && has("OUTREACH_DAILY_CAP"))
         ? `$${e.DAILY_SPEND_CAP_USD}/day spend, ${e.OUTREACH_DAILY_CAP} messages/day` : "Using safe defaults (15/day, 25/day)",
       hint: "Safety limits the Overseer enforces." },
+    { label: "Email sending", optional: true, ok: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS"),
+      detail: (has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS"))
+        ? `SMTP ready (${e.SMTP_HOST})` : "Not set — outreach and graphical emails can't be delivered yet",
+      hint: "Your mail SMTP host, username and password, plus a from-address." },
+    { label: "WhatsApp Business", optional: true, ok: has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN"),
+      detail: (has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN"))
+        ? "Connected" : "Not set — the UAE's main enquiry channel is off",
+      hint: "Phone number ID + access token from Meta's WhatsApp Cloud API." },
+    { label: "Google Search Console", optional: true, ok: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH),
+      detail: (has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH))
+        ? `Connected (${e.GSC_PROPERTY})` : "Not set — no owned-site search data",
+      hint: "Property (e.g. sc-domain:yoursite.ae) + a service-account JSON key." },
   ];
 
   res.json({
