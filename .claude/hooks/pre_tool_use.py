@@ -26,7 +26,7 @@ def main():
     blob = json.dumps(args).lower()
 
     # RED LINE 1: never deploy/push to the live site unless you are the releaser
-    if re.search(r"(deploy|git push|rsync|ftp|scp).*(prod|live|public_html)", blob):
+    if re.search(r"\b(deploy\w*|git push|rsync|s?ftp|scp)\b.*\b(prod\w*|live|public_html)\b", blob):
         if agent != "it-releaser":
             log(agent, tool, args, "blocked", "only it-releaser may reach production")
             print("BLOCKED: only the IT Releaser may touch production.", file=sys.stderr)
