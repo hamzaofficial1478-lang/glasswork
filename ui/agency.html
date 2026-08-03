@@ -325,12 +325,12 @@ function renderRooms(st){
         ${ring(rm.score)}
       </div>
       <div class="agents">
-        ${rm.agents.map(a=>`
+        ${rm.agents.length ? rm.agents.map(a=>`
           <div class="agent">
             <span class="sd ${a.s}"></span>
             <div class="who"><b>${a.n}</b><span>${a.t}</span></div>
             <span class="st">${a.s}</span>
-          </div>`).join('')}
+          </div>`).join('') : '<div class="empty">No tasks on the board for this room.</div>'}
       </div>
       <div class="room-foot"><span>${rm.foot[0]}</span><b>${rm.foot[1]}</b></div>
     </div>`).join('');
@@ -354,7 +354,9 @@ function renderApprovals(st){
 }
 
 function renderSecurity(st){
-  $('#secfeed').innerHTML = st.security.map(e=>`
+  const box=$('#secfeed');
+  if(!st.security.length){ box.innerHTML='<div class="empty">Nothing flagged.</div>'; $('#secBadge').textContent=0; return; }
+  box.innerHTML = st.security.map(e=>`
     <div class="sec-event">
       <span class="tag ${e.sev}"></span>
       <div class="txt"><b>${e.title}</b><span>${e.sub}</span></div>
@@ -381,16 +383,27 @@ function renderConns(st){
 function renderShelf(st){
   const box=$('#shelfmini'); if(!box) return;
   const shelves=st.shelf||[];
+  if(!shelves.length){
+    box.innerHTML='<div class="empty">No shelves yet — start the server so /api/state can read the cabinet.</div>';
+    $('#shelfCount').textContent='—'; return;
+  }
+  // always list EVERY shelf: an idle shelf still needs to be visible, and an
+  // empty one is exactly what tells you a key is missing.
   const busy=shelves.filter(s=>s.holder||s.queue);
-  const rows = busy.length ? busy : shelves.filter(s=>s.spend);
-  if(!rows.length){ box.innerHTML='<div class="empty">All shelves free · nothing borrowing right now.</div>'; }
-  else box.innerHTML = rows.map(s=>`
-    <div class="conn">
-      <div class="ic">${s.holder?'●':'○'}</div>
-      <div class="nm"><b>${s.shelf}</b><span>${s.holder?('in use · '+s.holder):'free'}${s.queue?(' · '+s.queue+' queued'):''}</span></div>
-      <span class="etch">$${(s.spend||0)}</span>
-    </div>`).join('');
-  $('#shelfCount').textContent = busy.length ? (busy.length+' in use') : 'all free';
+  box.innerHTML = shelves.map(s=>{
+    const state = s.holder ? ('in use · '+s.holder) : (s.items ? 'free' : 'no API yet');
+    const dot   = s.holder ? '●' : (s.items ? '○' : '·');
+    const queue = s.queue ? (' · '+s.queue+' queued') : '';
+    const kit   = s.items ? (s.items+(s.items===1?' API':' APIs')) : '—';
+    return `<div class="conn" style="${s.items?'':'opacity:.55'}">
+      <div class="ic">${dot}</div>
+      <div class="nm"><b>${s.shelf}</b><span>${state}${queue} · ${kit}</span></div>
+      <span class="etch">${s.spend?('$'+s.spend):''}</span>
+    </div>`;
+  }).join('');
+  const stocked=shelves.filter(s=>s.items).length;
+  $('#shelfCount').textContent = busy.length ? (busy.length+' in use')
+                                             : (stocked+'/'+shelves.length+' stocked');
 }
 
 /* ---- interactions (in-memory) ---- */
@@ -410,14 +423,16 @@ function addConn(){
 }
 
 /* ---- boot ---- */
-(async()=>{
+async function refresh(){
   STATE=await fetchState();
   $('#mHealth').textContent=STATE.metrics.health;
   $('#mLeads').textContent=STATE.metrics.leads;
   $('#mSpend').textContent=STATE.metrics.spend;
   $('#mdState').textContent=STATE.md.state;
   renderRooms(STATE); renderApprovals(STATE); renderSecurity(STATE); renderConns(STATE); renderShelf(STATE);
-})();
+}
+refresh();
+setInterval(refresh, 15000);   // keep the room live without a page reload
 
 setInterval(()=>{
   const d=new Date();
