@@ -170,10 +170,16 @@ def build():
     try:
         state = cabinet.shelf_state(["llm", "image", "embedding", "seo_data",
                                      "stock_images", "email", "crawler", "whatsapp"])
+        try:  # how many APIs/models actually sit on each shelf
+            from providers import store as _store
+            cat = _store.shelf_catalogue()
+        except Exception:
+            cat = {}
         shelf = [{"shelf": k,
                   "holder": (v["holder"]["agent"] if v.get("holder") else None),
                   "queue": len(v.get("queue", [])),
-                  "spend": v.get("today_spend", 0)} for k, v in sorted(state.items())]
+                  "spend": v.get("today_spend", 0),
+                  "items": len(cat.get(k, []))} for k, v in sorted(state.items())]
     except Exception:
         shelf = []
 
