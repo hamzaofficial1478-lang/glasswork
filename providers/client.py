@@ -81,7 +81,7 @@ def _content_text(body_text):
         return ""
 
 
-def chat(cred, model, messages, max_tokens=512, timeout=120, extra=None):
+def chat(cred, model, messages, max_tokens=512, timeout=180, extra=None):
     """Production LLM call. Shares build_chat_request with the probe path."""
     url, headers, body = build_chat_request(cred, model["api_model_id"], messages, max_tokens, extra)
     res = _execute(cred, url, headers, body, timeout)
@@ -89,7 +89,7 @@ def chat(cred, model, messages, max_tokens=512, timeout=120, extra=None):
     return res
 
 
-def fetch_models(cred, timeout=30):
+def fetch_models(cred, timeout=90):
     """GET <base>/models. Convenience only — failure must never block manual entry."""
     url, headers, _ = build_request(cred, "models")
     try:
@@ -109,7 +109,7 @@ def fetch_models(cred, timeout=30):
                 "raw": {"url": url, "response_body": str(e)}}
 
 
-def probe_model(cred, model, timeout=60):
+def probe_model(cred, model, timeout=120):
     """
     Test & detect for a model, using a request VALID FOR ITS CATEGORY:
       LLM       -> a tiny chat completion (+ a multimodal image probe)
@@ -161,3 +161,49 @@ def probe_model(cred, model, timeout=60):
     return {"capabilities": {"supported": None}, "detect": diag,
             "test": {"ok": None, "status": None, "output": "",
                      "cause": f"No live probe for {category}; leaving it as unknown.", "raw": diag}}
+
+
+def probe_tool(tool, timeout=90):
+    """
+    Test a SHELF tool (DataForSEO, Pexels, a crawler…). These aren't chat APIs, so
+    we can't send a prompt — instead we make a real authenticated request to the
+    tool's own base URL and report exactly what came back, key-redacted.
+
+    A 2xx means the key works. 401/403 means the key is wrong. 404 usually means
+    the URL is right but the path isn't — which still proves the host is reachable
+    and is reported as such rather than as a failure of the key.
+    """
+    from . import auth
+    url = (tool.get("base_url") or "").strip()
+    if not url:
+        return {"ok": False, "status": 0, "cause": "No base URL saved for this tool."}
+    headers = {"Accept": "application/json"}
+    headers.update(auth.auth_header(tool.get("auth_style"), tool.get("api_key", ""),
+                                    tool.get("auth_header_name", "")))
+    raw = {"url": url, "headers": redact_headers(tool, headers), "method": "GET",
+           "status": None, "response_body": None}
+    try:
+        r = requests.get(url, headers=headers, timeout=timeout)
+        raw["status"] = r.status_code
+        raw["response_body"] = r.text[:600]
+        ok = 200 <= r.status_code < 300
+        if ok:
+            cause = "Reachable and the key was accepted."
+        elif r.status_code in (401, 403):
+            cause = f"{r.status_code} — the host answered but rejected the key."
+        elif r.status_code == 404:
+            cause = "404 — host reachable, but this exact path doesn't exist. The key may still be fine; check the base URL."
+        elif r.status_code == 405:
+            cause = "405 — host reachable and the path exists, it just wants POST. Usually fine."
+            ok = None
+        else:
+            cause = _likely_cause(r.status_code, r.text)
+        return {"ok": ok, "status": r.status_code, "cause": cause, "raw": raw}
+    except requests.exceptions.Timeout:
+        raw["status"] = 0
+        return {"ok": False, "status": 0, "cause": f"Timed out after {timeout}s.", "raw": raw}
+    except Exception as e:
+        raw["status"] = 0
+        raw["response_body"] = str(e)[:300]
+        return {"ok": False, "status": 0,
+                "cause": "Could not connect — check the base URL is reachable.", "raw": raw}
