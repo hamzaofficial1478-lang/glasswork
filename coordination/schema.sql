@@ -111,7 +111,10 @@ CREATE TABLE IF NOT EXISTS content_queue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT, type TEXT,               -- service_page | case_study | comparison | blog | social
   brief TEXT, draft TEXT, images TEXT,
-  status TEXT DEFAULT 'idea',          -- idea | briefed | drafted | in_review | approved | published
+  -- blocked_on_<sector> means the brief is finished but held for that sector's
+  -- call (e.g. blocked_on_seo, waiting on volume/difficulty). It is done work
+  -- waiting on someone else, not an idea.
+  status TEXT DEFAULT 'idea',          -- idea | briefed | blocked_on_<sector> | drafted | in_review | approved | published
   channel TEXT, created_at INTEGER
 );
 
@@ -139,7 +142,7 @@ CREATE TABLE IF NOT EXISTS site_issues (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT,                            -- bug | speed | broken_link | form_dead | ssl | security
   severity TEXT, detail TEXT, url TEXT,
-  status TEXT DEFAULT 'open',          -- open | fixing | in_review | deployed | closed
+  status TEXT DEFAULT 'open',          -- open | fixing | in_review | shipped | closed
   found_by TEXT, found_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS lighthouse (
