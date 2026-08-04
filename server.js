@@ -141,12 +141,12 @@ function ensureDb() {
 }
 
 // shell into the Python provider module (the single code path for provider ops)
-function pyProvider(command, payload) {
+function pyProvider(command, payload, timeoutMs) {
   const py = resolvePython();
   if (!py) return { ok: false, error: NO_PY };
   const r = spawnSync(py.cmd, [...py.prefix, "-m", "providers.api", command], {
     cwd: __dirname, input: JSON.stringify(payload || {}),
-    timeout: 300000, maxBuffer: 8 * 1024 * 1024,
+    timeout: timeoutMs || 300000, maxBuffer: 8 * 1024 * 1024,
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
   const out = String(r.stdout || "");
@@ -306,6 +306,16 @@ app.post("/api/providers/tool/delete", (req, res) => res.json(pyProvider("delete
 app.post("/api/providers/tool/test", (req, res) => res.json(pyProvider("test_tool", req.body)));
 app.get("/api/shelves", (_q, res) => res.json(pyProvider("shelves", {})));
 app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
+
+// ---- channels + the whole-system sweep -------------------------------------
+// Both prove credentials without sending anything. The one exception is
+// notify:true on Telegram, which posts to the owner's own chat and nowhere else.
+app.post("/api/integrations/test", (req, res) =>
+  res.json(pyProvider("test_integration", req.body)));
+// A full sweep calls every model and every shelf API, so it gets its own,
+// longer budget than an ordinary provider command.
+app.post("/api/preflight", (req, res) =>
+  res.json(pyProvider("preflight", req.body, 900000)));
 
 // ---- per-task routing ------------------------------------------------------
 app.get("/api/routing", (_q, res) => res.json(pyProvider("get_routing", {})));
