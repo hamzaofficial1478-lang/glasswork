@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS site_issues (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT,                            -- bug | speed | broken_link | form_dead | ssl | security
   severity TEXT, detail TEXT, url TEXT,
-  status TEXT DEFAULT 'open',          -- open | fixing | in_review | shipped | closed
+  status TEXT DEFAULT 'open',          -- open | fixing | in_review | deployed | closed
   found_by TEXT, found_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS lighthouse (
