@@ -1,5 +1,5 @@
 """
-state.py — the snapshot the Control Room reads.
+state.py — the live snapshot the Control Room reads.
 
 Reads the filing cabinet (agency.db) and returns the exact shape ui/agency.html
 renders: header metrics, the six rooms with their real task feed, the approvals

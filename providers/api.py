@@ -154,7 +154,7 @@ def cmd_shelves(_):
 
 def cmd_test_integration(a):
     """
-    Test one channel (telegram / whatsapp / email), or all three with 'all'.
+    Test one channel (telegram / email), or both with 'all'.
     Nothing is sent unless notify=True is passed, and that only ever posts to the
     owner's own Telegram chat.
     """
