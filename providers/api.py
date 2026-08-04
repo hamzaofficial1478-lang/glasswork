@@ -152,6 +152,33 @@ def cmd_shelves(_):
             "kinds": {s: store.shelf_kind(s) for s in names}}
 
 
+def cmd_test_integration(a):
+    """
+    Test one channel (telegram / whatsapp / email), or all three with 'all'.
+    Nothing is sent unless notify=True is passed, and that only ever posts to the
+    owner's own Telegram chat.
+    """
+    from . import integrations
+    which = (a.get("which") or "all").strip().lower()
+    notify = bool(a.get("notify"))
+    if which == "all":
+        return {"ok": True, "results": integrations.test_all(notify=notify)}
+    fn = integrations.ALL.get(which)
+    if not fn:
+        return {"ok": False, "error": f"unknown integration '{which}'"}
+    res = fn(notify=notify) if which == "telegram" else fn()
+    return {"ok": True, "results": [res]}
+
+
+def cmd_preflight(a):
+    """
+    The whole-system sweep: every brain, every sector's fallback chain, every
+    shelf's fallback chain, every channel — and whether the agency is fit to run.
+    """
+    from . import preflight
+    return preflight.sweep(quick=bool(a.get("quick")), notify=bool(a.get("notify")))
+
+
 DISPATCH = {
     "view": cmd_view, "save_credential": cmd_save_credential,
     "delete_credential": cmd_delete_credential, "save_model": cmd_save_model,
@@ -160,6 +187,7 @@ DISPATCH = {
     "save_route": cmd_save_route, "status": cmd_status,
     "save_tool": cmd_save_tool, "delete_tool": cmd_delete_tool, "shelves": cmd_shelves,
     "test_tool": cmd_test_tool, "resolve_shelf": cmd_resolve_shelf,
+    "test_integration": cmd_test_integration, "preflight": cmd_preflight,
 }
 
 

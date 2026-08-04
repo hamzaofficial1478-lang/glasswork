@@ -118,6 +118,54 @@ def test_400_means_key_accepted():
         client.requests.get = real_get
 
 
+def test_preflight_cover():
+    """
+    The whole point of the sweep: a chain with a DEAD fallback must not read as
+    safe. One working link is SINGLE (a single point of failure) even when a
+    fallback is configured — that is the failure people don't see coming.
+    """
+    print("Fallback cover verdicts:")
+    from .preflight import _cover, COVERED, SINGLE, DOWN, EMPTY, _ModelCache
+    check("two of two work -> COVERED", _cover(2, 2), COVERED)
+    check("two of three work -> COVERED", _cover(2, 3), COVERED)
+    check("primary works, fallback dead -> SINGLE", _cover(1, 2), SINGLE)
+    check("lone provider -> SINGLE", _cover(1, 1), SINGLE)
+    check("nothing works -> DOWN", _cover(0, 2), DOWN)
+    check("nothing configured -> EMPTY", _cover(0, 0), EMPTY)
+
+    # a brain shared by five sectors must cost one call, not five
+    calls = []
+    cache = _ModelCache(quick=True)
+    for _ in range(5):
+        cache.test({"id": "c"}, {"id": "m1"})
+        calls.append(len(cache.seen))
+    check("shared model tested once", (len(cache.seen), calls[-1]), (1, 1))
+
+
+def test_integrations_unconfigured():
+    """
+    'Not set up' and 'broken' are different answers and must never be conflated:
+    ok=None means nothing was entered, ok=False means what you entered is wrong.
+    Half-filled credentials are the quiet killer, so they name the missing field.
+    """
+    print("Channel checks (no network):")
+    from . import integrations as ig
+    blank = ig.test_all(env={})
+    check("all three report not-configured", [r["ok"] for r in blank], [None, None, None])
+    check("covers telegram, whatsapp, email",
+          sorted(r["integration"] for r in blank), ["email", "telegram", "whatsapp"])
+
+    half = ig.test_email(env={"SMTP_HOST": "h", "SMTP_USER": "u"})
+    check("half-filled SMTP is a failure, not 'unset'", half["ok"], False)
+    check("and it names what's missing", "SMTP_PASS" in half["detail"], True)
+
+    wa = ig.test_whatsapp(env={"WHATSAPP_TOKEN": "t"})
+    check("half-filled WhatsApp names what's missing", "WHATSAPP_PHONE_ID" in wa["detail"], True)
+
+    tg = ig.test_telegram(env={"TELEGRAM_BOT_TOKEN": ""})
+    check("no telegram token -> unset, not broken", tg["ok"], None)
+
+
 def test_probe_equals_production():
     print("Probe == production request shape:")
     cred = {"base_url": "https://h/v1/chat/completions",  # deliberately pasted full
@@ -138,6 +186,8 @@ def main():
     test_auth()
     test_405_retry()
     test_400_means_key_accepted()
+    test_preflight_cover()
+    test_integrations_unconfigured()
     test_probe_equals_production()
     print()
     if _fail:
