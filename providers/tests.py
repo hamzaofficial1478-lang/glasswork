@@ -45,6 +45,46 @@ def test_auth():
     check("custom", auth.auth_header("custom", "K", "X-Key"), {"X-Key": "K"})
     check("empty key -> no header", auth.auth_header("bearer", ""), {})
     check("redact hides key", "SECRETKEY" in auth.redact("SECRETKEY"), False)
+    # 'raw' is the fix for the commonest false 'bad key': Pexels and many media
+    # APIs want the key bare, and "Bearer <key>" comes back 401 with a good key.
+    check("raw = no prefix", auth.auth_header("raw", "K"), {"Authorization": "K"})
+    check("basic encodes login:password",
+          auth.auth_header("basic", "user:pass"), {"Authorization": "Basic dXNlcjpwYXNz"})
+    check("basic passes through pre-encoded",
+          auth.auth_header("basic", "dXNlcjpwYXNz"), {"Authorization": "Basic dXNlcjpwYXNz"})
+    check("every declared style builds a header",
+          [s for s in auth.STYLES if not auth.auth_header(s, "K")], [])
+
+
+class _Resp:
+    def __init__(self, status, text="{}"):
+        self.status_code, self.text = status, text
+
+
+def test_405_retry():
+    """
+    A 405 on GET means 'wrong verb' — the host rejects the method BEFORE it looks
+    at auth, so it says nothing about the key. probe_tool retries with POST; these
+    four cases are the verdicts that retry must reach.
+    """
+    print("405 -> POST retry verdicts:")
+    from . import client
+    tool = {"auth_style": "bearer", "api_key": "K"}
+    cases = [  # POST status -> (ok, substring the owner should see)
+        (200, True, "key was accepted"),
+        (401, False, "rejected the key"),
+        (400, True, "ACCEPTED"),
+        (500, None, "provider-side error"),
+    ]
+    real_post = client.requests.post
+    try:
+        for status, want_ok, want_text in cases:
+            client.requests.post = lambda *a, _s=status, **k: _Resp(_s)
+            res = client._retry_post(tool, "https://h/x", {}, 5, {})
+            check(f"POST {status} -> ok={want_ok}", res["ok"], want_ok)
+            check(f"POST {status} explains why", want_text in res["cause"], True)
+    finally:
+        client.requests.post = real_post
 
 
 def test_probe_equals_production():
@@ -65,6 +105,7 @@ def test_probe_equals_production():
 def main():
     test_urls()
     test_auth()
+    test_405_retry()
     test_probe_equals_production()
     print()
     if _fail:

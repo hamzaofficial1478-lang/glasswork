@@ -50,9 +50,20 @@ DEFAULT_SHELVES = list(SHELF_KINDS)
 # kept as an alias so older callers/tests keep working
 TOOL_SHELVES = DEFAULT_SHELVES
 
+# Model shelves are named after a model's CATEGORY, so they are created by adding
+# a model rather than a tool — they must not appear in the tool-shelf dropdown,
+# but the dashboard still has to group them under a purpose instead of dumping
+# them in "custom". Kept separate from SHELF_KINDS for exactly that reason.
+MODEL_SHELF_KINDS = {
+    "llm":       "reasoning",   # the text brain each sector routes to
+    "image":     "reasoning",   # generated graphics
+    "embedding": "reasoning",   # vectors for similarity + dedupe
+}
+
 
 def shelf_kind(name: str) -> str:
-    return SHELF_KINDS.get((name or "").strip().lower(), "custom")
+    n = (name or "").strip().lower()
+    return SHELF_KINDS.get(n) or MODEL_SHELF_KINDS.get(n, "custom")
 
 
 def known_shelves() -> list:
