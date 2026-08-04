@@ -92,11 +92,16 @@ function updateEnv(partial) {
   try { fs.chmodSync(ENV_PATH, 0o600); } catch (_) {}
 }
 
+// Every table the app expects. A cabinet built by an OLDER version is missing the
+// newer ones (that's what made the shelf board fail), so this list is what decides
+// whether the schema needs applying again — not just "does the file exist".
+const REQUIRED_TABLES = ["tasks", "decisions", "keywords", "shelf_queue", "borrows"];
+
 function dbBuilt() {
   if (!fs.existsSync(DB_PATH)) return false;
   try {
     const buf = fs.readFileSync(DB_PATH);
-    return buf.includes("tasks") && buf.includes("decisions") && buf.includes("keywords");
+    return REQUIRED_TABLES.every((t) => buf.includes(t));
   } catch (_) { return false; }
 }
 
@@ -407,4 +412,12 @@ app.get("/api/status", (_q, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Agency running on :${PORT}`));
+app.listen(PORT, () => {
+  // Upgrade the cabinet on boot. schema.sql is CREATE TABLE IF NOT EXISTS
+  // throughout, so this is safe to run every time and adds any table a newer
+  // version introduced — an existing database is never left half-upgraded.
+  const db = ensureDb();
+  if (db.built) console.log("filing cabinet ready");
+  else console.log("filing cabinet NOT ready:", db.error || "unknown");
+  console.log(`Agency running on :${PORT}`);
+});
