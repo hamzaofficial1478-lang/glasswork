@@ -146,7 +146,7 @@ function pyProvider(command, payload) {
   if (!py) return { ok: false, error: NO_PY };
   const r = spawnSync(py.cmd, [...py.prefix, "-m", "providers.api", command], {
     cwd: __dirname, input: JSON.stringify(payload || {}),
-    timeout: 120000, maxBuffer: 8 * 1024 * 1024,
+    timeout: 300000, maxBuffer: 8 * 1024 * 1024,
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
   const out = String(r.stdout || "");
@@ -303,7 +303,9 @@ app.post("/api/providers/test", (req, res) => res.json(pyProvider("test_model", 
 // shelf board shows who holds each shelf, who's queued, and today's spend.
 app.post("/api/providers/tool", (req, res) => res.json(pyProvider("save_tool", req.body)));
 app.post("/api/providers/tool/delete", (req, res) => res.json(pyProvider("delete_tool", req.body)));
+app.post("/api/providers/tool/test", (req, res) => res.json(pyProvider("test_tool", req.body)));
 app.get("/api/shelves", (_q, res) => res.json(pyProvider("shelves", {})));
+app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
 
 // ---- per-task routing ------------------------------------------------------
 app.get("/api/routing", (_q, res) => res.json(pyProvider("get_routing", {})));
