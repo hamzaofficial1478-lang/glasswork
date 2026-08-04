@@ -69,7 +69,11 @@ main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 .btnrow{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
 
 .inl{font-size:12px;margin-left:auto}
-.inl.ok{color:var(--ok)}.inl.err{color:var(--danger)}.inl.dim{color:var(--muted)}
+.inl.ok{color:var(--ok)}.inl.err{color:var(--danger)}.inl.dim{color:var(--muted)}.inl.warn{color:var(--amber)}
+/* preflight verdicts — COVERED / SINGLE / DOWN read at a glance */
+#pfOut .ok{color:var(--ok)}#pfOut .err{color:var(--danger)}
+#pfOut .warn{color:var(--amber)}#pfOut .dim{color:var(--muted)}
+#pfOut li{list-style:disc}
 
 .cred{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:rgba(24,37,48,.4)}
 .cred-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
@@ -193,7 +197,8 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
           <div class="field"><label>From address</label><input id="em_from" placeholder="hello@glassworks.ae"></div>
           <div class="field"><label>From name</label><input id="em_fromname" placeholder="Glassworks Dubai"></div>
         </div>
-        <div class="btnrow"><button class="pbtn" id="saveEmail">Save email</button><span class="inl dim" id="emailMsg"></span></div>
+        <div class="btnrow"><button class="pbtn" id="saveEmail">Save email</button><button class="mini" id="testEmail">Test login</button><span class="inl dim" id="emailMsg"></span></div>
+        <div class="hint">The test logs in to your mail server and hangs up — no message is delivered to anyone.</div>
       </div>
 
       <div class="cred">
@@ -204,7 +209,8 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
           <div class="field"><label>Business account ID (optional)</label><input id="wa_biz" placeholder="optional"></div>
         </div>
         <div class="field"><label>Access token</label><input id="wa_token" type="password" placeholder="leave blank to keep saved"><div class="hint">The permanent access token from your Meta app.</div></div>
-        <div class="btnrow"><button class="pbtn" id="saveWa">Save WhatsApp</button><span class="inl dim" id="waMsg"></span></div>
+        <div class="btnrow"><button class="pbtn" id="saveWa">Save WhatsApp</button><button class="mini" id="testWa">Test token</button><span class="inl dim" id="waMsg"></span></div>
+        <div class="hint">The test reads your number's own record from Meta to check the token and phone ID together. It messages nobody.</div>
       </div>
 
       <div class="cred">
@@ -283,7 +289,24 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15.</div></div>
         <div class="field"><label>Daily outreach cap</label><input id="outreachCap" type="number" min="0" step="1" placeholder="25"><div class="hint">Defaults to 25.</div></div>
       </div>
-      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><span class="inl dim" id="optMsg"></span></div>
+      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testTg">Test Telegram</button><button class="mini" id="tgPing">Message me</button><span class="inl dim" id="optMsg"></span></div>
+      <div class="hint"><b>Test Telegram</b> checks the bot and that it can reach your chat, silently. <b>Message me</b> posts a real message to your chat so you can see it arrive.</div>
+    </div>
+  </section>
+
+  <!-- PREFLIGHT ------------------------------------------------------------ -->
+  <section class="card">
+    <div class="card-h"><div class="ic">🧪</div><div><b>7 · Preflight — test everything at once</b><small>Every brain, every shelf API, every channel — and whether your fallbacks actually work</small></div></div>
+    <div class="card-b">
+      <p class="hint" style="margin-top:0">Testing a primary only tells you today works. This tests <b>every link in every chain</b>, so you find out now — not at 2am when a provider rate-limits — whether losing a primary actually costs you anything. Each result is one of:
+        <b>COVERED</b> (two or more links work, you're safe), <b>SINGLE</b> (only one works — a single point of failure, even if you thought you had a fallback), or <b>DOWN</b> (nothing works).</p>
+      <div class="btnrow">
+        <button class="pbtn" id="runPreflight">Run full check</button>
+        <button class="mini" id="runPreflightQuick">Quick check (no model calls)</button>
+        <span class="inl dim" id="pfMsg"></span>
+      </div>
+      <div class="hint">The full check makes a real, tiny call to every model, so it costs a few tokens. The quick check skips those and only reports what it can verify without calling.</div>
+      <div id="pfOut" style="margin-top:12px"></div>
     </div>
   </section>
 
@@ -680,6 +703,78 @@ $('#saveWa').onclick=()=>saveIntegration('whatsapp',{
 $('#saveGsc').onclick=()=>saveIntegration('gsc',{
   GSC_PROPERTY:$('#gsc_prop').value.trim(),GSC_SERVICE_ACCOUNT_JSON:$('#gsc_json').value
 },$('#saveGsc'),$('#gscMsg'),['gsc_json']);
+
+/* ---- channel tests: prove the credential, deliver nothing ---- */
+async function testChannel(which, btn, msg, notify){
+  btn.disabled=true; inl(msg,'dim', notify?'Posting…':'Testing…');
+  const j=await api('POST','/api/integrations/test',{which,notify:!!notify});
+  btn.disabled=false;
+  const r=(j.results||[])[0];
+  if(!r){ inl(msg,'err','✕ '+(j.error||'no result')); return; }
+  if(r.ok===true)       inl(msg,'ok','✓ '+r.detail);
+  else if(r.ok===null)  inl(msg,'dim','· '+r.detail);
+  else                  inl(msg,'err','✕ '+r.detail);
+}
+$('#testEmail').onclick=()=>testChannel('email',$('#testEmail'),$('#emailMsg'));
+$('#testWa').onclick   =()=>testChannel('whatsapp',$('#testWa'),$('#waMsg'));
+$('#testTg').onclick   =()=>testChannel('telegram',$('#testTg'),$('#optMsg'));
+$('#tgPing').onclick   =()=>testChannel('telegram',$('#tgPing'),$('#optMsg'),true);
+
+/* ---- preflight ---- */
+const PF_TONE={COVERED:'ok',SINGLE:'warn',DOWN:'err',EMPTY:'dim'};
+function pfMark(ok){ return ok===true?'<span class="ok">✓</span>':ok===false?'<span class="err">✕</span>':'<span class="dim">·</span>'; }
+function pfChain(chain){
+  if(!chain||!chain.length) return '';
+  return '<div style="margin:4px 0 2px 14px">'+chain.map(l=>
+    '<div style="font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:baseline">'+
+      pfMark(l.ok)+'<span style="min-width:78px;opacity:.75">'+esc(l.role)+'</span>'+
+      '<span style="flex:1">'+esc(l.name)+'</span>'+
+      '<span style="opacity:.7">'+esc(l.ok===true?(l.ms||0)+'ms':(l.cause||'').slice(0,70))+'</span></div>').join('')+'</div>';
+}
+function pfBlock(title, rows){
+  if(!rows.length) return '';
+  return '<div style="margin-top:12px"><b style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)">'+esc(title)+'</b>'+rows.join('')+'</div>';
+}
+function renderPreflight(d){
+  const out=[];
+  out.push(pfBlock('Sector brains — survives losing its primary?', (d.routing||[]).map(r=>
+    '<div style="margin-top:8px"><span class="'+(PF_TONE[r.cover]||'dim')+'"><b>'+esc(r.cover)+'</b></span> '+
+    '<b>'+esc(r.task)+'</b> '+(r.error?'<span class="dim">'+esc(r.error)+'</span>':'')+pfChain(r.chain)+'</div>')));
+  const shelves=(d.shelf||[]).filter(s=>s.cover!=='EMPTY');
+  out.push(pfBlock('Shelf APIs — survives losing its primary?', shelves.map(s=>
+    '<div style="margin-top:8px"><span class="'+(PF_TONE[s.cover]||'dim')+'"><b>'+esc(s.cover)+'</b></span> '+
+    '<b>'+esc(s.shelf)+'</b> <span class="dim">'+esc(s.purpose)+'</span>'+pfChain(s.chain)+'</div>')));
+  const empty=(d.shelf||[]).filter(s=>s.cover==='EMPTY').map(s=>s.shelf);
+  if(empty.length) out.push('<p class="hint">Empty shelves, nothing to test: '+esc(empty.join(', '))+'</p>');
+  out.push(pfBlock('Channels — nothing was sent', (d.integrations||[]).map(c=>
+    '<div style="margin-top:6px;font-size:12px">'+pfMark(c.ok)+' <b>'+esc(c.integration)+'</b> '+
+    '<span style="color:var(--muted)">'+esc(c.detail)+'</span></div>')));
+
+  let head;
+  if((d.blocking||[]).length){
+    head='<div class="err"><b>NOT READY</b> — these stop the agency running:</div>'+
+         '<ul style="margin:6px 0 0 18px;padding:0">'+d.blocking.map(b=>'<li class="err" style="font-size:12px">'+esc(b)+'</li>').join('')+'</ul>';
+  } else {
+    head='<div class="ok"><b>READY</b> — every sector has a working brain and you can be reached.</div>';
+  }
+  if((d.warnings||[]).length){
+    head+='<ul style="margin:6px 0 0 18px;padding:0">'+d.warnings.map(w=>'<li class="warn" style="font-size:12px">'+esc(w)+'</li>').join('')+'</ul>';
+  }
+  if(d.quick) head+='<p class="hint">Quick check — no model or API calls were made, so anything marked <span class="dim">·</span> is unverified.</p>';
+  $('#pfOut').innerHTML='<div class="cred"><div class="card-b" style="padding:12px 14px">'+head+out.join('')+'</div></div>';
+}
+async function runPreflight(quick){
+  const btns=[$('#runPreflight'),$('#runPreflightQuick')];
+  btns.forEach(b=>b.disabled=true);
+  inl($('#pfMsg'),'dim', quick?'Checking…':'Testing every provider — this can take a minute…');
+  const j=await api('POST','/api/preflight',{quick:!!quick});
+  btns.forEach(b=>b.disabled=false);
+  if(!j||!j.ok){ inl($('#pfMsg'),'err','✕ '+((j&&j.error)||'failed')); return; }
+  inl($('#pfMsg'), j.ready?'ok':'err', j.ready?'✓ Ready':'✕ Not ready');
+  renderPreflight(j);
+}
+$('#runPreflight').onclick=()=>runPreflight(false);
+$('#runPreflightQuick').onclick=()=>runPreflight(true);
 
 /* ---- load saved values so nothing looks unsaved after a restart ---- */
 async function loadSettings(){
