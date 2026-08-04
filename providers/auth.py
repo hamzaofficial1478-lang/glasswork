@@ -4,16 +4,22 @@ alike, so a credential authenticates identically everywhere. Never emits two
 conflicting auth headers.
 """
 
-STYLES = ("bearer", "x-api-key", "token", "custom")
+STYLES = ("bearer", "raw", "basic", "x-api-key", "token", "custom")
 
 
 def auth_header(style: str, api_key: str, custom_name: str = "") -> dict:
     """
     Return the single auth header for a credential.
       bearer    -> Authorization: Bearer <key>
+      raw       -> Authorization: <key>          (NO prefix — Pexels, many media APIs)
+      basic     -> Authorization: Basic <b64>    (key given as "login:password" — DataForSEO)
       x-api-key -> x-api-key: <key>
       token     -> Authorization: Token <key>
       custom    -> <custom_name>: <key>
+
+    'raw' exists because a very common 401 is sending "Bearer <key>" to an API that
+    wants the bare key in the Authorization header. The host answers, rejects it,
+    and it looks like a bad key when the key is fine.
     """
     key = (api_key or "").strip()
     style = (style or "bearer").strip().lower()
@@ -21,6 +27,13 @@ def auth_header(style: str, api_key: str, custom_name: str = "") -> dict:
         return {}
     if style == "bearer":
         return {"Authorization": f"Bearer {key}"}
+    if style == "raw":
+        return {"Authorization": key}
+    if style == "basic":
+        import base64
+        # already base64? send as-is; otherwise encode "login:password"
+        token = key if ":" not in key else base64.b64encode(key.encode()).decode()
+        return {"Authorization": f"Basic {token}"}
     if style == "x-api-key":
         return {"x-api-key": key}
     if style == "token":
