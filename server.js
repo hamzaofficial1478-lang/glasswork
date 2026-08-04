@@ -42,10 +42,11 @@ const ENV_PATH = path.join(__dirname, ".env");
 const DB_PATH = path.join(__dirname, "coordination", "agency.db");
 const GSC_SA_PATH = path.join(__dirname, "config", "gsc-service-account.local.json");
 
-// external service integrations stored in .env (secrets flagged for keyless re-save)
+// external service integrations stored in .env (secrets flagged for keyless re-save).
+// WhatsApp used to sit here; it was dropped because enquiries come through the
+// widget on the site and the owner answers them himself — no agent read it.
 const INTEGRATIONS = {
   email: { fields: ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_FROM_NAME"], secret: ["SMTP_PASS"] },
-  whatsapp: { fields: ["WHATSAPP_PHONE_ID", "WHATSAPP_TOKEN", "WHATSAPP_BUSINESS_ID"], secret: ["WHATSAPP_TOKEN"] },
 };
 
 // the agency's tasks — each binds to a provider on the Routing screen
@@ -178,7 +179,6 @@ function readConnections() {
     { ic: "⌕", name: "DataForSEO", sub: "rank tracking", on: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD") },
     { ic: "✈", name: "Telegram bridge", sub: has("TELEGRAM_CHAT_ID") ? "connected" : "not connected", on: has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID") },
     { ic: "✉", name: "Email (SMTP)", sub: e.SMTP_HOST || "not set", on: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS") },
-    { ic: "▤", name: "WhatsApp", sub: has("WHATSAPP_TOKEN") ? "connected" : "not connected", on: has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN") },
     { ic: "⌗", name: "Search Console", sub: e.GSC_PROPERTY || "not set", on: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH) },
   ];
 }
@@ -258,7 +258,7 @@ app.post("/api/integration", (req, res) => {
     const vals = b.values || {};
     const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
 
-    if (group === "email" || group === "whatsapp") {
+    if (group === "email") {
       const map = INTEGRATIONS[group];
       const partial = {};
       for (const f of map.fields) {
@@ -347,8 +347,6 @@ app.get("/api/settings", (_q, res) => {
     integrations: {
       email: { host: v("SMTP_HOST"), port: v("SMTP_PORT"), user: v("SMTP_USER"),
                from: v("MAIL_FROM"), fromName: v("MAIL_FROM_NAME"), passSet: set("SMTP_PASS") },
-      whatsapp: { phoneId: v("WHATSAPP_PHONE_ID"), businessId: v("WHATSAPP_BUSINESS_ID"),
-                  tokenSet: set("WHATSAPP_TOKEN") },
       gsc: { property: v("GSC_PROPERTY"), serviceAccountSet: fs.existsSync(GSC_SA_PATH) },
     },
   });
@@ -406,10 +404,6 @@ app.get("/api/status", (_q, res) => {
       detail: (has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS"))
         ? `SMTP ready (${e.SMTP_HOST})` : "Not set — outreach and graphical emails can't be sent yet",
       hint: "Your mail SMTP host, username and password, plus a from-address." },
-    { label: "WhatsApp Business", optional: true, ok: has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN"),
-      detail: (has("WHATSAPP_PHONE_ID") && has("WHATSAPP_TOKEN"))
-        ? "Connected" : "Not set — the UAE's main enquiry channel is off",
-      hint: "Phone number ID + access token from Meta's WhatsApp Cloud API." },
     { label: "Google Search Console", optional: true, ok: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH),
       detail: (has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH))
         ? `Connected (${e.GSC_PROPERTY})` : "Not set — no owned-site search data",
