@@ -168,13 +168,16 @@ def build():
 
     # ---- the shelf (shared API cabinet) ----
     try:
-        state = cabinet.shelf_state(["llm", "image", "embedding", "seo_data",
-                                     "stock_images", "email", "crawler", "whatsapp"])
-        try:  # how many APIs/models actually sit on each shelf
+        # the shelf list is NOT hardcoded — it comes from the store, so a custom
+        # shelf you invent on /setup shows up here with no code change.
+        try:
             from providers import store as _store
             cat = _store.shelf_catalogue()
+            names = sorted(set(_store.known_shelves()) | set(cat))
+            kind_of = _store.shelf_kind
         except Exception:
-            cat = {}
+            cat, names, kind_of = {}, [], (lambda _n: "custom")
+        state = cabinet.shelf_state(names)
         shelf = []
         for k, v in sorted(state.items()):
             # the borrow that is open right now tells us WHICH sector holds it
@@ -189,6 +192,7 @@ def build():
                 "spend": v.get("today_spend", 0),
                 "items": len(cat.get(k, [])),
                 "names": [i.get("name", "") for i in cat.get(k, [])],
+                "purpose": kind_of(k),
             })
     except Exception:
         shelf = []
