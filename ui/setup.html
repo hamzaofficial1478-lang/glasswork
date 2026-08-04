@@ -249,7 +249,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
           <div class="hint">Lowercase, no spaces. The cabinet creates it the moment you save.</div></div>
         <div class="row">
           <div class="field"><label>Auth style</label>
-            <select id="nt_auth"><option value="bearer">Bearer (most common)</option><option value="x-api-key">x-api-key</option><option value="token">Token</option><option value="custom">Custom header…</option></select></div>
+            <select id="nt_auth"><option value="bearer">Bearer (most common)</option><option value="raw">raw — bare key, no prefix (Pexels &amp; most media APIs)</option><option value="basic">Basic — enter key as login:password (DataForSEO)</option><option value="x-api-key">x-api-key</option><option value="token">Token</option><option value="custom">Custom header…</option></select><div class="hint">If a key is rejected with 401, it is usually the <b>prefix</b>, not the key — try <b>raw</b>.</div></div>
           <div class="field nt_customwrap hidden"><label>Custom header name</label><input id="nt_custom" placeholder="X-Api-Key"></div>
         </div>
         <div class="field"><label>Base URL</label><input id="nt_base" placeholder="https://api.dataforseo.com/v3" inputmode="url"></div>
@@ -518,7 +518,7 @@ function renderRouting(){
 }
 
 /* ---- the shelf (shared API cabinet) ---- */
-const TOOL_AUTH=['bearer','x-api-key','token','custom'];
+const TOOL_AUTH=['bearer','raw','basic','x-api-key','token','custom'];
 const SHELF_HINT={reasoning:'reasoning',data:'data',delivery:'delivery (fallback)',other:'other',custom:'custom'};
 function fillToolShelfSelect(){
   const sel=$('#nt_shelf'); if(!sel) return;
