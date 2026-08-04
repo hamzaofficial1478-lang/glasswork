@@ -1,5 +1,5 @@
 """
-state.py — the live snapshot the Control Room reads.
+state.py — the snapshot the Control Room reads.
 
 Reads the filing cabinet (agency.db) and returns the exact shape ui/agency.html
 renders: header metrics, the six rooms with their real task feed, the approvals
@@ -85,7 +85,11 @@ def _room_stats(c, key, day0, open_tasks):
     if key == "Content":
         review = _one(c, "SELECT count(*) FROM content_queue WHERE status IN ('drafted','in_review')")
         queued = _one(c, "SELECT count(*) FROM content_queue WHERE status IN ('idea','briefed','approved')")
-        return [f"{review} in review", f"{queued} queued"], base
+        # A page held for another sector's call is real work, not nothing — if it
+        # isn't shown, six finished briefs look like an idle room.
+        held = _one(c, "SELECT count(*) FROM content_queue WHERE status LIKE 'blocked_on_%'")
+        right = f"{queued} queued" + (f", {held} held" if held else "")
+        return [f"{review} in review", right], base
     if key == "SEO":
         kw = _one(c, "SELECT count(*) FROM keywords")
         ranks = _one(c, "SELECT count(*) FROM rankings")
