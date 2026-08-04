@@ -179,7 +179,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 
   <!-- INTEGRATIONS -------------------------------------------------------- -->
   <section class="card">
-    <div class="card-h"><div class="ic">🔌</div><div><b>4 · Integrations</b><small>How the agency reaches the outside world — email, WhatsApp and Search Console</small></div></div>
+    <div class="card-h"><div class="ic">🔌</div><div><b>4 · Integrations</b><small>How the agency reaches the outside world — email and Search Console</small></div></div>
     <div class="card-b">
 
       <div class="cred">
@@ -199,18 +199,6 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         </div>
         <div class="btnrow"><button class="pbtn" id="saveEmail">Save email</button><button class="mini" id="testEmail">Test login</button><span class="inl dim" id="emailMsg"></span></div>
         <div class="hint">The test logs in to your mail server and hangs up — no message is delivered to anyone.</div>
-      </div>
-
-      <div class="cred">
-        <div class="cred-h"><b>WhatsApp Business</b></div>
-        <p class="hint" style="margin-top:0;margin-bottom:10px">The UAE's main enquiry channel — fast replies here win jobs. From Meta's WhatsApp Cloud API (developers.facebook.com).</p>
-        <div class="row">
-          <div class="field"><label>Phone number ID</label><input id="wa_phone" placeholder="1234567890"></div>
-          <div class="field"><label>Business account ID (optional)</label><input id="wa_biz" placeholder="optional"></div>
-        </div>
-        <div class="field"><label>Access token</label><input id="wa_token" type="password" placeholder="leave blank to keep saved"><div class="hint">The permanent access token from your Meta app.</div></div>
-        <div class="btnrow"><button class="pbtn" id="saveWa">Save WhatsApp</button><button class="mini" id="testWa">Test token</button><span class="inl dim" id="waMsg"></span></div>
-        <div class="hint">The test reads your number's own record from Meta to check the token and phone ID together. It messages nobody.</div>
       </div>
 
       <div class="cred">
@@ -697,9 +685,6 @@ $('#saveEmail').onclick=()=>saveIntegration('email',{
   SMTP_HOST:$('#em_host').value.trim(),SMTP_PORT:$('#em_port').value.trim(),SMTP_USER:$('#em_user').value.trim(),
   SMTP_PASS:$('#em_pass').value,MAIL_FROM:$('#em_from').value.trim(),MAIL_FROM_NAME:$('#em_fromname').value.trim()
 },$('#saveEmail'),$('#emailMsg'),['em_pass']);
-$('#saveWa').onclick=()=>saveIntegration('whatsapp',{
-  WHATSAPP_PHONE_ID:$('#wa_phone').value.trim(),WHATSAPP_BUSINESS_ID:$('#wa_biz').value.trim(),WHATSAPP_TOKEN:$('#wa_token').value
-},$('#saveWa'),$('#waMsg'),['wa_token']);
 $('#saveGsc').onclick=()=>saveIntegration('gsc',{
   GSC_PROPERTY:$('#gsc_prop').value.trim(),GSC_SERVICE_ACCOUNT_JSON:$('#gsc_json').value
 },$('#saveGsc'),$('#gscMsg'),['gsc_json']);
@@ -716,7 +701,6 @@ async function testChannel(which, btn, msg, notify){
   else                  inl(msg,'err','✕ '+r.detail);
 }
 $('#testEmail').onclick=()=>testChannel('email',$('#testEmail'),$('#emailMsg'));
-$('#testWa').onclick   =()=>testChannel('whatsapp',$('#testWa'),$('#waMsg'));
 $('#testTg').onclick   =()=>testChannel('telegram',$('#testTg'),$('#optMsg'));
 $('#tgPing').onclick   =()=>testChannel('telegram',$('#tgPing'),$('#optMsg'),true);
 
@@ -793,12 +777,10 @@ async function loadSettings(){
   $('#outreachCap').value=o.outreachCap||'';
   if(o.dfsPasswordSet) $('#dfsPassword').placeholder='saved — leave blank to keep';
   if(o.telegramTokenSet) $('#telegramToken').placeholder='saved — leave blank to keep';
-  const ig=j.integrations||{}, em=ig.email||{}, wa=ig.whatsapp||{}, gsc=ig.gsc||{};
+  const ig=j.integrations||{}, em=ig.email||{}, gsc=ig.gsc||{};
   $('#em_host').value=em.host||''; $('#em_port').value=em.port||''; $('#em_user').value=em.user||'';
   $('#em_from').value=em.from||''; $('#em_fromname').value=em.fromName||'';
   if(em.passSet) $('#em_pass').placeholder='saved — leave blank to keep';
-  $('#wa_phone').value=wa.phoneId||''; $('#wa_biz').value=wa.businessId||'';
-  if(wa.tokenSet) $('#wa_token').placeholder='saved — leave blank to keep';
   $('#gsc_prop').value=gsc.property||'';
   if(gsc.serviceAccountSet) $('#gsc_json').placeholder='saved — leave blank to keep';
 }
