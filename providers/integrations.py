@@ -1,21 +1,32 @@
 """
 integrations.py — test the channels the agency talks through: Telegram (how the
-owner is asked to approve), WhatsApp, and SMTP.
+owner is asked to approve) and SMTP.
 
 These live in .env rather than the provider store, so they were the one part of
 the setup with no test at all. You could have a dead Telegram token and not find
 out until the night an agent needed a decision from you.
 
+Telegram is NOT a customer channel — it is the owner's approval line, the way an
+agent stops and asks before doing anything amber. Five agents depend on it (MD,
+Overseer, Reporter, Security, Leads-Responder), and every red line in the
+handbook ends in "owner approval", which arrives here.
+
 THE RULE HERE: prove the credential, send nothing. Every check below is a
 read-only or auth-only call:
   Telegram  getMe + getChat   — reads the bot and the chat, posts no message
-  WhatsApp  GET the phone-id  — reads the number's own record, messages nobody
   SMTP      connect + login   — authenticates and hangs up, no mail leaves
 
 A test that spams the owner (or worse, a customer) to prove it works is a test
 you stop running. The one exception is Telegram, where you can explicitly ask
 for a real message — you have to pass notify=True, and it only ever goes to the
 owner's own chat id.
+
+(The WhatsApp Cloud API used to live here. It was removed because the owner
+takes WhatsApp enquiries through the widget on the site and answers them
+himself — no agent ever read or wrote that channel, so it was setup surface
+with nothing behind it. It is in git history if agent-driven replies are ever
+wanted. The company's WhatsApp *number* still appears on the email banner;
+that is contact detail, not this API.)
 """
 import os
 import re
@@ -29,7 +40,6 @@ from . import auth
 
 ENV_PATH = Path(__file__).parents[1] / ".env"
 _TELEGRAM = "https://api.telegram.org"
-_GRAPH = "https://graph.facebook.com/v21.0"
 
 
 def read_env(path=None) -> dict:
@@ -125,58 +135,6 @@ def test_telegram(env=None, notify=False, timeout=20) -> dict:
     return _result("telegram", True, detail, bot=bot, chat=chat)
 
 
-# ---- WhatsApp (Meta Cloud API) ----------------------------------------------
-
-def test_whatsapp(env=None, timeout=20) -> dict:
-    """
-    Read the phone number's own record. That single call exercises the token AND
-    the phone id together, which is the pair that actually has to be right.
-    No message is sent — messaging a real number to test would be outreach.
-    """
-    env = env if env is not None else read_env()
-    gone = _missing(env, ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID"])
-    if len(gone) == 2:
-        return _result("whatsapp", None, "Not configured — no WhatsApp token or phone id in .env.")
-    if gone:
-        return _result("whatsapp", False, f"Half configured — still missing: {', '.join(gone)}.")
-
-    token = env["WHATSAPP_TOKEN"].strip()
-    phone_id = env["WHATSAPP_PHONE_ID"].strip()
-    try:
-        r = requests.get(f"{_GRAPH}/{phone_id}",
-                         params={"fields": "display_phone_number,verified_name,quality_rating"},
-                         headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
-    except Exception as e:
-        return _result("whatsapp", False, f"Could not reach Meta's Graph API: {e}",
-                       key=auth.redact(token))
-    body = {}
-    try:
-        body = r.json() or {}
-    except Exception:
-        pass
-    if 200 <= r.status_code < 300:
-        num = body.get("display_phone_number", "?")
-        name = body.get("verified_name", "?")
-        qual = body.get("quality_rating", "")
-        extra = f", quality {qual}" if qual else ""
-        return _result("whatsapp", True,
-                       f"Token and phone id both valid — {name} on {num}{extra}. Nothing was sent.",
-                       number=num, name=name)
-    err = (body.get("error") or {}).get("message", "")
-    if r.status_code in (401, 403) or "token" in err.lower():
-        return _result("whatsapp", False,
-                       f"{r.status_code} — Meta rejected the token{': ' + err if err else ''}. "
-                       "Cloud API tokens expire; a temporary one lasts 24h, so generate a "
-                       "permanent System User token.", status=r.status_code, key=auth.redact(token))
-    if r.status_code == 404:
-        return _result("whatsapp", False,
-                       f"404 — the token works but phone id {phone_id} doesn't exist under it. "
-                       "Check you copied the Phone number ID, not the WhatsApp Business ID.",
-                       status=404)
-    return _result("whatsapp", False,
-                   f"{r.status_code}{': ' + err if err else ''}", status=r.status_code)
-
-
 # ---- SMTP -------------------------------------------------------------------
 
 def test_email(env=None, timeout=20) -> dict:
@@ -236,7 +194,7 @@ def test_email(env=None, timeout=20) -> dict:
                        host=host, port=port)
 
 
-ALL = {"telegram": test_telegram, "whatsapp": test_whatsapp, "email": test_email}
+ALL = {"telegram": test_telegram, "email": test_email}
 
 
 def test_all(env=None, notify=False) -> list:
