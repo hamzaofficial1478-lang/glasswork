@@ -194,10 +194,14 @@ def probe_tool(tool, timeout=90):
         elif r.status_code == 404:
             cause = "404 — host reachable, but this exact path doesn't exist. The key may still be fine; check the base URL."
         elif r.status_code == 405:
-            cause = "405 — host reachable and the path exists, it just wants POST. Usually fine."
-            ok = None
+            # 405 only says "wrong method" — it proves NOTHING about the key, because
+            # the server rejects the verb before it ever checks auth. So try the same
+            # URL with POST and report THAT, which does exercise the credential.
+            return _retry_post(tool, url, headers, timeout, raw)
         else:
             cause = _likely_cause(r.status_code, r.text)
+        if r.status_code == 401 or r.status_code == 403:
+            cause += _auth_hint(tool)
         return {"ok": ok, "status": r.status_code, "cause": cause, "raw": raw}
     except requests.exceptions.Timeout:
         raw["status"] = 0
@@ -207,3 +211,51 @@ def probe_tool(tool, timeout=90):
         raw["response_body"] = str(e)[:300]
         return {"ok": False, "status": 0,
                 "cause": "Could not connect — check the base URL is reachable.", "raw": raw}
+
+
+def _auth_hint(tool):
+    """
+    The single most common false 'bad key': sending "Bearer <key>" to an API that
+    wants the bare key. Point at it instead of leaving the owner guessing.
+    """
+    style = (tool.get("auth_style") or "").lower()
+    if style == "bearer":
+        return ("  → Likely the PREFIX, not the key: this host may want the bare key with no "
+                "'Bearer '. Switch Auth style to 'raw (no prefix)' and test again. "
+                "(Pexels, and many media APIs, work this way.)")
+    if style == "raw":
+        return ("  → If the key itself is right, try 'bearer' — some hosts do want the prefix.")
+    if style == "basic":
+        return ("  → For Basic auth enter the key as login:password (it is base64-encoded for you).")
+    return ""
+
+
+def _retry_post(tool, url, headers, timeout, raw):
+    """A 405 on GET means 'wrong verb', not 'bad key'. POST actually tests auth."""
+    try:
+        r = requests.post(url, headers={**headers, "Content-Type": "application/json"},
+                          data="{}", timeout=timeout)
+    except Exception as e:
+        raw["method"] = "GET, then POST"
+        raw["status"] = 0
+        raw["response_body"] = str(e)[:300]
+        return {"ok": False, "status": 0,
+                "cause": "GET returned 405; the POST retry could not connect.", "raw": raw}
+    raw["method"] = "GET returned 405, retried with POST"
+    raw["status"] = r.status_code
+    raw["response_body"] = r.text[:600]
+    if 200 <= r.status_code < 300:
+        return {"ok": True, "status": r.status_code,
+                "cause": "Reachable and the key was accepted (via POST).", "raw": raw}
+    if r.status_code in (401, 403):
+        return {"ok": False, "status": r.status_code,
+                "cause": f"{r.status_code} — the host answered but rejected the key."
+                         + _auth_hint(tool), "raw": raw}
+    if r.status_code in (400, 422):
+        # auth passed; it only objected to our deliberately empty test body
+        return {"ok": True, "status": r.status_code,
+                "cause": (f"{r.status_code} — the key was ACCEPTED; the host only rejected the empty "
+                          "test body, which is expected. This API is wired correctly."), "raw": raw}
+    return {"ok": None, "status": r.status_code,
+            "cause": f"POST returned {r.status_code}. " + _likely_cause(r.status_code, r.text),
+            "raw": raw}
