@@ -147,7 +147,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 <div class="drawer" id="drawer">
   <div class="dh"><div class="av" id="dAv">🤖</div><div><b id="dName">Agent</b><br><small id="dRole">role</small></div><button class="x" onclick="closeDrawer()">×</button></div>
   <div class="dbody" id="dBody"></div>
-  <div class="dfoot"><input id="dInput" placeholder="Ask this agent for work…" onkeydown="if(event.key==='Enter')sendMsg()"><button onclick="sendMsg()">Send</button></div>
+  <div class="dfoot"><input id="dInput" placeholder="Ask this agent for work…" onkeydown="if(event.key==='Enter')askAgent()"><button onclick="askAgent()">Ask</button></div>
 </div>
 
 <div class="scrim" id="scrim" onclick="closeAll()"></div>
@@ -167,11 +167,11 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 
 <script>
 function sectors(){return [
-  {key:"Director",name:"Director's Office",cls:"dir",agents:[{n:"Director",role:"Plans the day",s:"working",t:"Reviewing overnight scorecard",av:"🜛"}]},
+  {key:"Director",name:"Director's Office",cls:"dir",agents:[{n:"Director",role:"Plans the day",s:"working",t:"Reviewing overnight scorecard",av:"🔮"}]},
   {key:"IT",name:"IT & Site Health",cls:"",agents:[{n:"Watcher",role:"Finds issues",s:"working",t:"Form test passed 07:02",av:"🛠"},{n:"Fixer",role:"Patches in a branch",s:"working",t:"Fixing slow gallery",av:"🧰"},{n:"Releaser",role:"Only agent on production",s:"idle",t:"Waiting on tests",av:"🚀"}]},
   {key:"Content",name:"Content & Social",cls:"",agents:[{n:"Writer",role:"Drafts in your voice",s:"working",t:"Marina villa case study",av:"✍"},{n:"Illustrator",role:"AI images",s:"working",t:"Rendering images",av:"🎨"},{n:"Publisher",role:"Publishes after Auditor",s:"waiting",t:"Waiting sign-off",av:"📤"}]},
   {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{n:"Auditor",role:"On-page & schema",s:"working",t:"Schema on 8 pages",av:"🔍"},{n:"Strategist",role:"Keyword gaps",s:"working",t:"Gap: doors Al Barsha",av:"🧭"}]},
-  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{n:"Hunter",role:"Finds UAE leads",s:"working",t:"41 firms, Business Bay",av:"🎯"},{n:"Scanner",role:"Blocks duplicates",s:"working",t:"3 dupes skipped",av:"♻"},{n:"Outreach",role:"Mail + DMs, under cap",s:"working",t:"18/25 sent",av:"✉"},{n:"Responder",role:"Handles replies",s:"waiting",t:"Reply from Aster",av:"💬"}]},
+  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{n:"Hunter",role:"Finds UAE leads",s:"working",t:"41 firms, Business Bay",av:"🎯"},{n:"Scanner",role:"Blocks duplicates",s:"working",t:"3 dupes skipped",av:"♻"},{n:"Outreach",role:"Mail + DMs, under cap",s:"working",t:"18/25 posted",av:"✉"},{n:"Responder",role:"Handles replies",s:"waiting",t:"Reply from Aster",av:"💬"}]},
   {key:"Report",name:"Reports",cls:"",agents:[{n:"Reporter",role:"Scores the agency",s:"working",t:"Scored 9 decisions",av:"📋"}]},
   {key:"Security",name:"Security",cls:"sec",agents:[{n:"Screener",role:"Scam & fraud filter",s:"working",t:"Flagged 2 scam leads",av:"🛡"},{n:"Guard",role:"Untrusts scraped text",s:"idle",t:"All clear",av:"⚠"}]}
 ];}
@@ -277,14 +277,48 @@ function fireComm(){
 function renderPerf(){
   const m=SITES[CURRENT].metrics;
   $('#perfStrip').innerHTML=m.map(([v,l,c])=>`<div class="pstat"><span class="v ${c}">${v}</span><span class="l etch">${l}</span></div>`).join('')+`<a href="agency.html">Open full control room →</a>`;
-  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working').length,tot=r.agents.length;return `<div class="conn"><div class="ic">▦</div><div class="nm"><b>${r.name}</b><span>${w}/${tot} working</span></div><div style="width:80px;height:6px;border-radius:3px;background:var(--line)"><div style="width:${Math.round(w/tot*100)}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`;}).join('')+`</div>`;
+  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
+    const sub = r.foot ? r.foot.join(' · ') : (w+'/'+tot+' working');
+    return `<div class="conn"><div class="ic">▦</div><div class="nm"><b>${r.name}</b><span>${sub}</span></div><div style="width:80px;height:6px;border-radius:3px;background:var(--line)"><div style="width:${pct}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`;}).join('')+`</div>`
+    + shelfPanel();
+}
+
+/* The shelf, shown right beside the per-sector health so you can see at a glance
+   which shared APIs exist, which are stocked, and which agent is holding one. */
+function shelfHealth(sh){
+  if(!sh.length) return 0;
+  const stocked = sh.filter(s=>s.items).length;
+  return Math.round(stocked / sh.length * 100);   // a shelf with no key is dead weight
+}
+function shelfPanel(){
+  const sh = (LIVE && LIVE.shelf) || [];
+  if(!sh.length){
+    return `<div class="pgroup"><div class="gh etch">The shelf · shared APIs</div>`
+      + `<div class="conn"><div class="nm"><b>Not loaded</b><span>start the server so /api/state can read the cabinet</span></div></div></div>`;
+  }
+  const health = shelfHealth(sh);
+  const stocked = sh.filter(s=>s.items).length;
+  const rows = sh.map(s=>{
+    const state = s.holder ? ('in use · '+s.holder) : (s.items ? 'available' : 'no API yet');
+    const dot   = s.holder ? '●' : (s.items ? '○' : '·');
+    const kit   = s.items ? (s.items+(s.items===1?' API':' APIs')) : '—';
+    return `<div class="conn" style="${s.items?'':'opacity:.5'}"><div class="ic">${dot}</div>`
+      + `<div class="nm"><b>${s.shelf}</b><span>${state}${s.queue?(' · '+s.queue+' queued'):''} · ${kit}</span></div>`
+      + `<b style="font-family:'IBM Plex Mono',monospace;font-size:11px">${s.spend?('$'+s.spend):''}</b></div>`;
+  }).join('');
+  return `<div class="pgroup"><div class="gh etch">The shelf · shared APIs</div>`
+    + `<div class="conn"><div class="ic">▩</div><div class="nm"><b>Shelf health</b>`
+    + `<span>${stocked} of ${sh.length} shelves have an API</span></div>`
+    + `<div style="width:80px;height:6px;border-radius:3px;background:var(--line)">`
+    + `<div style="width:${health}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`
+    + rows + `</div>`;
 }
 const CONNS=[
   {g:"Website & backend",items:[{ic:"◧",n:"Website",s:"custom · connected",on:true},{ic:"🗄",n:"Filing cabinet (DB)",s:"agency.db",on:true}]},
   {g:"SEO & data",items:[{ic:"⌕",n:"DataForSEO",s:"rank tracking",on:true},{ic:"📈",n:"Search Console",s:"not connected",on:false}]},
   {g:"Messaging",items:[{ic:"✈",n:"Telegram bridge",s:"@owner",on:true},{ic:"🟢",n:"WhatsApp",s:"not connected",on:false}]},
   {g:"Social",items:[{ic:"⌾",n:"Instagram",s:"not connected",on:false},{ic:"♪",n:"TikTok",s:"not connected",on:false},{ic:"f",n:"Facebook",s:"not connected",on:false}]},
-  {g:"Outreach",items:[{ic:"✉",n:"Sending domain",s:"mail.glassworks.ae",on:true}]}
+  {g:"Outreach",items:[{ic:"✉",n:"Outreach domain",s:"mail.glassworks.ae",on:true}]}
 ];
 function renderConns(){
   $('#connBody').innerHTML=CONNS.map(grp=>`<div class="pgroup"><div class="gh etch">${grp.g}</div>`+grp.items.map(it=>`<div class="conn"><div class="ic">${it.ic}</div><div class="nm"><b>${it.n}</b><span>${it.s}</span></div><div class="toggle ${it.on?'on':''}" onclick="this.classList.toggle('on')"></div></div>`).join('')+`</div>`).join('')+`<div class="pgroup"><div class="gh etch">Add a key or link</div><div class="field"><label>Name</label><input placeholder="e.g. Instagram token"></div><div class="field"><label>Value / URL</label><input placeholder="paste here"></div><button class="pbtn" onclick="alert('Stored on the server, never in the browser or git.')">Add connection</button></div>`;
@@ -294,14 +328,69 @@ function renderSiteMenu(){
 }
 function toggleSites(e){if(e)e.stopPropagation();$('#siteMenu').classList.toggle('open');}
 function switchSite(id){CURRENT=id;$('#curSite').textContent=SITES[id].name;$('#curFav').textContent=SITES[id].fav;$('#siteMenu').classList.remove('open');boot();}
-function addSite(){const name=($('#nsName').value.trim()||'New Website'),url=($('#nsUrl').value.trim()||'example.com');const id='s'+Object.keys(SITES).length,fav=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();SITES[id]={name,fav,url,metrics:[["—","Agency health","glass"],["0","Leads today",""],["0","Awaiting you","amber"],["—","Rank moves wk","ok"],["$0.00","Spend today","mono"]],rooms:sectors()};renderSiteMenu();switchSite(id);closeAll();}
+function addSite(){const name=($('#nsName').value.trim()||'New Website'),url=($('#nsUrl').value.trim()||'example.com');const id='s'+Object.keys(SITES).length,fav=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();SITES[id]={name,fav,url,metrics:[["—","Agency health","glass"],["0","Leads today",""],["0","Awaiting you","amber"],["—","Shelf","ok"],["$0.00","Spend today","mono"]],rooms:sectors()};renderSiteMenu();switchSite(id);closeAll();}
 let cur;
 function openDrawer(a){cur=a;$('#dAv').textContent=a.av;$('#dName').textContent=a.n;$('#dRole').textContent=a.role;$('#dBody').innerHTML=`<div class="msg a">I'm ${a.n} in the ${a.room||''} room. ${a.role}. Right now: ${a.t}. What do you need?</div>`;$('#drawer').classList.add('open');}
 function closeDrawer(){$('#drawer').classList.remove('open');}
-function sendMsg(){const v=$('#dInput').value.trim();if(!v)return;$('#dBody').insertAdjacentHTML('beforeend',`<div class="msg u">${v}</div>`);$('#dInput').value='';setTimeout(()=>{$('#dBody').insertAdjacentHTML('beforeend',`<div class="msg a">On it. I'll claim that as a task on the board, and if I need another sector to verify anything I'll send a request down the wire rather than doing their job.</div>`);$('#dBody').scrollTop=$('#dBody').scrollHeight;},480);}
+function askAgent(){const v=$('#dInput').value.trim();if(!v)return;$('#dBody').insertAdjacentHTML('beforeend',`<div class="msg u">${v}</div>`);$('#dInput').value='';setTimeout(()=>{$('#dBody').insertAdjacentHTML('beforeend',`<div class="msg a">On it. I'll claim that as a task on the board, and if I need another sector to verify anything I'll post a request down the wire rather than doing their job.</div>`);$('#dBody').scrollTop=$('#dBody').scrollHeight;},480);}
 function openPanel(id){closeAll();$('#'+id).classList.add('open');$('#scrim').classList.add('open');}
 function closeAll(){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('open'));$('#scrim').classList.remove('open');}
-function boot(){renderFloor();renderPerf();}
+/* ---- LIVE STATE -------------------------------------------------------
+   The office used to draw hardcoded numbers. It now reads /api/state (the
+   filing cabinet) and overlays the real figures, the real per-room task feed
+   and the shelf. If the server isn't up it simply keeps the sample layout, so
+   the floor plan never breaks. ------------------------------------------ */
+let LIVE = null;
+
+async function pullLive(){
+  try{
+    const r = await fetch('/api/state',{cache:'no-store'});
+    const j = await r.json();
+    if(!j || !j.ok) return null;
+    return j;
+  }catch(_){ return null; }
+}
+
+function applyLive(j){
+  if(!j) return;
+  const st = SITES[CURRENT];
+  const pend = (j.approvals||[]).length;
+  st.metrics = [
+    [String(j.metrics.health), "Agency health", "glass"],
+    [String(j.metrics.leads),  "Leads today",   ""],
+    [String(pend),             "Awaiting you",  "amber"],
+    [shelfSummary(j),          "Shelf",         "ok"],
+    [String(j.metrics.spend),  "Spend today",   "mono"],
+  ];
+  // overlay each room's real task feed onto the desks
+  const byKey = {}; (j.rooms||[]).forEach(r=>byKey[r.key]=r);
+  st.rooms.forEach(rm=>{
+    const live = byKey[rm.key];
+    if(!live) return;
+    rm.score = live.score;
+    rm.foot  = live.foot;
+    const tasks = live.agents||[];
+    rm.agents.forEach((a,i)=>{
+      if(tasks[i]){ a.s = tasks[i].s; a.t = tasks[i].t; }
+      else { a.s = 'idle'; a.t = 'no task on the board'; }
+    });
+  });
+}
+
+function shelfSummary(j){
+  const sh = (j && j.shelf) || [];
+  if(!sh.length) return "—";
+  const busy = sh.filter(s=>s.holder).length;
+  const stocked = sh.filter(s=>s.items).length;
+  return busy ? (busy+" in use") : (stocked+"/"+sh.length);
+}
+
+async function boot(){
+  renderFloor(); renderPerf();          // draw immediately from what we have
+  LIVE = await pullLive();
+  if(LIVE){ applyLive(LIVE); renderFloor(); renderPerf(); }
+}
+setInterval(async ()=>{ const j=await pullLive(); if(j){ LIVE=j; applyLive(j); renderFloor(); renderPerf(); } }, 15000);
 renderSiteMenu();renderConns();boot();
 setInterval(fireComm,2200);
 setInterval(()=>{const d=new Date();$('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');},1000);
