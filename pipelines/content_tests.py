@@ -1,5 +1,5 @@
 """
-content_tests.py — run: python3 -m pipelines.content_tests
+content_tests.py — run: python -m pipelines.content_tests  (python3 on macOS/Linux)
 
 Content's failure mode is not a crash, it is VOLUME: twelve thin pages that
 compete with each other and win no work. So these tests are aimed at the rules
@@ -169,8 +169,11 @@ def test_end_to_end_on_a_temp_cabinet():
         con.commit()
         con.close()
 
-        check("refuses to invent work with no request",
-              cb.run(agent="t")["error"].startswith("no open SEO->Content"), True)
+        idle = cb.run(agent="t")
+        check("refuses to invent work with no request", idle["ok"], False)
+        check("and says what the cabinet holds", idle["keywords_in_cabinet"], 5)
+        check("and names the command that fixes it",
+              "pipelines.seo_gap" in idle["error"], True)
 
         board.post_request("SEO", "Content", "Keyword-gap list ready", "gaps attached")
         r = cb.run(agent="content-writer")

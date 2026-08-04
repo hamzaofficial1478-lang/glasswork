@@ -26,7 +26,7 @@ The cycle, exactly as CLAUDE.md describes for Content:
   6. The CRITIC checks before anything is stored.
   7. REPLY on the request thread and close it. Append, never overwrite.
 
-    python3 -m pipelines.content_briefs
+    python -m pipelines.content_briefs       (python3 on macOS/Linux)
 """
 import json
 import re
@@ -181,8 +181,21 @@ def run(agent="content-writer", max_briefs=6, draft_allowance=1):
                 claimed = r
                 break
         if not claimed:
-            return {"ok": False, "error": "no open SEO->Content keyword request to claim "
-                                          "(run pipelines.seo_gap first)"}
+            # Not a fault: Content is refusing to invent work nobody asked for.
+            # Say WHY, and what the cabinet actually holds, so the fix is obvious.
+            kw = con.execute("SELECT count(*) FROM keywords").fetchone()[0]
+            done = con.execute("SELECT count(*) FROM requests WHERE to_sector='Content'"
+                               " AND status!='open'").fetchone()[0]
+            why = (f"{kw} keywords are tracked but SEO has not posted a handoff yet"
+                   if kw else "the cabinet has no keywords yet")
+            if done:
+                why += f"; {done} earlier handoff(s) were already answered"
+            return {"ok": False,
+                    "error": f"Nothing to claim — {why}. "
+                             "Content only works from a request on the board, never on its "
+                             "own. Run the SEO strategist first:  python -m pipelines.seo_gap "
+                             "(use python3 on macOS/Linux), then run this again.",
+                    "keywords_in_cabinet": kw, "handoffs_already_answered": done}
 
         # 2. the real evidence: gaps the SEO Strategist stored
         rows = [(r["phrase"], r["area"] or "", r["intent"] or "info")
