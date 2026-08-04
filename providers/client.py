@@ -169,9 +169,14 @@ def probe_tool(tool, timeout=90):
     we can't send a prompt — instead we make a real authenticated request to the
     tool's own base URL and report exactly what came back, key-redacted.
 
-    A 2xx means the key works. 401/403 means the key is wrong. 404 usually means
-    the URL is right but the path isn't — which still proves the host is reachable
-    and is reported as such rather than as a failure of the key.
+    Only 401/403 actually means a bad key. The other codes are routinely mistaken
+    for one, so each gets a verdict that reflects what it really proves:
+      2xx      the key works.
+      401/403  the key was rejected (+ a hint, since a wrong PREFIX looks identical).
+      404      host reachable, wrong path — says nothing about the key.
+      405      wrong VERB, checked before auth — proves nothing, so we retry POST.
+      400/422  the host READ the key and objected to the REQUEST. Auth passed; we
+               retry with a sample query so a working API shows live data.
     """
     from . import auth
     url = (tool.get("base_url") or "").strip()
@@ -198,6 +203,11 @@ def probe_tool(tool, timeout=90):
             # the server rejects the verb before it ever checks auth. So try the same
             # URL with POST and report THAT, which does exercise the credential.
             return _retry_post(tool, url, headers, timeout, raw)
+        elif r.status_code in (400, 422):
+            # A 400 means the host READ the credential and then objected to the
+            # REQUEST (Pexels: "No query param given"). Auth already succeeded —
+            # reporting this as a failure sends the owner hunting a key that works.
+            return _retry_with_params(tool, url, headers, timeout, raw, r)
         else:
             cause = _likely_cause(r.status_code, r.text)
         if r.status_code == 401 or r.status_code == 403:
@@ -228,6 +238,50 @@ def _auth_hint(tool):
     if style == "basic":
         return ("  → For Basic auth enter the key as login:password (it is base64-encoded for you).")
     return ""
+
+
+# Search-style APIs need a term before they will answer. These are the common
+# spellings. We only ever ADD a parameter to the URL the owner saved — the path
+# is never touched — and only after a 400/422 has already proved the key got in.
+_SAMPLE_PARAMS = ({"query": "test", "per_page": 1},
+                  {"q": "test", "limit": 1},
+                  {"keyword": "test"},
+                  {"search": "test"})
+
+
+def _retry_with_params(tool, url, headers, timeout, raw, first):
+    """
+    Turn "400 — no query given" into a real answer.
+
+    The 400 alone already proves the credential was accepted, but telling an owner
+    "your error is actually a pass" is a poor substitute for showing them live data.
+    So try a sample search first; only fall back to explaining the 400 if none fit.
+    """
+    sample_timeout = min(timeout, 30)
+    for params in _SAMPLE_PARAMS:
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=sample_timeout)
+        except Exception:
+            break  # network went away mid-test; the original 400 still stands
+        if 200 <= r.status_code < 300:
+            raw["method"] = f"GET (retried with a sample query: {params})"
+            raw["status"] = r.status_code
+            raw["response_body"] = r.text[:600]
+            return {"ok": True, "status": r.status_code,
+                    "cause": "Reachable, key accepted, and a sample query returned live data. "
+                             "This API is fully working.", "raw": raw}
+        if r.status_code in (401, 403):
+            raw["method"] = f"GET (retried with a sample query: {params})"
+            raw["status"] = r.status_code
+            raw["response_body"] = r.text[:600]
+            return {"ok": False, "status": r.status_code,
+                    "cause": f"{r.status_code} — the host answered but rejected the key."
+                             + _auth_hint(tool), "raw": raw}
+    # Nothing matched this API's parameter names — but auth still demonstrably passed.
+    return {"ok": True, "status": first.status_code,
+            "cause": (f"{first.status_code} — the key was ACCEPTED. The host only rejected the test "
+                      "request itself, because it wants a search parameter this generic test "
+                      "cannot guess. Your credential is wired correctly."), "raw": raw}
 
 
 def _retry_post(tool, url, headers, timeout, raw):

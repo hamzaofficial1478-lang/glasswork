@@ -87,6 +87,37 @@ def test_405_retry():
         client.requests.post = real_post
 
 
+def test_400_means_key_accepted():
+    """
+    Pexels answers a keyless search with 400 "No query param given". That 400 is
+    proof the credential got IN — a bad key 401s instead, whatever the params. So
+    the tester must never paint it red, and should prove it with a sample query.
+    """
+    print("400 (host read the key, wants a query):")
+    from . import client
+    real_get = client.requests.get
+    tool = {"base_url": "https://h/search", "auth_style": "raw", "api_key": "K"}
+    try:
+        seq = [_Resp(400, '{"code":"No query param given"}'), _Resp(200, '{"photos":[]}')]
+        client.requests.get = lambda *a, **k: seq.pop(0)
+        r = client.probe_tool(dict(tool))
+        check("sample query works -> green", (r["ok"], r["status"]), (True, 200))
+        check("says it returned live data", "live data" in r["cause"], True)
+
+        client.requests.get = lambda *a, **k: _Resp(400, '{"code":"unguessable"}')
+        r = client.probe_tool(dict(tool))
+        check("no sample fits -> still a pass", (r["ok"], r["status"]), (True, 400))
+        check("explains the key was accepted", "ACCEPTED" in r["cause"], True)
+
+        # the safety property: a genuinely bad key must NOT be laundered into a pass
+        seq = [_Resp(400, "{}"), _Resp(401, '{"error":"bad key"}')]
+        client.requests.get = lambda *a, **k: seq.pop(0)
+        r = client.probe_tool(dict(tool))
+        check("bad key still fails red", (r["ok"], r["status"]), (False, 401))
+    finally:
+        client.requests.get = real_get
+
+
 def test_probe_equals_production():
     print("Probe == production request shape:")
     cred = {"base_url": "https://h/v1/chat/completions",  # deliberately pasted full
@@ -106,6 +137,7 @@ def main():
     test_urls()
     test_auth()
     test_405_retry()
+    test_400_means_key_accepted()
     test_probe_equals_production()
     print()
     if _fail:
