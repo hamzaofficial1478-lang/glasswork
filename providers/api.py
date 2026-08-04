@@ -106,6 +106,24 @@ def cmd_delete_tool(a):
     return {"ok": store.delete_tool(a.get("id", ""))}
 
 
+def cmd_test_tool(a):
+    """Test one shelf API for real, the same way the model tester works."""
+    tool = store.get_tool(a.get("id", ""))
+    if not tool:
+        return {"ok": False, "error": "no such tool"}
+    t0 = time.time()
+    res = client.probe_tool(tool)
+    res["latency_ms"] = int((time.time() - t0) * 1000)
+    store.upsert_tool({**tool, "last_test_result": {
+        "ok": res.get("ok"), "status": res.get("status"), "at": int(time.time())}})
+    return {"ok": True, "test": res}
+
+
+def cmd_resolve_shelf(a):
+    """The fallback chain for one shelf: primary first, then each fallback."""
+    return {"ok": True, "resolved": store.resolve_shelf(a.get("shelf", ""))}
+
+
 def cmd_shelves(_):
     """
     The shelf board: every shelf, what's on it (catalogue), and its live state
@@ -113,16 +131,25 @@ def cmd_shelves(_):
     model categories; tool shelves from the tools list.
     """
     cat = store.shelf_catalogue()
-    names = sorted(set(cat) | set(store.TOOL_SHELVES) | {"llm", "image", "embedding"})
+    names = sorted(set(cat) | set(store.known_shelves()) | {"llm", "image", "embedding"})
     state = cabinet.shelf_state(names) if cabinet else {}
     shelves = []
     for name in names:
         items = cat.get(name, [])
-        kind = "model" if name in ("llm", "image", "embedding") else "tool"
-        shelves.append({"shelf": name, "kind": kind, "items": items,
-                        "state": state.get(name, {"holder": None, "queue": [],
-                                                   "today_spend": 0, "recent": []})})
-    return {"ok": True, "shelves": shelves, "cabinet": bool(cabinet)}
+        # items are already priority-sorted, so item 1 is the primary and the rest
+        # are its fallbacks — the same shape the routing screen uses for brains.
+        shelves.append({
+            "shelf": name,
+            "kind": "model" if name in ("llm", "image", "embedding") else "tool",
+            "purpose": store.shelf_kind(name),
+            "items": items,
+            "primary": (items[0]["name"] if items else None),
+            "fallbacks": [i["name"] for i in items[1:]],
+            "state": state.get(name, {"holder": None, "queue": [],
+                                      "today_spend": 0, "recent": []}),
+        })
+    return {"ok": True, "shelves": shelves, "cabinet": bool(cabinet),
+            "kinds": {s: store.shelf_kind(s) for s in names}}
 
 
 DISPATCH = {
@@ -132,6 +159,7 @@ DISPATCH = {
     "test_model": cmd_test_model, "get_routing": cmd_get_routing,
     "save_route": cmd_save_route, "status": cmd_status,
     "save_tool": cmd_save_tool, "delete_tool": cmd_delete_tool, "shelves": cmd_shelves,
+    "test_tool": cmd_test_tool, "resolve_shelf": cmd_resolve_shelf,
 }
 
 
