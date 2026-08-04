@@ -89,7 +89,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 /* ---- THE SHELF: a real cabinet standing against the right wall ---- */
 .room.shelf{border-color:#5b7a86}
 .room.shelf .plaque{border-color:#5b7a86;color:#a8c6d1}
-.shelfwrap{flex:1;display:flex;flex-direction:column;gap:5px;padding:20px 9px 10px;overflow:hidden}
+.shelfwrap{flex:1;display:flex;flex-direction:column;gap:2px;padding:8px 9px 10px;overflow-y:auto}
 .slot{position:relative;border:1px solid var(--line2);border-radius:7px;background:linear-gradient(180deg,#16242b,#111c22);
   padding:6px 8px;display:flex;flex-direction:column;gap:2px;min-height:0}
 .slot.empty{opacity:.4;border-style:dashed}
@@ -100,6 +100,14 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .slot .who.wait{color:var(--amber)}
 .slot .none{font-size:9px;color:var(--faint);font-style:italic}
 .slot .led{position:absolute;top:6px;right:7px;width:6px;height:6px;border-radius:50%;background:var(--faint)}
+.slot .fb{font-size:8.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .idlebit{color:var(--ok)!important}
+.slot .spend{font-size:8.5px;color:var(--amber);font-family:'IBM Plex Mono',monospace}
+.shelfhead{display:flex;align-items:baseline;gap:8px;padding:16px 10px 0}
+.shelfhead b{font-size:12px;color:var(--glass)}
+.shelfhead span{font-size:9.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace;margin-left:auto}
+.shelfgrp{display:flex;flex-direction:column;gap:4px}
+.grph{font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin:4px 0 1px;border-bottom:1px solid var(--line);padding-bottom:2px}
 .slot.busy .led{background:var(--glass);box-shadow:0 0 7px var(--glass);animation:pulse 1.2s infinite}
 .slot.stocked .led{background:var(--ok);box-shadow:0 0 6px var(--ok)}
 
@@ -232,9 +240,17 @@ function renderShelfRoom(floor){
       +`<div class="slot empty"><div class="none">waiting for the server…</div></div></div>`;
     floor.appendChild(room); return;
   }
-  const slots=sh.map(s=>{
+  // group by what the shelf is FOR, so the cabinet reads like real shelving
+  const ORDER=['reasoning','data','delivery','other','custom'];
+  const LABEL={reasoning:'Reasoning',data:'Data',delivery:'Delivery',other:'Other',custom:'Custom'};
+  const groups={};
+  sh.forEach(s=>{ const k=s.purpose||'custom'; (groups[k]=groups[k]||[]).push(s); });
+
+  const slot=s=>{
     const cls = s.holder ? 'busy' : (s.items ? 'stocked' : 'empty');
-    const api = s.items ? (s.names||[]).filter(Boolean).join(', ') : '';
+    const names=(s.names||[]).filter(Boolean);
+    const primary=names[0]||'';
+    const fb=names.slice(1);
     let line;
     if(s.holder){
       const who = s.holder_sector ? (s.holder_sector+' · '+s.holder) : s.holder;
@@ -242,18 +258,28 @@ function renderShelfRoom(floor){
     } else if(s.queue){
       line = `<div class="who wait">${s.queue} waiting</div>`;
     } else if(s.items){
-      line = `<div class="who" style="color:var(--faint)">nobody using it</div>`;
+      line = `<div class="who idlebit">ready</div>`;
     } else {
       line = `<div class="none">no API yet</div>`;
     }
     return `<div class="slot ${cls}"><div class="led"></div>`
       + `<div class="sname">${s.shelf}</div>`
-      + (api?`<div class="api">${api}</div>`:'')
-      + line + `</div>`;
-  }).join('');
-  const stocked=sh.filter(s=>s.items).length;
+      + (primary?`<div class="api">${primary}</div>`:'')
+      + (fb.length?`<div class="fb">↳ fallback: ${fb.join(', ')}</div>`:'')
+      + line
+      + (s.spend?`<div class="spend">$${s.spend} today</div>`:'')
+      + `</div>`;
+  };
+
+  const body=ORDER.filter(k=>groups[k]).map(k=>
+    `<div class="shelfgrp"><div class="grph">${LABEL[k]}</div>`
+    + groups[k].map(slot).join('') + `</div>`).join('');
+
+  const stocked=sh.filter(s=>s.items).length, busy=sh.filter(s=>s.holder).length;
   room.innerHTML=`<div class="plaque">The shelf · ${stocked}/${sh.length}</div>`
-    + `<div class="shelfwrap">${slots}</div>`;
+    + `<div class="shelfhead"><b>${busy?busy+' in use':'all idle'}</b>`
+    + `<span>${stocked} stocked</span></div>`
+    + `<div class="shelfwrap">${body}</div>`;
   floor.appendChild(room);
 }
 
@@ -357,7 +383,8 @@ function shelfPanel(){
   const rows = sh.map(s=>{
     const who = s.holder ? ((s.holder_sector?s.holder_sector+' · ':'')+s.holder)
                          : (s.items ? 'available' : 'no API yet');
-    const api = s.items ? (s.names||[]).filter(Boolean).join(', ') : '—';
+    const names=(s.names||[]).filter(Boolean);
+    const api = names.length ? names[0]+(names.length>1?(' ↳ '+names.slice(1).join(', ')):'') : '—';
     const dot = s.holder ? '●' : (s.items ? '○' : '·');
     return `<div class="conn" style="${s.items?'':'opacity:.5'}"><div class="ic">${dot}</div>`
       + `<div class="nm"><b>${s.shelf} · ${api}</b><span>${who}${s.queue?(' · '+s.queue+' queued'):''}</span></div>`
