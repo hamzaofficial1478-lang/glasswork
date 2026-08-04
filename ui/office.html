@@ -359,7 +359,7 @@ function fireComm(){
 function renderPerf(){
   const m=SITES[CURRENT].metrics;
   $('#perfStrip').innerHTML=m.map(([v,l,c])=>`<div class="pstat"><span class="v ${c}">${v}</span><span class="l etch">${l}</span></div>`).join('')+`<a href="agency.html">Open full control room →</a>`;
-  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
+  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">└</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
     const sub = r.foot ? r.foot.join(' · ') : (w+'/'+tot+' working');
     return `<div class="conn"><div class="ic">▦</div><div class="nm"><b>${r.name}</b><span>${sub}</span></div><div style="width:80px;height:6px;border-radius:3px;background:var(--line)"><div style="width:${pct}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`;}).join('')+`</div>`
     + shelfPanel();
@@ -400,7 +400,7 @@ function shelfPanel(){
 const CONNS=[
   {g:"Website & backend",items:[{ic:"◧",n:"Website",s:"custom · connected",on:true},{ic:"🗄",n:"Filing cabinet (DB)",s:"agency.db",on:true}]},
   {g:"SEO & data",items:[{ic:"⌕",n:"DataForSEO",s:"rank tracking",on:true},{ic:"📈",n:"Search Console",s:"not connected",on:false}]},
-  {g:"Messaging",items:[{ic:"✈",n:"Telegram bridge",s:"@owner",on:true},{ic:"🟢",n:"WhatsApp",s:"not connected",on:false}]},
+  {g:"Messaging",items:[{ic:"✈",n:"Telegram bridge",s:"@owner",on:true}]},
   {g:"Social",items:[{ic:"⌾",n:"Instagram",s:"not connected",on:false},{ic:"♪",n:"TikTok",s:"not connected",on:false},{ic:"f",n:"Facebook",s:"not connected",on:false}]},
   {g:"Outreach",items:[{ic:"✉",n:"Outreach domain",s:"mail.glassworks.ae",on:true}]}
 ];
