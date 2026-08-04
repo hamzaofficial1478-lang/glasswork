@@ -29,10 +29,10 @@ _EMPTY = {"credentials": [], "routing": {}, "usage": {}, "tools": []}
 #               multimodal LLM, an image-understanding model, embeddings, speech.
 #               This is the heart of the shelf.
 #   data      — read-the-world APIs: SEO/keyword data, stock graphics, crawling.
-#   delivery  — the outward channels. Email and WhatsApp are configured on the
-#               Integrations screen as the PRIMARY route; they sit here too so a
-#               second provider can act as a FALLBACK, and so sending takes the
-#               shelf lock (which is what enforces turn-taking and the daily cap).
+#   delivery  — the outward channels. Email is configured on the Integrations
+#               screen as the PRIMARY route; it sits here too so a second
+#               provider can act as a FALLBACK, and so delivery takes the shelf
+#               lock (which is what enforces turn-taking and the daily cap).
 SHELF_KINDS = {
     "llm_extra":       "reasoning",   # a stronger/spare text brain
     "vision":          "reasoning",   # image understanding / reasoning over images
@@ -43,7 +43,6 @@ SHELF_KINDS = {
     "stock_images":    "data",
     "crawler":         "data",
     "email":           "delivery",
-    "whatsapp":        "delivery",
     "other":           "other",
 }
 DEFAULT_SHELVES = list(SHELF_KINDS)

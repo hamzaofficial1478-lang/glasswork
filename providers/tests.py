@@ -151,16 +151,13 @@ def test_integrations_unconfigured():
     print("Channel checks (no network):")
     from . import integrations as ig
     blank = ig.test_all(env={})
-    check("all three report not-configured", [r["ok"] for r in blank], [None, None, None])
-    check("covers telegram, whatsapp, email",
-          sorted(r["integration"] for r in blank), ["email", "telegram", "whatsapp"])
+    check("both report not-configured", [r["ok"] for r in blank], [None, None])
+    check("covers telegram and email",
+          sorted(r["integration"] for r in blank), ["email", "telegram"])
 
     half = ig.test_email(env={"SMTP_HOST": "h", "SMTP_USER": "u"})
     check("half-filled SMTP is a failure, not 'unset'", half["ok"], False)
     check("and it names what's missing", "SMTP_PASS" in half["detail"], True)
-
-    wa = ig.test_whatsapp(env={"WHATSAPP_TOKEN": "t"})
-    check("half-filled WhatsApp names what's missing", "WHATSAPP_PHONE_ID" in wa["detail"], True)
 
     tg = ig.test_telegram(env={"TELEGRAM_BOT_TOKEN": ""})
     check("no telegram token -> unset, not broken", tg["ok"], None)
