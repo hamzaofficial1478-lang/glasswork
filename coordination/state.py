@@ -175,11 +175,21 @@ def build():
             cat = _store.shelf_catalogue()
         except Exception:
             cat = {}
-        shelf = [{"shelf": k,
-                  "holder": (v["holder"]["agent"] if v.get("holder") else None),
-                  "queue": len(v.get("queue", [])),
-                  "spend": v.get("today_spend", 0),
-                  "items": len(cat.get(k, []))} for k, v in sorted(state.items())]
+        shelf = []
+        for k, v in sorted(state.items()):
+            # the borrow that is open right now tells us WHICH sector holds it
+            active = next((b for b in v.get("recent", []) if b.get("status") == "active"), None)
+            shelf.append({
+                "shelf": k,
+                "holder": (v["holder"]["agent"] if v.get("holder") else None),
+                "holder_sector": (active or {}).get("sector"),
+                "using": (active or {}).get("item"),
+                "queue": len(v.get("queue", [])),
+                "queued_by": [q.get("agent") for q in v.get("queue", [])],
+                "spend": v.get("today_spend", 0),
+                "items": len(cat.get(k, [])),
+                "names": [i.get("name", "") for i in cat.get(k, [])],
+            })
     except Exception:
         shelf = []
 
