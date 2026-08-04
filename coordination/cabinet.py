@@ -214,18 +214,27 @@ def shelf_state(shelf_names=None, recent=5):
     now = _now()
     day0 = _day_start()
     with _conn() as c:
+        # A cabinet created before the shelf tables existed is still perfectly
+        # valid — report the shelves as idle rather than crashing the board.
+        # (init_db.py is idempotent and will add the tables on the next run.)
+        def _rows(sql, args=()):
+            try:
+                return c.execute(sql, args).fetchall()
+            except sqlite3.OperationalError:
+                return []
+
         for tbl, col in (("shelf_queue", "shelf"), ("borrows", "shelf")):
-            for r in c.execute(f"SELECT DISTINCT {col} AS s FROM {tbl}").fetchall():
+            for r in _rows(f"SELECT DISTINCT {col} AS s FROM {tbl}"):
                 if r["s"]:
                     names.add(r["s"])
-        for r in c.execute("SELECT resource FROM locks WHERE resource LIKE 'shelf:%'").fetchall():
+        for r in _rows("SELECT resource FROM locks WHERE resource LIKE 'shelf:%'"):
             names.add(r["resource"].split("shelf:", 1)[1])
 
         out = {}
         for shelf in sorted(names):
-            lk = c.execute(
-                "SELECT holder,acquired_at,expires_at FROM locks WHERE resource=?",
-                (_resource(shelf),)).fetchone()
+            _lk = _rows("SELECT holder,acquired_at,expires_at FROM locks WHERE resource=?",
+                        (_resource(shelf),))
+            lk = _lk[0] if _lk else None
             holder = None
             if lk and lk["expires_at"] and lk["expires_at"] >= now:
                 holder = {"agent": lk["holder"],
@@ -234,21 +243,21 @@ def shelf_state(shelf_names=None, recent=5):
             queue = [
                 {"agent": q["agent"], "sector": q["sector"], "reason": q["reason"],
                  "data_class": q["data_class"], "waited_s": now - (q["enqueued_at"] or now)}
-                for q in c.execute(
+                for q in _rows(
                     "SELECT * FROM shelf_queue WHERE shelf=? AND status='waiting'"
-                    " ORDER BY enqueued_at", (shelf,)).fetchall()
+                    " ORDER BY enqueued_at", (shelf,))
             ]
-            spend = c.execute(
-                "SELECT COALESCE(SUM(usd_cost),0) AS s FROM borrows"
-                " WHERE shelf=? AND granted_at>=?", (shelf, day0)).fetchone()["s"]
+            _sp = _rows("SELECT COALESCE(SUM(usd_cost),0) AS s FROM borrows"
+                        " WHERE shelf=? AND granted_at>=?", (shelf, day0))
+            spend = _sp[0]["s"] if _sp else 0
             hist = [
                 {"agent": b["agent"], "sector": b["sector"], "item": b["item"],
                  "approval": b["approval"], "status": b["status"],
                  "usd_cost": b["usd_cost"], "reason": b["reason"],
                  "granted_at": b["granted_at"], "released_at": b["released_at"]}
-                for b in c.execute(
+                for b in _rows(
                     "SELECT * FROM borrows WHERE shelf=? ORDER BY granted_at DESC LIMIT ?",
-                    (shelf, recent)).fetchall()
+                    (shelf, recent))
             ]
             out[shelf] = {"holder": holder, "queue": queue,
                           "today_spend": round(spend or 0, 4), "recent": hist}
