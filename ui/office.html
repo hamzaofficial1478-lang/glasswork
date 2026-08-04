@@ -86,6 +86,23 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .name{margin-top:5px;font-size:9.5px;font-weight:500;text-align:center;line-height:1.05}
 .role{font-size:8px;color:var(--muted);text-align:center}
 
+/* ---- THE SHELF: a real cabinet standing against the right wall ---- */
+.room.shelf{border-color:#5b7a86}
+.room.shelf .plaque{border-color:#5b7a86;color:#a8c6d1}
+.shelfwrap{flex:1;display:flex;flex-direction:column;gap:5px;padding:20px 9px 10px;overflow:hidden}
+.slot{position:relative;border:1px solid var(--line2);border-radius:7px;background:linear-gradient(180deg,#16242b,#111c22);
+  padding:6px 8px;display:flex;flex-direction:column;gap:2px;min-height:0}
+.slot.empty{opacity:.4;border-style:dashed}
+.slot.busy{border-color:var(--glass);box-shadow:0 0 0 1px var(--glass-dim),0 0 12px rgba(84,203,217,.25)}
+.slot .sname{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--etch)}
+.slot .api{font-size:10.5px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .who{font-size:9px;color:var(--glass);font-family:'IBM Plex Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .who.wait{color:var(--amber)}
+.slot .none{font-size:9px;color:var(--faint);font-style:italic}
+.slot .led{position:absolute;top:6px;right:7px;width:6px;height:6px;border-radius:50%;background:var(--faint)}
+.slot.busy .led{background:var(--glass);box-shadow:0 0 7px var(--glass);animation:pulse 1.2s infinite}
+.slot.stocked .led{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+
 .drawer{position:fixed;top:0;right:-400px;width:400px;max-width:92vw;height:100vh;background:var(--panel);border-left:1px solid var(--line2);z-index:90;transition:right .26s ease;display:flex;flex-direction:column}
 .drawer.open{right:0}
 .dh{display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid var(--line)}
@@ -175,7 +192,7 @@ function sectors(){return [
   {key:"Report",name:"Reports",cls:"",agents:[{n:"Reporter",role:"Scores the agency",s:"working",t:"Scored 9 decisions",av:"📋"}]},
   {key:"Security",name:"Security",cls:"sec",agents:[{n:"Screener",role:"Scam & fraud filter",s:"working",t:"Flagged 2 scam leads",av:"🛡"},{n:"Guard",role:"Untrusts scraped text",s:"idle",t:"All clear",av:"⚠"}]}
 ];}
-const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",metrics:[["82","Agency health","glass"],["6","Leads today",""],["3","Awaiting you","amber"],["+3","Rank moves wk","ok"],["$4.12","Spend today","mono"]],rooms:sectors()}};
+const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",metrics:[["82","Agency health","glass"],["6","Leads today",""],["3","Awaiting you","amber"],["—","Shelf","ok"],["$4.12","Spend today","mono"]],rooms:sectors()}};
 let CURRENT="gd";
 const LAYOUT={Director:{x:24,y:22,w:320,h:150},Report:{x:372,y:22,w:230,h:150},Security:{x:630,y:22,w:266,h:150},Leads:{x:24,y:210,w:400,h:210},SEO:{x:454,y:210,w:210,h:210},Content:{x:694,y:210,w:202,h:210},IT:{x:24,y:452,w:872,h:242}};
 const $=s=>document.querySelector(s);
@@ -196,8 +213,48 @@ function renderFloor(){
   floor.querySelectorAll('.emp').forEach(el=>{
     el.onclick=()=>{const rm=st.rooms.find(r=>r.key===el.dataset.k);const a=rm.agents[+el.dataset.i];a.room=rm.name;openDrawer(a);};
   });
-  [['🪴',902,470],['🪴',430,662],['🌿',600,192]].forEach(([e,x,y])=>{const p=document.createElement('div');p.className='plant';p.style.cssText=`position:absolute;z-index:2;font-size:19px;opacity:.75;left:${x}px;top:${y}px`;p.textContent=e;floor.appendChild(p);});
+  renderShelfRoom(floor);
+  [['🪴',430,662],['🌿',600,192]].forEach(([e,x,y])=>{const p=document.createElement('div');p.className='plant';p.style.cssText=`position:absolute;z-index:2;font-size:19px;opacity:.75;left:${x}px;top:${y}px`;p.textContent=e;floor.appendChild(p);});
   drawLinks();
+}
+
+/* THE SHELF — a cabinet standing against the right wall of the office. Each slot
+   is one capability shelf: the API sitting on it, and the sector currently
+   holding it. This is the same data the agents borrow through. */
+const SHELF_BOX={x:912,y:22,w:184,h:672};
+function renderShelfRoom(floor){
+  const sh=(LIVE&&LIVE.shelf)||[];
+  const room=document.createElement('div');
+  room.className='room shelf';
+  room.style.cssText=`left:${SHELF_BOX.x}px;top:${SHELF_BOX.y}px;width:${SHELF_BOX.w}px;height:${SHELF_BOX.h}px`;
+  if(!sh.length){
+    room.innerHTML=`<div class="plaque">The shelf</div><div class="shelfwrap">`
+      +`<div class="slot empty"><div class="none">waiting for the server…</div></div></div>`;
+    floor.appendChild(room); return;
+  }
+  const slots=sh.map(s=>{
+    const cls = s.holder ? 'busy' : (s.items ? 'stocked' : 'empty');
+    const api = s.items ? (s.names||[]).filter(Boolean).join(', ') : '';
+    let line;
+    if(s.holder){
+      const who = s.holder_sector ? (s.holder_sector+' · '+s.holder) : s.holder;
+      line = `<div class="who">▸ ${who}</div>`;
+    } else if(s.queue){
+      line = `<div class="who wait">${s.queue} waiting</div>`;
+    } else if(s.items){
+      line = `<div class="who" style="color:var(--faint)">nobody using it</div>`;
+    } else {
+      line = `<div class="none">no API yet</div>`;
+    }
+    return `<div class="slot ${cls}"><div class="led"></div>`
+      + `<div class="sname">${s.shelf}</div>`
+      + (api?`<div class="api">${api}</div>`:'')
+      + line + `</div>`;
+  }).join('');
+  const stocked=sh.filter(s=>s.items).length;
+  room.innerHTML=`<div class="plaque">The shelf · ${stocked}/${sh.length}</div>`
+    + `<div class="shelfwrap">${slots}</div>`;
+  floor.appendChild(room);
 }
 
 /* ---------- CYBER LINKS ---------- */
@@ -229,7 +286,6 @@ function drawLinks(){
     // port lights on each end
     [[a,pa],[b,pb]].forEach(([rk,pt])=>{
       const dot=document.createElement('div');dot.className='port'+((rk==='Security')?' ':'');
-      const room=[...document.querySelectorAll('.room')].find(r=>r.querySelector('.plaque').textContent===LAYOUT[rk]&&false);
       dot.style.cssText=`left:${pt.x-3.5}px;top:${pt.y-3.5}px`;$('#floor').appendChild(dot);
     });
   });
@@ -299,11 +355,12 @@ function shelfPanel(){
   const health = shelfHealth(sh);
   const stocked = sh.filter(s=>s.items).length;
   const rows = sh.map(s=>{
-    const state = s.holder ? ('in use · '+s.holder) : (s.items ? 'available' : 'no API yet');
-    const dot   = s.holder ? '●' : (s.items ? '○' : '·');
-    const kit   = s.items ? (s.items+(s.items===1?' API':' APIs')) : '—';
+    const who = s.holder ? ((s.holder_sector?s.holder_sector+' · ':'')+s.holder)
+                         : (s.items ? 'available' : 'no API yet');
+    const api = s.items ? (s.names||[]).filter(Boolean).join(', ') : '—';
+    const dot = s.holder ? '●' : (s.items ? '○' : '·');
     return `<div class="conn" style="${s.items?'':'opacity:.5'}"><div class="ic">${dot}</div>`
-      + `<div class="nm"><b>${s.shelf}</b><span>${state}${s.queue?(' · '+s.queue+' queued'):''} · ${kit}</span></div>`
+      + `<div class="nm"><b>${s.shelf} · ${api}</b><span>${who}${s.queue?(' · '+s.queue+' queued'):''}</span></div>`
       + `<b style="font-family:'IBM Plex Mono',monospace;font-size:11px">${s.spend?('$'+s.spend):''}</b></div>`;
   }).join('');
   return `<div class="pgroup"><div class="gh etch">The shelf · shared APIs</div>`
