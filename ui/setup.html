@@ -240,9 +240,13 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
       <div class="cred" style="border-style:dashed">
         <div class="cred-h"><b>Add a tool API to a shelf</b></div>
         <div class="row">
-          <div class="field"><label>Shelf</label><select id="nt_shelf"></select><div class="hint">Which capability this API provides.</div></div>
+          <div class="field"><label>Shelf</label><select id="nt_shelf"></select>
+            <div class="hint">What this API is for. Pick <b>+ new shelf…</b> to invent your own — the list isn't fixed.</div></div>
           <div class="field"><label>Name</label><input id="nt_name" placeholder="e.g. DataForSEO"><div class="hint">A label for you.</div></div>
         </div>
+        <div class="field nt_newshelfwrap hidden"><label>New shelf name</label>
+          <input id="nt_newshelf" placeholder="e.g. language_understanding">
+          <div class="hint">Lowercase, no spaces. The cabinet creates it the moment you save.</div></div>
         <div class="row">
           <div class="field"><label>Auth style</label>
             <select id="nt_auth"><option value="bearer">Bearer (most common)</option><option value="x-api-key">x-api-key</option><option value="token">Token</option><option value="custom">Custom header…</option></select></div>
@@ -253,6 +257,8 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="row">
           <div class="field"><label>Cost</label><select id="nt_tier"><option>unknown</option><option>free</option><option>paid</option></select></div>
           <div class="field"><label>Daily cap (USD, 0 = none)</label><input id="nt_cap" type="number" min="0" step="1" placeholder="0"></div>
+          <div class="field"><label>Fallback order</label><input id="nt_prio" type="number" min="1" step="10" placeholder="100">
+            <div class="hint">Lowest number is tried first. Put a second API on the same shelf with a higher number and it becomes the fallback.</div></div>
         </div>
         <div class="field"><label>Notes (optional)</label><input id="nt_notes" placeholder="what it's for"></div>
         <div class="btnrow"><button class="pbtn" id="addTool">Add to shelf</button><span class="inl dim" id="addToolMsg"></span></div>
@@ -304,7 +310,7 @@ const TASKS = [
 const CATS = ['LLM','Image','Embedding'];  // Vision is auto-detected as an LLM capability
 const TIERS = ['unknown','free','paid'];
 
-let STORE = {credentials:[], routing:{}, tools:[], toolShelves:[]};
+let STORE = {credentials:[], routing:{}, tools:[], toolShelves:[], shelfKinds:{}};
 
 /* ---- website ---- */
 let mode='readonly';
@@ -440,7 +446,7 @@ function wireCredEvents(){
       if(j.ok){ inl(mMsg,'ok','✓ Added'); await loadProviders(); } else inl(mMsg,'err','✕ '+(j.error||'failed'));
     };
     card.querySelector('.fetchModels').onclick=async()=>{
-      inl(mMsg,'dim','Fetching…');
+      inl(mMsg,'dim','Fetching… (up to 90s)');
       const j=await api('POST','/api/providers/fetch-models',{credential_id:cid});
       if(j.ok && j.models && j.models.length){
         const dl=card.querySelector('#ml_'+cid); dl.innerHTML=j.models.map(m=>`<option value="${esc(m)}">`).join('');
@@ -454,7 +460,7 @@ function wireCredEvents(){
         if(j.ok) await loadProviders();
       };
       row.querySelector('.test').onclick=async()=>{
-        out.className='testout'; out.textContent='Testing…';
+        out.className='testout'; out.textContent='Testing… (up to 120s)';
         const j=await api('POST','/api/providers/test',{credential_id:cid,model_id:mid});
         if(!j.ok){ out.className='testout err'; out.textContent='✕ '+(j.error||'failed'); return; }
         // update the capability line in place — do NOT re-render (that would wipe this result)
@@ -513,9 +519,17 @@ function renderRouting(){
 
 /* ---- the shelf (shared API cabinet) ---- */
 const TOOL_AUTH=['bearer','x-api-key','token','custom'];
+const SHELF_HINT={reasoning:'reasoning',data:'data',delivery:'delivery (fallback)',other:'other',custom:'custom'};
 function fillToolShelfSelect(){
   const sel=$('#nt_shelf'); if(!sel) return;
-  sel.innerHTML=(STORE.toolShelves||[]).map(s=>`<option>${esc(s)}</option>`).join('');
+  const kinds=STORE.shelfKinds||{};
+  // group the list so it reads as a cabinet, not a flat dropdown
+  const groups={};
+  (STORE.toolShelves||[]).forEach(s=>{ const k=kinds[s]||'custom'; (groups[k]=groups[k]||[]).push(s); });
+  sel.innerHTML=Object.entries(groups).map(([k,list])=>
+    `<optgroup label="${esc(SHELF_HINT[k]||k)}">`+list.map(s=>`<option>${esc(s)}</option>`).join('')+`</optgroup>`
+  ).join('')+`<option value="__new">+ new shelf…</option>`;
+  sel.onchange=()=>document.querySelector('.nt_newshelfwrap').classList.toggle('hidden',sel.value!=='__new');
 }
 function toolShelfOptions(cur){
   return (STORE.toolShelves||[]).map(s=>`<option${s===cur?' selected':''}>${esc(s)}</option>`).join('');
@@ -525,7 +539,7 @@ function renderTools(){
   const tools=STORE.tools||[];
   if(!tools.length){ host.innerHTML='<p class="hint">No tool APIs on the shelf yet — add one below.</p>'; return; }
   host.innerHTML=tools.map(t=>`<div class="cred" data-tid="${t.id}">
-    <div class="cred-h"><b>${esc(t.name)}</b><span class="tagchip">${esc(t.shelf)}</span><span class="tagchip ${esc(t.cost_tier)}">${esc(t.cost_tier)}</span><span class="mono">${esc(t.key_masked||'no key')} · ${esc(t.auth_style)}</span></div>
+    <div class="cred-h"><b>${esc(t.name)}</b><span class="tagchip">${esc(t.shelf)}</span><span class="tagchip">${esc((STORE.shelfKinds||{})[t.shelf]||"custom")}</span><span class="tagchip ${esc(t.cost_tier)}">${esc(t.cost_tier)}</span><span class="mono">${esc(t.key_masked||'no key')} · ${esc(t.auth_style)}</span></div>
     <div class="row">
       <div class="field"><label>Name</label><input class="t_name" value="${esc(t.name)}"></div>
       <div class="field"><label>Shelf</label><select class="t_shelf">${toolShelfOptions(t.shelf)}</select></div>
@@ -539,13 +553,16 @@ function renderTools(){
     <div class="row">
       <div class="field"><label>Cost</label><select class="t_tier">${TIERS.map(x=>`<option${x===t.cost_tier?' selected':''}>${x}</option>`).join('')}</select></div>
       <div class="field"><label>Daily cap (USD)</label><input class="t_cap" type="number" min="0" step="1" value="${esc(t.daily_cap||0)}"></div>
+      <div class="field"><label>Fallback order</label><input class="t_prio" type="number" min="1" step="10" value="${esc(t.priority||100)}"></div>
     </div>
     <div class="btnrow">
       <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><input type="checkbox" class="t_enabled" ${t.enabled!==false?'checked':''}> enabled</label>
       <button class="pbtn saveTool">Save</button>
+      <button class="mini testTool">Test this API</button>
       <button class="mini del delTool">Delete</button>
       <span class="inl dim tMsg"></span>
     </div>
+    <div class="testout tOut"></div>
   </div>`).join('');
   host.querySelectorAll('.cred').forEach(card=>{
     const tid=card.dataset.tid, msg=card.querySelector('.tMsg');
@@ -556,8 +573,22 @@ function renderTools(){
         auth_style:card.querySelector('.t_auth').value,auth_header_name:card.querySelector('.t_custom').value.trim(),
         base_url:card.querySelector('.t_base').value.trim(),api_key:card.querySelector('.t_key').value,
         cost_tier:card.querySelector('.t_tier').value,daily_cap:card.querySelector('.t_cap').value,
+        priority:card.querySelector('.t_prio').value,
         enabled:card.querySelector('.t_enabled').checked}});
       if(j.ok){ inl(msg,'ok','✓ Saved'); await loadProviders(); } else inl(msg,'err','✕ '+(j.error||'failed'));
+    };
+    card.querySelector('.testTool').onclick=async()=>{
+      const out=card.querySelector('.tOut');
+      out.className='testout'; out.textContent='Testing… (up to 90s)';
+      const j=await api('POST','/api/providers/tool/test',{id:tid});
+      if(!j.ok){ out.className='testout err'; out.textContent='✕ '+(j.error||'failed'); return; }
+      const t=j.test||{};
+      const status=(t.status===0||t.status==null)?'no HTTP response':('HTTP '+t.status);
+      if(t.ok===true){ out.className='testout ok'; out.innerHTML='✓ '+esc(status)+' — '+esc(t.cause||'')+' ('+(t.latency_ms||0)+'ms)'; }
+      else if(t.ok===null){ out.className='testout'; out.innerHTML='● '+esc(status)+' — '+esc(t.cause||''); }
+      else { out.className='testout err';
+        out.innerHTML='✕ '+esc(status)+' — '+esc(t.cause||'')+
+          '<details><summary>Raw request / response</summary><pre>'+esc(JSON.stringify(t.raw||{},null,2))+'</pre></details>'; }
     };
     card.querySelector('.delTool').onclick=async()=>{
       if(!confirm('Remove this tool from the shelf?'))return;
@@ -571,13 +602,19 @@ $('#addTool').onclick=async()=>{
   const name=$('#nt_name').value.trim();
   if(!name){ inl($('#addToolMsg'),'err','Enter a name'); return; }
   const btn=$('#addTool'); btn.disabled=true; inl($('#addToolMsg'),'dim','Saving…');
+  let shelf=$('#nt_shelf').value;
+  if(shelf==='__new'){
+    shelf=($('#nt_newshelf').value||'').trim().toLowerCase().replace(/[^a-z0-9_]+/g,'_');
+    if(!shelf){ inl($('#addToolMsg'),'err','Name the new shelf'); btn.disabled=false; return; }
+  }
   const j=await api('POST','/api/providers/tool',{tool:{
-    shelf:$('#nt_shelf').value,name:name,
+    shelf:shelf,name:name,
     auth_style:$('#nt_auth').value,auth_header_name:$('#nt_custom').value.trim(),
     base_url:$('#nt_base').value.trim(),api_key:$('#nt_key').value,
-    cost_tier:$('#nt_tier').value,daily_cap:$('#nt_cap').value,notes:$('#nt_notes').value.trim()}});
+    cost_tier:$('#nt_tier').value,daily_cap:$('#nt_cap').value,
+    priority:$('#nt_prio').value,notes:$('#nt_notes').value.trim()}});
   btn.disabled=false;
-  if(j.ok){ ['nt_name','nt_base','nt_key','nt_custom','nt_cap','nt_notes'].forEach(id=>$('#'+id).value='');
+  if(j.ok){ ['nt_name','nt_base','nt_key','nt_custom','nt_cap','nt_notes','nt_newshelf','nt_prio'].forEach(id=>{const el=$('#'+id); if(el) el.value='';});
     inl($('#addToolMsg'),'ok','✓ Added to shelf'); await loadProviders(); }
   else inl($('#addToolMsg'),'err','✕ '+(j.error||'failed'));
 };
@@ -590,16 +627,16 @@ function renderShelfBoard(shelves){
     const st=s.state||{}, h=st.holder;
     const holderTxt=h
       ? `<span class="y">● in use</span> by <b>${esc(h.agent)}</b> · held ${fmtDur(h.held_for_s)} · ${fmtDur(h.expires_in_s)} left`
-      : `<span class="q">○ free</span>`;
+      : `<span class="q">○ idle</span>`;
     const items=(s.items||[]).length
-      ? (s.items||[]).map(it=>`<span class="tagchip${it.enabled?'':' n'}">${esc(it.name)}</span>`).join(' ')
+      ? (s.items||[]).map((it,i)=>`<span class="tagchip${it.enabled?'':' n'}">${i?'↳ ':''}${esc(it.name)}</span>`).join(' ')
       : '<span class="hint">no APIs on this shelf yet</span>';
     const queue=(st.queue||[]).length
       ? `<div class="caps"><b>Queue:</b> ${st.queue.map((q,i)=>`${i+1}. ${esc(q.agent)} <span class="mono">(${esc(q.reason||'')}${q.data_class==='external'?' · ⚑external':''})</span> waiting ${fmtDur(q.waited_s)}`).join(' &nbsp; ')}</div>`
       : '';
     const recent=(st.recent||[]).slice(0,3).map(b=>`${esc(b.agent)}→${esc(b.item||b.shelf||'')} <span class="mono">${(b.approval==='escalate'||b.approval==='escalated')?'⚑':''}${esc(b.status)}${b.usd_cost?(' $'+b.usd_cost):''}</span>`).join(' · ');
     return `<div class="model">
-      <div class="model-top"><span class="mid">${esc(s.shelf)}</span><span class="tagchip">${esc(s.kind)}</span>${holderTxt}<span class="dim" style="margin-left:auto;font-size:12px">today $${(st.today_spend||0)}</span></div>
+      <div class="model-top"><span class="mid">${esc(s.shelf)}</span><span class="tagchip">${esc(s.purpose||s.kind)}</span>${holderTxt}<span class="dim" style="margin-left:auto;font-size:12px">today $${(st.today_spend||0)}</span></div>
       <div class="caps">${items}</div>
       ${queue}
       ${recent?`<div class="testout">recent: ${recent}</div>`:''}
@@ -677,6 +714,7 @@ async function loadProviders(){
   STORE.credentials=(p&&p.credentials)||[];
   STORE.tools=(p&&p.tools)||[];
   STORE.toolShelves=(p&&p.tool_shelves)||[];
+  STORE.shelfKinds=(p&&p.shelf_kinds)||{};
   STORE.routing=(r&&r.routing)||{};
   renderCredentials(); renderRouting(); renderTools(); fillToolShelfSelect();
   loadShelves();
