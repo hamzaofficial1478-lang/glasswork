@@ -23,7 +23,14 @@ except ImportError:  # pragma: no cover - script/path fallback
 DB = Path(__file__).parent / "agency.db"
 
 # key, display name, task-sector match, is-security-room
+#
+# The Director is in this list deliberately. The office draws a Director's Office
+# but the server used to omit it, so the UI's overlay skipped that room and its
+# desk kept its hardcoded "working" placeholder — the MD's lamp glowed forever
+# whether or not a cycle had ever run, while sectors doing real work sat dark.
+# A room the dashboard draws must be a room the server reports on.
 SECTORS = [
+    ("Director", "Director's Office", "md", False),
     ("IT", "IT & Site Health", "it", False),
     ("Content", "Content & Social", "content", False),
     ("SEO", "SEO & Rankings", "seo", False),
@@ -78,6 +85,12 @@ def _hitrate(c):
 def _room_stats(c, key, day0, open_tasks):
     """Return (foot[2], score) for a room, from real counts."""
     base = _clamp(92 - open_tasks * 4, 60, 96)
+    if key == "Director":
+        posted = _one(c, "SELECT count(*) FROM tasks WHERE created_by='MD'")
+        unscored = _one(c, "SELECT count(*) FROM decisions WHERE outcome IS NULL")
+        hr = _hitrate(c)
+        return ([f"{posted} tasks posted", f"{unscored} calls unscored"],
+                (int(hr * 100) if hr is not None else base))
     if key == "IT":
         issues = _one(c, "SELECT count(*) FROM site_issues WHERE status IN ('open','fixing','in_review')")
         perf = _one(c, "SELECT perf FROM lighthouse ORDER BY at DESC LIMIT 1", default=None)
