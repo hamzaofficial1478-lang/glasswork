@@ -132,6 +132,20 @@ def test_source_screen():
     check("social is usable but conditional",
           ss.verdict(social), "cleared_with_conditions")
 
+    # Leads renamed b2b_only -> business_data when the target list widened. A
+    # check that silently stops firing on a rename is worse than no check, so
+    # both names are read and both are tested.
+    renamed = ss.screen_source({"name": "Classifieds", "kind": "classifieds",
+                                "business_data": False, "why": "private individuals"})
+    check("the renamed flag still trips it", ss.verdict(renamed), "quarantined")
+
+    # and it must fire on the source list Leads actually publishes, not a fixture
+    from . import leads_sources as _ls
+    real = [s for s in _ls.SOURCES if not s.get("business_data", True)]
+    check("Leads still ships a source worth refusing", len(real) >= 1, True)
+    check("and Security quarantines it",
+          all(ss.verdict(ss.screen_source(s)) == "quarantined" for s in real), True)
+
 
 def test_critic_detects_a_broken_detector():
     """
