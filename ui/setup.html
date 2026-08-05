@@ -282,9 +282,35 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
     </div>
   </section>
 
+  <!-- DAILY TARGETS --------------------------------------------------------- -->
+  <section class="card">
+    <div class="card-h"><div class="ic">🎯</div><div><b>7 · Your daily orders</b><small>How much of each job you want done per day — the agency plans to these numbers instead of inventing its own workload</small></div></div>
+    <div class="card-b">
+
+      <div class="cred">
+        <div class="cred-h"><b>Targets</b><span class="inl dim" id="tgToday"></span></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Set a number, or 0 to switch a job off for now. Progress is <b>measured</b> from what actually landed in the cabinet — an agent cannot tick its own box.</p>
+        <div id="tgRows"></div>
+        <div class="field" style="margin-top:12px"><label>Anything else for today</label>
+          <textarea id="tgOrders" rows="3" placeholder="e.g. Sharjah hotels this week. No outreach until I say — I'm on site Thursday." style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px"></textarea>
+          <div class="hint">In your own words. The MD reads this before it plans, and follows it over its own preference.</div></div>
+        <div class="btnrow"><button class="pbtn" id="saveTargets">Save today's orders</button><span class="inl dim" id="tgMsg"></span></div>
+        <div id="tgWarn"></div>
+      </div>
+
+      <div class="cred">
+        <div class="cred-h"><b>What your website says you sell</b></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Reads your own site and checks it against the agency's service list. Anything on your site that the agency doesn't know about <b>cannot be targeted or written about</b> — this is how you find those.</p>
+        <div class="btnrow"><button class="pbtn" id="readSite">Read my website</button><span class="inl dim" id="siteSvcMsg"></span></div>
+        <div id="siteOut"></div>
+      </div>
+
+    </div>
+  </section>
+
   <!-- PREFLIGHT ------------------------------------------------------------ -->
   <section class="card">
-    <div class="card-h"><div class="ic">🧪</div><div><b>7 · Preflight — test everything at once</b><small>Every brain, every shelf API, every channel — and whether your fallbacks actually work</small></div></div>
+    <div class="card-h"><div class="ic">🧪</div><div><b>8 · Preflight — test everything at once</b><small>Every brain, every shelf API, every channel — and whether your fallbacks actually work</small></div></div>
     <div class="card-b">
       <p class="hint" style="margin-top:0">Testing a primary only tells you today works. This tests <b>every link in every chain</b>, so you find out now — not at 2am when a provider rate-limits — whether losing a primary actually costs you anything. Each result is one of:
         <b>COVERED</b> (two or more links work, you're safe), <b>SINGLE</b> (only one works — a single point of failure, even if you thought you had a fallback), or <b>DOWN</b> (nothing works).</p>
@@ -689,6 +715,90 @@ $('#saveGsc').onclick=()=>saveIntegration('gsc',{
   GSC_PROPERTY:$('#gsc_prop').value.trim(),GSC_SERVICE_ACCOUNT_JSON:$('#gsc_json').value
 },$('#saveGsc'),$('#gscMsg'),['gsc_json']);
 
+/* ---- the owner's daily orders -------------------------------------------
+   The numbers the agency works to. Everything shown here is measured from the
+   cabinet, so "12/20 leads" means twelve rows really exist — not that an agent
+   said so. The ceiling warnings come from the server, because what counts as a
+   safe outreach volume is a judgement that belongs in one place, not in the
+   browser. ---------------------------------------------------------------- */
+let TARGETS = null;
+
+function tgRow(j){
+  const pct = j.per_day ? (j.pct||0) : 0;
+  const bar = j.per_day
+    ? `<div style="height:5px;border-radius:3px;background:var(--line);margin-top:6px">
+         <div style="width:${pct}%;height:5px;border-radius:3px;background:${j.hit?'var(--ok)':'var(--glass)'}"></div></div>`
+    : '';
+  const done = j.per_day
+    ? `<span class="inl ${j.hit?'ok':'dim'}">${j.done_today}/${j.per_day} today${j.hit?' · done':''}</span>`
+    : `<span class="inl dim">off</span>`;
+  return `<div class="row" style="align-items:flex-start">
+    <div class="field" style="flex:2">
+      <label>${j.label} ${done}</label>
+      <div class="hint">${j.does_it}${j.approximate?' · '+j.approximate:''}</div>
+      ${bar}
+    </div>
+    <div class="field" style="flex:0 0 120px">
+      <label>per day</label>
+      <input id="tg_${j.name}" type="number" min="0" value="${j.per_day}"
+             placeholder="${j.suggested}">
+      <div class="hint">${j.set_by_owner?'':'suggested '+j.suggested} </div>
+    </div>
+  </div>`;
+}
+
+function renderTargets(t){
+  TARGETS = t;
+  if(!t || !t.ok){
+    $('#tgRows').innerHTML = `<div class="hint">Could not read the cabinet: ${(t&&t.error)||'unknown'}. Save your website above first — that builds it.</div>`;
+    return;
+  }
+  $('#tgToday').textContent = t.day + (t.any_target_set ? '' : ' · nothing set yet');
+  $('#tgRows').innerHTML = t.jobs.map(tgRow).join('');
+  if(t.orders && !$('#tgOrders').value) $('#tgOrders').value = t.orders;
+  const w = (t.warnings||[]).filter(Boolean);
+  $('#tgWarn').innerHTML = w.length
+    ? w.map(x=>`<div class="hint" style="color:var(--amber);margin-top:8px">⚠ ${x}</div>`).join('')
+    : '';
+}
+
+async function loadTargets(){ renderTargets(await api('GET','/api/targets')); }
+
+$('#saveTargets').onclick = async ()=>{
+  const btn=$('#saveTargets'); btn.disabled=true; inl($('#tgMsg'),'dim','Saving…');
+  const body={orders:$('#tgOrders').value};
+  ['leads','mails','posts','site_checks'].forEach(k=>{
+    const el=$('#tg_'+k); if(el && el.value!=='') body[k]=el.value;
+  });
+  const j=await api('POST','/api/targets',body);
+  btn.disabled=false;
+  if(j && j.ok){ inl($('#tgMsg'),'ok','✓ Saved'); renderTargets(j); }
+  else inl($('#tgMsg'),'err','✕ '+((j&&j.error)||'failed'));
+};
+
+/* ---- read our own website and see what it says we sell ---- */
+$('#readSite').onclick = async ()=>{
+  const btn=$('#readSite'); btn.disabled=true; inl($('#siteSvcMsg'),'dim','Reading your site…');
+  const j=await api('POST','/api/site-services');
+  btn.disabled=false;
+  if(!j || !j.ok){ inl($('#siteSvcMsg'),'err','✕ '+((j&&j.error)||'failed')); $('#siteOut').innerHTML=''; return; }
+  inl($('#siteSvcMsg'),'ok','✓ '+j.pages_read.length+' page(s) read');
+  const conf=Object.values(j.confirmed||{});
+  const list=(items,colour)=>items.length
+    ? items.map(x=>`<div class="hint" style="color:${colour}">${x}</div>`).join('')
+    : '<div class="hint dim">none</div>';
+  $('#siteOut').innerHTML =
+    `<div style="margin-top:12px"><b style="font-size:12.5px">On your site and targetable</b>`
+    + list(conf.map(c=>`✓ ${c.label} <span class="dim">— as “${(c.seen_as||[])[0]||''}”</span>`), 'var(--ok)')
+    + `<b style="font-size:12.5px;display:block;margin-top:10px">On your site but the agency can't target it yet</b>`
+    + list((j.uncatalogued||[]).map(p=>`! ${p}`), 'var(--amber)')
+    + `<b style="font-size:12.5px;display:block;margin-top:10px">The agency knows these but couldn't find them on your site</b>`
+    + list((j.missing_from_site||[]).map(m=>`? ${m.label}`), 'var(--muted)')
+    + (j.uncatalogued&&j.uncatalogued.length
+        ? `<div class="hint" style="margin-top:10px">Queued for your approval — adding a service is your call, so no agent edits the list on its own.</div>` : '')
+    + `</div>`;
+};
+
 /* ---- channel tests: prove the credential, deliver nothing ---- */
 async function testChannel(which, btn, msg, notify){
   btn.disabled=true; inl(msg,'dim', notify?'Posting…':'Testing…');
@@ -798,6 +908,7 @@ async function loadProviders(){
 }
 loadSettings();
 loadProviders();
+loadTargets();
 </script>
 </body>
 </html>
