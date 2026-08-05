@@ -107,6 +107,116 @@ def get_task(task_id):
 
 
 # ----------------------------------------------------------------------------
+# AGENT RUNS — proof that an agent actually did something
+# ----------------------------------------------------------------------------
+#
+# Why this exists: a task is claimed and finished inside the same second, so
+# "who holds a claimed task right now" is almost always nobody. Read the board
+# alone and a sector that filed nine tickets two minutes ago looks exactly like
+# one that has never run in its life — both dark. The Overseer needs the same
+# trace to spot a stall or a loop, and the cost governor needs somewhere to put
+# spend. So every pipeline records a run: when it started, what it was working,
+# how it ended, and one plain line about what came of it.
+
+_MIGRATED = set()
+
+
+def _migrate(c):
+    """agent_runs gained its 'note' column after the first cabinets were built."""
+    key = str(DB)
+    if key in _MIGRATED:
+        return
+    try:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(agent_runs)")}
+        if cols and "note" not in cols:
+            c.execute("ALTER TABLE agent_runs ADD COLUMN note TEXT")
+    except sqlite3.OperationalError:
+        pass
+    _MIGRATED.add(key)
+
+
+class _Run:
+    """Handle on an open run. The pipeline tells it what it ended up doing."""
+
+    def __init__(self, run_id):
+        self.id = run_id
+        self.task_id = None
+        self._note = None
+
+    def task(self, task_id):
+        """Attach the task once it has actually been claimed."""
+        self.task_id = task_id
+        with _conn() as c:
+            c.execute("UPDATE agent_runs SET task_id=? WHERE id=?", (task_id, self.id))
+        return self
+
+    def note(self, text):
+        """One sentence, in plain words. This is what the office floor shows."""
+        self._note = (text or "")[:200]
+        with _conn() as c:
+            _migrate(c)
+            c.execute("UPDATE agent_runs SET note=? WHERE id=?", (self._note, self.id))
+        return self
+
+    def spent(self, usd, tokens_in=0, tokens_out=0):
+        with _conn() as c:
+            c.execute("UPDATE agent_runs SET usd_cost=usd_cost+?, tokens_in=tokens_in+?,"
+                      " tokens_out=tokens_out+? WHERE id=?",
+                      (float(usd), int(tokens_in), int(tokens_out), self.id))
+        return self
+
+
+@contextmanager
+def agent_run(agent, task_id=None, note=None):
+    """
+    Wrap a pipeline's work so it leaves a trace:
+
+        with board.agent_run("it-watcher") as run:
+            task = board.next_open_task("IT", "it-watcher")
+            run.task(task["id"])
+            ...
+            run.note("filed 3 tickets on glassworks.ae")
+
+    A crash marks the run 'error' and re-raises — a stalled agent must never
+    look like a clean finish.
+    """
+    with _conn() as c:
+        _migrate(c)
+        cur = c.execute(
+            "INSERT INTO agent_runs(agent,task_id,started_at,status,note)"
+            " VALUES(?,?,?, 'running', ?)", (agent, task_id, _now(), note))
+        run = _Run(cur.lastrowid)
+    try:
+        yield run
+    except BaseException:
+        _end_run(run.id, "error")
+        raise
+    _end_run(run.id, "ok")
+
+
+def _end_run(run_id, status):
+    with _conn() as c:
+        c.execute("UPDATE agent_runs SET status=?, ended_at=? WHERE id=?",
+                  (status, _now(), run_id))
+
+
+def recent_runs(since, limit=60):
+    """Runs started at or after `since` — newest first. Used by the office floor."""
+    with _conn() as c:
+        _migrate(c)
+        try:
+            rows = c.execute(
+                "SELECT r.id, r.agent, r.task_id, r.started_at, r.ended_at, r.status,"
+                "       r.note, t.title AS task_title"
+                " FROM agent_runs r LEFT JOIN tasks t ON t.id = r.task_id"
+                " WHERE r.started_at >= ? ORDER BY r.started_at DESC LIMIT ?",
+                (int(since), limit)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [dict(r) for r in rows]
+
+
+# ----------------------------------------------------------------------------
 # LOCKS — single holder, everyone else queues (this is what stops overriding)
 # ----------------------------------------------------------------------------
 
