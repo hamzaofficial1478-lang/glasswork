@@ -31,6 +31,10 @@ without the owner's sign-off (see must_avoid, and the red-line hook that
 enforces it). This composer only ever drafts on that basis.
 """
 
+import html as _html
+
+from . import services
+
 # --- email type by lead stage ----------------------------------------------
 # Grounded in the lead's real stage (schema: leads.stage), never guessed.
 _TYPES = {
@@ -82,23 +86,59 @@ def banner_spec(company: dict) -> dict:
     }
 
 
+def lead_service(lead: dict) -> tuple:
+    """
+    (service_key, label, related_labels) for this lead.
+
+    The Hunter tags every lead it collects with the service that business most
+    likely needs, worked out from its own listing. If that tag is present we use
+    it; if the lead came from somewhere else we work it out here rather than
+    falling back to a generic pitch. One mail, one job — a hotel gets shower
+    glass and mirrors, a warehouse gets aluminium doors. Naming the whole
+    catalogue at someone is how an email gets deleted.
+    """
+    key = (lead.get("service") or "").strip()
+    if key not in services.SERVICES:
+        key, _ = services.match_service(
+            lead.get("company"), lead.get("category"), lead.get("segment"),
+            segment=lead.get("segment", ""))
+    return key, services.label(key), services.related_labels(key)
+
+
 def writing_brief(lead: dict, company: dict, owner_voice: str = "") -> dict:
     """The full instruction the sector brain writes against."""
     stage = lead.get("stage", "new")
     et = email_type(stage)
+    key, label, related = lead_service(lead)
     return {
         "email_type": et["type"],
         "goal": et["goal"],
         "single_ask": et["ask"],
         "recipient": {"name": lead.get("name"), "company": lead.get("company"),
                       "area": lead.get("area"), "segment": lead.get("segment")},
+        # THE one thing this email is about, and the ones that go underneath it
+        "lead_service": key,
+        "headline_service": label,
+        "also_offer": related,
         "language": "British English",
         "length_words": [90, 130],
         "voice": owner_voice or "plain, human, confident, no filler — a tradesman with 10+ years, writing like a person",
         "attention_levers": _LEVERS,
-        "must_include": ["the reader's area + service", "one real proof point", "one clear ask"],
+        "must_include": [f"{label} — this is what the email is ABOUT, lead with it",
+                         "the reader's area, by name",
+                         "one real proof point",
+                         "one clear ask"],
         "must_avoid": ["fake project photos", "invented reviews or numbers",
-                       "any price or special deal (owner sign-off only)", "walls of text"],
+                       "any price or special deal (owner sign-off only)", "walls of text",
+                       "listing every service in the body — the related ones belong "
+                       "in the footer block, not the paragraph"],
+        "footer_block": {
+            "also_offer": related,
+            "website": company.get("website", ""),
+            "phone": company.get("phone", ""),
+            "whatsapp": company.get("whatsapp", ""),
+            "areas": company.get("areas", ["Dubai", "Abu Dhabi", "Sharjah"]),
+        },
         "banner": banner_spec(company),
     }
 
@@ -122,6 +162,166 @@ def plan(lead: dict, company: dict, owner_voice: str = "") -> dict:
                        "image is a genuine project shot", "one clear ask", "on-voice, short"],
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# RENDER — the actual email, in a form a person can read
+# ---------------------------------------------------------------------------
+#
+# What was missing: everything above produces a PLAN — a nested dict describing
+# the email. That is the right thing for the brain to write against and the
+# wrong thing to look at. Reading a plan is not reading an email, and an owner
+# asked to approve outreach should be looking at what the customer will see.
+#
+# So render() takes the plan plus the written copy and produces the finished
+# thing: a subject line, a plain-text version, and an HTML version with the
+# banner, the one service this mail is about, the related services underneath,
+# and the website and contact details in the footer. Both versions carry the
+# same words — the text one is not an afterthought, because plenty of UAE
+# procurement inboxes still strip HTML.
+
+
+def _split_subject(draft: str) -> tuple:
+    """
+    The brain returns 'subject line, then body'. Take it apart forgivingly —
+    with or without a 'Subject:' prefix, and cope if it only wrote a body.
+    """
+    lines = [l.rstrip() for l in (draft or "").strip().splitlines()]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if not lines:
+        return "", ""
+    first = lines[0].strip()
+    low = first.lower()
+    if low.startswith("subject:"):
+        return first.split(":", 1)[1].strip(), "\n".join(lines[1:]).strip()
+    # a short first line with no full stop is a subject, not a paragraph
+    if len(first) <= 90 and not first.endswith((".", "!", "?")) and len(lines) > 1:
+        return first, "\n".join(lines[1:]).strip()
+    return "", "\n".join(lines).strip()
+
+
+def _paragraphs(body: str) -> list:
+    out, buf = [], []
+    for line in (body or "").splitlines():
+        if line.strip():
+            buf.append(line.strip())
+        elif buf:
+            out.append(" ".join(buf))
+            buf = []
+    if buf:
+        out.append(" ".join(buf))
+    return out
+
+
+def render(plan_or_brief: dict, draft: str, company: dict, lead: dict) -> dict:
+    """
+    The finished email. Returns {subject, text, html, service, also_offer}.
+
+    Nothing here invents copy: the words are the ones the brain wrote and the MD
+    approved. This only wraps them in the branding, the service block and the
+    contact details, which are facts about the business rather than claims about
+    the customer.
+    """
+    brief = plan_or_brief.get("brief", plan_or_brief)
+    key, label, related = lead_service(lead)
+    fb = brief.get("footer_block", {}) or {}
+    site = (fb.get("website") or company.get("website") or "").strip()
+    phone = (fb.get("phone") or company.get("phone") or "").strip()
+    wa = (fb.get("whatsapp") or company.get("whatsapp") or "").strip()
+    areas = fb.get("areas") or company.get("areas") or ["Dubai", "Abu Dhabi", "Sharjah"]
+    name = company.get("name", "Glassworks")
+    tagline = company.get("tagline", "Glass & aluminium, done properly")
+
+    subject, body = _split_subject(draft)
+    if not subject:
+        where = (lead.get("area") or "").strip()
+        subject = f"{label.capitalize()}" + (f" in {where}" if where else "")
+    paras = _paragraphs(body) or [body.strip()]
+
+    # ---- plain text -------------------------------------------------------
+    lines = list(paras)
+    lines += ["", "— " + name + (f", {tagline}" if tagline else "")]
+    if phone:
+        lines.append(f"  Phone: {phone}")
+    if wa:
+        lines.append(f"  WhatsApp: {wa}")
+    if site:
+        lines.append(f"  {site}")
+    lines += ["", f"We also do: {', '.join(related)}.",
+              f"Covering {', '.join(areas)}."]
+    text = "\n".join(lines).strip() + "\n"
+
+    # ---- html -------------------------------------------------------------
+    e = _html.escape
+    hero = ""
+    photo = (company.get("hero_photo") or "").strip()
+    if photo:
+        # a REAL project photo or nothing. Never a generated one — see the
+        # graphics rule at the top of this file.
+        hero = (f'<img src="{e(photo)}" alt="Recent {e(label)} job" '
+                f'style="width:100%;max-width:600px;display:block;border:0">')
+
+    svc_chips = "".join(
+        f'<span style="display:inline-block;background:#eef6f8;color:#14343d;'
+        f'border:1px solid #cfe3e8;border-radius:14px;padding:4px 11px;margin:3px 4px 0 0;'
+        f'font-size:12px">{e(s)}</span>' for s in related)
+
+    contact_bits = []
+    if phone:
+        contact_bits.append(f'<a href="tel:{e(phone)}" style="color:#0b6b7a;'
+                            f'text-decoration:none">{e(phone)}</a>')
+    if wa:
+        digits = "".join(ch for ch in wa if ch.isdigit())
+        contact_bits.append(f'<a href="https://wa.me/{digits}" '
+                            f'style="color:#0b6b7a;text-decoration:none">WhatsApp</a>')
+    if site:
+        shown = site.replace("https://", "").replace("http://", "").rstrip("/")
+        contact_bits.append(f'<a href="{e(site)}" style="color:#0b6b7a;'
+                            f'text-decoration:none">{e(shown)}</a>')
+
+    html_doc = f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#f4f6f7">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+       style="background:#f4f6f7;padding:20px 10px">
+<tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0"
+       style="max-width:600px;width:100%;background:#ffffff;border-radius:10px;
+              overflow:hidden;font-family:Helvetica,Arial,sans-serif;color:#1f2b30">
+
+  <tr><td style="background:#12313a;padding:18px 24px">
+    <div style="color:#ffffff;font-size:19px;font-weight:700">{e(name)}</div>
+    <div style="color:#8fd3e0;font-size:12.5px;margin-top:3px">{e(tagline)}</div>
+  </td></tr>
+
+  {f'<tr><td>{hero}</td></tr>' if hero else ''}
+
+  <tr><td style="padding:24px 24px 6px">
+    <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+                color:#0b6b7a;font-weight:700">{e(label)}</div>
+  </td></tr>
+
+  <tr><td style="padding:6px 24px 18px;font-size:15px;line-height:1.6">
+    {''.join(f'<p style="margin:0 0 14px">{e(p)}</p>' for p in paras)}
+  </td></tr>
+
+  <tr><td style="padding:0 24px 20px">
+    <div style="font-size:13px;color:#4a5c63;margin-bottom:4px">
+      We also do:</div>{svc_chips}
+  </td></tr>
+
+  <tr><td style="background:#f7fafb;border-top:1px solid #e2eaed;padding:16px 24px;
+                 font-size:13px;color:#4a5c63">
+    <div style="font-weight:600;color:#1f2b30">{e(name)}</div>
+    <div style="margin-top:4px">{' &nbsp;·&nbsp; '.join(contact_bits)}</div>
+    <div style="margin-top:6px;color:#7a8b92">Covering {e(', '.join(areas))}.</div>
+  </td></tr>
+
+</table></td></tr></table></body></html>"""
+
+    return {"subject": subject, "text": text, "html": html_doc,
+            "service": key, "service_label": label, "also_offer": related,
+            "website": site}
 
 
 # ---------------------------------------------------------------------------
@@ -250,15 +450,63 @@ def _smtp_send(lead: dict, draft: str) -> dict:
     return {"ok": False, "error": "SMTP send not enabled yet — add SMTP on /setup and turn on outreach"}
 
 
-if __name__ == "__main__":  # show a plan (pure, no side effects)
-    import json
-    demo_lead = {"name": "Sara", "company": "Marina Fitout LLC", "area": "Dubai Marina",
-                 "segment": "fitout", "stage": "new", "email": "hello@example.ae"}
-    demo_company = {"name": "Glassworks Dubai", "phone": "+9715...", "whatsapp": "+9715..."}
-    pl = plan(demo_lead, demo_company)
-    print(json.dumps(pl, indent=2))
+def preview(lead: dict, company: dict, draft: str = "", write_html_to: str = "") -> dict:
+    """
+    See the email the way the customer will. Pure — nothing is borrowed, nothing
+    is sent, no key needed.
+
+    With no draft it uses a placeholder body so the shape, the service block and
+    the footer can be checked; with a real draft it shows the real thing.
+    """
+    p = plan(lead, company)
+    if not draft:
+        _, label, _ = lead_service(lead)
+        where = lead.get("area") or "your area"
+        draft = (f"{label.capitalize()} in {where}\n\n"
+                 f"[the written copy goes here — {p['brief']['length_words'][0]}"
+                 f"–{p['brief']['length_words'][1]} words, in the owner's voice, "
+                 f"about {label} and nothing else]\n\n"
+                 "[one real proof point from a nearby finished job]\n\n"
+                 "[one clear ask]")
+    out = render(p, draft, company, lead)
+    if write_html_to:
+        from pathlib import Path
+        Path(write_html_to).write_text(out["html"], encoding="utf-8")
+        out["written_to"] = write_html_to
+    return out
+
+
+if __name__ == "__main__":  # show the EMAIL, not the plan (pure, no side effects)
+    import argparse
+    ap = argparse.ArgumentParser(description="Preview an outreach email.")
+    ap.add_argument("--html", help="also write the HTML version to this file")
+    ap.add_argument("--segment", default="hotel")
+    ap.add_argument("--plan", action="store_true", help="print the JSON plan instead")
+    a = ap.parse_args()
+
+    demo_lead = {"company": "Marina Bay Hotel", "area": "Dubai Marina",
+                 "segment": a.segment, "stage": "new", "email": "info@example.ae"}
+    demo_company = {"name": "Glassworks Dubai",
+                    "tagline": "Glass & aluminium, done properly since 2014",
+                    "phone": "+971 4 000 0000", "whatsapp": "+971 50 000 0000",
+                    "website": "https://glassworks.ae",
+                    "areas": ["Dubai", "Abu Dhabi", "Sharjah"]}
+
+    if a.plan:
+        import json
+        print(json.dumps(plan(demo_lead, demo_company), indent=2))
+    else:
+        out = preview(demo_lead, demo_company, write_html_to=a.html or "")
+        print("Subject: " + out["subject"])
+        print("About:   " + out["service_label"])
+        print("Also:    " + ", ".join(out["also_offer"]))
+        print("-" * 62)
+        print(out["text"])
+        if out.get("written_to"):
+            print(f"(HTML written to {out['written_to']} — open it in a browser)")
+
     # tiny self-checks
+    pl = plan(demo_lead, demo_company)
     assert pl["email_type"] == "cold_intro"
     assert email_type("won")["type"] == "thank_you"
     assert "email" in pl["shelves_needed"]
-    print("\nplan self-checks passed")
