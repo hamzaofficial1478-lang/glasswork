@@ -209,6 +209,26 @@ CREATE TABLE IF NOT EXISTS borrows (
   released_at INTEGER
 );
 
+-- ---- the owner's daily orders ---------------------------------------------
+-- How much of each job the owner wants done per day, set on /setup. The MD
+-- plans against these instead of inventing a workload, and the office floor
+-- shows today's progress against them. One row per job type.
+CREATE TABLE IF NOT EXISTS targets (
+  name       TEXT PRIMARY KEY,     -- leads | mails | posts | site_checks
+  per_day    INTEGER DEFAULT 0,    -- 0 = not today
+  note       TEXT,                 -- the owner's own words for this job
+  updated_at INTEGER
+);
+
+-- What the owner types for a given day, in his own words: "focus on Sharjah
+-- hotels", "no outreach today, I'm on site". The MD reads it before planning
+-- and is expected to follow it over its own preference.
+CREATE TABLE IF NOT EXISTS daily_orders (
+  day        TEXT PRIMARY KEY,     -- YYYY-MM-DD, local time
+  orders     TEXT,
+  updated_at INTEGER
+);
+
 -- ---- the daily digest -----------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS daily_reports (
