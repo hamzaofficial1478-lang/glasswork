@@ -96,7 +96,8 @@ function updateEnv(partial) {
 // Every table the app expects. A cabinet built by an OLDER version is missing the
 // newer ones (that's what made the shelf board fail), so this list is what decides
 // whether the schema needs applying again — not just "does the file exist".
-const REQUIRED_TABLES = ["tasks", "decisions", "keywords", "shelf_queue", "borrows"];
+const REQUIRED_TABLES = ["tasks", "decisions", "keywords", "shelf_queue", "borrows",
+                         "targets", "daily_orders"];
 
 function dbBuilt() {
   if (!fs.existsSync(DB_PATH)) return false;
@@ -154,6 +155,22 @@ function pyProvider(command, payload, timeoutMs) {
   if (!out) return { ok: false, error: "provider module error: " + String(r.stderr || "no output") };
   try { return JSON.parse(out); }
   catch (_) { return { ok: false, error: "bad provider output: " + out.slice(0, 300) }; }
+}
+
+// Shell into any agency module the same way. Arguments go through as an ARRAY,
+// never a shell string, so an owner typing a quote into their daily orders
+// cannot turn into a command.
+function pyModule(mod, args, timeoutMs) {
+  const py = resolvePython();
+  if (!py) return { ok: false, error: NO_PY };
+  const r = spawnSync(py.cmd, [...py.prefix, "-m", mod, ...(args || [])], {
+    cwd: __dirname, timeout: timeoutMs || 120000, maxBuffer: 8 * 1024 * 1024,
+  });
+  if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
+  const out = String(r.stdout || "");
+  if (!out) return { ok: false, error: mod + " error: " + String(r.stderr || "no output") };
+  try { return JSON.parse(out); }
+  catch (_) { return { ok: false, error: "bad output from " + mod + ": " + out.slice(0, 300) }; }
 }
 
 // shell into the state reader (same single code path — the server reads no DB itself)
@@ -316,6 +333,37 @@ app.post("/api/integrations/test", (req, res) =>
 // longer budget than an ordinary provider command.
 app.post("/api/preflight", (req, res) =>
   res.json(pyProvider("preflight", req.body, 900000)));
+
+// ---- the owner's daily targets ---------------------------------------------
+// The numbers the agency works to. Read and written through coordination.targets
+// so the ceiling checks and the measurement live in one place — the server does
+// not know what a safe outreach volume is, and should not have an opinion.
+app.get("/api/targets", (_q, res) => res.json(pyModule("coordination.targets", ["--json"])));
+
+app.post("/api/targets", (req, res) => {
+  const b = req.body || {};
+  const args = [];
+  const JOBS = ["leads", "mails", "posts", "site_checks"];
+  for (const k of JOBS) {
+    if (b[k] === undefined || b[k] === null || b[k] === "") continue;
+    const n = parseInt(b[k], 10);
+    if (Number.isNaN(n) || n < 0)
+      return res.status(400).json({ ok: false, error: `${k} must be a whole number, 0 or more.` });
+    if (n > 100000)
+      return res.status(400).json({ ok: false, error: `${k} of ${n} is not a real target.` });
+    args.push("--set", `${k}=${n}`);
+  }
+  if (typeof b.orders === "string") args.push("--orders", b.orders.slice(0, 4000));
+  if (!args.length) return res.status(400).json({ ok: false, error: "Nothing to save." });
+  args.push("--json");
+  return res.json(pyModule("coordination.targets", args));
+});
+
+// ---- what our own website says we sell --------------------------------------
+// Reads SITE_URL and reconciles it against the service catalogue. Slow (it
+// fetches several pages), so it is only ever run on demand from the button.
+app.post("/api/site-services", (_q, res) =>
+  res.json(pyModule("pipelines.site_services", ["--json"], 180000)));
 
 // ---- per-task routing ------------------------------------------------------
 app.get("/api/routing", (_q, res) => res.json(pyProvider("get_routing", {})));
