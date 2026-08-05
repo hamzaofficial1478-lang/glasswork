@@ -103,6 +103,29 @@ RELEVANT = ("glass", "alumin", "fit out", "fit-out", "fitout", "interior",
             "contract", "develop", "facilit", "property", "real estate",
             "joinery", "façade", "facade", "constru", "engineer", "maintenance")
 
+# A company switchboard is business data. A named employee's work address is
+# PERSONAL data about an identifiable person, even at a company — UAE PDPL does
+# not stop caring because the domain is corporate. So we prefer the role inbox,
+# and anything personal is flagged rather than filed away as ordinary business
+# detail. It is also simply better outreach: info@ survives the person leaving.
+ROLE_INBOXES = ("info", "sales", "enquiry", "enquiries", "contact", "admin",
+                "office", "projects", "procurement", "purchasing", "tenders",
+                "hello", "team", "support", "estimation", "estimating")
+
+
+def contact_kind(lead: dict) -> str:
+    """'role' | 'personal' | 'unknown' — which kind of address is this?"""
+    email = (lead.get("email") or "").strip().lower()
+    local = email.split("@")[0] if "@" in email else ""
+    if local and any(local == r or local.startswith(r + ".") or local.startswith(r + "-")
+                     for r in ROLE_INBOXES):
+        return "role"
+    if (lead.get("name") or "").strip():
+        return "personal"          # we hold a person's name against this record
+    if local and ("." in local or "_" in local):
+        return "personal"          # firstname.lastname@ is a person
+    return "unknown"
+
 
 # ---- the gate ---------------------------------------------------------------
 
@@ -145,7 +168,13 @@ def screen_lead(c: dict) -> tuple:
         return (False, "no connection to glass, aluminium or the trades that buy it")
     if not ((c.get("email") or "").strip() or (c.get("phone") or "").strip()):
         return (False, "no business contact route recorded")
-    return (True, "business, in the UAE, relevant, contactable")
+    kind = contact_kind(c)
+    if kind == "personal":
+        # Allowed, but it is personal data and must not be filed as if it were
+        # just a company detail. Prefer the switchboard where one exists.
+        return (True, "business, but a NAMED PERSON's address — personal data under "
+                      "PDPL; prefer the company's role inbox and keep a lawful basis")
+    return (True, f"business, in the UAE, relevant, contactable ({kind} inbox)")
 
 
 def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
@@ -158,12 +187,16 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
     needs Security clearance and an owner-approved route, neither of which lives
     in this function.
     """
-    stored, dupes, refused = [], [], []
+    stored, dupes, refused, personal = [], [], [], []
     for c in candidates:
         ok, why = screen_lead(c)
         if not ok:
             refused.append({"company": c.get("company") or c.get("name"), "why": why})
             continue
+        if contact_kind(c) == "personal":
+            # counted separately so you can always see how much personal data the
+            # cabinet is holding, rather than discovering it during an audit
+            personal.append(c.get("company"))
         # dedup BEFORE the store — re-approaching a firm burns the relationship
         if board.lead_seen(c.get("email"), c.get("phone"), c.get("company")):
             dupes.append(c.get("company"))
@@ -174,7 +207,8 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
         else:
             stored.append({"id": lid, "company": c.get("company")})
     return {"stored": stored, "duplicates": dupes, "refused": refused,
-            "contacted": 0, "agent": agent, "sector": sector}
+            "personal_data_held": personal, "contacted": 0,
+            "agent": agent, "sector": sector}
 
 
 # ---- today's task: the source map -------------------------------------------
