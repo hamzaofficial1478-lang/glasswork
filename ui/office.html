@@ -455,8 +455,15 @@ function applyLive(j){
     rm.foot  = live.foot;
     const tasks = live.agents||[];
     rm.agents.forEach((a,i)=>{
-      if(tasks[i]){ a.s = tasks[i].s; a.t = tasks[i].t; }
-      else { a.s = 'idle'; a.t = 'no task on the board'; }
+      if(a.staff===undefined) a.staff = a.n;   // remember the desk's own name once
+      if(tasks[i]){
+        a.s = tasks[i].s; a.t = tasks[i].t;
+        // show WHO actually holds it. The board records the real owner, and a desk
+        // labelled 'Writer' while content-writer holds the task tells you nothing.
+        a.n = (tasks[i].n && tasks[i].n !== 'unassigned') ? tasks[i].n : a.staff;
+      } else {
+        a.s = 'idle'; a.t = 'no task on the board'; a.n = a.staff;
+      }
     });
   });
 }
