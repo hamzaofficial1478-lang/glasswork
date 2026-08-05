@@ -160,9 +160,20 @@ def build():
     except Exception:
         sells_to, areas = [], []
 
+    # What the owner has actually asked for today. This goes near the top of the
+    # briefing on purpose: an agent that reads the capability list but not the
+    # orders will do what it CAN rather than what it was ASKED, which is the
+    # difference between a useful agency and a busy one.
+    try:
+        from . import targets as _t
+        orders = _t.status()
+    except Exception:
+        orders = {"ok": False, "jobs": [], "orders": ""}
+
     return {
         "ok": True,
         "generated_at": int(time.time()),
+        "todays_orders": orders,
         "business": {
             "trade": "glass & aluminium fabrication and installation, UAE",
             "services": sells,
@@ -199,6 +210,22 @@ def as_text(b=None) -> str:
     if biz["sells_to"]:
         L.append(f"  Sells to {len(biz['sells_to'])} kinds of business across "
                  f"{len(biz['areas'])} areas.")
+
+    o = b.get("todays_orders") or {}
+    if o.get("ok"):
+        L.append("")
+        L.append("WHAT THE OWNER HAS ASKED FOR TODAY")
+        if not o.get("any_target_set"):
+            L.append("  Nothing set. Do not invent a workload — ask, or work the board.")
+        for j in o.get("jobs", []):
+            if not j["per_day"]:
+                continue
+            state = "done" if j["hit"] else f"{j['remaining']} still to do"
+            L.append(f"  {j['done_today']}/{j['per_day']}  {j['label'].lower()} — {state}")
+            if j["warning"]:
+                L.append(f"        WARNING: {j['warning']}")
+        if o.get("orders"):
+            L.append("  In his own words: " + o["orders"].replace("\n", " / "))
 
     L.append("")
     L.append("THE SECTORS, AND WHAT EACH ONE RUNS")

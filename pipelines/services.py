@@ -7,12 +7,20 @@ write about THAT service and to mention the related ones underneath. Keeping it
 in one module is the point: add a service here and both the targeting and the
 email pick it up, with no second list to forget.
 
-Each service carries four things:
+Each service carries five things:
 
   label      what we call it in writing, in the owner's words
-  signals    words that, in a business's name/category/site, say they need it
+  names      what the service is CALLED — the words a website uses for it
+  signals    words that, in a business's name/category/site, say they NEED it
   buyers     the segments that buy it most (see SEGMENTS in leads_sources)
   related    what to mention underneath in the same email
+
+'names' and 'signals' answer different questions and must not be confused. A
+hotel is a *signal* for shower glass — it tells you who needs the job. "Shower
+enclosure" is a *name* — it tells you what the job is. Reading our own website
+needs names; reading a prospect's listing needs signals. Trying to do the first
+with the second is exactly how the site reader failed to recognise "Frameless
+Shower Enclosures" as a service we sell.
 
 'related' is doing real work. A hotel that needs shower glass almost always has
 mirrors, balustrades and aluminium windows too, and a mail that names the one
@@ -27,6 +35,10 @@ from functools import lru_cache
 SERVICES = {
     "glass_partition": {
         "label": "office glass partitions",
+        "names": ("glass partition",
+                  "office partition",
+                  "glazed partition",
+                  "partition"),
         "signals": ("office", "coworking", "co-working", "business centre", "business center",
                     "corporate", "consultanc", "law firm", "accounting", "clinic", "bank",
                     "insurance", "agency", "studio", "workspace", "fit out", "fit-out",
@@ -37,6 +49,12 @@ SERVICES = {
     },
     "shopfront": {
         "label": "glass shopfronts and storefronts",
+        "names": ("shopfront",
+                  "shop front",
+                  "storefront",
+                  "store front",
+                  "shop fitting",
+                  "shopfitting"),
         "signals": ("shop", "store", "retail", "boutique", "showroom", "outlet",
                     "pharmacy", "supermarket", "mall", "kiosk", "bakery"),
         "buyers": ("retail", "showroom", "mall", "restaurant", "salon", "pharmacy"),
@@ -44,6 +62,12 @@ SERVICES = {
     },
     "shower_glass": {
         "label": "frameless shower glass",
+        "names": ("shower glass",
+                  "shower enclosure",
+                  "shower screen",
+                  "shower cabin",
+                  "shower cubicle",
+                  "shower"),
         "signals": ("hotel", "resort", "spa", "hostel", "apartment", "residence",
                     "villa", "bathroom", "sanitary", "wellness", "hospital"),
         "buyers": ("hotel", "spa", "hospital", "property_management", "developer",
@@ -52,6 +76,12 @@ SERVICES = {
     },
     "glass_railing": {
         "label": "glass railings and balustrades",
+        "names": ("glass railing",
+                  "balustrade",
+                  "handrail",
+                  "glass railings",
+                  "banister",
+                  "railing"),
         "signals": ("villa", "tower", "residence", "staircase", "balcony", "terrace",
                     "developer", "landscap", "resort", "restaurant", "rooftop"),
         "buyers": ("developer", "property_management", "hotel", "restaurant",
@@ -60,6 +90,12 @@ SERVICES = {
     },
     "glass_door": {
         "label": "glass doors, sliding and automatic",
+        "names": ("glass door",
+                  "sliding door",
+                  "automatic door",
+                  "frameless door",
+                  "swing door",
+                  "patch fitting"),
         "signals": ("entrance", "lobby", "reception", "clinic", "hospital", "bank",
                     "office", "hotel", "supermarket", "showroom", "airport"),
         "buyers": ("office", "hotel", "hospital", "clinic", "retail", "bank", "mall"),
@@ -67,6 +103,8 @@ SERVICES = {
     },
     "mirror": {
         "label": "mirrors and mirror walls",
+        "names": ("mirror wall",
+                  "mirror"),
         "signals": ("salon", "barber", "gym", "fitness", "spa", "dance", "yoga",
                     "beauty", "hotel", "boutique", "studio"),
         "buyers": ("salon", "gym", "spa", "hotel", "retail", "school"),
@@ -74,6 +112,11 @@ SERVICES = {
     },
     "aluminium_windows": {
         "label": "aluminium windows",
+        "names": ("aluminium window",
+                  "aluminum window",
+                  "upvc window",
+                  "sliding window",
+                  "window"),
         "signals": ("villa", "apartment", "building", "residence", "tower", "compound",
                     "developer", "contracting", "school", "warehouse", "labour camp"),
         "buyers": ("developer", "property_management", "construction", "school",
@@ -82,6 +125,9 @@ SERVICES = {
     },
     "aluminium_doors": {
         "label": "aluminium doors",
+        "names": ("aluminium door",
+                  "aluminum door",
+                  "upvc door"),
         "signals": ("warehouse", "factory", "workshop", "garage", "storage", "logistics",
                     "building", "school", "clinic", "office", "compound"),
         "buyers": ("warehouse", "construction", "school", "office", "facility_management",
@@ -90,6 +136,12 @@ SERVICES = {
     },
     "cladding": {
         "label": "aluminium cladding and façade panels",
+        "names": ("cladding",
+                  "acp",
+                  "aluminium composite",
+                  "composite panel",
+                  "facade panel",
+                  "façade panel"),
         "signals": ("tower", "building", "façade", "facade", "developer", "contracting",
                     "hotel", "mall", "showroom", "petrol", "signage"),
         "buyers": ("developer", "construction", "mall", "hotel", "facility_management"),
@@ -97,6 +149,11 @@ SERVICES = {
     },
     "curtain_wall": {
         "label": "curtain walling and structural glazing",
+        "names": ("curtain wall",
+                  "curtain walling",
+                  "structural glazing",
+                  "spider glazing",
+                  "unitised"),
         "signals": ("tower", "high rise", "high-rise", "corporate", "headquarters",
                     "developer", "contracting", "consultant", "architect"),
         "buyers": ("developer", "construction", "architect", "office"),
@@ -104,6 +161,11 @@ SERVICES = {
     },
     "wooden_doors": {
         "label": "wooden doors and joinery",
+        "names": ("wooden door",
+                  "wood door",
+                  "timber door",
+                  "joinery",
+                  "carpentry"),
         "signals": ("hotel", "apartment", "villa", "residence", "school", "clinic",
                     "interior", "joinery", "furniture", "fit out", "fit-out"),
         "buyers": ("hotel", "fitout_contractor", "interior_design", "developer",
@@ -112,6 +174,13 @@ SERVICES = {
     },
     "pergola": {
         "label": "pergolas, shades and canopies",
+        "names": ("pergola",
+                  "gazebo",
+                  "shade structure",
+                  "car park shade",
+                  "awning",
+                  "canopy",
+                  "shade"),
         "signals": ("restaurant", "cafe", "café", "resort", "villa", "garden", "landscap",
                     "pool", "terrace", "rooftop", "nursery", "school", "compound"),
         "buyers": ("restaurant", "hotel", "school", "villa_compound", "property_management",
@@ -120,6 +189,10 @@ SERVICES = {
     },
     "skylight": {
         "label": "skylights and glass roofs",
+        "names": ("skylight",
+                  "glass roof",
+                  "atrium",
+                  "roof glazing"),
         "signals": ("mall", "atrium", "showroom", "villa", "resort", "museum",
                     "airport", "warehouse", "clinic"),
         "buyers": ("mall", "developer", "hotel", "showroom", "construction"),
@@ -127,6 +200,12 @@ SERVICES = {
     },
     "glass_repair": {
         "label": "glass and aluminium repair and replacement",
+        "names": ("glass repair",
+                  "glass replacement",
+                  "glass fixing",
+                  "glazing repair",
+                  "maintenance",
+                  "repair"),
         "signals": ("facility", "maintenance", "management", "property", "handover",
                     "snagging", "building services", "hospital", "school", "hotel"),
         "buyers": ("facility_management", "property_management", "real_estate_agency",
@@ -168,6 +247,24 @@ def related_labels(service_key: str, limit: int = 4) -> list:
     if not s:
         return ALL_SERVICE_LABELS[:limit]
     return [label(k) for k in s["related"][:limit]]
+
+
+def match_by_name(text) -> tuple:
+    """
+    Which service is this phrase the NAME of? (key, matched_name) or (None, "").
+
+    Used when reading a site that lists what it sells, rather than guessing what
+    a prospect needs. The longest matching name wins, so "aluminium door" beats
+    the bare "door" and "shower enclosure" beats "shower" — the specific name is
+    always the more informative one.
+    """
+    t = (text or "").lower()
+    best = (0, None, "")
+    for key, s in SERVICES.items():
+        for n in s.get("names", ()):
+            if len(n) > best[0] and _signal_re(n).search(t):
+                best = (len(n), key, n)
+    return (best[1], best[2])
 
 
 def services_for_segment(segment: str) -> list:
