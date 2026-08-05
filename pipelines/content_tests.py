@@ -154,6 +154,50 @@ def test_claim_is_atomic():
         board.DB = real_db
 
 
+def test_rerun_does_not_duplicate():
+    """
+    Running twice must not mint a competing twin of every page. This is the
+    duplicate-URL rule the Critic already enforces inside one run, applied
+    across runs — which is where it was actually being broken.
+    """
+    print("Re-running is safe:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        for ph, ar, it in [("glass partition dubai", "Dubai", "buy"),
+                           ("glass partition dubai price", "Dubai", "buy"),
+                           ("pergola dubai", "Dubai", "buy"),
+                           ("pergola dubai price", "Dubai", "buy")]:
+            con.execute("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)", (ph, ar, it))
+        con.commit()
+        con.close()
+
+        board.post_request("SEO", "Content", "Keyword-gap list ready", "gaps")
+        first = cb.run(agent="content-writer")
+        check("first run briefs the pages", first["stored"], 2)
+
+        board.post_request("SEO", "Content", "Keyword-gap list ready", "same gaps again")
+        second = cb.run(agent="content-writer")
+        check("second run stores nothing new", second["stored"], 0)
+        check("and says why", second["already_briefed"], 2)
+
+        con = sqlite3.connect(board.DB)
+        titles = [r[0] for r in con.execute("SELECT title FROM content_queue")]
+        check("no page was briefed twice", len(titles), len(set(titles)))
+        check("still just the two pages", len(titles), 2)
+        con.close()
+
+        # and the Critic refuses outright if a clash is somehow handed to it
+        clash = [{"url": "/glass-partition-dubai", "title": "x",
+                  "evidence": {"phrases_behind_this_page": 3}, "_ready": True}]
+        ok, why = cb.critic_check(clash, 10, already={"/glass-partition-dubai"})
+        check("Critic rejects a page that already exists",
+              (ok, any("already briefed" in r for r in why)), (False, True))
+    finally:
+        board.DB = real_db
+
+
 def test_end_to_end_on_a_temp_cabinet():
     print("Full cycle on a throwaway cabinet:")
     real_db = board.DB
@@ -213,6 +257,7 @@ def main():
     test_critic_gate()
     test_brief_is_grounded()
     test_claim_is_atomic()
+    test_rerun_does_not_duplicate()
     test_end_to_end_on_a_temp_cabinet()
     print()
     if _fail:
