@@ -156,9 +156,12 @@ def screen_source(src: dict):
         sev, why = RISKY_SOURCE_KINDS[kind]
         out.append({"kind": "source_risk", "severity": sev, "where": src.get("name", "?"),
                     "why": why, "excerpt": kind})
-    if not src.get("b2b_only", True):
+    # Leads renamed this flag from b2b_only to business_data when the target list
+    # widened. Both are read, because a check that silently stops firing when a
+    # field is renamed is worse than no check — it still looks like it is working.
+    if not src.get("business_data", src.get("b2b_only", True)):
         out.append({"kind": "source_risk", "severity": "high", "where": src.get("name", "?"),
-                    "why": "yields private individuals", "excerpt": "b2b_only=false"})
+                    "why": "yields private individuals at home", "excerpt": "business_data=false"})
     out.extend(scan_text(f'{src.get("name","")} {src.get("why","")}',
                          where=src.get("name", "source")))
     return out
@@ -221,6 +224,15 @@ def _screen_request(req, body):
 
 
 def run(agent="security-screener"):
+    with board.agent_run(agent) as run_row:
+        out = _screen(agent)
+        run_row.note(f"screened {len(out['answered'])} request(s), "
+                     f"{out.get('findings_logged', 0)} finding(s)"
+                     if out.get("answered") else out.get("error", "nothing to screen"))
+        return out
+
+
+def _screen(agent):
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
     try:
