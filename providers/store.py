@@ -40,6 +40,8 @@ SHELF_KINDS = {
     "image_gen":       "reasoning",   # generated graphics (decoration only)
     "speech":          "reasoning",   # transcription / voice
     "seo_data":        "data",
+    "trends":          "data",        # Google Trends & co — what demand is rising
+    "maps":            "data",        # Google Places — real UAE businesses, by area
     "stock_images":    "data",
     "crawler":         "data",
     "email":           "delivery",
