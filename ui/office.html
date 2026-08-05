@@ -68,7 +68,12 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .emp{width:72px;display:flex;flex-direction:column;align-items:center;cursor:pointer;position:relative}
 .emp .figure{position:relative;animation:bob 3.4s ease-in-out infinite}
 .emp .status{position:absolute;top:-9px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;z-index:4}
-.emp.working .status{background:var(--glass);box-shadow:0 0 8px var(--glass)}
+/* Four honest states. 'working' is an agent running right now; 'done' is one
+   that finished real work inside the last hour — steady, not pulsing, because
+   it is resting, not busy; 'waiting' is work on the board nobody has claimed;
+   'idle' is a desk that has genuinely done nothing, and it stays dark. */
+.emp.working .status{background:var(--glass);box-shadow:0 0 8px var(--glass);animation:pulse 1.4s infinite}
+.emp.done .status{background:var(--ok);box-shadow:0 0 7px var(--ok)}
 .emp.waiting .status{background:var(--amber);box-shadow:0 0 8px var(--amber);animation:pulse 1.4s infinite}
 .emp.idle .status{background:var(--faint)}.emp.blocked .status{background:var(--danger);box-shadow:0 0 8px var(--danger)}
 .head{width:26px;height:24px;border-radius:9px 9px 8px 8px;margin:0 auto;position:relative;background:linear-gradient(180deg,#c9d6dc,#9fb2ba);border:1px solid #7d929b}
@@ -76,13 +81,19 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .head::before,.head::after{content:"";position:absolute;top:9px;width:4px;height:4px;border-radius:50%;background:#1a2429;animation:blink 4.2s infinite}
 .head::before{left:6px}.head::after{right:6px}
 .antenna{position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:2px;height:6px;background:#7d929b}
-.antenna::after{content:"";position:absolute;top:-3px;left:-1.5px;width:5px;height:5px;border-radius:50%;background:var(--glass)}
-.emp.working .antenna::after{animation:pulse 1.1s infinite}
+/* The bulb on the head. Dark by default — a fused bulb means an agent that
+   isn't doing anything, and that has to be visible at a glance. */
+.antenna::after{content:"";position:absolute;top:-3px;left:-1.5px;width:5px;height:5px;border-radius:50%;background:var(--faint)}
+.emp.working .antenna::after{background:var(--glass);box-shadow:0 0 6px var(--glass);animation:pulse 1.1s infinite}
+.emp.done .antenna::after{background:var(--ok);box-shadow:0 0 5px var(--ok)}
+.emp.waiting .antenna::after{background:var(--amber);box-shadow:0 0 5px var(--amber)}
+.emp.blocked .antenna::after{background:var(--danger);box-shadow:0 0 6px var(--danger)}
 .body{width:34px;height:20px;border-radius:10px 10px 5px 5px;margin:-2px auto 0;background:linear-gradient(180deg,#41565f,#2e3f47);border:1px solid #223038}
 .desk{width:54px;height:14px;border-radius:5px;margin:3px auto 0;position:relative;background:linear-gradient(180deg,#3a4c54,#293840);border:1px solid #1e2a30;box-shadow:0 4px 8px rgba(0,0,0,.3)}
 .monitor{position:absolute;top:-11px;left:50%;transform:translateX(-50%);width:22px;height:14px;border-radius:3px;background:#0e161a;border:1px solid #33484f;overflow:hidden}
 .monitor .scan{position:absolute;left:2px;right:2px;top:2px;height:2px;background:var(--faint);border-radius:2px}
 .emp.working .monitor{border-color:var(--glass)}.emp.working .monitor .scan{background:var(--glass);animation:type 1.3s steps(4) infinite}
+.emp.done .monitor{border-color:var(--ok)}.emp.done .monitor .scan{background:var(--ok);opacity:.6}
 .name{margin-top:5px;font-size:9.5px;font-weight:500;text-align:center;line-height:1.05}
 .role{font-size:8px;color:var(--muted);text-align:center}
 
@@ -191,14 +202,22 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 </div>
 
 <script>
+/* The staff list: who sits where. NOT what they are doing — every desk starts
+   dark and stays dark until the server says otherwise.
+
+   This used to ship each desk with s:"working" and a plausible-sounding task,
+   which is why the floor lit up for a moment on a hard refresh and then went
+   dark: the first paint was a mock-up, and the truth arrived a beat later. A
+   dashboard that shows work nobody did is worse than one that shows nothing,
+   so the placeholder is gone. If a bulb is lit, an agent really ran. */
 function sectors(){return [
-  {key:"Director",name:"Director's Office",cls:"dir",agents:[{n:"Director",role:"Plans the day",s:"working",t:"Reviewing overnight scorecard",av:"🔮"}]},
-  {key:"IT",name:"IT & Site Health",cls:"",agents:[{n:"Watcher",role:"Finds issues",s:"working",t:"Form test passed 07:02",av:"🛠"},{n:"Fixer",role:"Patches in a branch",s:"working",t:"Fixing slow gallery",av:"🧰"},{n:"Releaser",role:"Only agent on production",s:"idle",t:"Waiting on tests",av:"🚀"}]},
-  {key:"Content",name:"Content & Social",cls:"",agents:[{n:"Writer",role:"Drafts in your voice",s:"working",t:"Marina villa case study",av:"✍"},{n:"Illustrator",role:"AI images",s:"working",t:"Rendering images",av:"🎨"},{n:"Publisher",role:"Publishes after Auditor",s:"waiting",t:"Waiting sign-off",av:"📤"}]},
-  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{n:"Auditor",role:"On-page & schema",s:"working",t:"Schema on 8 pages",av:"🔍"},{n:"Strategist",role:"Keyword gaps",s:"working",t:"Gap: doors Al Barsha",av:"🧭"}]},
-  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{n:"Hunter",role:"Finds UAE leads",s:"working",t:"41 firms, Business Bay",av:"🎯"},{n:"Scanner",role:"Blocks duplicates",s:"working",t:"3 dupes skipped",av:"♻"},{n:"Outreach",role:"Mail + DMs, under cap",s:"working",t:"18/25 posted",av:"✉"},{n:"Responder",role:"Handles replies",s:"waiting",t:"Reply from Aster",av:"💬"}]},
-  {key:"Report",name:"Reports",cls:"",agents:[{n:"Reporter",role:"Scores the agency",s:"working",t:"Scored 9 decisions",av:"📋"}]},
-  {key:"Security",name:"Security",cls:"sec",agents:[{n:"Screener",role:"Scam & fraud filter",s:"working",t:"Flagged 2 scam leads",av:"🛡"},{n:"Guard",role:"Untrusts scraped text",s:"idle",t:"All clear",av:"⚠"}]}
+  {key:"Director",name:"Director's Office",cls:"dir",agents:[{n:"Director",role:"Plans the day",s:"idle",t:"—",av:"🔮"}]},
+  {key:"IT",name:"IT & Site Health",cls:"",agents:[{n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"}]},
+  {key:"Content",name:"Content & Social",cls:"",agents:[{n:"Writer",role:"Drafts in your voice",s:"idle",t:"—",av:"✍"},{n:"Illustrator",role:"AI images",s:"idle",t:"—",av:"🎨"},{n:"Publisher",role:"Publishes after Auditor",s:"idle",t:"—",av:"📤"}]},
+  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"}]},
+  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{n:"Hunter",role:"Finds UAE leads",s:"idle",t:"—",av:"🎯"},{n:"Scanner",role:"Blocks duplicates",s:"idle",t:"—",av:"♻"},{n:"Outreach",role:"Mail + DMs, under cap",s:"idle",t:"—",av:"✉"},{n:"Responder",role:"Handles replies",s:"idle",t:"—",av:"💬"}]},
+  {key:"Report",name:"Reports",cls:"",agents:[{n:"Reporter",role:"Scores the agency",s:"idle",t:"—",av:"📋"}]},
+  {key:"Security",name:"Security",cls:"sec",agents:[{n:"Screener",role:"Scam & fraud filter",s:"idle",t:"—",av:"🛡"},{n:"Guard",role:"Untrusts scraped text",s:"idle",t:"—",av:"⚠"}]}
 ];}
 const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",metrics:[["82","Agency health","glass"],["6","Leads today",""],["3","Awaiting you","amber"],["—","Shelf","ok"],["$4.12","Spend today","mono"]],rooms:sectors()}};
 let CURRENT="gd";
@@ -359,7 +378,7 @@ function fireComm(){
 function renderPerf(){
   const m=SITES[CURRENT].metrics;
   $('#perfStrip').innerHTML=m.map(([v,l,c])=>`<div class="pstat"><span class="v ${c}">${v}</span><span class="l etch">${l}</span></div>`).join('')+`<a href="agency.html">Open full control room →</a>`;
-  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
+  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working'||a.s==='done').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
     const sub = r.foot ? r.foot.join(' · ') : (w+'/'+tot+' working');
     return `<div class="conn"><div class="ic">▦</div><div class="nm"><b>${r.name}</b><span>${sub}</span></div><div style="width:80px;height:6px;border-radius:3px;background:var(--line)"><div style="width:${pct}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`;}).join('')+`</div>`
     + shelfPanel();
@@ -453,18 +472,38 @@ function applyLive(j){
     if(!live) return;
     rm.score = live.score;
     rm.foot  = live.foot;
-    const tasks = live.agents||[];
-    rm.agents.forEach((a,i)=>{
-      if(a.staff===undefined) a.staff = a.n;   // remember the desk's own name once
-      if(tasks[i]){
-        a.s = tasks[i].s; a.t = tasks[i].t;
-        // show WHO actually holds it. The board records the real owner, and a desk
-        // labelled 'Writer' while content-writer holds the task tells you nothing.
-        a.n = (tasks[i].n && tasks[i].n !== 'unassigned') ? tasks[i].n : a.staff;
-      } else {
-        a.s = 'idle'; a.t = 'no task on the board'; a.n = a.staff;
-      }
-    });
+    seatLive(rm, live.agents||[]);
+  });
+}
+
+/* Put each live line at the desk it belongs to.
+
+   Every line carries a 'slot' from the server — 'it-watcher' reports slot
+   'watcher' — so running the IT health check lights the Watcher, not whichever
+   desk happens to sit first in the room. A line with no matching slot (an
+   unclaimed task on the board, say) takes the next empty desk rather than being
+   dropped, and every desk left over goes honestly dark. */
+function seatLive(rm, feed){
+  const desks = rm.agents;
+  desks.forEach(a=>{ if(a.staff===undefined) a.staff = a.n; a._seated = false; });
+
+  const sit = (desk, f)=>{
+    desk._seated = true;
+    desk.s = f.s; desk.t = f.t;
+    // show WHO actually did it — a desk labelled 'Writer' while content-writer
+    // holds the task tells you nothing you didn't already know.
+    desk.n = (f.n && f.n !== 'unassigned') ? f.n : desk.staff;
+  };
+
+  const spare = [];
+  feed.forEach(f=>{
+    const slot = (f.slot||'').toLowerCase();
+    const d = slot && desks.find(a=>!a._seated && a.staff.toLowerCase()===slot);
+    if(d) sit(d,f); else spare.push(f);
+  });
+  spare.forEach(f=>{ const d = desks.find(a=>!a._seated); if(d) sit(d,f); });
+  desks.forEach(a=>{
+    if(!a._seated){ a.s='idle'; a.t='nothing on the board for this desk'; a.n=a.staff; }
   });
 }
 
