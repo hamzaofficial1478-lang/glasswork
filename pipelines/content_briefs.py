@@ -190,6 +190,18 @@ def critic_check(briefs, gap_count, already=()):
 
 
 def run(agent="content-writer", max_briefs=6, draft_allowance=1):
+    with board.agent_run(agent) as run_row:
+        out = _brief(agent, max_briefs, draft_allowance)
+        if out.get("ok"):
+            run_row.note(f"briefed {out.get('stored', 0)} page(s)"
+                         + (f", {out['already_briefed']} already done"
+                            if out.get("already_briefed") else ""))
+        else:
+            run_row.note(out.get("error", "nothing to brief"))
+        return out
+
+
+def _brief(agent, max_briefs, draft_allowance):
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
     try:
