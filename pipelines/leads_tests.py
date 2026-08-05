@@ -217,7 +217,14 @@ def test_end_to_end():
         t = dict(con.execute("SELECT status,owner,result FROM tasks").fetchone())
         check("the task was finished", t["status"], "done")
         check("and records who did it", t["owner"], "leads-hunter")
-        check("the map is the deliverable", "usable_sources" in (t["result"] or ""), True)
+        # Round-trip it, don't just grep it. A substring survives double-encoding,
+        # which is exactly how the map got stored as an escaped string once.
+        import json as _json
+        parsed = _json.loads(t["result"] or "null")
+        check("the result is a real object, not an escaped string",
+              isinstance(parsed, dict), True)
+        check("the map is the deliverable", sorted(parsed)[:2],
+              ["refused_sources", "segments"])
         sec = con.execute("SELECT count(*) FROM requests WHERE to_sector='Security'").fetchone()[0]
         check("Security was asked to clear the sources", sec, 1)
         con.close()
