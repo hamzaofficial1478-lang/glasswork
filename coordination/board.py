@@ -136,34 +136,47 @@ def _migrate(c):
 
 
 class _Run:
-    """Handle on an open run. The pipeline tells it what it ended up doing."""
+    """
+    Handle on an open run. The pipeline tells it what it ended up doing.
+
+    Every write here is best-effort. Bookkeeping must never be the thing that
+    breaks the work: on a cabinet that has not been built yet the whole table is
+    missing, and a pipeline should fail with its own clear message about the
+    board rather than a raw sqlite error about a table nobody has heard of.
+    A run with id None is a no-op handle — the work still runs, untraced.
+    """
 
     def __init__(self, run_id):
         self.id = run_id
         self.task_id = None
         self._note = None
 
+    def _write(self, sql, args):
+        if self.id is None:
+            return self
+        try:
+            with _conn() as c:
+                _migrate(c)
+                c.execute(sql, args)
+        except sqlite3.Error:
+            pass
+        return self
+
     def task(self, task_id):
         """Attach the task once it has actually been claimed."""
         self.task_id = task_id
-        with _conn() as c:
-            c.execute("UPDATE agent_runs SET task_id=? WHERE id=?", (task_id, self.id))
-        return self
+        return self._write("UPDATE agent_runs SET task_id=? WHERE id=?", (task_id, self.id))
 
     def note(self, text):
         """One sentence, in plain words. This is what the office floor shows."""
         self._note = (text or "")[:200]
-        with _conn() as c:
-            _migrate(c)
-            c.execute("UPDATE agent_runs SET note=? WHERE id=?", (self._note, self.id))
-        return self
+        return self._write("UPDATE agent_runs SET note=? WHERE id=?", (self._note, self.id))
 
     def spent(self, usd, tokens_in=0, tokens_out=0):
-        with _conn() as c:
-            c.execute("UPDATE agent_runs SET usd_cost=usd_cost+?, tokens_in=tokens_in+?,"
-                      " tokens_out=tokens_out+? WHERE id=?",
-                      (float(usd), int(tokens_in), int(tokens_out), self.id))
-        return self
+        return self._write(
+            "UPDATE agent_runs SET usd_cost=usd_cost+?, tokens_in=tokens_in+?,"
+            " tokens_out=tokens_out+? WHERE id=?",
+            (float(usd), int(tokens_in), int(tokens_out), self.id))
 
 
 @contextmanager
@@ -180,12 +193,17 @@ def agent_run(agent, task_id=None, note=None):
     A crash marks the run 'error' and re-raises — a stalled agent must never
     look like a clean finish.
     """
-    with _conn() as c:
-        _migrate(c)
-        cur = c.execute(
-            "INSERT INTO agent_runs(agent,task_id,started_at,status,note)"
-            " VALUES(?,?,?, 'running', ?)", (agent, task_id, _now(), note))
-        run = _Run(cur.lastrowid)
+    try:
+        with _conn() as c:
+            _migrate(c)
+            cur = c.execute(
+                "INSERT INTO agent_runs(agent,task_id,started_at,status,note)"
+                " VALUES(?,?,?, 'running', ?)", (agent, task_id, _now(), note))
+            run = _Run(cur.lastrowid)
+    except sqlite3.Error:
+        # no cabinet yet (python -m coordination.init_db). Let the pipeline run
+        # and fail on its own terms; do not hijack the error with a trace problem.
+        run = _Run(None)
     try:
         yield run
     except BaseException:
@@ -195,9 +213,14 @@ def agent_run(agent, task_id=None, note=None):
 
 
 def _end_run(run_id, status):
-    with _conn() as c:
-        c.execute("UPDATE agent_runs SET status=?, ended_at=? WHERE id=?",
-                  (status, _now(), run_id))
+    if run_id is None:
+        return
+    try:
+        with _conn() as c:
+            c.execute("UPDATE agent_runs SET status=?, ended_at=? WHERE id=?",
+                      (status, _now(), run_id))
+    except sqlite3.Error:
+        pass
 
 
 def recent_runs(since, limit=60):

@@ -183,6 +183,36 @@ def test_the_ui_does_not_open_on_a_lie():
           "height:5px;border-radius:50%;background:var(--faint)}" in html, True)
 
 
+def test_tracing_never_breaks_the_work():
+    """
+    Found on a clean checkout: a fresh clone has no cabinet, so the very first
+    pipeline run died inside the trace layer with 'no such table: agent_runs'
+    instead of reaching its own message about the board. Bookkeeping is not
+    allowed to be the thing that breaks the job.
+    """
+    print("Tracing never breaks the work:")
+    real = board.DB
+    board.DB = Path(tempfile.mkdtemp()) / "not-built-yet.db"
+    try:
+        got = []
+        with board.agent_run("leads-hunter") as run:
+            run.task("nope").note("still works").spent(1.5)
+            got.append("the body ran")
+        check("the work still happens with no cabinet", got, ["the body ran"])
+        check("and the handle is inert, not half-alive", run.id, None)
+
+        # a crash inside the body must still propagate, untraced or not
+        raised = None
+        try:
+            with board.agent_run("leads-hunter"):
+                raise RuntimeError("boom")
+        except RuntimeError as e:
+            raised = str(e)
+        check("an error still reaches the caller", raised, "boom")
+    finally:
+        board.DB = real
+
+
 def test_spend_still_adds_up():
     print("Cost governor still reads the runs:")
     real_b, real_s = board.DB, state.DB
@@ -202,6 +232,7 @@ def main():
     test_the_run_wins_over_a_stale_task_row()
     test_each_agent_reaches_its_own_desk()
     test_the_ui_does_not_open_on_a_lie()
+    test_tracing_never_breaks_the_work()
     test_spend_still_adds_up()
     print()
     if _fail:
