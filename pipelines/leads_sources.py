@@ -263,8 +263,10 @@ def run(agent="leads-hunter"):
               "before the Hunter collects from it.",
             blocking=False)
 
-        # 5. the deliverable IS the map — it goes on the task, not into the leads table
-        board.finish_task(task["id"], agent, json.dumps(smap, indent=2), status="done")
+        # 5. the deliverable IS the map — it goes on the task, not into the leads table.
+        #    Pass the dict: finish_task json-encodes it, and handing it a string
+        #    would store the map double-encoded and unreadable to anything downstream.
+        board.finish_task(task["id"], agent, smap, status="done")
         did = board.log_decision(
             "leads-sources",
             reasoning=(f"Mapped {len(smap['usable_sources'])} B2B sources covering all "
