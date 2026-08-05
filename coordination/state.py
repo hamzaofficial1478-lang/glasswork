@@ -82,6 +82,67 @@ def _hitrate(c):
     return round(wins / len(rows), 2)
 
 
+# How long a finished run keeps the desk lit. A pipeline claims a task and
+# finishes it inside the same second, so "holding a task right now" is almost
+# never true — read the board alone and a sector that filed nine tickets two
+# minutes ago is as dark as one that has never run. An hour is roughly a
+# working session: long enough that you see what the agency has been doing,
+# short enough that yesterday's run is not passed off as activity.
+RECENT_RUN_SECS = 3600
+
+# Which desk an agent sits at. The pipelines are named sector-role, so the role
+# is the last segment: 'it-watcher' sits at the Watcher desk. Anything that does
+# not match falls through to the first free desk rather than being dropped.
+def _desk_of(agent):
+    return (agent or "").rsplit("-", 1)[-1].lower()
+
+
+def _ago(secs):
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        return f"{secs // 60} min ago"
+    return f"{secs // 3600}h ago"
+
+
+def _run_feed(c, match, now):
+    """
+    What this sector's agents have actually been doing, newest first.
+
+    'running' is a live desk. A run that finished inside the last hour is a desk
+    that did real work and is worth showing as such — distinct from a desk that
+    has never run at all, which is what 'idle' honestly means.
+    """
+    try:
+        rows = c.execute(
+            "SELECT r.agent, r.status, r.started_at, r.ended_at, r.note, t.title"
+            " FROM agent_runs r LEFT JOIN tasks t ON t.id=r.task_id"
+            " WHERE r.started_at>=? AND lower(r.agent) LIKE ?"
+            " ORDER BY r.started_at DESC LIMIT 12",
+            (now - RECENT_RUN_SECS, match + "-%")).fetchall()
+    except Exception:
+        return []
+
+    feed, seen = [], set()
+    for r in rows:
+        desk = _desk_of(r["agent"])
+        if desk in seen:          # one line per desk: its most recent run
+            continue
+        seen.add(desk)
+        if r["status"] == "running":
+            feed.append({"n": r["agent"], "slot": desk, "s": "working",
+                         "t": r["note"] or r["title"] or "working…"})
+        elif r["status"] == "error":
+            feed.append({"n": r["agent"], "slot": desk, "s": "blocked",
+                         "t": (r["note"] or "the run failed") + " · "
+                              + _ago(now - (r["ended_at"] or r["started_at"]))})
+        else:
+            feed.append({"n": r["agent"], "slot": desk, "s": "done",
+                         "t": (r["note"] or r["title"] or "finished a run") + " · "
+                              + _ago(now - (r["ended_at"] or r["started_at"]))})
+    return feed
+
+
 def _room_stats(c, key, day0, open_tasks):
     """Return (foot[2], score) for a room, from real counts."""
     base = _clamp(92 - open_tasks * 4, 60, 96)
@@ -127,8 +188,9 @@ def _room_stats(c, key, day0, open_tasks):
 def build():
     c = _conn()
     day0 = _day_start()
+    now = int(time.time())
 
-    # ---- rooms, each with its real task feed from the board ----
+    # ---- rooms: what each sector's agents are doing, and what's waiting ----
     rooms = []
     for key, name, match, sec in SECTORS:
         try:
@@ -138,8 +200,18 @@ def build():
                 " ORDER BY created_at DESC LIMIT 6", (match,)).fetchall()
         except Exception:
             trows = []
-        agents = [{"n": (t["owner"] or "unassigned"), "t": t["title"],
-                   "s": "working" if t["status"] == "in_progress" else "waiting"} for t in trows]
+
+        # A run beats a task row. An agent mid-run IS the live picture; a task
+        # sitting 'in_progress' with nobody running is a stall, not work.
+        agents = _run_feed(c, match, now)
+        busy = {a["slot"] for a in agents}
+        for t in trows:
+            owner = t["owner"] or "unassigned"
+            if t["status"] == "in_progress" and _desk_of(owner) in busy:
+                continue                      # already shown, with better detail
+            agents.append({"n": owner, "slot": _desk_of(owner) if t["owner"] else "",
+                           "t": t["title"],
+                           "s": "working" if t["status"] == "in_progress" else "waiting"})
         open_tasks = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=? AND status IN ('open','in_progress')", (match,))
         foot, score = _room_stats(c, key, day0, open_tasks)
         rooms.append({"key": key, "name": name, "score": score, "foot": foot,
