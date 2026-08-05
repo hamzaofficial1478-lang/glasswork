@@ -146,7 +146,25 @@ def make_brief(g, rank):
     }
 
 
-def critic_check(briefs, gap_count):
+def existing_pages(con):
+    """
+    URLs already in the queue. Without this a second run briefs the same pages
+    again and you end up with two /glass-partition-dubai entries competing —
+    the exact failure the Critic's duplicate-URL rule exists to prevent, just
+    spread across runs instead of within one.
+    """
+    seen = set()
+    for brief, title in con.execute("SELECT brief, title FROM content_queue"):
+        url = ""
+        try:
+            url = (json.loads(brief) or {}).get("url", "")
+        except Exception:
+            pass
+        seen.add(url or "title:" + (title or ""))
+    return seen
+
+
+def critic_check(briefs, gap_count, already=()):
     """
     The Critic's gate, before anything is stored. Content's specific failure mode
     is volume for its own sake, so the checks are aimed straight at that.
@@ -165,6 +183,9 @@ def critic_check(briefs, gap_count):
     ready = [b for b in briefs if b.get("_ready")]
     if len(ready) > 1:
         reasons.append(f"{len(ready)} briefs marked ready — the MD gated this at one")
+    clash = [b["url"] for b in briefs if b["url"] in set(already)]
+    if clash:
+        reasons.append(f"{len(clash)} page(s) already briefed: {', '.join(clash[:3])}")
     return (len(reasons) == 0, reasons)
 
 
@@ -202,19 +223,39 @@ def run(agent="content-writer", max_briefs=6, draft_allowance=1):
                 for r in con.execute(
                     "SELECT phrase, area, intent FROM keywords ORDER BY id DESC LIMIT 200")]
 
-        # 3. cluster into page candidates
-        groups = cluster(rows)[:max_briefs]
-        briefs = [make_brief(g, i + 1) for i, g in enumerate(groups)]
+        # 3. cluster into page candidates, then drop any page already briefed.
+        #    Re-running must not mint a second /glass-partition-dubai to compete
+        #    with the first one.
+        already = existing_pages(con)
+        groups = cluster(rows)
+        fresh, skipped = [], []
+        for g in groups:
+            b = make_brief(g, len(fresh) + 1)
+            (skipped if b["url"] in already else fresh).append(b)
+            if len(fresh) >= max_briefs:
+                break
+        briefs = fresh
+
+        result = {"ok": True, "agent": agent, "claimed_request": claimed["id"],
+                  "keywords_read": len(rows), "clusters": len(groups),
+                  "briefs": len(briefs), "already_briefed": len(skipped)}
+
+        if not briefs:
+            board.reply_request(
+                claimed["id"], agent,
+                f"Nothing new to brief — all {len(skipped)} page candidates from this gap "
+                "list are already in the content queue. Send fresh gaps and I'll pick them up.",
+                close=True)
+            result.update({"stored": 0, "critic": "skipped",
+                           "note": "every candidate page was already briefed"})
+            return result
 
         # 5. the MD's gate: exactly one template brief, the rest wait on SEO
         for i, b in enumerate(briefs):
             b["_ready"] = i < draft_allowance
 
         # 6. critic
-        ok, reasons = critic_check(briefs, len(rows))
-        result = {"ok": True, "agent": agent, "claimed_request": claimed["id"],
-                  "keywords_read": len(rows), "clusters": len(groups),
-                  "briefs": len(briefs)}
+        ok, reasons = critic_check(briefs, len(rows), already)
         if not ok:
             board.reply_request(claimed["id"], agent,
                                 "Could not brief this yet — the Critic rejected it: "
