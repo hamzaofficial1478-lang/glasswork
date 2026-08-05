@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   tokens_in   INTEGER DEFAULT 0,
   tokens_out  INTEGER DEFAULT 0,
   usd_cost    REAL DEFAULT 0,
-  status      TEXT                     -- running | ok | error | killed
+  status      TEXT,                    -- running | ok | error | killed
+  note        TEXT                     -- one plain line: what it actually did
 );
 
 -- every tool action, from the hooks — nothing happens in the dark

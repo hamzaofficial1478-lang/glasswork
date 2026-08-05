@@ -103,6 +103,14 @@ def critic_check(gaps, seeds_used):
 
 
 def run(agent="seo-strategist", max_seeds=18, cost_ceiling=0.0):
+    with board.agent_run(agent) as run_row:
+        out = _gap(agent, max_seeds, cost_ceiling)
+        run_row.note(f"found {out['stored']} new keyword gaps" if out.get("stored")
+                     else out.get("error", "no new gaps found"))
+        return out
+
+
+def _gap(agent, max_seeds, cost_ceiling):
     b = cabinet.borrow("seo_data", agent, "SEO",
                        reason="keyword-gap pull for UAE glass & aluminium",
                        data_class="external", cost_ceiling=cost_ceiling, wait=True)

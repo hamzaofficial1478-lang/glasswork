@@ -194,6 +194,14 @@ def file_issues(findings, url, agent):
 
 
 def run(agent="it-watcher", url=None, timeout=20):
+    """Wrapped so the run is on the record even when it refuses to report."""
+    with board.agent_run(agent) as run_row:
+        out = _check(agent, url, timeout, run_row)
+        run_row.note(out.get("summary") or out.get("error") or "checked the site")
+        return out
+
+
+def _check(agent, url, timeout, run_row):
     site = (url or os.environ.get("SITE_URL") or "").strip()
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
@@ -203,6 +211,7 @@ def run(agent="it-watcher", url=None, timeout=20):
             return {"ok": False, "error":
                     "No open IT task on the board to claim. The Watcher works from the "
                     "board, never on its own initiative."}
+        run_row.task(task["id"])
 
         if not site:
             board.finish_task(task["id"], agent,
@@ -261,6 +270,8 @@ def run(agent="it-watcher", url=None, timeout=20):
                 "issues_filed": filed, "worst_severity": worst,
                 "changes_queued_for_owner": len(queued),
                 "changes_applied": 0, "decision_id": did,
+                "summary": (f"checked {site} — HTTP {status} in {ms}ms, "
+                            f"{filed} ticket(s) filed, {len(queued)} queued for you"),
                 "findings": findings}
     finally:
         con.close()
