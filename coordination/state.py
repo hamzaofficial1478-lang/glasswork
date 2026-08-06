@@ -105,13 +105,20 @@ def _ago(secs):
     return f"{secs // 3600}h ago"
 
 
+# A run that started and never ended is not "still going" after this long — it
+# is a stall. Nothing here takes twenty minutes; the site check times out in
+# under a minute and the Hunter is capped well below it.
+STALL_SECS = 1200
+
+
 def _run_feed(c, match, now):
     """
     What this sector's agents have actually been doing, newest first.
 
-    'running' is a live desk. A run that finished inside the last hour is a desk
-    that did real work and is worth showing as such — distinct from a desk that
-    has never run at all, which is what 'idle' honestly means.
+    Four states, and the important one is 'blocked'. A desk goes dark ONLY when
+    something is genuinely wrong — the last run raised, or it started and never
+    came back — and when it does, the reason travels with it so the desk can say
+    what broke rather than just looking off.
     """
     try:
         rows = c.execute(
@@ -129,17 +136,30 @@ def _run_feed(c, match, now):
         if desk in seen:          # one line per desk: its most recent run
             continue
         seen.add(desk)
-        if r["status"] == "running":
-            feed.append({"n": r["agent"], "slot": desk, "s": "working",
-                         "t": r["note"] or r["title"] or "working…"})
+        age = now - (r["ended_at"] or r["started_at"])
+        base = {"n": r["agent"], "slot": desk}
+
+        if r["status"] == "running" and (now - r["started_at"]) > STALL_SECS:
+            # said it was working, then stopped saying anything
+            feed.append({**base, "s": "blocked",
+                         "t": f"stalled — started {_ago(now - r['started_at'])} and "
+                              "never finished",
+                         "why": ("This agent began a run and never reported back. Either "
+                                 "the process was killed, or it is stuck waiting on "
+                                 "something that will not answer. Re-run it from the "
+                                 "command line and watch the output.")})
+        elif r["status"] == "running":
+            feed.append({**base, "s": "working", "t": r["note"] or r["title"] or "working…"})
         elif r["status"] == "error":
-            feed.append({"n": r["agent"], "slot": desk, "s": "blocked",
-                         "t": (r["note"] or "the run failed") + " · "
-                              + _ago(now - (r["ended_at"] or r["started_at"]))})
+            feed.append({**base, "s": "blocked",
+                         "t": (r["note"] or "the run failed") + " · " + _ago(age),
+                         "why": ("The last run raised an error and stopped. " +
+                                 (r["note"] or "No detail was recorded.") +
+                                 " Nothing was half-written — the run is marked failed, "
+                                 "not finished.")})
         else:
-            feed.append({"n": r["agent"], "slot": desk, "s": "done",
-                         "t": (r["note"] or r["title"] or "finished a run") + " · "
-                              + _ago(now - (r["ended_at"] or r["started_at"]))})
+            feed.append({**base, "s": "done",
+                         "t": (r["note"] or r["title"] or "finished a run") + " · " + _ago(age)})
     return feed
 
 
@@ -195,7 +215,7 @@ def build():
     for key, name, match, sec in SECTORS:
         try:
             trows = c.execute(
-                "SELECT title,status,owner FROM tasks"
+                "SELECT title,status,owner,claimed_at FROM tasks"
                 " WHERE lower(sector)=? AND status IN ('open','in_progress')"
                 " ORDER BY created_at DESC LIMIT 6", (match,)).fetchall()
         except Exception:
@@ -207,11 +227,25 @@ def build():
         busy = {a["slot"] for a in agents}
         for t in trows:
             owner = t["owner"] or "unassigned"
-            if t["status"] == "in_progress" and _desk_of(owner) in busy:
+            slot = _desk_of(owner) if t["owner"] else ""
+            if t["status"] == "in_progress" and slot in busy:
                 continue                      # already shown, with better detail
-            agents.append({"n": owner, "slot": _desk_of(owner) if t["owner"] else "",
-                           "t": t["title"],
-                           "s": "working" if t["status"] == "in_progress" else "waiting"})
+            if t["status"] != "in_progress":
+                agents.append({"n": owner, "slot": slot, "t": t["title"], "s": "waiting"})
+                continue
+            # Claimed, but no run backing it. A claim with nothing behind it is a
+            # held job nobody is doing — it blocks every other agent from taking
+            # the task, so it is a fault, not activity.
+            held = now - (t["claimed_at"] or now)
+            agents.append({
+                "n": owner, "slot": slot,
+                "s": "blocked" if held > STALL_SECS else "working",
+                "t": (f"holding '{t['title']}' since {_ago(held)} with nothing running"
+                      if held > STALL_SECS else t["title"]),
+                **({"why": ("This task was claimed and never finished, and no run is "
+                            "recording work against it. While it is held, no other "
+                            "agent can take it. Finish it or release it.")}
+                   if held > STALL_SECS else {})})
         open_tasks = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=? AND status IN ('open','in_progress')", (match,))
         foot, score = _room_stats(c, key, day0, open_tasks)
         rooms.append({"key": key, "name": name, "score": score, "foot": foot,
