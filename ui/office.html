@@ -506,10 +506,13 @@ async function askAgent(){
 
   if(!j || !j.ok){ bubble('a', `<span style="color:var(--danger)">Couldn't reach me: ${esc((j&&j.error)||'unknown')}</span>`); return; }
   let html = esc(j.reply).replace(/\n/g,'<br>');
-  // say when the answer came from the record rather than a brain — the owner
-  // should always know which one he is reading
-  if(j.brain_error) html += `<br><br><span class="dim" style="font-size:11px">(my brain failed: ${esc(j.brain_error)} — that was my record read straight)</span>`;
-  else if(j.brain)  html += `<br><br><span class="dim" style="font-size:11px">via ${esc(j.brain)}</span>`;
+  // Say once, and only once, where the answer came from. Three cases, three
+  // different things to do about them: nothing to fix, go and set a model up,
+  // or something is broken.
+  const foot=(txt,col)=>`<br><br><span class="dim" style="font-size:11px${col?';color:'+col:''}">${txt}</span>`;
+  if(j.brain_error)   html += foot(`my model failed: ${esc(j.brain_error)} — that was my record read straight`,'var(--danger)');
+  else if(j.unrouted) html += foot(`Read straight off my record — ${esc(j.unrouted)}. Set one on Setup → Who runs what and I can talk it through.`,'var(--amber)');
+  else if(j.brain)    html += foot(`via ${esc(j.brain.model||j.brain)}`);
   bubble('a', html);
 }
 function openPanel(id){closeAll();$('#'+id).classList.add('open');$('#scrim').classList.add('open');}
