@@ -31,10 +31,29 @@ app.get("/api/state", (_q, res) => {
   res.json(st);
 });
 
-// CHAT — the office sends {agent, message}; forward to Claude / the Agent SDK
-app.post("/api/chat", async (req, res) => {
-  const { agent, message } = req.body || {};
-  res.json({ agent, reply: `(${agent}) received: ${message}` });
+// CHAT — talk to one agent about its own work.
+//
+// This used to echo the message back with the agent's name in brackets, which
+// looked like a reply and said nothing. It now goes to coordination.agent_chat,
+// which assembles that desk's real record from the cabinet and asks the sector's
+// routed brain to explain it. Facts come from rows; the model only does the
+// wording. With no brain configured it still answers, from the record alone.
+app.post("/api/chat", (req, res) => {
+  const b = req.body || {};
+  const agent = String(b.agent || "").trim();
+  const message = String(b.message || "").slice(0, 4000);
+  if (!agent) return res.status(400).json({ ok: false, error: "Which agent?" });
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.agent_chat"], {
+    cwd: __dirname, input: JSON.stringify({ agent, message }),
+    timeout: 180000, maxBuffer: 8 * 1024 * 1024,
+  });
+  if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
+  const out = String(r.stdout || "");
+  if (!out) return res.json({ ok: false, error: "agent_chat error: " + String(r.stderr || "no output") });
+  try { return res.json(JSON.parse(out)); }
+  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
 });
 
 // ---- helpers ---------------------------------------------------------------
