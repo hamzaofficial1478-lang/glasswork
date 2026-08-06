@@ -206,19 +206,34 @@ def agent_run(agent, task_id=None, note=None):
         run = _Run(None)
     try:
         yield run
-    except BaseException:
-        _end_run(run.id, "error")
+    except BaseException as e:
+        # Record WHAT WENT WRONG, not just that something did. The note at the
+        # point of the crash says what the agent was attempting; on its own that
+        # reads like a status update and explains nothing. The office floor turns
+        # this desk's bulb off and shows this line as the reason, so the reason
+        # has to be the actual fault.
+        _end_run(run.id, "error", f"{type(e).__name__}: {e}")
         raise
     _end_run(run.id, "ok")
 
 
-def _end_run(run_id, status):
+def _end_run(run_id, status, error=None):
     if run_id is None:
         return
     try:
         with _conn() as c:
-            c.execute("UPDATE agent_runs SET status=?, ended_at=? WHERE id=?",
-                      (status, _now(), run_id))
+            _migrate(c)
+            if error:
+                # keep what it was doing, then say how it broke
+                c.execute(
+                    "UPDATE agent_runs SET status=?, ended_at=?,"
+                    " note = CASE WHEN note IS NULL OR note='' THEN ?"
+                    "             ELSE note || ' — FAILED: ' || ? END"
+                    " WHERE id=?",
+                    (status, _now(), "FAILED: " + error[:200], error[:200], run_id))
+            else:
+                c.execute("UPDATE agent_runs SET status=?, ended_at=? WHERE id=?",
+                          (status, _now(), run_id))
     except sqlite3.Error:
         pass
 
