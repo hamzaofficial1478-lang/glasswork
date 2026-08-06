@@ -288,11 +288,21 @@ def test_the_agent_chat_is_not_canned():
         check("and an unknown name does not crash",
               agent_chat.whois("")["sector"], "Director")
 
-        # every exchange is on the record, like everything else here
+        # An unrouted sector is a setup step, not a crash, and the two must not
+        # be dressed up the same. Nothing is configured in a fresh cabinet, so
+        # every answer above came back unrouted.
+        check("no model on the shelf reads as unrouted", bool(broke.get("unrouted")), True)
+        check("and is NOT reported as a failure", broke.get("brain_error"), None)
+        check("the record does not also explain itself",
+              "routed to my sector" in broke["reply"], False)
+
+        # Every exchange is on the record, like everything else here. This used
+        # to assert n >= 0, which is true of every number there has ever been —
+        # it would have passed just as happily with the logging deleted.
         con = sqlite3.connect(board.DB)
         n = con.execute("SELECT count(*) FROM requests WHERE from_sector='Owner'").fetchone()[0]
         con.close()
-        check("conversations are logged, not private", n >= 0, True)
+        check("all three conversations are logged, not private", n, 3)
     finally:
         board.DB = agent_chat.DB = real_b
 

@@ -242,8 +242,13 @@ support bot. Two or three sentences unless he asks for detail. No filler, no
 
 def _offline_reply(f: dict, message: str) -> str:
     """
-    The honest answer with no brain configured. Not a placeholder — the record
+    The honest answer with no brain to phrase it. Not a placeholder — the record
     read out plainly, which is most of what the question ever wanted.
+
+    It deliberately does NOT explain why there is no brain. The caller knows
+    whether the shelf was empty or the model fell over, and the UI prints that
+    once underneath. Saying it here as well told the owner the same thing twice
+    in two different vocabularies.
     """
     w = f["who"]
     L = [f"{w['agent']} here — {w['job']}."]
@@ -258,28 +263,44 @@ def _offline_reply(f: dict, message: str) -> str:
     hold = f.get("holding") or []
     if hold:
         L.append("Holding: " + ", ".join(h["title"] for h in hold))
-    L.append("")
-    L.append("(No language model is routed to my sector, so this is my record read "
-             "out straight rather than a conversation. Set one on /setup → Who runs "
-             "what, and I can actually talk it through.)")
     return "\n".join(L)
 
 
 def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
-    """One turn. Returns the reply plus everything it was based on."""
+    """
+    One turn. Returns the reply plus everything it was based on.
+
+    There are three ways this can go, and the owner is told which one he is
+    reading, exactly once:
+
+      brain      a model answered, and we name it
+      unrouted   no model is on the shelf for this sector — the record, read out
+      brain_error a model IS routed and it fell over — the record, plus the fault
+
+    'unrouted' and 'brain_error' are not the same thing and must not read the
+    same. Nothing configured yet is a setup step; a configured model failing is
+    something gone wrong. Both still answer the question from the rows.
+    """
     f = gather(agent)
     w = f["who"]
     record = _facts_text(f)
 
-    try:
-        from providers import call_task
-    except Exception:
-        call_task = None
-
-    if call_task is None:
+    def _from_record(**extra):
+        reply = _offline_reply(f, message)
+        _log(w, message, reply)          # a conversation is logged either way
         return {"ok": True, "agent": w["agent"], "sector": w["sector"],
-                "reply": _offline_reply(f, message), "brain": None, "offline": True,
-                "record": record}
+                "reply": reply, "offline": True, "record": record, **extra}
+
+    try:
+        from providers import call_task, resolve_task
+    except Exception:
+        return _from_record(unrouted="the provider shelf could not be loaded at all")
+
+    # Ask the shelf before spending anything. An empty shelf is not a failure.
+    route = resolve_task(w["brain_task"])
+    if not route.get("ok"):
+        return _from_record(unrouted=route.get("error") or
+                            f"no model routed to {w['sector']} yet")
 
     r = call_task(w["brain_task"], [
         {"role": "system", "content": SYSTEM + "\n\n--- YOUR RECORD ---\n" + record},
@@ -287,14 +308,15 @@ def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
     ], max_tokens=max_tokens)
 
     if not r.get("ok"):
-        # Say why, and still answer from the record. A dead brain must not turn
-        # into silence — the owner asked a question that the rows can answer.
-        return {"ok": True, "agent": w["agent"], "sector": w["sector"],
-                "reply": _offline_reply(f, message),
-                "brain_error": r.get("error", "the brain did not answer"),
-                "failovers": r.get("failovers", []), "offline": True, "record": record}
+        # A dead brain must not turn into silence — the owner asked a question
+        # the rows can answer. Answer it, and say what broke.
+        return _from_record(brain_error=r.get("error", "the brain did not answer"),
+                            failovers=r.get("failovers", []))
 
-    reply = (r.get("output") or "").strip() or _offline_reply(f, message)
+    reply = (r.get("output") or "").strip()
+    if not reply:
+        return _from_record(brain_error="the brain returned nothing",
+                            failovers=r.get("failovers", []))
     _log(w, message, reply)
     return {"ok": True, "agent": w["agent"], "sector": w["sector"], "reply": reply,
             "brain": r.get("used"), "failovers": r.get("failovers", []),
