@@ -68,26 +68,43 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .emp{width:72px;display:flex;flex-direction:column;align-items:center;cursor:pointer;position:relative}
 .emp .figure{position:relative;animation:bob 3.4s ease-in-out infinite}
 .emp .status{position:absolute;top:-9px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;z-index:4}
-/* Four honest states. 'working' is an agent running right now; 'done' is one
-   that finished real work inside the last hour — steady, not pulsing, because
-   it is resting, not busy; 'waiting' is work on the board nobody has claimed;
-   'idle' is a desk that has genuinely done nothing, and it stays dark. */
+/* The small dot above the head is the status lamp, and it is the loud one: it
+   is the ONLY thing that turns red, so a broken desk is findable in a glance
+   even though its bulb has gone out. */
 .emp.working .status{background:var(--glass);box-shadow:0 0 8px var(--glass);animation:pulse 1.4s infinite}
 .emp.done .status{background:var(--ok);box-shadow:0 0 7px var(--ok)}
-.emp.waiting .status{background:var(--amber);box-shadow:0 0 8px var(--amber);animation:pulse 1.4s infinite}
-.emp.idle .status{background:var(--faint)}.emp.blocked .status{background:var(--danger);box-shadow:0 0 8px var(--danger)}
+.emp.waiting .status{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.emp.idle .status{background:var(--faint)}
+.emp.blocked .status{background:var(--danger);box-shadow:0 0 10px var(--danger);animation:pulse 1s infinite}
+/* a broken desk is dimmed and outlined, so you see it before you read it */
+.emp.blocked .figure{opacity:.55}
+.emp.blocked .head{border-color:var(--danger)}
 .head{width:26px;height:24px;border-radius:9px 9px 8px 8px;margin:0 auto;position:relative;background:linear-gradient(180deg,#c9d6dc,#9fb2ba);border:1px solid #7d929b}
 .emp.dir .head{background:linear-gradient(180deg,#8fe6ef,#54cbd9)}.emp.sec .head{background:linear-gradient(180deg,#f0a9ac,#e5565b)}
 .head::before,.head::after{content:"";position:absolute;top:9px;width:4px;height:4px;border-radius:50%;background:#1a2429;animation:blink 4.2s infinite}
 .head::before{left:6px}.head::after{right:6px}
 .antenna{position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:2px;height:6px;background:#7d929b}
-/* The bulb on the head. Dark by default — a fused bulb means an agent that
-   isn't doing anything, and that has to be visible at a glance. */
-.antenna::after{content:"";position:absolute;top:-3px;left:-1.5px;width:5px;height:5px;border-radius:50%;background:var(--faint)}
-.emp.working .antenna::after{background:var(--glass);box-shadow:0 0 6px var(--glass);animation:pulse 1.1s infinite}
-.emp.done .antenna::after{background:var(--ok);box-shadow:0 0 5px var(--ok)}
-.emp.waiting .antenna::after{background:var(--amber);box-shadow:0 0 5px var(--amber)}
-.emp.blocked .antenna::after{background:var(--danger);box-shadow:0 0 6px var(--danger)}
+/* THE BULB ON THE HEAD — the one thing you should be able to read across the room.
+
+   Lit means alive. Blinking means working. DARK MEANS BROKEN.
+
+   This was the wrong way round: idle desks went dark and broken ones lit up red,
+   so a healthy agency with nothing queued looked like a morgue and you could not
+   tell "nothing to do" from "this one has fallen over". Now:
+
+     blinking   working right now
+     steady     alive and fine — recently finished (green), work queued (amber),
+                or simply nothing to do (pale)
+     dark       something is wrong; the desk says what
+
+   A bulb only goes out for a reason, and the reason is always on the desk. */
+.antenna::after{content:"";position:absolute;top:-3px;left:-1.5px;width:5px;height:5px;border-radius:50%;
+  background:#8fa4ad;box-shadow:0 0 5px rgba(143,164,173,.7)}
+.emp.working .antenna::after{background:var(--glass);box-shadow:0 0 8px var(--glass);animation:pulse 1.1s infinite}
+.emp.done .antenna::after{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+.emp.waiting .antenna::after{background:var(--amber);box-shadow:0 0 7px var(--amber)}
+/* the only dark bulb in the building */
+.emp.blocked .antenna::after{background:#3a2326;box-shadow:none}
 .body{width:34px;height:20px;border-radius:10px 10px 5px 5px;margin:-2px auto 0;background:linear-gradient(180deg,#41565f,#2e3f47);border:1px solid #223038}
 .desk{width:54px;height:14px;border-radius:5px;margin:3px auto 0;position:relative;background:linear-gradient(180deg,#3a4c54,#293840);border:1px solid #1e2a30;box-shadow:0 4px 8px rgba(0,0,0,.3)}
 .monitor{position:absolute;top:-11px;left:50%;transform:translateX(-50%);width:22px;height:14px;border-radius:3px;background:#0e161a;border:1px solid #33484f;overflow:hidden}
@@ -433,9 +450,68 @@ function toggleSites(e){if(e)e.stopPropagation();$('#siteMenu').classList.toggle
 function switchSite(id){CURRENT=id;$('#curSite').textContent=SITES[id].name;$('#curFav').textContent=SITES[id].fav;$('#siteMenu').classList.remove('open');boot();}
 function addSite(){const name=($('#nsName').value.trim()||'New Website'),url=($('#nsUrl').value.trim()||'example.com');const id='s'+Object.keys(SITES).length,fav=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();SITES[id]={name,fav,url,metrics:[["—","Agency health","glass"],["0","Leads today",""],["0","Awaiting you","amber"],["—","Shelf","ok"],["$0.00","Spend today","mono"]],rooms:sectors()};renderSiteMenu();switchSite(id);closeAll();}
 let cur;
-function openDrawer(a){cur=a;$('#dAv').textContent=a.av;$('#dName').textContent=a.n;$('#dRole').textContent=a.role;$('#dBody').innerHTML=`<div class="msg a">I'm ${a.n} in the ${a.room||''} room. ${a.role}. Right now: ${a.t}. What do you need?</div>`;$('#drawer').classList.add('open');}
-function closeDrawer(){$('#drawer').classList.remove('open');}
-function askAgent(){const v=$('#dInput').value.trim();if(!v)return;$('#dBody').insertAdjacentHTML('beforeend',`<div class="msg u">${v}</div>`);$('#dInput').value='';setTimeout(()=>{$('#dBody').insertAdjacentHTML('beforeend',`<div class="msg a">On it. I'll claim that as a task on the board, and if I need another sector to verify anything I'll post a request down the wire rather than doing their job.</div>`);$('#dBody').scrollTop=$('#dBody').scrollHeight;},480);}
+/* ---- TALKING TO AN AGENT ------------------------------------------------
+   The drawer used to reply "On it. I'll claim that as a task on the board…" to
+   anything you typed, including "are you broken?". That is worse than no chat:
+   it looks like an answer and contains nothing.
+
+   Every reply now comes from /api/chat -> coordination.agent_chat, which builds
+   that desk's real record out of the cabinet — its runs, its failures, what it
+   holds — and has the sector's brain explain it. The opening line is built from
+   live state too, so a broken agent leads with what broke. ------------------ */
+const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function bubble(kind, html){
+  $('#dBody').insertAdjacentHTML('beforeend',`<div class="msg ${kind}">${html}</div>`);
+  $('#dBody').scrollTop=$('#dBody').scrollHeight;
+}
+
+function openDrawer(a){
+  cur=a;
+  $('#dAv').textContent=a.av; $('#dName').textContent=a.n; $('#dRole').textContent=a.role;
+  // the opening line is the desk's actual state, not a greeting
+  let open;
+  if(a.s==='blocked'){
+    open = `<b style="color:var(--danger)">I've stopped.</b> ${esc(a.t)}`
+         + (a.why?`<br><br>${esc(a.why)}`:'')
+         + `<br><br>Ask me about it and I'll tell you what I know.`;
+  } else if(a.s==='working'){
+    open = `Working now — ${esc(a.t)}.`;
+  } else if(a.s==='done'){
+    open = `Last thing I did: ${esc(a.t)}. Ask me anything about it.`;
+  } else if(a.s==='waiting'){
+    open = `There's work on the board for me — ${esc(a.t)} — but nobody has claimed it yet.`;
+  } else {
+    open = `Nothing on the board for me right now. Ask what I'm for, or what the sector's carrying.`;
+  }
+  $('#dBody').innerHTML=`<div class="msg a">${open}</div>`;
+  $('#drawer').classList.add('open');
+  $('#dInput').focus();
+}
+function closeDrawer(){ $('#drawer').classList.remove('open'); }
+
+let asking=false;
+async function askAgent(){
+  const v=$('#dInput').value.trim();
+  if(!v || asking || !cur) return;
+  asking=true; $('#dInput').value='';
+  bubble('u', esc(v));
+  bubble('a','<span class="dim" id="thinking">…</span>');
+  const j=await (async()=>{ try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({agent:cur.n, message:v})});
+    return await r.json();
+  }catch(e){ return {ok:false, error:String(e)}; }})();
+  const t=document.getElementById('thinking'); if(t) t.parentElement.remove();
+  asking=false;
+
+  if(!j || !j.ok){ bubble('a', `<span style="color:var(--danger)">Couldn't reach me: ${esc((j&&j.error)||'unknown')}</span>`); return; }
+  let html = esc(j.reply).replace(/\n/g,'<br>');
+  // say when the answer came from the record rather than a brain — the owner
+  // should always know which one he is reading
+  if(j.brain_error) html += `<br><br><span class="dim" style="font-size:11px">(my brain failed: ${esc(j.brain_error)} — that was my record read straight)</span>`;
+  else if(j.brain)  html += `<br><br><span class="dim" style="font-size:11px">via ${esc(j.brain)}</span>`;
+  bubble('a', html);
+}
 function openPanel(id){closeAll();$('#'+id).classList.add('open');$('#scrim').classList.add('open');}
 function closeAll(){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('open'));$('#scrim').classList.remove('open');}
 /* ---- LIVE STATE -------------------------------------------------------
@@ -490,6 +566,8 @@ function seatLive(rm, feed){
   const sit = (desk, f)=>{
     desk._seated = true;
     desk.s = f.s; desk.t = f.t;
+    // a dark bulb always carries its reason — see state.py's _run_feed
+    desk.why = f.why || '';
     // show WHO actually did it — a desk labelled 'Writer' while content-writer
     // holds the task tells you nothing you didn't already know.
     desk.n = (f.n && f.n !== 'unassigned') ? f.n : desk.staff;
@@ -503,7 +581,7 @@ function seatLive(rm, feed){
   });
   spare.forEach(f=>{ const d = desks.find(a=>!a._seated); if(d) sit(d,f); });
   desks.forEach(a=>{
-    if(!a._seated){ a.s='idle'; a.t='nothing on the board for this desk'; a.n=a.staff; }
+    if(!a._seated){ a.s='idle'; a.t='nothing on the board for this desk'; a.n=a.staff; a.why=''; }
   });
 }
 
