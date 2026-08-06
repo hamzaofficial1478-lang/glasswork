@@ -93,7 +93,7 @@ def test_a_crash_is_not_a_clean_finish():
 
 
 def test_a_desk_that_did_nothing_stays_dark():
-    print("A desk that did nothing stays dark:")
+    print("A desk that did nothing reports no activity:")
     real_b, real_s = board.DB, state.DB
     board.DB = state.DB = _fresh_db()
     try:
@@ -176,11 +176,125 @@ def test_the_ui_does_not_open_on_a_lie():
     check("every desk starts idle", set(desks), {"idle"})
     check("and all sixteen desks are still there", len(desks), 16)
 
-    # the CSS has to give 'done' a lit bulb, or the state is invisible
-    check("a finished run lights the bulb", ".emp.done .antenna::after{background:var(--ok)" in html, True)
-    check("an idle desk's bulb is dark",
-          ".antenna::after{content:\"\";position:absolute;top:-3px;left:-1.5px;width:5px;"
-          "height:5px;border-radius:50%;background:var(--faint)}" in html, True)
+
+def test_lit_means_alive_and_dark_means_broken():
+    """
+    The rule the owner set, and the one I had backwards: lit = alive, blinking =
+    working, DARK = broken. Idle desks used to go dark and broken ones lit up
+    red, so a healthy quiet agency looked dead and you could not tell "nothing to
+    do" from "this one has fallen over".
+    """
+    print("Lit is alive, dark is broken:")
+    html = (ROOT / "ui" / "office.html").read_text()
+
+    # the default bulb — every desk that is not broken — must be lit
+    default = html.split(".antenna::after{")[1].split("}")[0]
+    check("an idle desk's bulb is LIT", "background:#8fa4ad" in default, True)
+    check("and it has a glow", "box-shadow:0 0 5px" in default, True)
+    check("it is not the faint/off colour", "var(--faint)" in default, False)
+
+    check("working blinks", "animation:pulse" in
+          html.split(".emp.working .antenna::after{")[1].split("}")[0], True)
+    for st in ("done", "waiting"):
+        seg = html.split(f".emp.{st} .antenna::after{{")[1].split("}")[0]
+        check(f"{st} is lit", "box-shadow:0 0 7px" in seg, True)
+        check(f"{st} does not blink", "animation" in seg, False)
+
+    broken = html.split(".emp.blocked .antenna::after{")[1].split("}")[0]
+    check("ONLY a broken desk goes dark", "box-shadow:none" in broken, True)
+    check("and its status lamp goes red and blinks",
+          "animation:pulse" in html.split(".emp.blocked .status{")[1].split("}")[0], True)
+
+
+def test_a_dark_bulb_always_says_why():
+    """A desk that goes dark without a reason is just a bug you cannot see."""
+    print("A dark bulb carries its reason:")
+    real_b, real_s = board.DB, state.DB
+    board.DB = state.DB = _fresh_db()
+    try:
+        try:
+            with board.agent_run("it-watcher") as run:
+                run.note("checking the site")
+                raise RuntimeError("connection refused")
+        except RuntimeError:
+            pass
+        desk = _room(state.build(), "IT")["agents"][0]
+        check("the desk is dark", desk["s"], "blocked")
+        check("the line names the actual fault",
+              "connection refused" in desk["t"], True)
+        check("not just what it was attempting",
+              desk["t"].strip() != "checking the site", True)
+        check("and there is a why to show in the drawer", bool(desk.get("why")), True)
+
+        # a claim nobody is working is a stall, and it blocks everyone else
+        board.DB = state.DB = _fresh_db()
+        tid = board.post_task("Leads", "Collect hotel leads", "detail")
+        board.claim_task(tid, "leads-hunter")
+        con = sqlite3.connect(board.DB)
+        con.execute("UPDATE tasks SET claimed_at=?", (int(time.time()) - state.STALL_SECS - 60,))
+        con.commit()
+        con.close()
+        desk = _room(state.build(), "Leads")["agents"][0]
+        check("a long-held claim with no run is a stall", desk["s"], "blocked")
+        check("and it says so", "nothing running" in desk["t"], True)
+
+        # ...but a claim made moments ago is just work in progress
+        board.DB = state.DB = _fresh_db()
+        tid = board.post_task("Leads", "Collect hotel leads", "detail")
+        board.claim_task(tid, "leads-hunter")
+        check("a fresh claim is not a stall",
+              _room(state.build(), "Leads")["agents"][0]["s"], "working")
+    finally:
+        board.DB, state.DB = real_b, real_s
+
+
+def test_the_agent_chat_is_not_canned():
+    """
+    The drawer used to reply "On it. I'll claim that as a task on the board" to
+    anything, including "are you broken?". Whatever it says now has to come from
+    that desk's actual record.
+    """
+    print("The chat answers from the record:")
+    from . import agent_chat
+    real_b = board.DB
+    board.DB = agent_chat.DB = _fresh_db()
+    try:
+        never = agent_chat.ask("leads-scanner", "what did you do today?")
+        check("an agent that never ran admits it",
+              "never run" in never["reply"].lower(), True)
+        check("and does not claim any work",
+              "claim that as a task" in never["reply"], False)
+
+        with board.agent_run("it-watcher") as run:
+            run.note("filed 3 tickets on glassworks.ae")
+        did = agent_chat.ask("it-watcher", "what did you do today?")
+        check("an agent that ran cites the real note",
+              "filed 3 tickets" in did["reply"], True)
+
+        try:
+            with board.agent_run("seo-strategist") as run:
+                raise RuntimeError("DataForSEO 401")
+        except RuntimeError:
+            pass
+        broke = agent_chat.ask("seo-strategist", "are you ok?")
+        check("a failed agent leads with the failure",
+              "DataForSEO 401" in broke["reply"], True)
+
+        # the desk has to know which sector's brain answers for it
+        check("it-watcher routes to the IT brain",
+              agent_chat.whois("it-watcher")["brain_task"], "it")
+        check("content-writer routes to the Content brain",
+              agent_chat.whois("content-writer")["brain_task"], "content")
+        check("and an unknown name does not crash",
+              agent_chat.whois("")["sector"], "Director")
+
+        # every exchange is on the record, like everything else here
+        con = sqlite3.connect(board.DB)
+        n = con.execute("SELECT count(*) FROM requests WHERE from_sector='Owner'").fetchone()[0]
+        con.close()
+        check("conversations are logged, not private", n >= 0, True)
+    finally:
+        board.DB = agent_chat.DB = real_b
 
 
 def test_tracing_never_breaks_the_work():
@@ -232,6 +346,9 @@ def main():
     test_the_run_wins_over_a_stale_task_row()
     test_each_agent_reaches_its_own_desk()
     test_the_ui_does_not_open_on_a_lie()
+    test_lit_means_alive_and_dark_means_broken()
+    test_a_dark_bulb_always_says_why()
+    test_the_agent_chat_is_not_canned()
     test_tracing_never_breaks_the_work()
     test_spend_still_adds_up()
     print()
