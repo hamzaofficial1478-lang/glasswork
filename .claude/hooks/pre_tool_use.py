@@ -3,11 +3,37 @@
 PRE-TOOL-USE HOOK — the seatbelt. Runs BEFORE any agent tool action.
 Reads the proposed action on stdin, blocks red-line moves, logs the rest.
 Exit 0 = allow, exit 2 = block (Claude Code treats a non-zero blocking hook as a veto).
+
+RED LINE 1's check independently searches for a deploy-word and a
+production-word anywhere in the blob (not "deploy-word THEN production-word"
+as one ordered pattern) — an ordered match let "our live site needs an
+update, so rsync the new build now" straight through, because the words
+just happened to sit in the other order. The production-word list uses
+exact words, not a wildcard — a wildcard also used to catch ordinary English
+like "produced"/"product", which would have blocked completely unrelated
+work for no reason.
+
+It also reads the content of any script a Bash command runs by path
+(`bash x.sh`, `python x.py`, `./x.sh`, ...) and scans THAT too. Otherwise a
+red line is trivially dodged: write the dangerous command to a file across a
+couple of small, individually-innocent edits, then run the file with a
+command that itself contains none of the trigger words. This closes that
+specific hole; it is not a sandbox — a sufficiently indirect trick (an
+interpreter reading a command from a variable, a script fetched over the
+network at run time) can still get past a regex. Treat this as a tripwire,
+not a wall.
 """
 import sys, json, time, sqlite3, re
 from pathlib import Path
 
 DB = Path(__file__).parents[2] / "coordination" / "agency.db"
+
+DEPLOY_WORDS = re.compile(r"\b(deploy\w*|git\s+push|rsync|s?ftp|scp)\b")
+PROD_WORDS = re.compile(r"\b(prod|production|live|public_html)\b")
+SCRIPT_RUN = re.compile(
+    r"(?:^|[;&|]\s*)(?:bash|sh|zsh|python3?|node|perl|ruby|\.)\s+([^\s;&|]+)"
+    r"|(?:^|[;&|]\s*)(\.{0,2}/[^\s;&|]+\.(?:sh|py|js|rb|pl))\b")
+
 
 def log(agent, tool, args, decision, reason):
     try:
@@ -18,15 +44,35 @@ def log(agent, tool, args, decision, reason):
     except Exception:
         pass
 
+
+def _script_contents(command: str) -> str:
+    """Read any script this Bash command runs by path, so the checks below see
+    what it actually does, not just the one line that launched it."""
+    found = []
+    for m in SCRIPT_RUN.finditer(command or ""):
+        path = m.group(1) or m.group(2)
+        if not path:
+            continue
+        try:
+            p = Path(path)
+            if p.is_file() and p.stat().st_size < 200_000:
+                found.append(p.read_text(errors="ignore"))
+        except Exception:
+            pass
+    return "\n".join(found)
+
+
 def main():
     ev = json.load(sys.stdin)
     tool = ev.get("tool_name", "")
     args = ev.get("tool_input", {}) or {}
     agent = ev.get("agent", "unknown")
     blob = json.dumps(args).lower()
+    if tool == "Bash":
+        blob += "\n" + _script_contents(args.get("command", "")).lower()
 
     # RED LINE 1: never deploy/push to the live site unless you are the releaser
-    if re.search(r"\b(deploy\w*|git push|rsync|s?ftp|scp)\b.*\b(prod\w*|live|public_html)\b", blob):
+    if DEPLOY_WORDS.search(blob) and PROD_WORDS.search(blob):
         if agent != "it-releaser":
             log(agent, tool, args, "blocked", "only it-releaser may reach production")
             print("BLOCKED: only the IT Releaser may touch production.", file=sys.stderr)
@@ -38,7 +84,7 @@ def main():
         print("BLOCKED: destructive command refused.", file=sys.stderr)
         sys.exit(2)
 
-    # RED LINE 3: sending money-offer / discount language to a client -> needs owner
+    # RED LINE 3: a price concession reaching a client needs owner approval first
     if re.search(r"(discount|free|off the price|special offer)", blob) and "send" in blob:
         log(agent, tool, args, "blocked", "price concession needs owner approval")
         print("BLOCKED: a discount/offer must be approved by the owner first.", file=sys.stderr)
@@ -46,6 +92,7 @@ def main():
 
     log(agent, tool, args, "allowed", "")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

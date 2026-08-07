@@ -67,9 +67,9 @@ SECTORS = {
         "runs": ["python -m pipelines.security_screen"],
     },
     "Report": {
-        "does": "Scores each sector, marks the MD's past decisions worked or failed, and "
-                "writes the daily digest. Not yet built.",
-        "runs": [],
+        "does": "Scores each sector, marks the MD's past decisions worked, failed or partial "
+                "against real cabinet evidence, and writes the daily digest to Telegram.",
+        "runs": ["python -m pipelines.report_daily"],
     },
 }
 
