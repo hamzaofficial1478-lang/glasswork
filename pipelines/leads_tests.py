@@ -557,6 +557,81 @@ def test_end_to_end():
         board.DB = real
 
 
+def test_outreach_is_capped_and_recorded():
+    """
+    The send boundary. Three promises the handbook makes about outgoing mail,
+    each of which used to have nothing behind it:
+
+      nothing goes out above the daily cap
+      nothing goes out from the wrong domain
+      nothing goes out without being written down
+
+    That last one mattered most: eleven places read outreach_log and NOTHING
+    ever wrote it, so the cap had nothing to count, the dashboard read 0 for
+    ever, and the promise never to approach the same firm twice had no record
+    of who had already been approached.
+    """
+    print("Outreach cannot exceed the cap, leave the wrong domain, or go unrecorded:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    from coordination import targets as _t
+    real_t = _t.DB
+    _t.DB = board.DB
+    keep = {k: os.environ.get(k) for k in
+            ("SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "OUTREACH_DOMAIN")}
+    try:
+        for k in keep:
+            os.environ.pop(k, None)
+
+        lead = {"id": 1, "email": "info@example.ae"}
+        r = mail._smtp_send(lead, "Subject line\n\nbody")
+        check("with no SMTP it refuses rather than pretending", r["ok"], False)
+        check("and says the credential is missing", "not configured" in r["error"], True)
+
+        check("nothing was recorded for a send that never happened", mail.sent_today(), 0)
+
+        # the log is what every counter reads
+        mail.log_outreach(1, "a real mail")
+        check("a recorded send is counted", mail.sent_today(), 1)
+        con = sqlite3.connect(board.DB)
+        n = con.execute("SELECT count(*) FROM outreach_log WHERE direction='sent'").fetchone()[0]
+        con.close()
+        check("and it is really in outreach_log", n, 1)
+
+        os.environ.update(SMTP_HOST="smtp.test", SMTP_USER="hello@mail.example.ae",
+                          SMTP_PASS="x")
+        cap = mail.daily_cap()
+        for i in range(cap):
+            mail.log_outreach(i, "filler")
+        over = mail._smtp_send(lead, "Subject\n\nbody")
+        check("over the cap, nothing is sent", over["ok"], False)
+        check("and it says so plainly", over.get("capped"), True)
+
+        # clear the log, then prove the domain guard bites before any connection
+        con = sqlite3.connect(board.DB)
+        con.execute("DELETE FROM outreach_log")
+        con.commit(); con.close()
+        os.environ["OUTREACH_DOMAIN"] = "mail.example.ae"
+        os.environ["SMTP_FROM"] = "someone@gmail.com"
+        bad = mail._smtp_send(lead, "Subject\n\nbody")
+        check("the wrong sending domain is refused", bad["ok"], False)
+        check("and named in the error", "not on the approved outreach" in bad["error"], True)
+        check("a refused send is never logged", mail.sent_today(), 0)
+
+        # a lead with no address must not reach the network at all
+        os.environ["SMTP_FROM"] = "hello@mail.example.ae"
+        none = mail._smtp_send({"id": 9, "email": ""}, "S\n\nb")
+        check("a lead with no email is refused", none["ok"], False)
+    finally:
+        for k, v in keep.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        _t.DB = real_t
+        board.DB = real_db
+
+
 def main():
     test_the_target_list_is_the_whole_market()
     test_every_segment_knows_what_to_sell_it()
@@ -578,6 +653,7 @@ def main():
     test_hunt_critic()
     test_claim_is_atomic()
     test_end_to_end()
+    test_outreach_is_capped_and_recorded()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

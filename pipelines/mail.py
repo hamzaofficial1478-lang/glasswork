@@ -435,19 +435,149 @@ def compose(lead: dict, company: dict, *, agent: str, sector: str = "Leads",
             "draft": drafted["draft"], "error": sent.get("error")}
 
 
+# The daily ceiling on outgoing mail, used when the owner has not set a target.
+# A cap that defaults to "unlimited" is not a cap.
+DEFAULT_DAILY_CAP = 20
+
+
+def sent_today(con=None) -> int:
+    """How many mails have actually left the building today. Reads the log."""
+    from coordination import board as _board, targets as _targets
+    own = con is None
+    con = con or __import__("sqlite3").connect(_board.DB)
+    try:
+        r = con.execute("SELECT count(*) FROM outreach_log"
+                        " WHERE direction='sent' AND at>=?",
+                        (_targets._day_start(),)).fetchone()
+        return int(r[0] or 0)
+    except Exception:
+        return 0
+    finally:
+        if own:
+            con.close()
+
+
+def daily_cap() -> int:
+    """
+    The owner's own number if he set one on /setup, else the built-in ceiling.
+    Read here rather than passed in: a cap the caller supplies is a cap the
+    caller can forget.
+    """
+    try:
+        from coordination import targets as _targets
+        for j in (_targets.status().get("jobs") or []):
+            if j["name"] == "mails" and j.get("per_day"):
+                return int(j["per_day"])
+    except Exception:
+        pass
+    return DEFAULT_DAILY_CAP
+
+
+def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=None):
+    """
+    Record that we contacted somebody. THIS IS NOT OPTIONAL.
+
+    Nothing wrote this table before, while eleven places read it, so "mails sent
+    today", "replies today" and "people contacted" were all permanently zero and
+    the daily cap had nothing to count. Worse, the promise never to approach the
+    same firm twice had no record of who had already been approached.
+    """
+    import sqlite3 as _sq
+    from coordination import board as _board
+    try:
+        with _sq.connect(_board.DB, timeout=30) as c:
+            cur = c.execute(
+                "INSERT INTO outreach_log(lead_id,channel,direction,body,reply_class,"
+                "needs_owner,at) VALUES(?,?,?,?,?,0,?)",
+                (lead_id, channel, direction, (body or "")[:4000], reply_class,
+                 int(__import__("time").time())))
+            return cur.lastrowid
+    except Exception:
+        return None
+
+
 def _smtp_send(lead: dict, draft: str) -> dict:
     """
     Deliver via SMTP using the credentials saved on /setup (env: SMTP_*). Kept as
-    the single send boundary: no other code emails directly. Returns a clear
-    message when SMTP isn't configured rather than pretending to send.
+    the single send boundary: no other code emails directly.
+
+    Three things happen here and nowhere else, because this is the only place
+    that can be sure of them:
+
+      the cap is checked HERE, not by the caller. The handbook red line is a
+      daily limit and the right sending domain; a limit enforced by whoever
+      happens to call is a limit that gets skipped by the next caller written.
+
+      the send is real, via smtplib, using exactly the keys test_email() proves.
+
+      the send is LOGGED, before we return. An unlogged send is invisible to the
+      cap, to the dedup promise, and to every counter the owner reads.
     """
     import os
-    host = os.environ.get("SMTP_HOST", "")
-    if not host:
+    import smtplib
+    from email.message import EmailMessage
+
+    host = os.environ.get("SMTP_HOST", "").strip()
+    user = os.environ.get("SMTP_USER", "").strip()
+    pw = os.environ.get("SMTP_PASS", "")
+    to = (lead.get("email") or "").strip()
+    if not host or not user:
         return {"ok": False, "error": "SMTP not configured (set it on /setup → Integrations)"}
-    # A real send goes here (smtplib). Left unbuilt on purpose until the owner
-    # adds SMTP + confirms outreach caps — this module must not silently email.
-    return {"ok": False, "error": "SMTP send not enabled yet — add SMTP on /setup and turn on outreach"}
+    if not to:
+        return {"ok": False, "error": "this lead has no email address"}
+
+    # --- the cap, before anything leaves ------------------------------------
+    cap = daily_cap()
+    already = sent_today()
+    if already >= cap:
+        return {"ok": False, "capped": True,
+                "error": f"daily outreach cap reached ({already}/{cap}). Nothing sent. "
+                         "Raise it on /setup → Daily orders if you really want more."}
+
+    # --- the sending domain, as the handbook requires ------------------------
+    sender = (os.environ.get("SMTP_FROM") or user).strip()
+    domain = os.environ.get("OUTREACH_DOMAIN", "").strip().lower()
+    if domain and not sender.lower().endswith("@" + domain):
+        return {"ok": False,
+                "error": f"refusing to send: {sender} is not on the approved outreach "
+                         f"domain ({domain})"}
+
+    subject, body = _split_subject(draft)
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = to
+    msg["Subject"] = subject or "Glass & aluminium work"
+    msg.set_content(body or draft)
+
+    try:
+        port = int((os.environ.get("SMTP_PORT") or "587").strip() or 587)
+    except ValueError:
+        port = 587
+    try:
+        if port == 465:
+            srv = smtplib.SMTP_SSL(host, port, timeout=30)
+        else:
+            srv = smtplib.SMTP(host, port, timeout=30)
+            srv.ehlo()
+            if srv.has_extn("starttls"):
+                srv.starttls()
+                srv.ehlo()
+        try:
+            srv.login(user, pw)
+            srv.send_message(msg)
+        finally:
+            try:
+                srv.quit()
+            except Exception:
+                pass
+    except Exception as e:
+        return {"ok": False, "error": f"SMTP refused the message: {e}"}
+
+    # It has gone. Record it before returning — a send we did not write down is
+    # a send the cap cannot see and the Scanner cannot dedup against.
+    row = log_outreach(lead.get("id"), draft)
+    return {"ok": True, "to": to, "outreach_log_id": row,
+            "sent_today": already + 1, "cap": cap}
 
 
 def preview(lead: dict, company: dict, draft: str = "", write_html_to: str = "") -> dict:
