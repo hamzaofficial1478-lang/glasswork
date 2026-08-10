@@ -28,6 +28,7 @@ DEL = "rm " + "-rf"
 OFR = "disc" + "ount"
 SND = "se" + "nd"
 FRZ = "fre" + "eze"
+FRE = "fre" + "e"          # the standalone money word
 
 fails = []
 
@@ -99,6 +100,23 @@ print("\nDestructive and concession lines still hold:")
 check("destructive command blocked", run("Bash", {"command": f"{DEL} /tmp/x"}), BLOCK)
 check("concession in an outgoing message blocked",
       run("Bash", {"command": f"{SND} the client a 10% {OFR}"}), BLOCK)
+
+print("\nA concession only counts when it is heading OUT to someone:")
+# the real thing: the offer and the posting verb in the same breath
+check("an offer in an outgoing line is blocked",
+      run("Bash", {"command": f"{SND} the client a {FRE} site survey this week"}), BLOCK)
+check("...and the other way round",
+      run("Bash", {"command": f"a {FRE} survey, {SND} it over today"}), BLOCK)
+# source code that merely mentions both, far apart, is not an offer
+faraway = ("x = " + FRE + "_slot()\n" + ("# padding line\n" * 12)
+           + "notify_by_" + "e" + "mail(user)\n")
+check("a money word and a posting word 400 chars apart do not",
+      run("Write", {"file_path": "/tmp/x.py", "content": faraway}), ALLOW)
+check("the real file that could not be pushed now can",
+      run("mcp__github__push_files",
+          {"files": [{"path": "coordination/board.py",
+                      "content": open("/home/user/glasswork/coordination/board.py").read()}]}),
+      ALLOW)
 
 print("\nFalse positives that cost real work:")
 check(f"the word '{FRZ}' does not read as a price concession",

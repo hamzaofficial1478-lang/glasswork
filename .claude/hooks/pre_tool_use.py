@@ -54,6 +54,33 @@ SCRIPT_RUN = re.compile(
     re.MULTILINE)
 
 
+# A price concession only matters when it is heading OUT to a client. The old
+# test was 'a money word ANYWHERE in the payload and an outbound word ANYWHERE',
+# which across a 20KB source file is near-certain coincidence - it refused a
+# file whose only sin was a variable named `free` on one line and the word
+# `email` four hundred lines below it. Red line 1 was narrowed for exactly this
+# reason when its wildcard started catching 'produced' and 'product': a rule
+# that cries wolf on ordinary work is a rule that gets switched off.
+#
+# The two signals now have to sit together, the way they do in any real offer.
+# Still a tripwire, not a wall - deliberately spacing them out defeats it, the
+# same way a script fetched at run time defeats the scanner above.
+CONCESSION_GAP = 60
+
+
+def concession_going_out(blob):
+    """The offending text when a money word and an outbound word sit close."""
+    money = [m.span() for m in MONEY_WORDS.finditer(blob)]
+    if not money:
+        return None
+    outbound = [m.span() for m in OUTBOUND_WORDS.finditer(blob)]
+    for ms, me in money:
+        for os_, oe in outbound:
+            if max(ms, os_) - min(me, oe) <= CONCESSION_GAP:
+                return blob[max(0, min(ms, os_) - 30):max(me, oe) + 30]
+    return None
+
+
 def log(agent, tool, args, decision, reason):
     try:
         con = sqlite3.connect(DB)
@@ -104,7 +131,7 @@ def main():
         sys.exit(2)
 
     # RED LINE 3: a price concession reaching a client needs owner approval first
-    if MONEY_WORDS.search(blob) and OUTBOUND_WORDS.search(blob):
+    if concession_going_out(blob):
         log(agent, tool, args, "blocked", "price concession needs owner approval")
         print("BLOCKED: a discount/offer must be approved by the owner first.", file=sys.stderr)
         sys.exit(2)
