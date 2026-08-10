@@ -164,9 +164,11 @@ def _gap(agent, max_seeds, cost_ceiling):
             return result
 
         top = gaps[:40]
+        keyword_ids = []
         for g in top:
-            con.execute("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)",
-                        (g["phrase"], g["area"], g["intent"]))
+            cur = con.execute("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)",
+                              (g["phrase"], g["area"], g["intent"]))
+            keyword_ids.append(cur.lastrowid)
         con.commit()
 
         buy = [g["phrase"] for g in top if g["intent"] == "buy"][:12]
@@ -179,7 +181,11 @@ def _gap(agent, max_seeds, cost_ceiling):
             reasoning=(f"Pulled {len(fetched)} real suggestions from {source} across "
                        f"{len(seeds_used)} seeds; {len(top)} in-scope gaps weren't tracked yet."),
             expectation="Content briefs the buying-intent gaps into service+area pages.",
-            confidence=0.7)
+            confidence=0.7,
+            # THESE phrases, not "any brief written afterwards" — otherwise an
+            # unrelated page the owner asked for by hand scores this list.
+            evidence={"keyword_ids": keyword_ids,
+                      "phrases": [g["phrase"] for g in top]})
         result.update({"posted": True, "critic": "passed", "stored": len(top),
                        "request_id": rid, "decision_id": did, "top_buy": buy})
         return result
