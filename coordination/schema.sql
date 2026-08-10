@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS decisions (
   confidence  REAL,
   outcome     TEXT,                    -- worked | failed | partial (set later by Report)
   created_at  INTEGER,
-  scored_at   INTEGER
+  scored_at   INTEGER,
+  evidence     TEXT,                   -- json: WHICH rows this decision is a claim about
+  outcome_note TEXT                    -- why Report scored it the way it did
 );
 
 -- ---- who's doing what (Overseer + cost governor) --------------------------

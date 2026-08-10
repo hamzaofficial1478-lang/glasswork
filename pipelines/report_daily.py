@@ -6,25 +6,35 @@ back for the MD's next SENSE step.
 
     python -m pipelines.report_daily
 
-TWO KINDS OF DECISION, SCORED HONESTLY
+SCORED AGAINST THE ROWS THE DECISION WAS ACTUALLY ABOUT
 
-  SELF-VERIFYING   the decision's own pipeline already gates log_decision()
-                    behind its own critic_check passing (security-screen,
-                    site-services, leads-sources, leads-hunt) so the
-                    expectation is already true the moment Report sees it.
-                    leads-hunt still gets a real check (are the new leads
-                    actually tagged?) because that is cheap evidence sitting
-                    right there; the other three are scored 'worked' outright.
+Every decision records, at the moment it is logged, WHICH rows it is a claim
+about — the tickets that check filed, the leads that run stored, the keywords
+that gap list added (board.log_decision(evidence=...)). Scoring reads those ids
+back and asks what became of those specific rows.
 
-  DOWNSTREAM        the expectation depends on ANOTHER sector acting later
-                    (seo-gap -> Content briefs it; content-briefs -> the
-                    Writer drafts one; it-health -> the fix lands). These wait
-                    for real evidence in the cabinet, inside a grace window
-                    per cycle. Inside the window with no evidence yet -> left
-                    UNSCORED. Never guessed, never forced to a verdict early.
+That link is the whole point, and this file used to be built without it. It
+matched evidence to a decision by wall-clock proximity instead, which was wrong
+in three separate ways, all of them flattering:
 
-This is the same rule the rest of the agency lives by: no decision without
-evidence. Report does not get an exception for its own scorecard.
+  - an seo-gap list scored 'worked' off ANY content brief created afterwards,
+    including a page the owner asked for by hand;
+  - one brief scored EVERY pending gap list at once, because they all matched
+    the same "created after" test;
+  - a health check looked for its tickets in a +/-5 second window around the
+    decision, and read "I could not find them" as "nothing was wrong" — so an
+    open, critical, dead enquiry form scored 'worked'.
+
+Three cycles were also scored 'worked' outright, unchecked, on the grounds of
+being "self-verifying". They are not: 'no sector acts on unscreened text' and
+'the Hunter collects across the whole market' are claims about what happens
+NEXT. Nothing that has not been checked is marked as having worked.
+
+THE RULE: a decision is scored only when there is real evidence about its own
+rows. Otherwise it waits inside a grace window, and after that it either failed
+or is left permanently unscored with the reason recorded. Unscored is a fine
+answer. A guessed 'worked' is not — a scorecard that cannot return a loss
+teaches the MD nothing, which is worse than having no scorecard at all.
 """
 import json
 import sqlite3
@@ -37,8 +47,19 @@ GRACE = {
     "seo-gap": 5 * 86400,
     "content-briefs": 7 * 86400,
     "it-health": 3 * 86400,
+    "leads-sources": 7 * 86400,
+    "site-services": 7 * 86400,
 }
-SELF_VERIFYING = ("security-screen", "site-services", "leads-sources")
+
+# Cycles we can check, and cycles we cannot check yet but must not pretend to.
+# 'security-screen' expects that no sector acts on unscreened outside text.
+# Proving that needs an outreach trail, and nothing writes one yet — so it stays
+# unscored and says so, rather than being waved through as 'worked'.
+NO_RULE_YET = {
+    "security-screen":
+        "no way to check this yet — the claim is that no sector acted on "
+        "unscreened text, and nothing records outreach actions to check against",
+}
 
 
 def _now():
@@ -55,76 +76,179 @@ def _day_start():
     return int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
 
 
-def _score_seo_gap(con, created_at):
-    n = _one(con, "SELECT count(*) FROM content_queue WHERE created_at>?", (created_at,))
-    if n > 0:
-        return "worked", f"{n} content brief(s) created since"
-    if _now() - created_at > GRACE["seo-gap"]:
-        return "failed", "no content briefed from this gap list after 5 days"
+def _expired(cycle, created_at):
+    """Has this decision waited longer than its cycle's grace window?"""
+    return _now() - created_at > GRACE.get(cycle, 7 * 86400)
+
+
+def _ids(ev, key):
+    v = (ev or {}).get(key) or []
+    return [x for x in v if x is not None]
+
+
+def _in(col, ids):
+    """A safe IN clause for a list of integer row ids."""
+    return f"{col} IN ({','.join('?' * len(ids))})"
+
+
+def _score_seo_gap(con, created_at, ev):
+    """
+    Did Content brief a page from THESE phrases? A brief written about something
+    else is not evidence that this gap list was any good.
+    """
+    phrases = [p for p in (ev.get("phrases") or []) if p]
+    if not phrases:
+        return None, "no phrases recorded on this decision — cannot tell what it claimed"
+    rows = con.execute("SELECT brief, title FROM content_queue WHERE created_at>?",
+                       (created_at,)).fetchall()
+    hits = {p for p in phrases
+            for r in rows if p.lower() in ((r[0] or "") + " " + (r[1] or "")).lower()}
+    if hits:
+        return "worked", (f"{len(hits)} of {len(phrases)} gap phrase(s) were briefed, "
+                          f"e.g. {sorted(hits)[0]!r}")
+    if _expired("seo-gap", created_at):
+        return "failed", f"none of the {len(phrases)} gap phrases was briefed within 5 days"
     return None, "still within the 5-day grace window"
 
 
-def _score_content_briefs(con, created_at):
-    n = _one(con, "SELECT count(*) FROM content_queue WHERE created_at>? AND"
-                  " status NOT IN ('idea','briefed')", (created_at,))
-    if n > 0:
-        return "worked", f"{n} brief(s) moved past 'briefed'"
-    if _now() - created_at > GRACE["content-briefs"]:
-        return "failed", "no brief was drafted from the template page after 7 days"
+def _score_content_briefs(con, created_at, ev):
+    """Did any of the pages THIS run briefed actually move past 'briefed'?"""
+    ids = _ids(ev, "content_queue_ids")
+    if not ids:
+        return None, "no brief ids recorded on this decision"
+    rows = con.execute(
+        f"SELECT status FROM content_queue WHERE {_in('id', ids)}", ids).fetchall()
+    if not rows:
+        return "failed", f"all {len(ids)} briefed page(s) have been deleted from the queue"
+    moved = [r[0] for r in rows if r[0] not in ("idea", "briefed", "blocked_on_seo")]
+    if moved:
+        return "worked", f"{len(moved)} of {len(rows)} briefed page(s) moved past 'briefed'"
+    if _expired("content-briefs", created_at):
+        return "failed", f"none of the {len(rows)} briefed page(s) was drafted within 7 days"
     return None, "still within the 7-day grace window"
 
 
-def _score_it_health(con, created_at):
+def _score_it_health(con, created_at, ev):
+    """
+    Were the urgent tickets THIS check filed ever resolved?
+
+    'No urgent tickets' only counts as success when the check genuinely filed
+    none. It must never be inferred from a lookup that came back empty, which is
+    how an open critical issue used to score 'worked'.
+    """
+    if "site_issue_ids" not in (ev or {}):
+        return None, "no ticket ids recorded on this decision — cannot tell what it filed"
+    ids = _ids(ev, "site_issue_ids")
+    if not ids:
+        return "worked", "this check filed no tickets at all — the site was clean"
     rows = con.execute(
-        "SELECT status, severity FROM site_issues WHERE found_at BETWEEN ? AND ?",
-        (created_at - 5, created_at + 5)).fetchall()
+        f"SELECT status, severity FROM site_issues WHERE {_in('id', ids)}", ids).fetchall()
     urgent = [r for r in rows if r[1] in ("critical", "high")]
     if not urgent:
-        return "worked", "nothing critical or high was filed on this check"
-    if all(r[0] in ("closed", "deployed") for r in urgent):
-        return "worked", f"all {len(urgent)} urgent issue(s) from this check are resolved"
-    if _now() - created_at > GRACE["it-health"]:
-        still_open = sum(1 for r in urgent if r[0] not in ("closed", "deployed"))
-        return "failed", f"{still_open} urgent issue(s) from this check still open after 3 days"
-    return None, "still within the 3-day grace window"
+        return "worked", f"{len(ids)} ticket(s) filed, none of them critical or high"
+    done = [r for r in urgent if r[0] in ("closed", "deployed")]
+    if len(done) == len(urgent):
+        return "worked", f"all {len(urgent)} urgent ticket(s) from this check are resolved"
+    if _expired("it-health", created_at):
+        return "failed", (f"{len(urgent) - len(done)} of {len(urgent)} urgent ticket(s) "
+                          "from this check still open after 3 days")
+    return None, f"{len(urgent) - len(done)} urgent ticket(s) still open, inside the 3-day window"
 
 
-def _score_leads_hunt(con, created_at):
-    rows = con.execute(
-        "SELECT segment FROM leads WHERE found_at BETWEEN ? AND ?",
-        (created_at - 5, created_at + 5)).fetchall()
+def _score_leads_hunt(con, created_at, ev):
+    """Do the leads THIS run stored carry the service tag it promised?"""
+    if "lead_ids" not in (ev or {}):
+        return None, "no lead ids recorded on this decision"
+    ids = _ids(ev, "lead_ids")
+    if not ids:
+        return None, "this run stored no leads, so the tagging claim was never tested"
+    rows = con.execute(f"SELECT segment FROM leads WHERE {_in('id', ids)}", ids).fetchall()
     if not rows:
-        return "worked", "no leads were stored on this run to mis-tag"
+        return "failed", f"all {len(ids)} lead(s) from this run have gone from the cabinet"
     tagged = sum(1 for r in rows if (r[0] or "").strip())
     if tagged == len(rows):
-        return "worked", f"all {len(rows)} new lead(s) carry a service tag"
+        return "worked", f"all {len(rows)} lead(s) from this run carry a service tag"
     if tagged == 0:
-        return "failed", f"none of {len(rows)} new lead(s) carry a service tag"
-    return "partial", f"{tagged}/{len(rows)} new lead(s) carry a service tag"
+        return "failed", f"none of {len(rows)} lead(s) from this run carry a service tag"
+    return "partial", f"{tagged}/{len(rows)} lead(s) from this run carry a service tag"
+
+
+def _score_leads_sources(con, created_at, ev):
+    """
+    The claim was that the Hunter would then collect across the whole market.
+    Measured against the baseline the map recorded, not against nothing.
+    """
+    before = (ev or {}).get("leads_before")
+    if before is None:
+        return None, "no lead baseline recorded on this decision"
+    rows = con.execute("SELECT DISTINCT segment FROM leads WHERE found_at>?",
+                       (created_at,)).fetchall()
+    segs = {(r[0] or "").strip() for r in rows if (r[0] or "").strip()}
+    if len(segs) > 1:
+        return "worked", f"leads have since arrived across {len(segs)} different segments"
+    if _expired("leads-sources", created_at):
+        if not segs:
+            return "failed", "no leads at all were collected from this source map within 7 days"
+        return "partial", f"7 days on, leads came from only {len(segs)} segment"
+    return None, "still within the 7-day grace window, waiting on the Hunter"
+
+
+def _score_site_services(con, created_at, ev):
+    """The claim is the catalogue matches the site. Did the mismatches get closed?"""
+    if ev is None or "uncatalogued" not in ev:
+        return None, "no reconciliation recorded on this decision"
+    gaps = len(ev.get("uncatalogued") or []) + len(ev.get("missing_from_site") or [])
+    if gaps == 0:
+        return "worked", "the catalogue already matched the site exactly"
+    if _expired("site-services", created_at):
+        return "failed", f"{gaps} service mismatch(es) were still unreconciled after 7 days"
+    return None, f"{gaps} mismatch(es) waiting on the owner, inside the 7-day window"
+
+
+SCORERS = {
+    "seo-gap": _score_seo_gap,
+    "content-briefs": _score_content_briefs,
+    "it-health": _score_it_health,
+    "leads-hunt": _score_leads_hunt,
+    "leads-sources": _score_leads_sources,
+    "site-services": _score_site_services,
+}
 
 
 def score_pending_decisions(con):
-    """Score every decision still waiting on an outcome. Returns what it scored."""
-    rows = con.execute("SELECT id, cycle, created_at FROM decisions"
+    """
+    Score every decision still waiting on an outcome, against its own recorded
+    evidence. Returns only what it actually scored — anything left waiting is
+    reported separately rather than being forced to a verdict.
+    """
+    board.ensure_schema(con)
+    rows = con.execute("SELECT id, cycle, created_at, evidence FROM decisions"
                        " WHERE outcome IS NULL ORDER BY created_at").fetchall()
-    scored = []
-    for did, cycle, created_at in rows:
-        if cycle in SELF_VERIFYING:
-            outcome, why = "worked", "self-verifying: this sector's own critic already confirmed it"
-        elif cycle == "leads-hunt":
-            outcome, why = _score_leads_hunt(con, created_at)
-        elif cycle == "seo-gap":
-            outcome, why = _score_seo_gap(con, created_at)
-        elif cycle == "content-briefs":
-            outcome, why = _score_content_briefs(con, created_at)
-        elif cycle == "it-health":
-            outcome, why = _score_it_health(con, created_at)
+    scored, waiting = [], []
+    for did, cycle, created_at, raw in rows:
+        try:
+            ev = json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            ev = None
+
+        if cycle in NO_RULE_YET:
+            outcome, why = None, NO_RULE_YET[cycle]
+        elif cycle not in SCORERS:
+            outcome, why = None, f"unknown cycle {cycle!r} — no scoring rule written for it"
+        elif ev is None:
+            # Logged before decisions carried their evidence. There is no honest
+            # way to score it now, and inventing one is how the scorecard lied.
+            outcome, why = None, "logged before decisions recorded their evidence — unscorable"
         else:
-            outcome, why = None, f"unknown cycle '{cycle}' - no scoring rule written for it"
+            outcome, why = SCORERS[cycle](con, created_at, ev)
+
+        entry = {"decision_id": did, "cycle": cycle, "outcome": outcome, "why": why}
         if outcome:
-            board.score_decision(did, outcome)
-            scored.append({"decision_id": did, "cycle": cycle, "outcome": outcome, "why": why})
-    return scored
+            board.score_decision(did, outcome, note=why)
+            scored.append(entry)
+        else:
+            waiting.append(entry)
+    return scored, waiting
 
 
 def _leads_summary(con, day0):
@@ -168,12 +292,33 @@ def _prioritised_actions(site_sev, leads_today, approvals_pending):
     return actions[:3]
 
 
-def critic_check(state, summary):
-    """Report's own gate: a digest may not ship on a cabinet it could not read."""
+def critic_check(state, summary=None):
+    """
+    Report's own gate: a digest may not ship on a cabinet it could not read.
+
+    This runs BEFORE the digest is built, on the raw state, because a guard that
+    fires after the numbers have already been pulled out of `state` is not a
+    guard — the missing key crashes first. It also has to check the keys it
+    actually needs rather than a general 'ok' flag: state.build() never returns
+    ok=False (it raises instead), so testing that flag could never reject
+    anything and the gate was decorative.
+    """
     reasons = []
-    if not state or not state.get("ok"):
+    if not isinstance(state, dict):
         reasons.append("could not read the cabinet state - nothing to report on")
-    if not (summary or "").strip():
+    else:
+        if not state.get("ok"):
+            reasons.append("the cabinet state came back marked not-ok")
+        metrics = state.get("metrics")
+        if not isinstance(metrics, dict):
+            reasons.append("no metrics in the cabinet state - nothing to report on")
+        else:
+            for key in ("health", "spend"):
+                if metrics.get(key) is None:
+                    reasons.append(f"the state has no '{key}' figure to report")
+        if not isinstance(state.get("rooms"), list):
+            reasons.append("no per-sector rooms in the state - cannot score the sectors")
+    if summary is not None and not str(summary).strip():
         reasons.append("empty summary - nothing was actually said")
     return (len(reasons) == 0, reasons)
 
@@ -188,10 +333,19 @@ def run(agent="reporter"):
 def _report(agent):
     con = sqlite3.connect(board.DB)
     try:
-        scored = score_pending_decisions(con)
+        scored, waiting = score_pending_decisions(con)
         con.commit()
 
+        # The critic goes first, on the raw state, before a single figure is
+        # pulled out of it. Reading the numbers and then asking whether they
+        # were readable is the wrong way round.
         state = _state.build()  # the exact numbers the dashboard already shows
+        ok, reasons = critic_check(state)
+        if not ok:
+            return {"ok": True, "agent": agent, "critic": "rejected",
+                    "critic_reasons": reasons,
+                    "decisions_scored": scored, "decisions_waiting": waiting}
+
         day0 = _day_start()
         leads_today, by_stage = _leads_summary(con, day0)
         site_sev = _site_severity(con)
@@ -213,10 +367,14 @@ def _report(agent):
         ok, reasons = critic_check(state, summary)
         if not ok:
             return {"ok": True, "agent": agent, "critic": "rejected",
-                    "critic_reasons": reasons, "decisions_scored": scored}
+                    "critic_reasons": reasons,
+                    "decisions_scored": scored, "decisions_waiting": waiting}
 
         day = time.strftime("%Y-%m-%d", time.localtime())
         sector_scores = {r["key"]: r["score"] for r in state["rooms"]}
+        # One digest per day. Running Report twice used to leave two rows for the
+        # same date and no way to tell which one the owner actually read.
+        con.execute("DELETE FROM daily_reports WHERE day=?", (day,))
         con.execute(
             "INSERT INTO daily_reports(day,health_score,sector_scores,summary,actions,"
             "spend_usd,created_at) VALUES(?,?,?,?,?,?,?)",
@@ -224,20 +382,27 @@ def _report(agent):
              json.dumps(actions), spend, _now()))
         con.commit()
 
+        tally = ""
+        if scored:
+            tally = (f" ({sum(1 for s in scored if s['outcome'] == 'worked')} worked, "
+                     f"{sum(1 for s in scored if s['outcome'] == 'failed')} failed, "
+                     f"{sum(1 for s in scored if s['outcome'] == 'partial')} partial)")
         telegram_text = (
             f"Daily digest - {day}\n\n"
             f"Health: {state['metrics']['health']}/100\n" + summary + "\n\n"
             "Top 3 today:\n" + "\n".join(f"- {a}" for a in actions) + "\n\n"
-            f"Decisions scored: {len(scored)}"
-            + (f" ({sum(1 for s in scored if s['outcome']=='worked')} worked, "
-               f"{sum(1 for s in scored if s['outcome']=='failed')} failed, "
-               f"{sum(1 for s in scored if s['outcome']=='partial')} partial)" if scored else "")
+            f"Decisions scored: {len(scored)}" + tally
+            # An unscored decision is a real state, not a rounding error. Saying
+            # so keeps the owner from reading "3 scored, all worked" as "all is
+            # well" when nine others could not be checked at all.
+            + (f"\nStill unscored: {len(waiting)}" if waiting else "")
         )
         tg = integrations.send_message(telegram_text)
 
         return {"ok": True, "agent": agent, "critic": "passed", "day": day,
                 "health_score": state["metrics"]["health"], "sector_scores": sector_scores,
-                "decisions_scored": scored, "summary": summary, "actions": actions,
+                "decisions_scored": scored, "decisions_waiting": waiting,
+                "summary": summary, "actions": actions,
                 "spend_usd": spend, "telegram_sent": tg.get("ok"), "telegram_detail": tg.get("detail")}
     finally:
         con.close()

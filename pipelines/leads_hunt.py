@@ -399,7 +399,8 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
                        f"in the cabinet, {len(result['refused'])} screened out."),
             expectation="Each new lead carries the service it needs, so outreach writes "
                         "about that job rather than reciting the whole service list.",
-            confidence=0.7)
+            confidence=0.7,
+            evidence={"lead_ids": [s["id"] for s in result["stored"]]})
 
         by_service = {}
         for c in candidates:

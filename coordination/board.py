@@ -121,18 +121,48 @@ def get_task(task_id):
 _MIGRATED = set()
 
 
+_ADDED_COLUMNS = (
+    # table          column          type
+    ("agent_runs",   "note",         "TEXT"),
+    # A decision has to say which rows it is a claim ABOUT, or nothing can ever
+    # check it honestly later. Without this, Report matched evidence to a
+    # decision by wall-clock proximity, so an unrelated content brief scored an
+    # SEO gap list as 'worked' and one brief scored every pending gap list at
+    # once. See pipelines/report_daily.py.
+    ("decisions",    "evidence",     "TEXT"),
+    ("decisions",    "outcome_note", "TEXT"),
+)
+
+
 def _migrate(c):
-    """agent_runs gained its 'note' column after the first cabinets were built."""
+    """Columns added after the first cabinets were built. Safe to run repeatedly."""
     key = str(DB)
     if key in _MIGRATED:
         return
-    try:
-        cols = {r[1] for r in c.execute("PRAGMA table_info(agent_runs)")}
-        if cols and "note" not in cols:
-            c.execute("ALTER TABLE agent_runs ADD COLUMN note TEXT")
-    except sqlite3.OperationalError:
-        pass
+    for table, col, coltype in _ADDED_COLUMNS:
+        try:
+            cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+            if cols and col not in cols:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+        except sqlite3.OperationalError:
+            pass
     _MIGRATED.add(key)
+
+
+def ensure_schema(con=None):
+    """
+    Bring a cabinet up to date. Public because the Report sector opens its own
+    connection to score decisions, and a migration that only runs on board's
+    own connections is a migration that silently doesn't run.
+    """
+    if con is not None:
+        _MIGRATED.discard(str(DB))
+        _migrate(con)
+        con.commit()
+        return
+    with _conn() as c:
+        _MIGRATED.discard(str(DB))
+        _migrate(c)
 
 
 class _Run:
@@ -358,22 +388,40 @@ def open_requests_for(sector):
 # DECISION LOG — the MD's scorecard (learns over time)
 # ----------------------------------------------------------------------------
 
-def log_decision(cycle, reasoning, expectation, confidence):
+def log_decision(cycle, reasoning, expectation, confidence, evidence=None):
+    """
+    Record a call and what it expects to happen.
+
+    `evidence` names the rows this decision is a claim ABOUT — the site issues it
+    just filed, the leads it stored, the keywords it added. Report needs that to
+    check the expectation against the right rows later. A decision logged without
+    it cannot be scored honestly and will be left unscored rather than guessed,
+    so pass it whenever the pipeline knows what it produced.
+    """
     did = uuid.uuid4().hex[:12]
     with _conn() as c:
+        _migrate(c)
         c.execute(
-            "INSERT INTO decisions(id,cycle,reasoning,expectation,confidence,outcome,created_at)"
-            " VALUES(?,?,?,?,?, NULL, ?)",
-            (did, cycle, reasoning, expectation, confidence, _now()),
+            "INSERT INTO decisions(id,cycle,reasoning,expectation,confidence,outcome,"
+            "created_at,evidence) VALUES(?,?,?,?,?, NULL, ?,?)",
+            (did, cycle, reasoning, expectation, confidence, _now(),
+             json.dumps(evidence) if evidence else None),
         )
     return did
 
 
-def score_decision(decision_id, outcome):
-    """Report sector calls this later: 'worked' / 'failed' / 'partial'."""
+def score_decision(decision_id, outcome, note=None):
+    """
+    Report sector calls this later: 'worked' / 'failed' / 'partial'.
+
+    The note is the evidence behind the verdict. A score with no stated reason is
+    just an opinion, and the MD is supposed to be able to read back WHY a line of
+    reasoning kept losing.
+    """
     with _conn() as c:
-        c.execute("UPDATE decisions SET outcome=?, scored_at=? WHERE id=?",
-                  (outcome, _now(), decision_id))
+        _migrate(c)
+        c.execute("UPDATE decisions SET outcome=?, scored_at=?, outcome_note=? WHERE id=?",
+                  (outcome, _now(), note, decision_id))
 
 
 def recent_hit_rate(limit=30):

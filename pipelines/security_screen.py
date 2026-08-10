@@ -291,7 +291,8 @@ def _screen(agent):
             reasoning=(f"Screened {len(answered)} request(s) from other sectors; "
                        f"raised {total_findings} finding(s) and logged each one."),
             expectation="No sector acts on outside text that has not been through this gate.",
-            confidence=0.8)
+            confidence=0.8,
+            evidence={"request_ids": [a.get("request") for a in answered]})
         return {"ok": True, "agent": agent, "critic": "passed",
                 "answered": answered, "findings_logged": total_findings,
                 "decision_id": did}

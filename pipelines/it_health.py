@@ -181,16 +181,25 @@ def critic_check(findings, fetched, enquiry_found):
 
 
 def file_issues(findings, url, agent):
-    """Every finding becomes a ticket. Nothing is fixed here."""
+    """
+    Every finding becomes a ticket. Nothing is fixed here.
+
+    Returns the ticket ids, not just a count. Report has to be able to ask "were
+    the urgent issues THIS check filed ever resolved?", and it can only do that
+    if the check says which tickets were its own.
+    """
     if not findings:
-        return 0
+        return []
     now = int(time.time())
+    ids = []
     with sqlite3.connect(board.DB) as c:
-        c.executemany(
-            "INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
-            " VALUES(?,?,?,?, 'open', ?,?)",
-            [(f["kind"], f["severity"], f["detail"], url, agent, now) for f in findings])
-    return len(findings)
+        for f in findings:
+            cur = c.execute(
+                "INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
+                " VALUES(?,?,?,?, 'open', ?,?)",
+                (f["kind"], f["severity"], f["detail"], url, agent, now))
+            ids.append(cur.lastrowid)
+    return ids
 
 
 def run(agent="it-watcher", url=None, timeout=20):
@@ -237,7 +246,8 @@ def _check(agent, url, timeout, run_row):
             return {"ok": True, "claimed_task": task["id"], "critic": "rejected",
                     "critic_reasons": reasons, "issues_filed": 0}
 
-        filed = file_issues(findings, site, agent)
+        issue_ids = file_issues(findings, site, agent)
+        filed = len(issue_ids)
 
         # anything worth changing goes to the owner's queue. The Watcher does not
         # get to touch the site, and this is the only route a change may travel.
@@ -262,7 +272,10 @@ def _check(agent, url, timeout, run_row):
             reasoning=(f"Read-only check of {site}: HTTP {status} in {ms}ms, "
                        f"{len(found)} enquiry route(s) present, {filed} issue(s) filed."),
             expectation="The owner sees a broken enquiry path the day it breaks, not weeks later.",
-            confidence=0.8)
+            confidence=0.8,
+            # name the exact tickets, so Report checks THESE and cannot mistake a
+            # missed lookup for "nothing was wrong"
+            evidence={"site_issue_ids": issue_ids})
 
         return {"ok": True, "agent": agent, "claimed_task": task["id"], "critic": "passed",
                 "url": site, "http_status": status, "response_ms": ms,

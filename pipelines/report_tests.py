@@ -1,13 +1,18 @@
 """
 report_tests.py — run: python -m pipelines.report_tests   (python3 on macOS/Linux)
 
-Report's one job that can go wrong quietly is scoring a decision it has no
-real evidence for. So these tests pin down, per cycle: worked when the real
-evidence is there, failed only once the grace window has actually passed,
-and left unscored — never guessed — while still inside it. Self-verifying
-cycles (security-screen, site-services, leads-sources) score worked
-immediately, because their own pipeline already gated the decision behind a
-passed critic before it was ever logged.
+Report's one job that can go wrong quietly is scoring a decision it has no real
+evidence for. So these tests pin down, per cycle: worked when the evidence is
+there and belongs to THAT decision, failed only once the grace window has
+actually passed, and left unscored — never guessed — while still inside it.
+
+The hard part is attribution. Scoring used to match evidence to a decision by
+wall-clock proximity, which meant an unrelated brief scored an SEO gap list, one
+brief scored every pending gap list at once, and a health check that could not
+find its own tickets read that as "nothing was wrong" and scored an open
+critical issue as worked. Every decision now records WHICH rows it is a claim
+about, and these tests hold that line: evidence belonging to somebody else must
+never move the score.
 
 Everything runs against a throwaway cabinet; no real Telegram message is
 ever sent (send_message is monkeypatched to prove nothing goes out).
@@ -66,11 +71,36 @@ def main():
     print("\nall report tests passed")
 
 
-def _mk_decision(cycle, created_at, con):
-    did = board.log_decision(cycle, reasoning="test", expectation="test", confidence=0.7)
+def _mk_decision(cycle, created_at, con, evidence=None):
+    did = board.log_decision(cycle, reasoning="test", expectation="test",
+                             confidence=0.7, evidence=evidence)
     con.execute("UPDATE decisions SET created_at=? WHERE id=?", (created_at, did))
     con.commit()
     return did
+
+
+def _issue(con, severity, status, at, url="https://x.ae"):
+    cur = con.execute(
+        "INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
+        " VALUES('form_dead',?,'no whatsapp',?,?,'it-watcher',?)",
+        (severity, url, status, at))
+    con.commit()
+    return cur.lastrowid
+
+
+def _lead(con, company, segment, at):
+    cur = con.execute("INSERT INTO leads(name,company,segment,found_at) VALUES(?,?,?,?)",
+                      (company, company, segment, at))
+    con.commit()
+    return cur.lastrowid
+
+
+def _brief(con, title, status, at):
+    cur = con.execute(
+        "INSERT INTO content_queue(title,type,status,created_at) VALUES(?,?,?,?)",
+        (title, "service_page", status, at))
+    con.commit()
+    return cur.lastrowid
 
 
 def _outcome(con, did):
@@ -81,100 +111,122 @@ def _outcome(con, did):
 def _scoring_tests():
     con = sqlite3.connect(board.DB)
 
-    print("Self-verifying cycles score worked immediately:")
+    print("Nothing is marked 'worked' without being checked:")
     for cycle in ("security-screen", "site-services", "leads-sources"):
         did = _mk_decision(cycle, _now(), con)
-        scored = report.score_pending_decisions(con)
+        scored, waiting = report.score_pending_decisions(con)
         con.commit()
-        row = next((s for s in scored if s["decision_id"] == did), None)
-        check(f"{cycle} scored", row and row["outcome"], "worked")
-        check(f"{cycle} outcome persisted", _outcome(con, did), "worked")
+        check(f"{cycle} is not waved through", _outcome(con, did), None)
+        check(f"{cycle} says why it is unscored",
+              bool(next((w["why"] for w in waiting if w["decision_id"] == did), None)), True)
+    con.execute("DELETE FROM decisions"); con.commit()
 
-    print("seo-gap waits for Content, then scores on real evidence:")
-    did_pending = _mk_decision("seo-gap", _now(), con)
-    scored = report.score_pending_decisions(con)
-    check("fresh seo-gap decision stays unscored", _outcome(con, did_pending), None)
-    check("and is not in the scored list", did_pending in [s["decision_id"] for s in scored], False)
+    print("A decision with no recorded evidence cannot be scored at all:")
+    did = _mk_decision("seo-gap", _now() - report.GRACE["seo-gap"] - 10, con)  # no evidence
+    scored, waiting = report.score_pending_decisions(con)
+    check("old evidence-less decision stays unscored", _outcome(con, did), None)
+    check("and is not claimed as scored", did in [x["decision_id"] for x in scored], False)
+    con.execute("DELETE FROM decisions"); con.commit()
 
-    # failed case first, while content_queue is still empty — no cross-contamination
-    did_failed = _mk_decision("seo-gap", _now() - report.GRACE["seo-gap"] - 10, con)
+    print("seo-gap scores only on a brief about ITS OWN phrases:")
+    ev = {"phrases": ["frameless shower screens dubai"]}
+    did = _mk_decision("seo-gap", _now() - 1000, con, ev)
+    _brief(con, "Aluminium Windows Abu Dhabi", "briefed", _now())
     report.score_pending_decisions(con)
-    check("seo-gap fails after the grace window with nothing briefed",
-          _outcome(con, did_failed), "failed")
+    check("a brief about something else does not score it", _outcome(con, did), None)
 
-    did_worked = _mk_decision("seo-gap", _now() - 1000, con)
-    con.execute("INSERT INTO content_queue(title,type,status,created_at) VALUES(?,?,?,?)",
-                ("Glass partition Dubai", "service_page", "briefed", _now()))
-    con.commit()
+    _brief(con, "Frameless Shower Screens Dubai - service page", "briefed", _now())
     report.score_pending_decisions(con)
-    check("seo-gap worked once Content briefed something after it", _outcome(con, did_worked), "worked")
+    check("a brief about its own phrase does", _outcome(con, did), "worked")
 
-    print("it-health: clean check with nothing urgent scores worked outright:")
-    did = _mk_decision("it-health", _now(), con)
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM content_queue"); con.commit()
+    did = _mk_decision("seo-gap", _now() - report.GRACE["seo-gap"] - 10, con, ev)
     report.score_pending_decisions(con)
-    check("no urgent issues -> worked", _outcome(con, did), "worked")
+    check("nothing briefed past the grace window -> failed", _outcome(con, did), "failed")
+    con.execute("DELETE FROM decisions"); con.commit()
 
-    print("it-health: urgent issue resolved scores worked:")
+    print("content-briefs follows the pages it actually created:")
+    b1 = _brief(con, "Page one", "briefed", _now())
+    did = _mk_decision("content-briefs", _now() - 100, con, {"content_queue_ids": [b1]})
+    _brief(con, "A page this run never briefed", "drafted", _now())
+    report.score_pending_decisions(con)
+    check("somebody else's page moving does not score it", _outcome(con, did), None)
+
+    con.execute("UPDATE content_queue SET status='drafted' WHERE id=?", (b1,)); con.commit()
+    report.score_pending_decisions(con)
+    check("its own page moving does", _outcome(con, did), "worked")
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM content_queue"); con.commit()
+
+    print("it-health scores the tickets THIS check filed, and no others:")
+    did = _mk_decision("it-health", _now(), con, {"site_issue_ids": []})
+    report.score_pending_decisions(con)
+    check("a check that filed nothing -> worked", _outcome(con, did), "worked")
+
+    # the bug that mattered: the ticket is real, open, critical, and was filed
+    # further from the decision than any time window would allow
+    con.execute("DELETE FROM decisions"); con.commit()
+    filed = _now() - 3600
+    iid = _issue(con, "critical", "open", filed)
+    did = _mk_decision("it-health", filed + 30, con, {"site_issue_ids": [iid]})
+    report.score_pending_decisions(con)
+    check("an open critical ticket is NEVER scored worked", _outcome(con, did), None)
+
+    con.execute("UPDATE site_issues SET status='closed' WHERE id=?", (iid,)); con.commit()
+    report.score_pending_decisions(con)
+    check("once resolved it scores worked", _outcome(con, did), "worked")
+
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM site_issues"); con.commit()
+    old = _now() - report.GRACE["it-health"] - 10
+    iid = _issue(con, "critical", "open", old)
+    did = _mk_decision("it-health", old, con, {"site_issue_ids": [iid]})
+    report.score_pending_decisions(con)
+    check("still open past the grace window -> failed", _outcome(con, did), "failed")
+
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM site_issues"); con.commit()
+    iid = _issue(con, "low", "open", _now())
+    did = _mk_decision("it-health", _now(), con, {"site_issue_ids": [iid]})
+    report.score_pending_decisions(con)
+    check("only low-severity tickets -> worked", _outcome(con, did), "worked")
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM site_issues"); con.commit()
+
+    print("leads-hunt judges the leads THIS run stored:")
     t = _now()
-    did = _mk_decision("it-health", t, con)
-    con.execute("INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
-                " VALUES('form_dead','critical','no whatsapp','https://x.ae','closed','it-watcher',?)", (t,))
-    con.commit()
+    a, b = _lead(con, "A Co", "hotel", t), _lead(con, "B Co", "hotel", t)
+    did = _mk_decision("leads-hunt", t, con, {"lead_ids": [a, b]})
+    _lead(con, "Untagged from some other run", "", t)      # must not drag it down
     report.score_pending_decisions(con)
-    check("resolved urgent issue -> worked", _outcome(con, did), "worked")
+    check("another run's untagged lead does not fail it", _outcome(con, did), "worked")
 
-    print("it-health: urgent issue still open, inside grace -> unscored:")
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM leads"); con.commit()
     t = _now()
-    did = _mk_decision("it-health", t, con)
-    con.execute("INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
-                " VALUES('form_dead','critical','no whatsapp','https://x.ae','open','it-watcher',?)", (t,))
-    con.commit()
+    c = _lead(con, "C Co", "", t)
+    did = _mk_decision("leads-hunt", t, con, {"lead_ids": [c]})
     report.score_pending_decisions(con)
-    check("still open, too soon -> unscored", _outcome(con, did), None)
+    check("none of its own tagged -> failed", _outcome(con, did), "failed")
 
-    print("it-health: urgent issue still open past grace -> failed:")
-    t = _now() - report.GRACE["it-health"] - 10
-    did = _mk_decision("it-health", t, con)
-    con.execute("INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
-                " VALUES('form_dead','critical','no whatsapp','https://x.ae','open','it-watcher',?)", (t,))
-    con.commit()
-    report.score_pending_decisions(con)
-    check("still open past grace -> failed", _outcome(con, did), "failed")
-
-    print("leads-hunt: tagging evidence checked immediately, no waiting:")
-    # each sub-case starts from an empty leads table — the +/-5s evidence window
-    # is real wall-clock time, and these sub-cases run within the same second.
-    con.execute("DELETE FROM leads"); con.commit()
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM leads"); con.commit()
     t = _now()
-    did = _mk_decision("leads-hunt", t, con)
-    con.execute("INSERT INTO leads(name,company,segment,found_at) VALUES('A','A Co','hotel',?)", (t,))
-    con.execute("INSERT INTO leads(name,company,segment,found_at) VALUES('B','B Co','hotel',?)", (t,))
-    con.commit()
+    d, e = _lead(con, "D Co", "hotel", t), _lead(con, "E Co", "", t)
+    did = _mk_decision("leads-hunt", t, con, {"lead_ids": [d, e]})
     report.score_pending_decisions(con)
-    check("all leads tagged -> worked", _outcome(con, did), "worked")
+    check("half tagged -> partial", _outcome(con, did), "partial")
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM leads"); con.commit()
 
-    con.execute("DELETE FROM leads"); con.commit()
-    t = _now()
-    did = _mk_decision("leads-hunt", t, con)
-    con.execute("INSERT INTO leads(name,company,segment,found_at) VALUES('C','C Co','',?)", (t,))
-    con.commit()
+    print("The verdict's reason is written down, not just returned:")
+    iid = _issue(con, "high", "closed", _now())
+    did = _mk_decision("it-health", _now(), con, {"site_issue_ids": [iid]})
     report.score_pending_decisions(con)
-    check("no leads tagged -> failed", _outcome(con, did), "failed")
-
-    con.execute("DELETE FROM leads"); con.commit()
-    t = _now()
-    did = _mk_decision("leads-hunt", t, con)
-    con.execute("INSERT INTO leads(name,company,segment,found_at) VALUES('D','D Co','hotel',?)", (t,))
-    con.execute("INSERT INTO leads(name,company,segment,found_at) VALUES('E','E Co','',?)", (t,))
-    con.commit()
-    report.score_pending_decisions(con)
-    check("mixed tagging -> partial", _outcome(con, did), "partial")
+    note = con.execute("SELECT outcome_note FROM decisions WHERE id=?", (did,)).fetchone()[0]
+    check("the scorecard records WHY", bool(note and note.strip()), True)
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM site_issues"); con.commit()
 
     print("Unknown cycle is left alone, never guessed:")
-    did = _mk_decision("some-future-pipeline", _now(), con)
-    scored = report.score_pending_decisions(con)
+    did = _mk_decision("some-future-pipeline", _now(), con, {"anything": 1})
+    scored, waiting = report.score_pending_decisions(con)
     check("unknown cycle stays unscored", _outcome(con, did), None)
-    check("and is not claimed as scored", did in [s["decision_id"] for s in scored], False)
+    check("and is not claimed as scored", did in [x["decision_id"] for x in scored], False)
+    check("but it is reported as waiting, not silently dropped",
+          did in [w["decision_id"] for w in waiting], True)
 
     con.close()
 
@@ -196,6 +248,14 @@ def _digest_tests():
     n = con.execute("SELECT count(*) FROM daily_reports").fetchone()[0]
     check("exactly one digest row written", n, 1)
     con.close()
+
+    print("Running twice in a day leaves one digest, not two:")
+    report.run()
+    con = sqlite3.connect(board.DB)
+    day = time.strftime("%Y-%m-%d", time.localtime())
+    n = con.execute("SELECT count(*) FROM daily_reports WHERE day=?", (day,)).fetchone()[0]
+    con.close()
+    check("still exactly one row for today", n, 1)
 
     print("A real critical issue becomes the top action, not buried:")
     con = sqlite3.connect(board.DB)

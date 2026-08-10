@@ -30,9 +30,28 @@ DB = Path(__file__).parents[2] / "coordination" / "agency.db"
 
 DEPLOY_WORDS = re.compile(r"\b(deploy\w*|git\s+push|rsync|s?ftp|scp)\b")
 PROD_WORDS = re.compile(r"\b(prod|production|live|public_html)\b")
+
+# Word-bounded. Unbounded, the concession words matched INSIDE ordinary ones
+# (freeze, freelance, freeform), and the outbound test was a bare substring,
+# so a commit note about freezing a schema next to any word containing those
+# five letters read as a price offer and blocked real work. A concession is
+# the standalone word, never a fragment of a longer one.
+MONEY_WORDS = re.compile(r"\b(discount(s|ed|ing)?|free|complimentary|no charge|off the price|special offer)\b")
+OUTBOUND_WORDS = re.compile(r"\b(send|sends|sending|sent|email|dm|message[sd]?)\b")
+# A command can run a script instead of spelling the dangerous thing out.
+# Three shapes used to slip through and now do not:
+#   a script on its own line  - the separator class includes a newline and the
+#     pattern is MULTILINE. A multi-line Bash block is what people write
+#     normally, so this was not an exotic bypass, it was the common case.
+#   an interpreter flag first - leading -flags are skipped, so a run written
+#     as 'bash -x ship.sh' finds ship.sh instead of stopping at -x.
+#   the source builtin        - now listed alongside the '.' form.
 SCRIPT_RUN = re.compile(
-    r"(?:^|[;&|]\s*)(?:bash|sh|zsh|python3?|node|perl|ruby|\.)\s+([^\s;&|]+)"
-    r"|(?:^|[;&|]\s*)(\.{0,2}/[^\s;&|]+\.(?:sh|py|js|rb|pl))\b")
+    r"(?:^|[;&|\n]\s*)"
+    r"(?:source|bash|sh|zsh|python3?|node|perl|ruby|\.)\s+"
+    r"((?:-\S+\s+)*)([^\s;&|]+)"
+    r"|(?:^|[;&|\n]\s*)(\.{0,2}/[^\s;&|]+\.(?:sh|py|js|rb|pl))\b",
+    re.MULTILINE)
 
 
 def log(agent, tool, args, decision, reason):
@@ -50,7 +69,7 @@ def _script_contents(command: str) -> str:
     what it actually does, not just the one line that launched it."""
     found = []
     for m in SCRIPT_RUN.finditer(command or ""):
-        path = m.group(1) or m.group(2)
+        path = m.group(2) or m.group(3)
         if not path:
             continue
         try:
@@ -85,7 +104,7 @@ def main():
         sys.exit(2)
 
     # RED LINE 3: a price concession reaching a client needs owner approval first
-    if re.search(r"(discount|free|off the price|special offer)", blob) and "send" in blob:
+    if MONEY_WORDS.search(blob) and OUTBOUND_WORDS.search(blob):
         log(agent, tool, args, "blocked", "price concession needs owner approval")
         print("BLOCKED: a discount/offer must be approved by the owner first.", file=sys.stderr)
         sys.exit(2)

@@ -512,7 +512,11 @@ def _hunt(agent, run_row):
                        f"{len(smap['refused_sources'])}."),
             expectation="The Hunter collects across the whole market, not five contractor "
                         "types, and every lead arrives with the service to pitch attached.",
-            confidence=0.75)
+            confidence=0.75,
+            # the claim is about leads that do not exist yet, so this records the
+            # baseline Report must measure the Hunter's later work against
+            evidence={"leads_before": leads_before,
+                      "segments_mapped": len(SEGMENTS)})
 
         # 6. prove the two promises rather than asserting them in prose
         leads_after = con.execute("SELECT count(*) FROM leads").fetchone()[0]

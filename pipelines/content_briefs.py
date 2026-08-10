@@ -318,7 +318,8 @@ def _brief(agent, max_briefs, draft_allowance):
                        f"pages; briefed {len(stored)}, held {len(stored)-1} behind SEO's "
                        "volume call per the MD's no-drafting-spree gate."),
             expectation="One template service page proves the format before any volume is built.",
-            confidence=0.7)
+            confidence=0.7,
+            evidence={"content_queue_ids": [s["id"] for s in stored]})
         result.update({"stored": len(stored), "critic": "passed", "pages": stored,
                        "verification_request": ask, "decision_id": did,
                        "ready_to_draft": ready_one["title"] if ready_one else None})
