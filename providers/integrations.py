@@ -135,6 +135,36 @@ def test_telegram(env=None, notify=False, timeout=20) -> dict:
     return _result("telegram", True, detail, bot=bot, chat=chat)
 
 
+def send_message(text, env=None, timeout=20) -> dict:
+    """
+    Send REAL, agency-generated text to the owner's Telegram chat — the one
+    place that is allowed to, since this is the owner's own approval line, not
+    a customer channel. Used by the Report sector for the daily digest.
+
+    Deliberately separate from test_telegram(): that one proves the credential
+    and only ever sends a fixed, clearly-labelled test string. This one sends
+    whatever the caller built, so it stays a one-line function with no test-vs-
+    real ambiguity baked into it.
+    """
+    env = env if env is not None else read_env()
+    token = (env.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    chat = (env.get("TELEGRAM_CHAT_ID") or "").strip()
+    if not token or not chat:
+        return _result("telegram", False,
+                       "Not configured — no TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in .env. "
+                       "Nothing was sent.")
+    token = re.sub(r"^bot", "", token)
+    try:
+        r = requests.post(f"{_TELEGRAM}/bot{token}/sendMessage", timeout=timeout,
+                          json={"chat_id": chat, "text": (text or "")[:4000]})
+    except Exception as e:
+        return _result("telegram", False, f"Could not reach Telegram: {e}")
+    if not (200 <= r.status_code < 300):
+        return _result("telegram", False, f"Telegram rejected the message ({r.status_code}).",
+                       status=r.status_code)
+    return _result("telegram", True, "Sent.")
+
+
 # ---- SMTP -------------------------------------------------------------------
 
 def test_email(env=None, timeout=20) -> dict:
