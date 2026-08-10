@@ -221,7 +221,9 @@ def run(agent="seo-auditor", url=None, timeout=15):
                        f"{len(d['missing_from_site'])} not found on the site, "
                        f"{len(d['uncatalogued'])} phrases we cannot target."),
             expectation="The agency sells what the owner actually sells, in his words.",
-            confidence=0.6)
+            confidence=0.6,
+            evidence={"uncatalogued": d["uncatalogued"],
+                      "missing_from_site": d["missing_from_site"]})
         run_row.note(d["summary"])
         return d
 
