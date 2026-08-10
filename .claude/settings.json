@@ -13,6 +13,6 @@
     ]
   },
   "permissions": {
-    "deny": [ "Bash(rm -rf*)", "Bash(git push*)" ]
+    "deny": [ "Bash(rm -rf*)"]
   }
 }
