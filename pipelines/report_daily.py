@@ -51,15 +51,13 @@ GRACE = {
     "site-services": 7 * 86400,
 }
 
-# Cycles we can check, and cycles we cannot check yet but must not pretend to.
-# 'security-screen' expects that no sector acts on unscreened outside text.
-# Proving that needs an outreach trail, and nothing writes one yet — so it stays
-# unscored and says so, rather than being waved through as 'worked'.
-NO_RULE_YET = {
-    "security-screen":
-        "no way to check this yet — the claim is that no sector acted on "
-        "unscreened text, and nothing records outreach actions to check against",
-}
+GRACE["security-screen"] = 7 * 86400
+
+# Cycles with no honest check yet. Empty now: security-screen used to sit here
+# because proving "no sector acts on unscreened text" needs an outreach trail,
+# and nothing wrote one. mail.py records every send to outreach_log now, so the
+# claim finally has something real to be checked against.
+NO_RULE_YET = {}
 
 
 def _now():
@@ -205,7 +203,40 @@ def _score_site_services(con, created_at, ev):
     return None, f"{gaps} mismatch(es) waiting on the owner, inside the 7-day window"
 
 
+def _score_security_screen(con, created_at, ev):
+    """
+    The claim: no sector acts on outside text that has not been through this gate.
+
+    That is a claim about what happens NEXT, so it is checked against what
+    actually went out afterwards. It became checkable only when mail.py started
+    writing outreach_log — before that there was no record of any sector acting
+    on anything, so this cycle was left permanently unscored, which was honest
+    but useless.
+
+    The test is whether outreach left the building while Security still had
+    unanswered requests sitting on the board. If it did, some sector went ahead
+    without waiting for its clearance, and the gate did not hold.
+    """
+    sent = _one(con, "SELECT count(*) FROM outreach_log"
+                     " WHERE direction='sent' AND at>?", (created_at,))
+    if not sent:
+        if _expired("security-screen", created_at):
+            return None, ("nothing was sent in 7 days, so this gate was never "
+                          "actually tested — no verdict either way")
+        return None, "waiting: nothing has gone out since the screen ran"
+
+    last_send = _one(con, "SELECT max(at) FROM outreach_log WHERE direction='sent'")
+    jumped = _one(con, "SELECT count(*) FROM requests WHERE to_sector='Security'"
+                       " AND status IN ('open','claimed') AND created_at<?", (last_send,))
+    if jumped:
+        return "failed", (f"{sent} mail(s) went out while {jumped} Security "
+                          "request(s) were still unanswered — a sector did not wait")
+    return "worked", (f"{sent} mail(s) went out and Security had nothing "
+                      "unanswered at the time")
+
+
 SCORERS = {
+    "security-screen": _score_security_screen,
     "seo-gap": _score_seo_gap,
     "content-briefs": _score_content_briefs,
     "it-health": _score_it_health,

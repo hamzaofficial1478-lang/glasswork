@@ -35,7 +35,7 @@ import urllib.parse
 import urllib.request
 from html import unescape as _unescape
 
-from coordination import board
+from coordination import board, site as _site
 from . import services
 
 UA = "Mozilla/5.0 (compatible; glasswork-agency/1.0; reading our own site)"
@@ -189,7 +189,7 @@ def critic_check(d):
 
 def run(agent="seo-auditor", url=None, timeout=15):
     with board.agent_run(agent) as run_row:
-        site = (url or os.environ.get("SITE_URL") or "").strip()
+        site = _site.site_url(url)
         d = discover(site, timeout)
         if not d.get("ok"):
             run_row.note(d.get("error", "could not read the site"))

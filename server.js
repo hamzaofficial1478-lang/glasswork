@@ -246,6 +246,21 @@ app.post("/api/website", (req, res) => {
       SITE_API_TOKEN: mode === "full" ? apiToken : "",
     });
 
+    // The address also goes in a TRACKED file. .env is gitignored because it
+    // holds the API token and the mail password, so a website address saved
+    // only there never reaches a fresh clone -- the owner sets his site, then
+    // every agent elsewhere reports "no SITE_URL set" as if he never had.
+    // A public URL is not a credential, so it lives in config/site.json and
+    // travels with the repo. Secrets stay above, in .env, and only there.
+    try {
+      const cfgDir = path.join(__dirname, "config");
+      fs.mkdirSync(cfgDir, { recursive: true });
+      fs.writeFileSync(path.join(cfgDir, "site.json"),
+        JSON.stringify({ url: siteUrl, mode }, null, 2) + "\n");
+    } catch (e) {
+      console.error("could not write config/site.json:", e.message);
+    }
+
     const dir = path.join(__dirname, "mcp", "site_connector");
     const connPath = path.join(dir, "connector.py");
     const examplePath = path.join(dir, "connector.example.py");

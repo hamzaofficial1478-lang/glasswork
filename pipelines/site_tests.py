@@ -1,3 +1,7 @@
+import tempfile
+import json
+import os
+from pathlib import Path
 """
 site_tests.py — run: python -m pipelines.site_tests
 
@@ -166,7 +170,49 @@ def test_only_our_own_site_is_followed():
           any("competitor" in l for l in links), False)
 
 
+def test_the_site_address_survives_a_fresh_clone():
+    """
+    The owner saved his website on /setup and every agent elsewhere still said
+    "No SITE_URL set". It had gone into .env, which is gitignored because it
+    holds the mail password and the API token, so the address never travelled.
+    A public web address is not a credential; it belongs in a tracked file.
+    """
+    print("The website address travels with the repo:")
+    from coordination import site as _site
+    real_cfg = _site.CONFIG
+    keep = os.environ.pop("SITE_URL", None)
+    d = Path(tempfile.mkdtemp())
+    _site.CONFIG = d / "site.json"
+    try:
+        check("nothing saved yet -> empty, never a guess", _site.site_url(), "")
+        check("and it says how to set it", "setup" in _site.status()["hint"], True)
+
+        _site.save("glassworks.ae")
+        check("a saved address is found", _site.site_url(), "https://glassworks.ae")
+        check("a bare domain gets a scheme", _site.site_url().startswith("https://"), True)
+        check("and it came from the tracked file",
+              _site.status()["source"], "config/site.json")
+
+        os.environ["SITE_URL"] = "https://staging.example.ae"
+        check("an explicit env var still wins for one run",
+              _site.site_url(), "https://staging.example.ae")
+        os.environ.pop("SITE_URL")
+
+        check("an explicit argument beats both",
+              _site.site_url("https://other.ae"), "https://other.ae")
+
+        # the file is committed, so it must never be given a secret to hold
+        saved = json.loads(_site.CONFIG.read_text())
+        check("only public facts are stored",
+              set(saved) <= {"url", "mode", "areas"}, True)
+    finally:
+        _site.CONFIG = real_cfg
+        if keep is not None:
+            os.environ["SITE_URL"] = keep
+
+
 def main():
+    test_the_site_address_survives_a_fresh_clone()
     test_only_service_looking_text_is_taken()
     test_entities_are_decoded()
     test_matching_uses_names_not_buyer_signals()

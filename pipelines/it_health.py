@@ -38,7 +38,7 @@ import time
 import urllib.error
 import urllib.request
 
-from coordination import board
+from coordination import board, site as _site
 
 UA = "Mozilla/5.0 (compatible; glasswork-it-watcher/1.0; read-only health check)"
 
@@ -211,7 +211,7 @@ def run(agent="it-watcher", url=None, timeout=20):
 
 
 def _check(agent, url, timeout, run_row):
-    site = (url or os.environ.get("SITE_URL") or "").strip()
+    site = _site.site_url(url)
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
     try:

@@ -220,6 +220,44 @@ def _scoring_tests():
     check("the scorecard records WHY", bool(note and note.strip()), True)
     con.execute("DELETE FROM decisions"); con.execute("DELETE FROM site_issues"); con.commit()
 
+    print("security-screen is judged on whether the gate actually held:")
+    t = _now()
+    did = _mk_decision("security-screen", t, con, {"request_ids": ["r1"]})
+    report.score_pending_decisions(con)
+    check("nothing sent yet -> no verdict, the gate was not tested",
+          _outcome(con, did), None)
+
+    # a mail goes out, and Security had nothing waiting
+    con.execute("INSERT INTO outreach_log(lead_id,channel,direction,body,at)"
+                " VALUES(1,'email','sent','hello',?)", (t + 5,))
+    con.commit()
+    report.score_pending_decisions(con)
+    check("outreach with a clear Security board -> worked", _outcome(con, did), "worked")
+
+    # now the failing shape: outreach while a Security request sits unanswered
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM outreach_log")
+    con.execute("DELETE FROM requests"); con.commit()
+    t = _now()
+    did = _mk_decision("security-screen", t, con, {"request_ids": ["r2"]})
+    con.execute("INSERT INTO requests(id,from_sector,to_sector,subject,status,created_at)"
+                " VALUES('q1','Leads','Security','clear this lead','open',?)", (t + 1,))
+    con.execute("INSERT INTO outreach_log(lead_id,channel,direction,body,at)"
+                " VALUES(2,'email','sent','hello',?)", (t + 9,))
+    con.commit()
+    report.score_pending_decisions(con)
+    check("a sector that did not wait -> failed", _outcome(con, did), "failed")
+    note = con.execute("SELECT outcome_note FROM decisions WHERE id=?", (did,)).fetchone()[0]
+    check("and the note names the jumped gate", "did not wait" in note, True)
+
+    # never tested and out of time -> still no verdict, never a guess
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM outreach_log")
+    con.execute("DELETE FROM requests"); con.commit()
+    old_t = _now() - report.GRACE["security-screen"] - 10
+    did = _mk_decision("security-screen", old_t, con, {"request_ids": ["r3"]})
+    report.score_pending_decisions(con)
+    check("never tested, past the window -> still unscored", _outcome(con, did), None)
+    con.execute("DELETE FROM decisions"); con.commit()
+
     print("Unknown cycle is left alone, never guessed:")
     did = _mk_decision("some-future-pipeline", _now(), con, {"anything": 1})
     scored, waiting = report.score_pending_decisions(con)
