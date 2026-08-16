@@ -179,6 +179,9 @@ DAY = [
     ("Leads collects", "pipelines.leads_hunt"),
     ("Security screens what came in", "pipelines.security_screen"),
     ("SEO finds the gaps", "pipelines.seo_gap"),
+    # the rival watch runs before Content, because what it finds is work for
+    # Content to answer in the same pass rather than tomorrow
+    ("SEO watches the rivals", "pipelines.competitors"),
     ("Content briefs the pages", "pipelines.content_briefs"),
     ("Report scores the day", "pipelines.report_daily"),
 ]
@@ -203,7 +206,8 @@ def tests():
     head("Every test suite")
     mods = ["coordination.cabinet_tests", "coordination.floor_tests",
             "coordination.targets_tests", "coordination.hook_tests",
-            "providers.tests", "pipelines.md_tests", "pipelines.content_tests",
+            "providers.tests", "pipelines.md_tests", "pipelines.competitor_tests",
+            "pipelines.content_tests",
             "pipelines.leads_tests", "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.site_tests", "pipelines.seo_tests",
             "pipelines.report_tests"]

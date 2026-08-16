@@ -53,7 +53,57 @@ def _index(*children):
     return f'<?xml version="1.0"?><sitemapindex>{body}</sitemapindex>'
 
 
+def test_a_rival_cannot_steer_our_http_client():
+    """
+    The child sitemap URLs come out of the RIVAL'S OWN XML, so the remote file
+    decides what this pipeline requests next. That is an SSRF, and a rival site
+    does not have to be malicious to be compromised.
+
+    Before the guard, a sitemap index containing
+
+        <loc>file:///etc/passwd</loc>
+        <loc>http://169.254.169.254/latest/meta-data/</loc>
+
+    was fetched, and the contents were stored in competitor_snapshots and shown
+    to the owner as pages the rival had published. On a cloud box that second
+    one hands out credentials.
+    """
+    print("A rival's sitemap cannot point us at ourselves:")
+    import os, tempfile
+
+    secret = os.path.join(tempfile.mkdtemp(), "secret.txt")
+    with open(secret, "w") as fh:
+        fh.write("PRETEND-CREDENTIALS")
+
+    for url, why in [
+        ("file://" + secret, "a local file"),
+        ("http://127.0.0.1:3000/api/state", "our own server"),
+        ("http://169.254.169.254/latest/meta-data/", "the cloud metadata endpoint"),
+        ("http://localhost/admin", "localhost"),
+        ("http://10.0.0.5/internal", "a private address"),
+        ("gopher://x/1", "an exotic scheme"),
+    ]:
+        ok, _reason = comp.safe_url(url)
+        check(f"{why} is refused", ok, False)
+
+    status, body, err = comp._get("file://" + secret)
+    check("and _get returns the refusal rather than the file", body, "")
+    check("with the reason stated", "refusing scheme" in err, True)
+
+    # a redirect is a second choice of URL and gets the same check
+    import urllib.error
+    handler = comp._GuardedRedirect()
+    try:
+        handler.redirect_request(None, None, 302, "Found", {},
+                                 "http://127.0.0.1/secrets")
+        blocked = False
+    except urllib.error.URLError:
+        blocked = True
+    check("a redirect into the private network is blocked too", blocked, True)
+
+
 def main():
+    test_a_rival_cannot_steer_our_http_client()
     _domain_tests()
     _parse_tests()
     _classify_tests()

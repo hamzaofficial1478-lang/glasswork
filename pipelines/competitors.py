@@ -38,8 +38,10 @@ command to add one and stops. Same rule as everywhere else here: the agency
 does not make up facts to look busy.
 """
 import argparse
+import ipaddress
 import json
 import re
+import socket
 import sqlite3
 import time
 import urllib.error
@@ -70,11 +72,84 @@ def _now():
     return int(time.time())
 
 
+# ---------------------------------------------------------------------------
+# WHERE WE ARE ALLOWED TO FETCH FROM
+# ---------------------------------------------------------------------------
+#
+# This pipeline fetches URLs that come out of a RIVAL'S OWN XML. A sitemap index
+# lists child sitemaps, and this reads them — so the remote file decides what
+# the agency requests next. That is somebody else's content steering our HTTP
+# client, which is the whole shape of an SSRF, and a rival's site does not have
+# to be malicious to be compromised.
+#
+# Two things were reachable before this guard:
+#
+#   <loc>file:///etc/passwd</loc>          urlopen serves file:// happily, and
+#                                          the contents landed in the snapshot
+#   <loc>http://169.254.169.254/...</loc>  the cloud metadata endpoint, which on
+#                                          a hosted box hands out credentials
+#
+# and either would then be stored in competitor_snapshots and shown to the owner
+# as "a new page the rival published".
+#
+# So: http and https only, public addresses only, and every redirect hop is
+# checked too — a perfectly ordinary rival URL is allowed to 302 to 127.0.0.1.
+
+def _is_public_host(host: str) -> bool:
+    """False for anything that resolves to a loopback, private or link-local IP."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False              # cannot resolve it, so we do not fetch it
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
+
+def safe_url(url: str) -> tuple:
+    """(ok, why). The one gate every fetch in this module goes through."""
+    try:
+        u = urlparse((url or "").strip())
+    except Exception:
+        return False, "could not parse that URL"
+    if u.scheme not in ("http", "https"):
+        return False, f"refusing scheme {u.scheme or 'none'!r} — only http and https"
+    if not u.hostname:
+        return False, "no host in that URL"
+    if not _is_public_host(u.hostname):
+        return False, f"{u.hostname} is not a public address"
+    return True, ""
+
+
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is a second URL choice, so it gets the same check as the first."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        ok, why = safe_url(newurl)
+        if not ok:
+            raise urllib.error.URLError(f"blocked redirect to {newurl}: {why}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_GuardedRedirect)
+
+
 def _get(url, timeout=15):
-    """One read-only GET. Returns (status, body, error)."""
+    """One read-only GET, to a public http(s) address only. (status, body, error)."""
+    ok, why = safe_url(url)
+    if not ok:
+        return 0, "", f"refused: {why}"
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _OPENER.open(req, timeout=timeout) as r:
             return r.status, r.read(2_000_000).decode("utf-8", "replace"), None
     except urllib.error.HTTPError as e:
         return e.code, "", f"HTTP {e.code}"
