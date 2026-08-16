@@ -221,7 +221,68 @@ def test_the_sector_can_actually_claim_what_the_md_posted():
         board.DB, state.DB, targets.DB = real_b, real_s, real_t
 
 
+def test_the_md_does_not_grade_itself():
+    """
+    The card is computed by Report from rows the MD did not write. An agent that
+    grades its own management is not being graded, so the separation is asserted
+    rather than trusted.
+    """
+    print("The MD is judged, not self-judged:")
+    src = inspect.getsource(MD)
+    # an import, not a mention: the module comment is allowed to point at where
+    # the card is computed, it just may not reach for it
+    imported = re.findall(r"^\s*(?:from|import)\s+.*scorecard", src, re.M)
+    check("md_cycle does not import the scorecard", imported, [])
+    check("nor calls into it", "scorecard." in src, False)
+
+    from coordination import scorecard
+    sc_src = inspect.getsource(scorecard)
+    check("and the scorecard writes nothing",
+          any(w in sc_src for w in ("INSERT", "UPDATE", "DELETE")), False)
+
+
+def test_the_card_measures_management_not_just_outcome():
+    print("Five things a manager is accountable for:")
+    from coordination import scorecard
+    real_b, real_s, real_t = board.DB, state.DB, targets.DB
+    board.DB = state.DB = targets.DB = _fresh_db()
+    try:
+        empty = scorecard.build()
+        check("with no cycles it says so", empty["cycles_run"], 0)
+        check("and refuses to grade nothing",
+              "nothing to judge" in empty["verdict"], True)
+
+        _issue(board.DB, "critical")
+        targets.set_target("site_checks", 1)
+        MD.run()
+        card = scorecard.build()
+        check("it counts the cycle", card["cycles_run"], 1)
+        check("grounding is measured against what the Critic threw out",
+              card["grounding"]["of"].endswith("proposals survived the Critic"), True)
+
+        # a sector the MD could not direct must not count against it
+        check("a sector with no key is out of the denominator",
+              "had no key" in card["coverage"]["of"], True)
+
+        # too little data is never dressed up as a score
+        check("a two-task sample is not reported as a percentage",
+              card["direction"]["value"], None)
+        check("and is graded honestly", card["direction"]["grade"], "not enough yet")
+
+        # the verdict names the WEAKEST measure, so a neglected sector cannot
+        # hide behind four numbers that look fine
+        worst = min((k for k in ("direction", "delivery", "grounding",
+                                 "coverage", "judgement")
+                     if card[k]["value"] is not None),
+                    key=lambda k: card[k]["value"])
+        check("the verdict names the weakest link", worst in card["verdict"], True)
+    finally:
+        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+
+
 def main():
+    test_the_md_does_not_grade_itself()
+    test_the_card_measures_management_not_just_outcome()
     test_the_brain_never_touches_the_hands()
     test_nothing_ungrounded_reaches_the_board()
     test_amber_work_goes_to_the_owner_not_the_board()

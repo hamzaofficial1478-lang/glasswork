@@ -40,7 +40,7 @@ import json
 import sqlite3
 import time
 
-from coordination import board, state as _state
+from coordination import board, scorecard as _scorecard, state as _state
 from providers import integrations
 
 GRACE = {
@@ -503,12 +503,20 @@ def _report(agent):
             # well" when nine others could not be checked at all.
             + (f"\nStill unscored: {len(waiting)}" if waiting else "")
         )
+        # How the MD is MANAGING, computed here rather than by the MD, because an
+        # agent that grades its own management is not being graded.
+        try:
+            card = _scorecard.build(con=con)
+        except Exception as e:
+            card = {"verdict": f"could not build the MD's card ({e})"}
+        telegram_text += "\n\nThe MD: " + card.get("verdict", "")
+
         tg = integrations.send_message(telegram_text)
 
         return {"ok": True, "agent": agent, "critic": "passed", "day": day,
                 "health_score": state["metrics"]["health"], "sector_scores": sector_scores,
                 "decisions_scored": scored, "decisions_waiting": waiting,
-                "summary": summary, "actions": actions,
+                "md_card": card, "summary": summary, "actions": actions,
                 "spend_usd": spend, "telegram_sent": tg.get("ok"), "telegram_detail": tg.get("detail")}
     finally:
         con.close()

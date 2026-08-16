@@ -286,7 +286,18 @@ def _cycle(agent, dry_run):
                    f"{len(kept)} task(s) posted, {len(rejected)} rejected by the Critic."),
         expectation="Each sector claims its task and the day's work actually starts.",
         confidence=0.7,
-        evidence={"task_ids": [p["task_id"] for p in posted]})
+        # proposed/rejected/sectors are what the MD is MANAGED on, not just what
+        # it produced: how much of the plan was guesswork the Critic had to throw
+        # out, and which sectors it actually gave work to. The management card in
+        # coordination/ reads these. The MD records them and never grades itself.
+        evidence={"task_ids": [p["task_id"] for p in posted],
+                  "proposed": len(candidates),
+                  "rejected": len(rejected),
+                  "sectors": sorted({p["sector"] for p in posted}),
+                  # sectors it was not free to direct at all, so the scorecard
+                  # does not mark it down for neglecting them
+                  "blocked_sectors": sorted({r["sector"] for r in rejected
+                                             if "shelf is empty" in r["why"]})})
 
     summary = f"posted {len(posted)} task(s), Critic rejected {len(rejected)}"
     return {"ok": True, "agent": agent, "posted": posted, "rejected": rejected,
