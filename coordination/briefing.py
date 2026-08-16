@@ -40,8 +40,10 @@ SECTORS = {
     },
     "SEO": {
         "does": "Finds service+area keyword gaps from real demand data, and hands the "
-                "buying-intent ones to Content.",
-        "runs": ["python -m pipelines.seo_gap"],
+                "buying-intent ones to Content. Watches what the named rivals "
+                "publish, by diffing their own sitemaps run to run.",
+        "runs": ["python -m pipelines.seo_gap",
+                 "python -m pipelines.competitors        (rival sitemap diff)"],
     },
     "Content": {
         "does": "Clusters those keywords into one page per service+area and briefs them. "

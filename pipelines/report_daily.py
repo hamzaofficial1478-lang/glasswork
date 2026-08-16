@@ -53,6 +53,7 @@ GRACE = {
 
 GRACE["security-screen"] = 7 * 86400
 GRACE["md-cycle"] = 2 * 86400
+GRACE["competitor-watch"] = 7 * 86400
 
 # Cycles with no honest check yet. Empty now: security-screen used to sit here
 # because proving "no sector acts on unscreened text" needs an outreach trail,
@@ -261,7 +262,44 @@ def _score_md_cycle(con, created_at, ev):
     return None, f"{len(done)}/{len(rows)} done, inside the 2-day window"
 
 
+def _score_competitor_watch(con, created_at, ev):
+    """
+    The claim is that Content answers the service pages rivals just published.
+
+    Two of the three outcomes here settle immediately, and that is deliberate
+    rather than lenient. A watch that found no movement, or movement on
+    services we do not sell, has produced its whole deliverable the moment the
+    snapshot is written — there is nothing downstream for it to be right or
+    wrong about, and holding it open for a week would only park an unscorable
+    row on the scorecard. It is the third case, rivals moving on our own
+    services, that makes a claim about somebody else's future behaviour, and
+    only that one waits for evidence.
+    """
+    if ev is None or "new_pages" not in ev:
+        return None, "no snapshot recorded on this decision"
+    if not (ev.get("new_pages") or []):
+        return "worked", "the watch ran and the rivals had published nothing new"
+
+    services = [s for s in (ev.get("services") or []) if s]
+    if not services:
+        return "worked", (f"{len(ev['new_pages'])} new rival page(s) recorded, none about "
+                          "a service we sell — nothing for Content to answer")
+
+    rows = con.execute("SELECT brief, title FROM content_queue WHERE created_at>?",
+                       (created_at,)).fetchall()
+    answered = {s for s in services
+                for r in rows if s.lower() in ((r[0] or "") + " " + (r[1] or "")).lower()}
+    if answered:
+        return "worked", (f"{len(answered)} of {len(services)} service(s) the rivals moved on "
+                          f"were briefed since, e.g. {sorted(answered)[0]!r}")
+    if _expired("competitor-watch", created_at):
+        return "failed", (f"rivals published on {len(services)} service(s) we sell and "
+                          "nothing was briefed in answer within 7 days")
+    return None, f"{len(services)} rival service move(s) waiting on Content, inside 7 days"
+
+
 SCORERS = {
+    "competitor-watch": _score_competitor_watch,
     "md-cycle": _score_md_cycle,
     "security-screen": _score_security_screen,
     "seo-gap": _score_seo_gap,
@@ -322,14 +360,24 @@ def _site_severity(con):
 
 
 def _competitor_moves(con):
-    """Honest, not invented: no competitor pipeline is built yet, so say so."""
+    """
+    What the rivals have been doing, straight off the last snapshots.
+
+    An empty rival list is not a broken pipeline and no longer reads like one.
+    Who actually bids against this business is the owner's call — the watch
+    refuses to invent names — so with none on file the honest report is that
+    nobody has been named yet, plus the command that fixes it.
+    """
     n = _one(con, "SELECT count(*) FROM competitors")
     if n == 0:
-        return "no competitor tracking pipeline is built yet - 0 competitors on file"
+        return ("no rivals named yet — add one with "
+                "`python -m pipelines.competitors --add \"Their Name\" theirdomain.ae`")
     notes = [r[0] for r in con.execute(
         "SELECT notes FROM competitor_snapshots WHERE notes IS NOT NULL AND notes!=''"
-        " ORDER BY taken_at DESC LIMIT 3")]
-    return "; ".join(notes) if notes else f"{n} competitor(s) on file, no recent snapshot notes"
+        " ORDER BY taken_at DESC, id DESC LIMIT 3")]
+    return "; ".join(notes) if notes else (
+        f"{n} rival(s) on file, never yet checked — run "
+        "`python -m pipelines.competitors`")
 
 
 def _prioritised_actions(site_sev, leads_today, approvals_pending):

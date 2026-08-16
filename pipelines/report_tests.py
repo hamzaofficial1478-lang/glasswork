@@ -279,7 +279,13 @@ def _digest_tests():
     out = report.run()
     check("it runs", out["ok"], True)
     check("critic passed", out.get("critic"), "passed")
-    check("no competitors invented", "0 competitors on file" in out["summary"], True)
+    # The point is that an empty rival list never becomes a claim about rivals.
+    # Asserted on meaning rather than the exact sentence: the wording moved once
+    # the watch was built, and a test pinned to a phrase fails on a rewrite that
+    # changed nothing it was actually guarding.
+    check("no competitors invented", "no rivals named yet" in out["summary"], True)
+    check("and it never claims to have checked any",
+          any(w in out["summary"].lower() for w in ("published", "no change since")), False)
     check("nothing urgent -> says so plainly", out["actions"], ["Nothing urgent today - the board is clear."])
 
     con = sqlite3.connect(board.DB)
