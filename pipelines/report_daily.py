@@ -52,6 +52,7 @@ GRACE = {
 }
 
 GRACE["security-screen"] = 7 * 86400
+GRACE["md-cycle"] = 2 * 86400
 
 # Cycles with no honest check yet. Empty now: security-screen used to sit here
 # because proving "no sector acts on unscreened text" needs an outreach trail,
@@ -235,7 +236,33 @@ def _score_security_screen(con, created_at, ev):
                       "unanswered at the time")
 
 
+def _score_md_cycle(con, created_at, ev):
+    """
+    Did the day's plan actually turn into work? The MD's claim is that each
+    sector claims its task and the day starts, so the test is what became of
+    the exact tasks it posted - not whether the board looks busy in general.
+    """
+    ids = [i for i in (ev or {}).get("task_ids") or [] if i]
+    if not ids:
+        return None, "no task ids recorded on this decision"
+    rows = con.execute(
+        f"SELECT status FROM tasks WHERE {_in('id', ids)}", ids).fetchall()
+    if not rows:
+        return "failed", f"all {len(ids)} task(s) the MD posted have vanished"
+    done = [r[0] for r in rows if r[0] == "done"]
+    touched = [r[0] for r in rows if r[0] in ("in_progress", "done", "blocked")]
+    if len(done) == len(rows):
+        return "worked", f"all {len(rows)} task(s) the MD posted were completed"
+    if _expired("md-cycle", created_at):
+        if not touched:
+            return "failed", (f"none of the {len(rows)} task(s) was even claimed in 2 days "
+                              "- the MD planned work nobody could do")
+        return "partial", f"{len(done)}/{len(rows)} of the MD's task(s) finished in 2 days"
+    return None, f"{len(done)}/{len(rows)} done, inside the 2-day window"
+
+
 SCORERS = {
+    "md-cycle": _score_md_cycle,
     "security-screen": _score_security_screen,
     "seo-gap": _score_seo_gap,
     "content-briefs": _score_content_briefs,
