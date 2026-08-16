@@ -151,9 +151,9 @@ def test_integrations_unconfigured():
     print("Channel checks (no network):")
     from . import integrations as ig
     blank = ig.test_all(env={})
-    check("both report not-configured", [r["ok"] for r in blank], [None, None])
-    check("covers telegram and email",
-          sorted(r["integration"] for r in blank), ["email", "telegram"])
+    check("all report not-configured", [r["ok"] for r in blank], [None, None, None])
+    check("covers every channel",
+          sorted(r["integration"] for r in blank), ["email", "ntfy", "telegram"])
 
     half = ig.test_email(env={"SMTP_HOST": "h", "SMTP_USER": "u"})
     check("half-filled SMTP is a failure, not 'unset'", half["ok"], False)
@@ -161,6 +161,46 @@ def test_integrations_unconfigured():
 
     tg = ig.test_telegram(env={"TELEGRAM_BOT_TOKEN": ""})
     check("no telegram token -> unset, not broken", tg["ok"], None)
+
+
+def test_the_owner_can_always_be_reached():
+    """
+    Everything that notifies the owner goes through one function, so switching
+    his channel is config and not code. The failure that matters here is a
+    silent one: if no route is configured the agency must SAY nobody was told,
+    never return quietly as though the message landed.
+    """
+    print("One route to the owner, and it never fails silently:")
+    from . import integrations as ig
+
+    none = ig.send_message("anything", env={})
+    check("no route configured -> not ok", none["ok"], False)
+    check("and it says nobody was told", "nobody was told" in none["detail"], True)
+
+    topic = {"NTFY_TOPIC": "glasswork-a7f3k9x2q"}
+    check("ntfy wins when a topic is set",
+          ig.send_message("x", env=topic)["integration"], "ntfy")
+    check("telegram is still the fallback",
+          ig.send_message("x", env={"TELEGRAM_BOT_TOKEN": "t",
+                                    "TELEGRAM_CHAT_ID": "c"})["integration"], "telegram")
+    check("and ntfy is preferred when both exist",
+          ig.send_message("x", env={**topic, "TELEGRAM_BOT_TOKEN": "t",
+                                    "TELEGRAM_CHAT_ID": "c"})["integration"], "ntfy")
+
+    # a guessable topic is a public inbox — say so rather than pretending it is fine
+    short = ig.test_ntfy(env={"NTFY_TOPIC": "glass"})
+    check("a short topic is refused as unsafe", short["ok"], False)
+    check("and explains why", "guesses" in short["detail"], True)
+    check("no topic at all -> unset, not broken", ig.test_ntfy(env={})["ok"], None)
+
+    # ntfy carries its options in HTTP headers, which are latin-1 only. The
+    # digest is full of em-dashes; one of those raises inside requests and the
+    # notification is lost at exactly the moment it mattered.
+    h = ig._ntfy_headers({}, title="Digest — 16 Aug", tags=["bell"])
+    check("a non-latin-1 title cannot break the send",
+          h["Title"].encode("latin-1") == b"Digest - 16 Aug", True)
+    for v in h.values():
+        v.encode("latin-1")     # raises if any header is unsendable
 
 
 def test_probe_equals_production():
@@ -185,6 +225,7 @@ def main():
     test_400_means_key_accepted()
     test_preflight_cover()
     test_integrations_unconfigured()
+    test_the_owner_can_always_be_reached()
     test_probe_equals_production()
     print()
     if _fail:

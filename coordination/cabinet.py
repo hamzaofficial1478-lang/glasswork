@@ -25,6 +25,7 @@ flagged 'escalated' so the caller stops and asks the MD (and Security, for
 outside data) via board.request_verification. The cabinet does not itself block
 on approval — it enforces turn-taking and flags what must be escalated.
 """
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -80,6 +81,53 @@ def classify(data_class: str = "internal", est_cost: float = 0.0,
 
 
 # ---------------------------------------------------------------------------
+# THE DAILY SPEND CAP — a red line that had nothing behind it
+# ---------------------------------------------------------------------------
+#
+# The handbook says: "No money is spent above the daily cost cap without owner
+# approval." DAILY_SPEND_CAP_USD was written into .env by the setup screen and
+# read by absolutely nothing. classify()'s cost_ceiling is a PER-BORROW limit,
+# it defaults to 0.0, and `if cost_ceiling and ...` means the default disables
+# it — so a thousand small borrows could run all day and never trip anything.
+#
+# The cap is enforced HERE, in borrow(), for the same reason the outreach cap
+# lives inside _smtp_send: a limit checked by whoever remembers to check it is
+# a limit the next caller written will skip. Every paid capability comes
+# through this door.
+
+DEFAULT_DAILY_SPEND_CAP = 5.0     # dollars. A cap that defaults to infinity is not a cap.
+
+
+def daily_spend_cap() -> float:
+    """The owner's cap from .env, else the built-in one. Never unlimited."""
+    raw = os.environ.get("DAILY_SPEND_CAP_USD", "").strip()
+    if not raw:
+        try:
+            from providers import integrations
+            raw = (integrations.read_env().get("DAILY_SPEND_CAP_USD") or "").strip()
+        except Exception:
+            raw = ""
+    try:
+        cap = float(raw)
+        return cap if cap > 0 else DEFAULT_DAILY_SPEND_CAP
+    except ValueError:
+        return DEFAULT_DAILY_SPEND_CAP
+
+
+def spent_today() -> float:
+    """What the agency has actually spent today, summed from the borrow trail."""
+    lt = time.localtime()
+    day0 = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT COALESCE(SUM(usd_cost),0) FROM borrows"
+                          " WHERE granted_at>=?", (day0,)).fetchone()
+            return float(r[0] or 0)
+    except sqlite3.Error:
+        return 0.0
+
+
+# ---------------------------------------------------------------------------
 # BORROW / RELEASE — take a shelf, do the work, give it back
 # ---------------------------------------------------------------------------
 
@@ -107,6 +155,19 @@ def borrow(shelf, agent, sector=None, reason="", data_class="internal",
 
     resource = _resource(shelf)
     approval = classify(data_class, est_cost, cost_ceiling)
+
+    # The daily cap, before the lock is even taken. Spending it is the one thing
+    # that cannot be undone by releasing the shelf afterwards.
+    cap, so_far = daily_spend_cap(), spent_today()
+    if so_far >= cap:
+        return {"ok": False, "capped": True, "shelf": shelf,
+                "spent_today": round(so_far, 2), "cap": cap,
+                "error": (f"daily spend cap reached (${so_far:.2f} of ${cap:.2f}). "
+                          "Nothing was borrowed. Raise DAILY_SPEND_CAP_USD on /setup "
+                          "if you want the agency to keep going today.")}
+    if est_cost and so_far + float(est_cost) > cap:
+        # it would cross the line mid-job, so the owner decides before it starts
+        approval = "escalate"
 
     with _conn() as c:
         cur = c.execute(

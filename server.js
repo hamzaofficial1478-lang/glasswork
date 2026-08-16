@@ -98,6 +98,7 @@ function updateEnv(partial) {
   if (!merged.PORT) merged.PORT = process.env.PORT || "3000";
   const order = [
     "SITE_MODE", "SITE_URL", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
+    "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
     "DAILY_SPEND_CAP_USD", "OUTREACH_DAILY_CAP", "SITE_API_BASE", "SITE_API_TOKEN", "PORT",
   ];
@@ -213,6 +214,7 @@ function readConnections() {
   return [
     { ic: "◧", name: "Website", sub: e.SITE_URL || "not set", on: has("SITE_URL") },
     { ic: "⌕", name: "DataForSEO", sub: "rank tracking", on: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD") },
+    { ic: "🔔", name: "ntfy", sub: has("NTFY_TOPIC") ? "topic set" : "not set", on: has("NTFY_TOPIC") },
     { ic: "✈", name: "Telegram bridge", sub: has("TELEGRAM_CHAT_ID") ? "connected" : "not connected", on: has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID") },
     { ic: "✉", name: "Email (SMTP)", sub: e.SMTP_HOST || "not set", on: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS") },
     { ic: "⌗", name: "Search Console", sub: e.GSC_PROPERTY || "not set", on: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH) },

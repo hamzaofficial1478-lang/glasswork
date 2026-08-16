@@ -79,10 +79,60 @@ def test_live_state():
     check("today spend recorded", st2["today_spend"], 2.5)
 
 
+def test_the_daily_spend_cap_actually_bites():
+    """
+    "No money is spent above the daily cost cap without owner approval" is a
+    red line. DAILY_SPEND_CAP_USD was written to .env by the setup screen and
+    read by nothing at all, and classify()'s cost_ceiling is a per-borrow limit
+    that defaults to 0.0 — which disables it. A thousand small borrows could
+    run all day and trip nothing.
+    """
+    print("The daily spend cap:")
+    import os
+    real_db = board.DB
+    board.DB = _fresh_db()
+    keep = os.environ.get("DAILY_SPEND_CAP_USD")
+    os.environ["DAILY_SPEND_CAP_USD"] = "2.00"
+    try:
+        check("the owner's cap is read", cabinet.daily_spend_cap(), 2.0)
+        check("nothing spent yet", cabinet.spent_today(), 0.0)
+
+        b = cabinet.borrow("seo_data", "a", "SEO", reason="pull gaps")
+        check("a borrow under the cap is auto-granted", b["approval"], "auto")
+        cabinet.release("seo_data", "a", borrow_id=b["borrow_id"], usd_cost=1.50)
+        check("spend is counted from the borrow trail", cabinet.spent_today(), 1.5)
+
+        b2 = cabinet.borrow("seo_data", "a", "SEO", reason="again", est_cost=1.00)
+        check("one that would cross the line escalates first", b2["approval"], "escalate")
+        cabinet.release("seo_data", "a", borrow_id=b2["borrow_id"], usd_cost=1.00)
+
+        b3 = cabinet.borrow("seo_data", "a", "SEO", reason="third")
+        check("past the cap, the shelf is refused", b3["ok"], False)
+        check("and it says so plainly", b3.get("capped"), True)
+        check("the shelf was never even locked",
+              board.acquire_lock("shelf:seo_data", "someone", wait=False), True)
+        board.release_lock("shelf:seo_data", "someone")
+
+        # a cap of zero or junk must not read as "unlimited"
+        os.environ["DAILY_SPEND_CAP_USD"] = "0"
+        check("a zero cap falls back, never to infinity",
+              cabinet.daily_spend_cap(), cabinet.DEFAULT_DAILY_SPEND_CAP)
+        os.environ["DAILY_SPEND_CAP_USD"] = "not-a-number"
+        check("junk falls back too", cabinet.daily_spend_cap(),
+              cabinet.DEFAULT_DAILY_SPEND_CAP)
+    finally:
+        if keep is None:
+            os.environ.pop("DAILY_SPEND_CAP_USD", None)
+        else:
+            os.environ["DAILY_SPEND_CAP_USD"] = keep
+        board.DB = real_db
+
+
 def main():
     test_classify()
     test_borrow_rules()
     test_live_state()
+    test_the_daily_spend_cap_actually_bites()
     print("\n" + ("all cabinet tests passed" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0
 
