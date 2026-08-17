@@ -313,12 +313,19 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
                 "why": "A day is already running. Wait for it to finish — two "
                        "runs at once means two MDs planning the same day."}
 
-    # the owner's words go on the board first, so the MD plans around them
-    written = {}
+    # The owner's words go on the board FIRST, so the MD plans around them
+    # rather than over them. An order for a sector that does not exist is
+    # reported back, never swallowed — he asked for something and is entitled
+    # to know it did not land.
+    written, rejected = {}, {}
     for sec, text in (orders or {}).items():
-        if (text or "").strip():
+        if not (text or "").strip():
+            continue
+        try:
             proposals.set_orders(sec, text)
-            written[sec] = text.strip()
+            written[proposals.canonical_sector(sec)] = text.strip()
+        except ValueError as e:
+            rejected[str(sec)[:40]] = str(e)
 
     rid = _open_run(note, force and not pre["ready"], pre.get("blocking"))
     failed = 0
@@ -349,15 +356,52 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
     finally:
         board.release_lock(LOCK, LOCK_HOLDER)
 
+    why = ("The day ran clean." if not failed
+           else f"The day ran; {failed} of {len(STEPS)} steps failed.")
+    if rejected:
+        why += (" Your order for " + ", ".join(rejected)
+                + " went nowhere — " + list(rejected.values())[0])
     return {"ok": True, "ran": True, "run_id": rid, "orders": written,
-            "failed_steps": failed, "preflight": pre,
-            "why": ("The day ran clean." if not failed
-                    else f"The day ran; {failed} of {len(STEPS)} steps failed.")}
+            "rejected_orders": rejected, "failed_steps": failed,
+            "preflight": pre, "why": why}
 
 
 # ---------------------------------------------------------------------------
 # WHAT THE UI POLLS WHILE IT RUNS
 # ---------------------------------------------------------------------------
+
+def _reap(c, run, steps) -> bool:
+    """
+    Is this 'running' row actually a corpse?
+
+    Nothing marks a run failed when the process is killed outright — no
+    finally block runs on SIGKILL, on a reboot, or when the container goes
+    away. Left alone, the office shows "running" for ever, the Run button
+    stays greyed out, and the owner has no way back except deleting rows.
+
+    Two signals, and either is enough. The lock is the strong one: the run
+    holds 'day_run' for its whole life, so if nobody holds it the process is
+    gone. Progress is the backstop for the window where the lock has expired
+    under a genuinely long run — no step has moved in longer than a step is
+    allowed to take, and that is not slow, that is dead.
+    """
+    now = _now()
+    last = max([run["started_at"] or 0]
+               + [s["ended_at"] or s["started_at"] or 0 for s in steps])
+    if now - last <= STEP_TIMEOUT + 120:
+        return False
+    holder = c.execute("SELECT holder, expires_at FROM locks WHERE resource=?",
+                       (LOCK,)).fetchone()
+    held = bool(holder) and (holder["expires_at"] or 0) > now
+    if held:
+        return False
+    c.execute("UPDATE day_runs SET status='stalled', ended_at=? WHERE id=? AND status='running'",
+              (last, run["id"]))
+    c.execute("UPDATE day_steps SET status='failed', ended_at=?,"
+              " summary=COALESCE(summary,'the run was killed before this step finished')"
+              " WHERE run_id=? AND status='running'", (last, run["id"]))
+    return True
+
 
 def status(run_id=None) -> dict:
     board.ensure_schema()
@@ -370,9 +414,12 @@ def status(run_id=None) -> dict:
             if not r:
                 return {"ok": True, "run": None, "steps": [],
                         "head": "the agency has never been run from the button"}
-            steps = [dict(s) for s in c.execute(
-                "SELECT seq,label,module,status,started_at,ended_at,code,summary"
-                " FROM day_steps WHERE run_id=? ORDER BY seq", (r["id"],))]
+            q = ("SELECT seq,label,module,status,started_at,ended_at,code,summary"
+                 " FROM day_steps WHERE run_id=? ORDER BY seq")
+            steps = [dict(s) for s in c.execute(q, (r["id"],))]
+            if r["status"] == "running" and _reap(c, r, steps):
+                r = c.execute("SELECT * FROM day_runs WHERE id=?", (r["id"],)).fetchone()
+                steps = [dict(s) for s in c.execute(q, (r["id"],))]
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -386,7 +433,10 @@ def status(run_id=None) -> dict:
     bad = sum(1 for s in steps if s["status"] == "failed")
     sat_out = sum(1 for s in steps if s["status"] == "idle")
     run["running"] = run["status"] == "running"
-    if live:
+    if run["status"] == "stalled":
+        head = ("the run was killed part-way through — "
+                f"{done} of {len(steps)} steps finished. Press Run again.")
+    elif live:
         head = live["label"] + "…"
     elif run["status"] not in ("done", "partial", "failed"):
         head = run["status"]

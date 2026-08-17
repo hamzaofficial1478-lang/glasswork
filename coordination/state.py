@@ -49,6 +49,34 @@ SECTORS = [
     ("Security", "Security", "security", True),
 ]
 
+# Which agent names belong to which sector.
+#
+# The run feed used to find a sector's agents with `agent LIKE '<sector>-%'`,
+# which is true of it-watcher, leads-hunter, seo-strategist and the rest — and
+# false of the only two that do not follow the pattern. The MD runs as
+# 'managing-director' and Report runs as 'reporter', so neither ever matched
+# its own sector: the Director's Office sat dark through every cycle the MD
+# planned, and the Reporter's desk sat dark through every digest it wrote.
+# Two of nine desks could not light up, no matter how much work they did.
+#
+# Fixed here rather than by renaming the agents. The name is written into every
+# agent_runs row, every claimed task and every decision already in the cabinet;
+# renaming would light the desk today and silently orphan the history.
+AGENT_ALIASES = {
+    "md": ("md", "managing-director", "director", "critic"),
+    "report": ("report", "reporter"),
+}
+
+
+def _match_sql(sector):
+    """(sql, args) selecting every agent name that belongs to this sector."""
+    names = AGENT_ALIASES.get(sector, (sector,))
+    parts, args = [], []
+    for n in names:
+        parts.append("lower(r.agent)=? OR lower(r.agent) LIKE ?")
+        args += [n, n + "-%"]
+    return "(" + " OR ".join(parts) + ")", args
+
 
 def _conn():
     con = sqlite3.connect(_db())
@@ -130,13 +158,14 @@ def _run_feed(c, match, now):
     came back — and when it does, the reason travels with it so the desk can say
     what broke rather than just looking off.
     """
+    where, args = _match_sql(match)
     try:
         rows = c.execute(
             "SELECT r.agent, r.status, r.started_at, r.ended_at, r.note, t.title"
             " FROM agent_runs r LEFT JOIN tasks t ON t.id=r.task_id"
-            " WHERE r.started_at>=? AND lower(r.agent) LIKE ?"
+            " WHERE r.started_at>=? AND " + where +
             " ORDER BY r.started_at DESC LIMIT 12",
-            (now - RECENT_RUN_SECS, match + "-%")).fetchall()
+            (now - RECENT_RUN_SECS, *args)).fetchall()
     except Exception:
         return []
 
@@ -353,12 +382,18 @@ def build():
         run = _day_run.status()
     except Exception as e:
         run = {"ok": False, "error": str(e), "run": None, "steps": []}
+    try:
+        from . import proposals as _proposals
+        todays_orders = _proposals.orders()
+    except Exception:
+        todays_orders = {}
 
     return {"ok": True, "ts": int(time.time()),
             "md": {"state": md_state},
             "metrics": {"health": health, "leads": leads_today, "spend": f"${spend:.2f}"},
             "rooms": rooms, "approvals": approvals, "security": security, "shelf": shelf,
-            "readiness": ready, "activity": acts, "run": run}
+            "readiness": ready, "activity": acts, "run": run,
+            "orders": todays_orders}
 
 
 if __name__ == "__main__":

@@ -411,15 +411,26 @@ app.post("/api/run/start", (req, res) => {
       why: "A day is already running — wait for it to finish. Two at once means two MDs planning the same day." });
   }
 
+  // `orders` must be a plain object of {sector: text}. Object.entries happily
+  // takes a string and hands back index/character pairs, and an array turns
+  // into "0","1","2" — either way you get orders addressed to sectors that do
+  // not exist. There are seven sectors; anything past a couple of dozen entries
+  // is not a person typing.
+  const raw = b.orders;
   const orders = {};
-  for (const [k, v] of Object.entries(b.orders || {})) {
-    const text = String(v == null ? "" : v).slice(0, 4000).trim();
-    if (text) orders[String(k).slice(0, 40)] = text;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw).slice(0, 24)) {
+      if (typeof v !== "string" && typeof v !== "number") continue;
+      const text = String(v).slice(0, 4000).trim();
+      if (text) orders[String(k).slice(0, 40)] = text;
+    }
   }
   const payload = JSON.stringify({
     orders,
     note: String(b.note || "").slice(0, 4000),
-    force: !!b.force,
+    // Strictly true, not merely truthy. force overrides a check that said a
+    // sector cannot run, so the string "no" must not be enough to trip it.
+    force: b.force === true,
     // The owner just watched the full sweep finish in /api/run/check, so the
     // re-check here is the cheap one: it catches a key deleted while the form
     // was open without paying for every model call a second time.
@@ -440,6 +451,33 @@ app.post("/api/run/start", (req, res) => {
   child.unref();
   res.json({ ok: true, started: true, orders,
     why: "Running. Watch the office floor — the lamps come on as each sector picks up." });
+});
+
+// ---- the owner's standing orders, per sector --------------------------------
+// The same boxes the Run panel shows, settable without starting a day. One
+// form, one store: an order saved here is the order the MD reads when the day
+// runs, so there is no second place for the two to disagree.
+app.get("/api/orders", (_q, res) =>
+  res.json(pyModule("coordination.proposals", ["--json"], 60000)));
+
+app.post("/api/orders", (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const raw = (req.body || {}).orders;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    return res.status(400).json({ ok: false, error: "Send { orders: { Sector: text } }." });
+  const set = [], failed = [];
+  for (const [k, v] of Object.entries(raw).slice(0, 24)) {
+    if (typeof v !== "string" && typeof v !== "number") continue;
+    const sector = String(k).slice(0, 40);
+    const text = String(v).slice(0, 4000).trim();
+    // Arguments go through as an ARRAY, never a shell string, so an owner
+    // typing a quote into his orders cannot turn into a command.
+    const r = pyModule("coordination.proposals", ["--order", sector, text, "--json"], 60000);
+    (r && r.ok !== false ? set : failed).push(sector);
+  }
+  res.json({ ok: failed.length === 0, set, failed,
+    why: failed.length ? `No such sector: ${failed.join(", ")}.` : "Saved." });
 });
 
 // ---- what every sector and agent is doing right now -------------------------

@@ -285,3 +285,47 @@ CREATE TABLE IF NOT EXISTS sector_orders (
   updated_at INTEGER,
   PRIMARY KEY (day, sector)
 );
+
+-- ---- the remembered preflight ---------------------------------------------
+-- A saved API key is not a working API key, and proving one costs a real call.
+-- The sweep runs when the owner asks for it and the verdict is kept here, so
+-- the sector lamps on the office floor can read it without re-testing on every
+-- poll. Verdicts only — the channel details carry the ntfy topic, and the topic
+-- IS the secret, so it is never written into this row.
+CREATE TABLE IF NOT EXISTS preflight_runs (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  at        INTEGER,
+  ready     INTEGER,               -- 1 = nothing blocking
+  blocking  TEXT,                  -- json: the reasons, in the owner's words
+  payload   TEXT                   -- json: the slimmed check, for the lamps
+);
+
+-- ---- one press of the Run button ------------------------------------------
+-- Kept because a day that half-ran and stopped is the thing you most need to
+-- see afterwards, and by then stdout has scrolled away. A run that was killed
+-- outright leaves status='running' with nothing behind it; day_run.status()
+-- reaps those into 'stalled' rather than showing a run that will never finish.
+CREATE TABLE IF NOT EXISTS day_runs (
+  id          TEXT PRIMARY KEY,
+  started_at  INTEGER,
+  ended_at    INTEGER,
+  status      TEXT,                -- running | done | partial | failed | stalled
+  started_by  TEXT,
+  note        TEXT,                -- what the owner wants out of today
+  forced      INTEGER DEFAULT 0,   -- started despite a blocking check, in writing
+  blocking    TEXT,                -- json: what was wrong when he forced it
+  steps_total INTEGER DEFAULT 0,
+  steps_done  INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS day_steps (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     TEXT NOT NULL,
+  seq        INTEGER,
+  label      TEXT,
+  module     TEXT,
+  status     TEXT,                 -- waiting | running | ok | idle | failed
+  started_at INTEGER,
+  ended_at   INTEGER,
+  code       INTEGER,
+  summary    TEXT                  -- one plain line: what the step actually did
+);

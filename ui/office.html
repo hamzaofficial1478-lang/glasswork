@@ -393,6 +393,7 @@ function renderFloor(){
    same /api/state poll. The wording is the server's, not the browser's: if the
    reason a sector cannot run ever changes, it changes in one place. --------- */
 const RDY_WORD={ready:'apis working',unchecked:'not proven',thin:'no fallback',blocked:'cannot run'};
+const RDY_STATES=['unchecked','ready','thin','blocked'];
 function readyOf(key){
   const rs=(LIVE&&LIVE.readiness&&LIVE.readiness.sectors)||[];
   return rs.find(s=>s.room===key)||null;
@@ -405,9 +406,10 @@ function readyChip(rd, roomName, width){
   if(!rd) return '';
   const tip=[rd.says,...(rd.blocking||[]),...(rd.thin||[]),...(rd.notes||[])]
     .filter((v,i,a)=>v&&a.indexOf(v)===i).join('\n');
-  const word = RDY_WORD[rd.state]||rd.state;
+  const st = oneOf(rd.state, RDY_STATES);
+  const word = RDY_WORD[st];
   const fits = width >= String(roomName||'').length*6.4 + word.length*5.6 + 74;
-  return `<div class="rdy ${rd.state}" title="${escA((fits?'':word+' — ')+tip)}">`
+  return `<div class="rdy ${st}" title="${escA((fits?'':word+' — ')+tip)}">`
        + `<span class="b"></span>${fits?word:''}</div>`;
 }
 
@@ -613,6 +615,12 @@ const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;'
    sector name or an error message containing a double quote close the attribute
    and start writing markup. */
 const escA=(s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+/* A value that becomes a CSS CLASS is not text — escaping does nothing useful
+   for it, so it is checked against the list instead. These come from the server
+   today, but the activity feed is the one screen that renders text written by
+   the outside world (a rival's page title, a lead's company name, the body of
+   a scraped enquiry), so nothing on it gets to reach an attribute unchecked. */
+const oneOf=(v,allowed)=>allowed.includes(String(v))?String(v):allowed[0];
 function bubble(kind, html){
   $('#dBody').insertAdjacentHTML('beforeend',`<div class="msg ${kind}">${html}</div>`);
   $('#dBody').scrollTop=$('#dBody').scrollHeight;
@@ -710,8 +718,9 @@ function applyLive(j){
   if($('#actPanel').classList.contains('open')) renderActivity();
   // Only redraw the run panel from the poll while a day is actually going —
   // otherwise a poll landing mid-typing would wipe the orders the owner is
-  // still writing into the form.
+  // still writing into the form. (This is why RUN.touched exists too.)
   if($('#runPanel').classList.contains('open') && RUN.view==='progress') renderRun();
+  else if($('#runPanel').classList.contains('open') && RUN.view==='idle') renderRun();
 }
 
 /* Put each live line at the desk it belongs to.
@@ -771,8 +780,9 @@ function renderActivity(){
       + `on its own the moment a sector picks something up — press <b>Run the day</b> to start one.</p>`;
     return;
   }
+  const VERBS=['pushed','got','grabbed','delivered','errored'];
   $('#actBody').innerHTML = ev.map(e=>
-    `<div class="act ${e.verb} ${e.level==='live'?'live':''}">`
+    `<div class="act ${oneOf(e.verb,VERBS)} ${e.level==='live'?'live':''}">`
     + `<span class="tm">${esc(e.hhmm)}</span>`
     + `<span class="vb">${esc(e.verb)}</span>`
     + `<span class="bd"><b>${esc(e.what)}</b>`
@@ -810,7 +820,8 @@ function renderTicker(){
    Four views, in the order the owner asked for: check, then his instructions,
    then work, then what happened. Never one screen — a single "go" button that
    silently preflights is a button people press without reading. ------------ */
-const RUN = {view:'idle', check:null, busy:false, force:false, orders:{}, note:''};
+const RUN = {view:'idle', check:null, busy:false, force:false, orders:{}, note:'',
+             touched:false, saved:''};
 const RUN_SECTORS = [
   ['IT','IT & Site Health'],['Content','Content & Social'],['SEO','SEO & Rankings'],
   ['Leads','Leads & Outreach'],['Report','Reports'],['Security','Security'],
@@ -829,20 +840,34 @@ function renderRunButton(){
 function openRun(){
   openPanel('runPanel');
   const run=(LIVE&&LIVE.run&&LIVE.run.run)||null;
+  // Start from the orders already standing for today rather than blank boxes —
+  // otherwise saving from this panel silently wipes what he set this morning.
+  if(!RUN.touched) RUN.orders = Object.assign({}, (LIVE&&LIVE.orders)||{});
   RUN.view = (run && run.running) ? 'progress' : (RUN.check ? 'orders' : 'idle');
   renderRun();
 }
 
 function renderRun(){
   const B=$('#runBody');
-  if(RUN.view==='idle')      B.innerHTML = runIdle();
-  else if(RUN.view==='checking') B.innerHTML = runChecking();
-  else if(RUN.view==='orders')   B.innerHTML = runCheckResult()+runOrders();
-  else                           B.innerHTML = runProgress();
+  if(RUN.view==='idle')           B.innerHTML = runIdle();
+  else if(RUN.view==='checking')  B.innerHTML = runChecking();
+  else if(RUN.view==='orders')    B.innerHTML = runCheckResult()+runOrders();
+  else if(RUN.view==='ordersonly')B.innerHTML = runOrders(true);
+  else                            B.innerHTML = runProgress();
+}
+
+function standingOrders(){
+  const o=(LIVE&&LIVE.orders)||{};
+  const keys=Object.keys(o);
+  if(!keys.length) return '';
+  return `<div class="pgroup"><div class="gh etch">Your orders standing for today</div>`
+    + keys.map(k=>`<div class="chk ok"><span class="m">→</span><span>${esc(k)}`
+        + `<small>${esc(o[k])}</small></span></div>`).join('')
+    + `<p style="font-size:11px;color:var(--faint);margin:8px 0 0">The MD plans around these.</p></div>`;
 }
 
 function runIdle(){
-  return `<div class="pgroup">
+  return standingOrders()+`<div class="pgroup">
     <p style="font-size:12.5px;color:var(--muted);line-height:1.65;margin:0 0 14px">
       Pressing this checks the whole program first — the filing cabinet, every sector's
       brain and keys, whether each pipeline even loads, and every API and connector —
@@ -853,6 +878,8 @@ function runIdle(){
     <button class="pbtn" onclick="doCheck(false)">Check everything</button>
     <button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
             onclick="doCheck(true)">Quick check — read the config, call nothing</button>
+    <button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+            onclick="RUN.view='ordersonly';renderRun()">Just set today's orders</button>
   </div>`;
 }
 
@@ -913,8 +940,8 @@ function runCheckResult(){
   return H;
 }
 
-function runOrders(){
-  const c=RUN.check, blocked=(c&&(c.blocking||[]).length)&&!RUN.force;
+function runOrders(ordersOnly){
+  const c=RUN.check, blocked=!ordersOnly && (c&&(c.blocking||[]).length)&&!RUN.force;
   let H=`<div class="pgroup"><div class="gh etch">What do you want out of today?</div>
     <p style="font-size:11.5px;color:var(--muted);margin:0 0 12px;line-height:1.6">
       Anything you type here goes on the board <b>before</b> the MD plans, so it plans
@@ -924,12 +951,20 @@ function runOrders(){
       <textarea id="runNote" placeholder="e.g. two villa jobs finished this week — get them online">${esc(RUN.note)}</textarea></div>`;
   RUN_SECTORS.forEach(([k,label])=>{
     H+=`<div class="field"><label>${esc(label)}</label>`
-      +`<textarea data-sec="${escA(k)}" placeholder="today's order for ${esc(label)}">${esc(RUN.orders[k]||'')}</textarea></div>`;
+      +`<textarea data-sec="${escA(k)}" oninput="RUN.touched=true" placeholder="today's order for ${esc(label)}">${esc(RUN.orders[k]||'')}</textarea></div>`;
   });
-  H+=`<button class="pbtn" ${blocked?'disabled style="opacity:.45;cursor:not-allowed"':''} onclick="doStart()">`
-    +(blocked?'Blocked — fix the list above, or tick "run anyway"':'Start the day')+`</button>`;
+  if(RUN.saved) H+=`<p style="font-size:12px;color:var(--ok);margin:0 0 10px">${esc(RUN.saved)}</p>`;
+  if(ordersOnly){
+    H+=`<button class="pbtn" onclick="saveOrders()">Save today's orders</button>`;
+  }else{
+    H+=`<button class="pbtn" ${blocked?'disabled style="opacity:.45;cursor:not-allowed"':''} onclick="doStart()">`
+      +(blocked?'Blocked — fix the list above, or tick "run anyway"':'Start the day')+`</button>`;
+    H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+          onclick="saveOrders()">Save the orders without running</button>`;
+  }
   H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
-        onclick="RUN.check=null;RUN.view='idle';renderRun()">Check again</button></div>`;
+        onclick="RUN.check=null;RUN.view='idle';RUN.saved='';renderRun()">`
+    +(ordersOnly?'Back':'Check again')+`</button></div>`;
   return H;
 }
 
@@ -939,6 +974,20 @@ function collectOrders(){
   document.querySelectorAll('#runBody textarea[data-sec]').forEach(t=>{
     const v=(t.value||'').trim(); if(v) RUN.orders[t.dataset.sec]=v;
   });
+}
+
+async function saveOrders(){
+  collectOrders();
+  let j=null;
+  try{
+    const r=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
+                                       body:JSON.stringify({orders:RUN.orders})});
+    j=await r.json();
+  }catch(e){ j={ok:false,why:String(e)}; }
+  RUN.saved = (j&&j.ok) ? `Saved — ${(j.set||[]).join(', ')||'nothing to save'}.`
+                        : `Not saved. ${(j&&(j.why||j.error))||'unknown error'}`;
+  const s=await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+  renderRun();
 }
 
 async function doStart(){
@@ -979,8 +1028,9 @@ function runProgress(){
     ${(run.blocking||[]).length} known problem${(run.blocking||[]).length===1?'':'s'} — those sectors will do nothing.</div>`;
   H+=`</div><div class="pgroup">`;
   (R.steps||[]).forEach(s=>{
-    const mark={ok:'✓',idle:'–',failed:'✕',running:'▸',waiting:'·'}[s.status]||'·';
-    H+=`<div class="step ${s.status}"><span class="n">${mark}</span><span class="t">${esc(s.label)}`
+    const st=oneOf(s.status,['waiting','ok','idle','failed','running']);
+    const mark={ok:'✓',idle:'–',failed:'✕',running:'▸',waiting:'·'}[st];
+    H+=`<div class="step ${st}"><span class="n">${mark}</span><span class="t">${esc(s.label)}`
       +(s.summary?`<small>${esc(s.summary)}</small>`:'')+`</span></div>`;
   });
   H+=`</div><div class="pgroup"><button class="pbtn" onclick="openActivity()">See what each agent did →</button></div>`;

@@ -260,6 +260,27 @@ def all_sectors() -> dict:
 # asks for it and the result is kept here for the lights to read.
 # ---------------------------------------------------------------------------
 
+def _slim(payload: dict) -> dict:
+    """
+    What is worth keeping from a check, and what must not be kept.
+
+    The full sweep carries the ntfy topic and the credential names in its
+    channel details — the topic IS the secret on ntfy, anyone holding it reads
+    the owner's notifications. It is fine in the reply to his own browser; it
+    is not fine written into a row that any later dump reads back. So only the
+    verdicts are stored, and only the shape the lights need.
+    """
+    return {
+        "at": payload.get("at"), "quick": payload.get("quick"),
+        "ready": bool(payload.get("ready")),
+        "blocking": list(payload.get("blocking") or []),
+        "warnings": list(payload.get("warnings") or []),
+        "sectors": [{"sector": s.get("sector"), "state": s.get("state"),
+                     "says": s.get("says")}
+                    for s in ((payload.get("sectors") or {}).get("sectors") or [])],
+    }
+
+
 def record_check(payload: dict) -> None:
     board.ensure_schema()
     try:
@@ -268,7 +289,7 @@ def record_check(payload: dict) -> None:
                       " VALUES(?,?,?,?)",
                       (int(time.time()), 1 if payload.get("ready") else 0,
                        json.dumps(payload.get("blocking") or []),
-                       json.dumps(payload)[:400000]))
+                       json.dumps(_slim(payload))[:200000]))
             # keep the last 30; this is a light, not an archive
             c.execute("DELETE FROM preflight_runs WHERE id NOT IN"
                       " (SELECT id FROM preflight_runs ORDER BY at DESC LIMIT 30)")

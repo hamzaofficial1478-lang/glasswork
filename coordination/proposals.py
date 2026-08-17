@@ -187,8 +187,32 @@ def objected_task_ids():
 # THE OWNER'S ORDERS, PER SECTOR
 # ---------------------------------------------------------------------------
 
+# The sector names the board actually uses. board.next_open_task matches
+# `sector=?` EXACTLY, so an order filed against 'leads' creates a task that
+# next_open_task("Leads", …) will never find: it sits open for ever, the office
+# shows it unclaimed in the Leads room, and the owner's instruction is binned in
+# the one way that leaves no trace. Names are canonicalised at the door instead.
+SECTORS = ("Director", "IT", "Content", "SEO", "Leads", "Report", "Security")
+
+
+def canonical_sector(name):
+    """'leads' -> 'Leads'. None if it is not a sector at all."""
+    n = (name or "").strip().lower()
+    return next((s for s in SECTORS if s.lower() == n), None)
+
+
 def set_orders(sector, text, day=None):
-    """What the owner wants this sector doing today, in his own words."""
+    """
+    What the owner wants this sector doing today, in his own words.
+
+    Refuses a sector that does not exist. An order nobody can claim is worse
+    than no order — the owner believes he has asked for something.
+    """
+    canon = canonical_sector(sector)
+    if not canon:
+        raise ValueError(
+            f"there is no '{sector}' sector — it is one of: {', '.join(SECTORS)}")
+    sector = canon
     board.ensure_schema()
     day = day or _today()
     with sqlite3.connect(board.DB, timeout=30) as c:
@@ -235,7 +259,12 @@ if __name__ == "__main__":
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     if a.order:
-        print(json.dumps(set_orders(a.order[0], a.order[1]), indent=2))
+        try:
+            print(json.dumps(set_orders(a.order[0], a.order[1]), indent=2))
+        except ValueError as e:
+            # a typo at the command line should read like a sentence, not a
+            # traceback — the order did not land and he needs to know why
+            raise SystemExit(f"Nothing was set: {e}")
     else:
         print(json.dumps({"proposals": open_proposals(), "orders": orders()}, indent=2)
               if a.json else as_text())

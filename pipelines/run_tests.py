@@ -177,6 +177,32 @@ def _activity_tests():
     check("the run's own count carries it instead",
           any("added 34 leads" in e["what"] for e in ev), True)
 
+    print("\nThe two agents that are not named sector-role still find their room:")
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO agent_runs(agent,started_at,ended_at,status,note)"
+                " VALUES('managing-director',?,?,'ok','posted 3 tasks')",
+                (now - 90, now - 80))
+    con.execute("INSERT INTO agent_runs(agent,started_at,ended_at,status,note)"
+                " VALUES('reporter',?,?,'ok','scored the day')", (now - 70, now - 60))
+    con.commit(); con.close()
+    ev = activity.since(now - 3600, limit=200)
+    check("the MD's line lands in the Director's Office",
+          next(e["room"] for e in ev if e["who"] == "managing-director"), "Director")
+    check("the Reporter's line lands in Reports",
+          next(e["room"] for e in ev if e["who"] == "reporter"), "Report")
+
+    print("\n...and their DESKS light up, which they never used to:")
+    from coordination import state as _state
+    rooms = {r["key"]: r for r in _state.build()["rooms"]}
+    check("the Director's Office has a live agent",
+          [a["s"] for a in rooms["Director"]["agents"] if a["n"] == "managing-director"],
+          ["done"])
+    check("and it is seated at the Director desk",
+          [a["slot"] for a in rooms["Director"]["agents"] if a["n"] == "managing-director"],
+          ["director"])
+    check("Reports has one too",
+          [a["s"] for a in rooms["Report"]["agents"] if a["n"] == "reporter"], ["done"])
+
     print("\nA stalled run is not a working one:")
     con = sqlite3.connect(board.DB)
     con.execute("INSERT INTO agent_runs(agent,started_at,status,note)"
@@ -232,6 +258,43 @@ def _day_run_tests():
     check("no output at all still says something",
           day_run._summarise("", 3), "no output (exit 3)")
 
+    print("\nA killed run does not stay 'running' for ever:")
+    con = sqlite3.connect(board.DB)
+    long_ago = _now() - (day_run.STEP_TIMEOUT + 3600)
+    con.execute("INSERT INTO day_runs(id,started_at,status,started_by,steps_total)"
+                " VALUES('dead',?,'running','owner',2)", (long_ago,))
+    con.execute("INSERT INTO day_steps(run_id,seq,label,module,status,started_at)"
+                " VALUES('dead',0,'The MD plans','pipelines.md_cycle','ok',?)", (long_ago,))
+    con.execute("INSERT INTO day_steps(run_id,seq,label,module,status,started_at)"
+                " VALUES('dead',1,'IT checks','pipelines.it_health','running',?)", (long_ago,))
+    con.commit(); con.close()
+
+    st = day_run.status("dead")
+    check("no lock, no progress -> reaped", st["run"]["status"], "stalled")
+    check("and the button is pressable again", st["run"]["running"], False)
+    check("the step it died on is marked failed",
+          [s["status"] for s in st["steps"]], ["ok", "failed"])
+    check("and says what happened",
+          "killed" in (st["steps"][1]["summary"] or ""), True)
+    check("the head tells the owner to press Run again",
+          "Press Run again" in st["head"], True)
+
+    print("\n...but a slow run holding its lock is left alone:")
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO day_runs(id,started_at,status,started_by,steps_total)"
+                " VALUES('slow',?,'running','owner',1)", (long_ago,))
+    con.execute("INSERT INTO day_steps(run_id,seq,label,module,status,started_at)"
+                " VALUES('slow',0,'SEO watches','pipelines.competitors','running',?)",
+                (long_ago,))
+    con.commit(); con.close()
+    board.acquire_lock(day_run.LOCK, day_run.LOCK_HOLDER, wait=False, ttl=600)
+    try:
+        st = day_run.status("slow")
+        check("still running, because somebody still holds the lock",
+              st["run"]["status"], "running")
+    finally:
+        board.release_lock(day_run.LOCK, day_run.LOCK_HOLDER)
+
     print("\nThe same complaint from two checks is one problem:")
     check("deduplicated, order kept",
           day_run._once(["b has no brain", "B HAS NO BRAIN", "a is empty"]),
@@ -285,6 +348,33 @@ def _day_run_tests():
     finally:
         proposals.set_orders, day_run.preflight = real_set, real_pre
         day_run.STEPS = real_steps
+
+    print("\nAn order for a sector that does not exist is not silently binned:")
+    check("'leads' is the Leads sector", proposals.canonical_sector("leads"), "Leads")
+    check("'  SeO ' too", proposals.canonical_sector("  SeO "), "SEO")
+    check("'Marketing' is not a sector", proposals.canonical_sector("Marketing"), None)
+    try:
+        proposals.set_orders("Marketing", "do some marketing")
+        check("an unknown sector is refused", "no error raised", "ValueError")
+    except ValueError as e:
+        check("an unknown sector is refused", "there is no 'Marketing' sector" in str(e), True)
+    # the board matches sector EXACTLY, so a lowercase order must land as 'Leads'
+    proposals.set_orders("leads", "fitout only")
+    check("and a lowercase one lands where the board will find it",
+          list(proposals.orders()), ["Leads"])
+
+    real_pre, day_run.preflight = day_run.preflight, (
+        lambda quick=False: {"ready": True, "blocking": [], "warnings": []})
+    real_steps, day_run.STEPS = day_run.STEPS, []
+    try:
+        r = day_run.start(orders={"Marketing": "sell more", "IT": "check the form"})
+        check("the run still happens", r.get("ran"), True)
+        check("the good order lands", r["orders"].get("IT"), "check the form")
+        check("and the bad one is reported, not swallowed",
+              "Marketing" in r["rejected_orders"], True)
+        check("in the sentence the owner reads", "went nowhere" in r["why"], True)
+    finally:
+        day_run.preflight, day_run.STEPS = real_pre, real_steps
 
 
 def main():

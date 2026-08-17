@@ -51,10 +51,15 @@ def _db():
 GOT, GRABBED, PUSHED, DELIVERED, ERRORED = (
     "got", "grabbed", "pushed", "delivered", "errored")
 
-# sector key on the office floor, keyed by the lowercase sector name we store
-ROOM = {"md": "Director", "director": "Director", "it": "IT",
-        "content": "Content", "seo": "SEO", "leads": "Leads",
-        "report": "Report", "security": "Security", "owner": "Director"}
+# Which room a name belongs to. Most agents are named sector-role, so the first
+# segment is the room — but two are not: the MD runs as 'managing-director' and
+# Report runs as 'reporter'. Both are listed in full, or every line either of
+# them writes lands in no room at all. (Same trap as state.AGENT_ALIASES.)
+ROOM = {"md": "Director", "director": "Director", "managing": "Director",
+        "managing-director": "Director", "critic": "Director",
+        "it": "IT", "content": "Content", "seo": "SEO", "leads": "Leads",
+        "report": "Report", "reporter": "Report",
+        "security": "Security", "owner": "Director"}
 
 WINDOW = 24 * 3600      # how far back the floor looks by default
 PER_SOURCE = 40         # cap per source so one chatty table cannot drown the rest
