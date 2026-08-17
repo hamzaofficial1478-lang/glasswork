@@ -99,6 +99,8 @@ function updateEnv(partial) {
   const order = [
     "SITE_MODE", "SITE_URL", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
     "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
+    // Telegram keys are kept in the file if they're already there — an owner
+    // mid-switch shouldn't lose his fallback — but nothing writes them now.
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
     "DAILY_SPEND_CAP_USD", "OUTREACH_DAILY_CAP", "SITE_API_BASE", "SITE_API_TOKEN", "PORT",
   ];
@@ -215,7 +217,9 @@ function readConnections() {
     { ic: "◧", name: "Website", sub: e.SITE_URL || "not set", on: has("SITE_URL") },
     { ic: "⌕", name: "DataForSEO", sub: "rank tracking", on: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD") },
     { ic: "🔔", name: "ntfy", sub: has("NTFY_TOPIC") ? "topic set" : "not set", on: has("NTFY_TOPIC") },
-    { ic: "✈", name: "Telegram bridge", sub: has("TELEGRAM_CHAT_ID") ? "connected" : "not connected", on: has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID") },
+    ...(has("TELEGRAM_BOT_TOKEN")
+        ? [{ ic: "✈", name: "Telegram (legacy)", sub: "still configured — ntfy is the route now", on: true }]
+        : []),
     { ic: "✉", name: "Email (SMTP)", sub: e.SMTP_HOST || "not set", on: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS") },
     { ic: "⌗", name: "Search Console", sub: e.GSC_PROPERTY || "not set", on: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH) },
   ];
@@ -291,8 +295,10 @@ app.post("/api/optional", (req, res) => {
     const set = (k, v) => { const x = one(v); if (x) partial[k] = x; };  // only overwrite when given
     set("DATAFORSEO_LOGIN", b.dfsLogin);
     set("DATAFORSEO_PASSWORD", b.dfsPassword);
-    set("TELEGRAM_BOT_TOKEN", b.telegramToken);
-    set("TELEGRAM_CHAT_ID", b.telegramChatId);
+    // ntfy is the owner's route. Telegram keys are still READ if they exist in
+    // .env, so an older setup keeps working, but they are no longer offered.
+    set("NTFY_TOPIC", b.ntfyTopic);
+    set("NTFY_SERVER", b.ntfyServer);
     set("OUTREACH_DOMAIN", b.outreachDomain);
     partial.DAILY_SPEND_CAP_USD = one(b.spendCap) || cur.DAILY_SPEND_CAP_USD || "15";
     partial.OUTREACH_DAILY_CAP = one(b.outreachCap) || cur.OUTREACH_DAILY_CAP || "25";
@@ -362,7 +368,7 @@ app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shel
 
 // ---- channels + the whole-system sweep -------------------------------------
 // Both prove credentials without sending anything. The one exception is
-// notify:true on Telegram, which posts to the owner's own chat and nowhere else.
+// notify:true, which posts to the owner's own ntfy topic and nowhere else.
 app.post("/api/integrations/test", (req, res) =>
   res.json(pyProvider("test_integration", req.body)));
 // A full sweep calls every model and every shelf API, so it gets its own,
@@ -424,7 +430,7 @@ app.get("/api/settings", (_q, res) => {
     },
     optional: {
       dfsLogin: v("DATAFORSEO_LOGIN"), dfsPasswordSet: set("DATAFORSEO_PASSWORD"),
-      telegramTokenSet: set("TELEGRAM_BOT_TOKEN"), telegramChatId: v("TELEGRAM_CHAT_ID"),
+      ntfyTopic: v("NTFY_TOPIC"), ntfyServer: v("NTFY_SERVER"),
       outreachDomain: v("OUTREACH_DOMAIN"),
       spendCap: v("DAILY_SPEND_CAP_USD"), outreachCap: v("OUTREACH_DAILY_CAP"),
     },
@@ -474,9 +480,13 @@ app.get("/api/status", (_q, res) => {
     { label: "DataForSEO (rank tracking)", optional: true, ok: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD"),
       detail: (has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD")) ? "Login and password saved" : "Not set — rankings aren't tracked",
       hint: "Login + API password from your DataForSEO dashboard." },
-    { label: "Telegram (your approvals)", optional: true, ok: has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID"),
-      detail: (has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID")) ? "Bot token and chat ID saved" : "Not set — you won't get Telegram approvals yet",
-      hint: "Bot token from @BotFather, chat ID from @userinfobot." },
+    { label: "ntfy (your approvals)", optional: true, ok: has("NTFY_TOPIC"),
+      detail: has("NTFY_TOPIC")
+        ? `Sending to ${e.NTFY_TOPIC} on ${e.NTFY_SERVER || "https://ntfy.sh"}`
+        : (has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID")
+            ? "Not set — falling back to your old Telegram bot"
+            : "Not set — nothing will reach your phone for approval"),
+      hint: "Pick a long, private topic name and subscribe to it in the ntfy app." },
     { label: "Sending domain", optional: true, ok: has("OUTREACH_DOMAIN"),
       detail: has("OUTREACH_DOMAIN") ? e.OUTREACH_DOMAIN : "Not set — outreach stays off",
       hint: "A subdomain you send cold email from." },

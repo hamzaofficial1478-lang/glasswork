@@ -269,16 +269,16 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="field"><label>DataForSEO password</label><input id="dfsPassword" type="password" placeholder="leave blank to keep saved"><div class="hint">API password from the DataForSEO dashboard.</div></div>
       </div>
       <div class="row">
-        <div class="field"><label>Telegram bot token</label><input id="telegramToken" type="password" placeholder="leave blank to keep saved"><div class="hint">From @BotFather — lets the agency message you.</div></div>
-        <div class="field"><label>Telegram chat ID</label><input id="telegramChatId" placeholder="123456789"><div class="hint">Your chat ID from @userinfobot.</div></div>
+        <div class="field"><label>ntfy topic</label><input id="ntfyTopic" placeholder="glasswork-a7f3k9x2q"><div class="hint">How the agency reaches you. Install the ntfy app, subscribe to this exact name. <b>Make it long and random</b> — anyone who guesses the name reads your notifications.</div></div>
+        <div class="field"><label>ntfy server <span class="dim">(optional)</span></label><input id="ntfyServer" placeholder="https://ntfy.sh"><div class="hint">Leave blank for the public server. Self-host if the digest will ever carry customer detail.</div></div>
       </div>
       <div class="field"><label>Outreach domain</label><input id="outreachDomain" placeholder="mail.glassworks.ae"><div class="hint">Only needed for cold outreach. Use a subdomain, not your main domain.</div></div>
       <div class="row">
         <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15.</div></div>
         <div class="field"><label>Daily outreach cap</label><input id="outreachCap" type="number" min="0" step="1" placeholder="25"><div class="hint">Defaults to 25.</div></div>
       </div>
-      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testTg">Test Telegram</button><button class="mini" id="tgPing">Message me</button><span class="inl dim" id="optMsg"></span></div>
-      <div class="hint"><b>Test Telegram</b> checks the bot and that it can reach your chat, silently. <b>Message me</b> posts a real message to your chat so you can see it arrive.</div>
+      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testNtfy">Test ntfy</button><button class="mini" id="ntfyPing">Notify me</button><span class="inl dim" id="optMsg"></span></div>
+      <div class="hint"><b>Test ntfy</b> checks the topic is reachable and publishes nothing. <b>Notify me</b> sends a real notification so you can watch it arrive on your phone.</div>
     </div>
   </section>
 
@@ -692,10 +692,10 @@ setInterval(()=>{ const a=$('#shelfAuto'); if(a&&a.checked) loadShelves(); },500
 $('#saveOptional').onclick=async()=>{
   const btn=$('#saveOptional');btn.disabled=true;inl($('#optMsg'),'dim','Saving…');
   const j=await api('POST','/api/optional',{dfsLogin:$('#dfsLogin').value.trim(),dfsPassword:$('#dfsPassword').value,
-    telegramToken:$('#telegramToken').value,telegramChatId:$('#telegramChatId').value.trim(),
+    ntfyTopic:$('#ntfyTopic').value.trim(),ntfyServer:$('#ntfyServer').value.trim(),
     outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim()});
   btn.disabled=false;
-  if(j.ok){ inl($('#optMsg'),'ok','✓ Saved'); ['dfsPassword','telegramToken'].forEach(id=>$('#'+id).value=''); }
+  if(j.ok){ inl($('#optMsg'),'ok','✓ Saved'); ['dfsPassword'].forEach(id=>$('#'+id).value=''); }
   else inl($('#optMsg'),'err','✕ '+(j.error||'failed'));
 };
 
@@ -811,8 +811,8 @@ async function testChannel(which, btn, msg, notify){
   else                  inl(msg,'err','✕ '+r.detail);
 }
 $('#testEmail').onclick=()=>testChannel('email',$('#testEmail'),$('#emailMsg'));
-$('#testTg').onclick   =()=>testChannel('telegram',$('#testTg'),$('#optMsg'));
-$('#tgPing').onclick   =()=>testChannel('telegram',$('#tgPing'),$('#optMsg'),true);
+$('#testNtfy').onclick =()=>testChannel('ntfy',$('#testNtfy'),$('#optMsg'));
+$('#ntfyPing').onclick =()=>testChannel('ntfy',$('#ntfyPing'),$('#optMsg'),true);
 
 /* ---- preflight ---- */
 const PF_TONE={COVERED:'ok',SINGLE:'warn',DOWN:'err',EMPTY:'dim'};
@@ -881,12 +881,12 @@ async function loadSettings(){
   if(w.apiTokenSet) $('#siteApiToken').placeholder='saved — leave blank to keep';
   if(j.configured) inl($('#siteMsg'),'ok','✓ Saved ('+(w.mode==='full'?'Full access':'Read-only')+') — edit and re-save to change');
   $('#dfsLogin').value=o.dfsLogin||'';
-  $('#telegramChatId').value=o.telegramChatId||'';
+  $('#ntfyTopic').value=o.ntfyTopic||'';
+  $('#ntfyServer').value=o.ntfyServer||'';
   $('#outreachDomain').value=o.outreachDomain||'';
   $('#spendCap').value=o.spendCap||'';
   $('#outreachCap').value=o.outreachCap||'';
   if(o.dfsPasswordSet) $('#dfsPassword').placeholder='saved — leave blank to keep';
-  if(o.telegramTokenSet) $('#telegramToken').placeholder='saved — leave blank to keep';
   const ig=j.integrations||{}, em=ig.email||{}, gsc=ig.gsc||{};
   $('#em_host').value=em.host||''; $('#em_port').value=em.port||''; $('#em_user').value=em.user||'';
   $('#em_from').value=em.from||''; $('#em_fromname').value=em.fromName||'';

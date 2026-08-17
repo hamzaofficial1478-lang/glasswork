@@ -33,8 +33,13 @@ _EMPTY = {"credentials": [], "routing": {}, "usage": {}, "tools": []}
 #               screen as the PRIMARY route; it sits here too so a second
 #               provider can act as a FALLBACK, and so delivery takes the shelf
 #               lock (which is what enforces turn-taking and the daily cap).
+# NOTE: there is deliberately NO llm shelf here. A sector's text brain is ROUTED
+# per task (providers/routing.py: md, it, content, seo, leads, security, report),
+# never borrowed off a shelf. The difference matters: a shelf is shared, so an
+# llm shelf would let any sector borrow whichever model sat on it — including the
+# strong one meant for the MD — and quietly out-reason or override the sector it
+# was routed for. Routing keeps each sector on the brain the owner chose for it.
 SHELF_KINDS = {
-    "llm_extra":       "reasoning",   # a stronger/spare text brain
     "vision":          "reasoning",   # image understanding / reasoning over images
     "embedding":       "reasoning",   # vectors for similarity + dedupe
     "image_gen":       "reasoning",   # generated graphics (decoration only)
