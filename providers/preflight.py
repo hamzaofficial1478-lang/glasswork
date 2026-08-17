@@ -26,14 +26,27 @@ import time
 from . import client, integrations, routing, store
 
 COVERED, SINGLE, DOWN, EMPTY = "COVERED", "SINGLE", "DOWN", "EMPTY"
+# Five, not four. Under --quick nothing is called, so every link comes back
+# ok=None — and the old four-way verdict read that as DOWN and announced that
+# every sector in the agency had no working brain. "I did not look" and "I
+# looked and it is dead" are not the same answer, and reporting the first as
+# the second makes the cheap check useless: it can never say ready.
+UNKNOWN = "UNKNOWN"
 
 
-def _cover(n_working: int, n_total: int) -> str:
+def _cover(n_working: int, n_total: int, n_unknown: int = 0) -> str:
     if n_total == 0:
         return EMPTY
-    if n_working == 0:
-        return DOWN
-    return COVERED if n_working >= 2 else SINGLE
+    if n_working >= 2:
+        return COVERED
+    if n_working == 1:
+        return SINGLE
+    return UNKNOWN if n_unknown else DOWN
+
+
+def _verdict(chain) -> str:
+    return _cover(sum(1 for l in chain if l["ok"] is True), len(chain),
+                  sum(1 for l in chain if l["ok"] is None))
 
 
 class _ModelCache:
@@ -55,6 +68,15 @@ class _ModelCache:
             t = probe["test"]
             r = {"ok": t.get("ok"), "status": t.get("status"),
                  "ms": int((time.time() - t0) * 1000), "cause": t.get("cause")}
+            # Write the verdict back onto the model. The shelf sweep below has
+            # always done this for tools; models were tested and the answer
+            # thrown away, so the office had no way to tell a proven brain from
+            # a saved one and had to show every sector as unverified forever.
+            try:
+                store.upsert_model(cred["id"], {**model, "last_test_result": {
+                    "ok": r["ok"], "status": r["status"], "at": int(time.time())}})
+            except Exception:
+                pass
         self.seen[mid] = r
         return r
 
@@ -92,9 +114,9 @@ def sweep_routing(cache) -> list:
             chain.append({"role": "primary" if i == 0 else f"fallback {i}",
                           "name": f'{cand["credential_name"]} · {cand["api_model_id"]}',
                           **res})
-        working = sum(1 for l in chain if l["ok"] is True)
-        out.append({"task": task, "chain": chain, "working": working,
-                    "cover": _cover(working, len(chain))})
+        out.append({"task": task, "chain": chain,
+                    "working": sum(1 for l in chain if l["ok"] is True),
+                    "cover": _verdict(chain)})
     return out
 
 
@@ -125,9 +147,9 @@ def sweep_shelf(quick=False) -> list:
                     "ok": res["ok"], "status": res["status"], "at": int(time.time())}})
             chain.append({"role": "primary" if i == 0 else f"fallback {i}",
                           "name": t["name"], **res})
-        working = sum(1 for l in chain if l["ok"] is True)
         out.append({"shelf": shelf, "purpose": store.shelf_kind(shelf), "chain": chain,
-                    "working": working, "cover": _cover(working, len(chain))})
+                    "working": sum(1 for l in chain if l["ok"] is True),
+                    "cover": _verdict(chain)})
     return out
 
 
@@ -142,11 +164,19 @@ def sweep(quick=False, notify=False) -> dict:
     for r in route:
         if r["cover"] == DOWN:
             blocking.append(f"sector '{r['task']}' has no working brain")
-    tg = next((c for c in chan if c["integration"] == "telegram"), None)
-    if tg and tg["ok"] is False:
-        blocking.append("Telegram is broken — you cannot be asked to approve anything")
-    if tg and tg["ok"] is None:
-        blocking.append("Telegram is not set up — approvals have nowhere to go")
+    # Approvals need ONE working route to the owner, not a specific one. ntfy is
+    # the route now and Telegram is the fallback an owner mid-switch still has,
+    # so this asks "can he be reached at all" rather than naming a product —
+    # the old version blocked the whole day over a Telegram bot he had replaced.
+    routes = [c for c in chan if c["integration"] in ("ntfy", "telegram")]
+    live = sorted(c["integration"] for c in routes if c["ok"] is True)
+    broken = sorted(c["integration"] for c in routes if c["ok"] is False)
+    if not live:
+        blocking.append(
+            f"{' and '.join(broken)} failed — you cannot be asked to approve anything"
+            if broken else
+            "No notification route is set up — set NTFY_TOPIC or approvals have "
+            "nowhere to go")
 
     warn = [f"sector '{r['task']}' runs on one brain with no fallback"
             for r in route if r["cover"] == SINGLE]
@@ -154,6 +184,17 @@ def sweep(quick=False, notify=False) -> dict:
              for s in shelf if s["cover"] == SINGLE]
     warn += [f"shelf '{s['shelf']}' is configured but every API on it failed"
              for s in shelf if s["cover"] == DOWN]
+    # Under --quick every sector comes back unproven, and seven identical lines
+    # is not seven findings — it is one, and repeating it buries the real
+    # warnings underneath it. So this is always ONE line, listing the sectors.
+    unproven = sorted(r["task"] for r in route if r["cover"] == UNKNOWN)
+    if unproven:
+        lead = ("nothing was actually called, so no brain is proven"
+                if quick else "these brains were not reached, so they are unproven")
+        warn.append(f"{lead}: {', '.join(unproven)}")
+    if live and broken:
+        warn.append(f"{' and '.join(broken)} failed, but {' and '.join(live)} "
+                    "works — you will still be reached")
 
     return {"ok": True, "quick": quick, "at": int(time.time()),
             "brains": brains, "routing": route, "shelf": shelf, "integrations": chan,

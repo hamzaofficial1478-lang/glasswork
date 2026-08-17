@@ -3,6 +3,7 @@ run.py — the one file you start the agency from.
 
     python run.py                 open the office (updates first, then the UI)
     python run.py --day           run a full day's cycle in the terminal
+    python run.py --day --force   run it even though the check found problems
     python run.py --check         health check: what is configured, what is not
     python run.py --tests         run every test suite
     python run.py --no-update     skip the git pull
@@ -170,36 +171,44 @@ def check():
 # A DAY'S WORK
 # ---------------------------------------------------------------------------
 
-# The order the handbook lays down. The MD plans first or the board is empty and
-# every sector correctly refuses to invent its own work.
-DAY = [
-    ("The MD plans the day", "pipelines.md_cycle"),
-    ("IT checks the site", "pipelines.it_health"),
-    ("Leads maps its sources", "pipelines.leads_sources"),
-    ("Leads collects", "pipelines.leads_hunt"),
-    ("Security screens what came in", "pipelines.security_screen"),
-    ("SEO finds the gaps", "pipelines.seo_gap"),
-    # the rival watch runs before Content, because what it finds is work for
-    # Content to answer in the same pass rather than tomorrow
-    ("SEO watches the rivals", "pipelines.competitors"),
-    ("Content briefs the pages", "pipelines.content_briefs"),
-    ("Report scores the day", "pipelines.report_daily"),
-]
+def day(force=False, quick=False):
+    """
+    A full day, run through the SAME code the Run button in the office uses.
 
-
-def day():
+    This used to keep its own copy of the step list and shell each module itself.
+    Two copies of the running order is one copy too many: the button gained a
+    preflight, a run record and the owner's per-sector orders, and none of that
+    reached anyone who started the day from the terminal. There is one runner
+    now (pipelines/day_run.py) and both doors open onto it.
+    """
     head("A full day, in the order the handbook sets")
-    for label, mod in DAY:
+    sys.path.insert(0, str(ROOT))
+    from pipelines import day_run
+
+    say("  Checking everything first…")
+    pre = day_run.preflight(quick=quick)
+    for b in pre["blocking"]:
+        say("  BLOCKED  " + b)
+    for w in pre["warnings"]:
+        say("  warning  " + w)
+    if not pre["ready"] and not force:
         say()
-        say(f"--- {label} ({mod})")
-        code, out = sh([PY, "-m", mod], timeout=420)
-        tail = [l for l in out.strip().splitlines() if l.strip()][-6:]
-        for line in tail:
-            say("    " + line[:150])
-        if code != 0 and not tail:
-            say("    (no output — exit code %s)" % code)
+        say("  Nothing was run. Fix the blocked items above, or run again with --force.")
+        return False
+
+    r = day_run.start(force=force, quick=quick, skip_check=True)
+    if not r.get("ran"):
+        say("  " + r.get("why", "the day did not start"))
+        return False
+
+    st = day_run.status(r["run_id"])
     say()
-    say("Day finished. Open the office to see what happened.")
+    for s in st["steps"]:
+        mark = {"ok": "ok  ", "idle": "--  ", "failed": "FAIL"}.get(s["status"], "    ")
+        say(f"  {mark} {s['label']:34} {(s['summary'] or '')[:110]}")
+    say()
+    say("  " + r["why"] + " Open the office to see what happened.")
+    return r["failed_steps"] == 0
 
 
 def tests():
@@ -210,7 +219,7 @@ def tests():
             "pipelines.content_tests",
             "pipelines.leads_tests", "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.site_tests", "pipelines.seo_tests",
-            "pipelines.report_tests"]
+            "pipelines.report_tests", "pipelines.run_tests"]
     bad = []
     for m in mods:
         code, _ = sh([PY, "-m", m], timeout=420)
@@ -259,6 +268,10 @@ def main():
     ap.add_argument("--check", action="store_true", help="what is configured")
     ap.add_argument("--tests", action="store_true", help="run every test suite")
     ap.add_argument("--no-update", action="store_true", help="skip the git pull")
+    ap.add_argument("--force", action="store_true",
+                    help="with --day: run even though the check found problems")
+    ap.add_argument("--quick", action="store_true",
+                    help="with --day: skip the live API calls in the check")
     a = ap.parse_args()
 
     say("GLASSWORKS AGENCY")
@@ -273,7 +286,7 @@ def main():
         return
     if a.day:
         check()
-        day()
+        day(force=a.force, quick=a.quick)
         return
 
     check()

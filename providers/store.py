@@ -9,7 +9,9 @@ and writes back. Saving one credential never disturbs another.
 Keys are kept in the local file (like a .env) and are ALWAYS masked/redacted in
 any value that leaves the server (see redacted_view / auth.mask).
 """
+import contextlib
 import json
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -107,6 +109,30 @@ def _save(data: dict) -> None:
 
 def _new_id(prefix):
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+
+@contextlib.contextmanager
+def isolated():
+    """
+    Point the store at a throwaway file for the duration.
+
+    Every suite that asserts "with no model configured, this refuses" was
+    reading the OWNER'S store, so those tests only passed on a machine with
+    nothing set up. The day he saved his first model, `run.py --tests` began
+    reporting three suites red for reasons that had nothing to do with his code
+    — which teaches you to stop trusting the test run, and a test suite you
+    have stopped trusting is worse than none.
+
+    A test that says "nothing is configured" must be the one deciding that.
+    """
+    global STORE
+    was = STORE
+    d = Path(tempfile.mkdtemp(prefix="glasswork-store-"))
+    STORE = d / "providers.local.json"
+    try:
+        yield STORE
+    finally:
+        STORE = was
 
 
 # ---- credentials (incremental — the bug fix) -------------------------------

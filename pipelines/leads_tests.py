@@ -632,7 +632,15 @@ def test_outreach_is_capped_and_recorded():
         board.DB = real_db
 
 
+from providers import store as _store
+
+
 def main():
+    with _store.isolated():
+        _main()
+
+
+def _main():
     test_the_target_list_is_the_whole_market()
     test_every_segment_knows_what_to_sell_it()
     test_service_matching()

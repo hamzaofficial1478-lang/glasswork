@@ -13,14 +13,24 @@ degrades to zeros, never a crash.
 import json
 import sqlite3
 import time
-from pathlib import Path
 
 try:
-    from . import cabinet
+    from . import board, cabinet
 except ImportError:  # pragma: no cover - script/path fallback
+    import board
     import cabinet
 
-DB = Path(__file__).parent / "agency.db"
+# Where the cabinet lives is board's to say, not ours.
+#
+# This module used to compute its own path to agency.db, which looks harmless
+# because it is the same path — right up until something points board.DB
+# somewhere else. Every test that redirects the cabinet to a throwaway file did
+# exactly that, and this one module kept reading the owner's REAL data behind
+# its back: Report builds its digest from state.build(), so the Report tests
+# were quietly scoring whatever happened in the live agency yesterday, and
+# passed or failed depending on it. One definition, read fresh on every call.
+def _db():
+    return board.DB
 
 # key, display name, task-sector match, is-security-room
 #
@@ -41,7 +51,7 @@ SECTORS = [
 
 
 def _conn():
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(_db())
     con.row_factory = sqlite3.Row
     return con
 
@@ -321,10 +331,34 @@ def build():
         shelf = []
 
     c.close()
+
+    # ---- three more things the office draws, fetched in the SAME call ------
+    # Each of these could have its own endpoint, and each endpoint would be
+    # another Python process spawned every few seconds. The office polls fast
+    # while a day is running so the bulbs are actually visible, so one snapshot
+    # per poll is the difference between a live floor and a machine fighting
+    # itself. All three degrade to empty rather than taking the snapshot down.
+    try:
+        from . import readiness as _readiness
+        ready = _readiness.all_sectors()
+    except Exception as e:
+        ready = {"ok": False, "error": str(e), "sectors": []}
+    try:
+        from . import activity as _activity
+        acts = _activity.feed(limit=50)
+    except Exception as e:
+        acts = {"ok": False, "error": str(e), "events": []}
+    try:
+        from pipelines import day_run as _day_run
+        run = _day_run.status()
+    except Exception as e:
+        run = {"ok": False, "error": str(e), "run": None, "steps": []}
+
     return {"ok": True, "ts": int(time.time()),
             "md": {"state": md_state},
             "metrics": {"health": health, "leads": leads_today, "spend": f"${spend:.2f}"},
-            "rooms": rooms, "approvals": approvals, "security": security, "shelf": shelf}
+            "rooms": rooms, "approvals": approvals, "security": security, "shelf": shelf,
+            "readiness": ready, "activity": acts, "run": run}
 
 
 if __name__ == "__main__":

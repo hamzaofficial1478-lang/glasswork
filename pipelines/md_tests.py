@@ -133,8 +133,8 @@ def test_a_failing_line_of_reasoning_gets_dropped():
 
 def test_running_twice_does_not_double_the_board():
     print("Safe to run on a timer:")
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         _issue(board.DB, "critical")
         first = MD.run()
@@ -147,7 +147,7 @@ def test_running_twice_does_not_double_the_board():
         check("and every rejection explains itself",
               all(r["why"] for r in second["rejected"]), True)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_the_board_is_never_flooded():
@@ -163,8 +163,8 @@ def test_the_board_is_never_flooded():
 
 def test_the_decision_names_the_tasks_it_created():
     print("Report can score the MD later:")
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         _issue(board.DB, "critical")
         out = MD.run()
@@ -176,13 +176,13 @@ def test_the_decision_names_the_tasks_it_created():
         check("the decision records its task ids",
               sorted(ids), sorted(p["task_id"] for p in out["posted"]))
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_a_dry_run_writes_absolutely_nothing():
     print("--dry-run is honest:")
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         _issue(board.DB, "critical")
         out = MD.run(dry_run=True)
@@ -193,14 +193,14 @@ def test_a_dry_run_writes_absolutely_nothing():
         con.close()
         check("and no decision was logged", n, 0)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_the_sector_can_actually_claim_what_the_md_posted():
     """The whole point: the MD's task must be one a real sector picks up."""
     print("The handover works:")
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         _issue(board.DB, "critical")
         out = MD.run()
@@ -218,7 +218,7 @@ def test_the_sector_can_actually_claim_what_the_md_posted():
         check("a second agent cannot claim the same task",
               board.claim_task(claimed["id"], "it-fixer"), False)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_the_md_does_not_grade_itself():
@@ -244,8 +244,8 @@ def test_the_md_does_not_grade_itself():
 def test_the_card_measures_management_not_just_outcome():
     print("Five things a manager is accountable for:")
     from coordination import scorecard
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         empty = scorecard.build()
         check("with no cycles it says so", empty["cycles_run"], 0)
@@ -277,7 +277,7 @@ def test_the_card_measures_management_not_just_outcome():
                     key=lambda k: card[k]["value"])
         check("the verdict names the weakest link", worst in card["verdict"], True)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_the_sector_proposal_queue():
@@ -289,8 +289,8 @@ def test_the_sector_proposal_queue():
     """
     print("Sectors ask, the MD allocates:")
     from coordination import proposals as P
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         check("a hunch with no evidence is refused at the door",
               P.propose("SEO", "have a look around", evidence=""), None)
@@ -314,14 +314,14 @@ def test_the_sector_proposal_queue():
         check("and the proposal was answered", status, "accepted")
         check("with a reason the sector can read", bool(why), True)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_a_rejected_proposal_is_never_binned_silently():
     print("Nothing disappears without a reason:")
     from coordination import proposals as P
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         pid = P.propose("Leads", "Collect hotel leads",
                         evidence="owner wants hotels", needs="maps")
@@ -340,7 +340,7 @@ def test_a_rejected_proposal_is_never_binned_silently():
             silent = False
         check("a decision with no reason is impossible", silent, False)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_a_sector_can_refuse_the_wrong_work():
@@ -351,8 +351,8 @@ def test_a_sector_can_refuse_the_wrong_work():
     """
     print("The right of reply:")
     from coordination import proposals as P
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         tid = board.post_task("Leads", "Write a service page", "d", created_by="MD")
         board.claim_task(tid, "leads-hunter")
@@ -378,14 +378,14 @@ def test_a_sector_can_refuse_the_wrong_work():
         check("a finished task cannot be objected to",
               P.object_to_task(t2, "IT", "wrong_sector"), False)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def test_the_owner_outranks_the_md():
     print("The owner's own orders:")
     from coordination import proposals as P
-    real_b, real_s, real_t = board.DB, state.DB, targets.DB
-    board.DB = state.DB = targets.DB = _fresh_db()
+    real_b, real_t = board.DB, targets.DB
+    board.DB = targets.DB = _fresh_db()
     try:
         P.set_orders("IT", "check the site twice today, the form felt slow")
         out = MD.run()
@@ -393,7 +393,7 @@ def test_the_owner_outranks_the_md():
               any("Owner's order" in p["title"] for p in out["posted"]), True)
 
         # an order that cannot run is NEWS, not a quiet rejection
-        board.DB = state.DB = targets.DB = _fresh_db()
+        board.DB = targets.DB = _fresh_db()
         P.set_orders("Leads", "focus on Sharjah hotels today")
         out = MD.run()
         check("a blocked order is surfaced, not binned",
@@ -401,7 +401,7 @@ def test_the_owner_outranks_the_md():
         check("in words the owner will notice",
               "CANNOT RUN" in out["summary"], True)
     finally:
-        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+        board.DB, targets.DB = real_b, real_t
 
 
 def _raises(fn):
@@ -520,7 +520,15 @@ def test_security_clearance_fails_safe():
         check(f"    {text[:24]!r}", C._verdict_of(text), want)
 
 
+from providers import store as _store
+
+
 def main():
+    with _store.isolated():
+        _main()
+
+
+def _main():
     test_two_minds_on_the_allocation()
     test_security_clearance_fails_safe()
     test_the_sector_proposal_queue()

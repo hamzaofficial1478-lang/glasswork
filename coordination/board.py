@@ -148,6 +148,22 @@ _ADDED_TABLES = (
     """CREATE TABLE IF NOT EXISTS sector_orders (
          day TEXT NOT NULL, sector TEXT NOT NULL, orders TEXT,
          updated_at INTEGER, PRIMARY KEY (day, sector))""",
+    # The remembered preflight. A saved API key is not a working API key, and
+    # proving one costs a call — so the sweep runs when asked and the office
+    # lights read the answer from here instead of re-testing on every poll.
+    """CREATE TABLE IF NOT EXISTS preflight_runs (
+         id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, ready INTEGER,
+         blocking TEXT, payload TEXT)""",
+    # One press of Run. Kept because a day that half-ran and stopped is the
+    # thing you most need to see afterwards, and stdout has scrolled away.
+    """CREATE TABLE IF NOT EXISTS day_runs (
+         id TEXT PRIMARY KEY, started_at INTEGER, ended_at INTEGER,
+         status TEXT, started_by TEXT, note TEXT, forced INTEGER DEFAULT 0,
+         blocking TEXT, steps_total INTEGER DEFAULT 0, steps_done INTEGER DEFAULT 0)""",
+    """CREATE TABLE IF NOT EXISTS day_steps (
+         id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, seq INTEGER,
+         label TEXT, module TEXT, status TEXT, started_at INTEGER,
+         ended_at INTEGER, code INTEGER, summary TEXT)""",
 )
 
 

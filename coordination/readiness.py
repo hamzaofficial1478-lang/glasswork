@@ -1,0 +1,315 @@
+"""
+readiness.py — can this sector actually work right now?
+
+WHAT THE OWNER ASKED FOR
+
+"when each sector is having apis and working then there should be a sign showing
+that the sector has working apis."
+
+Fair, and it was missing. The office floor showed what each sector HAD DONE
+(bulbs, task feed) but nothing about whether it COULD do anything. A sector with
+no brain and no key looks identical to one that simply had a quiet morning: both
+dark, both silent. That is the worst kind of dashboard — it hides the difference
+between "nothing needed doing" and "nothing can be done".
+
+FOUR STATES, AND WHY NOT TWO
+
+A green/red light would be a lie in both directions, so this carries four:
+
+  ready       a brain answers, every key it needs is on the shelf, and the last
+              check passed. Press Run and this sector does real work.
+  unchecked   everything is configured but nothing has been tested since it was
+              saved. A saved key is not a working key. This is NOT green, because
+              the whole point of the light is that green means proven.
+  thin        it will run, but one thing dying stops it — one brain and no
+              fallback, or one API on a shelf it depends on. Runs today, silently
+              stops the night that API rate-limits.
+  blocked     it cannot run. No brain, or a shelf it must have is empty.
+
+CONFIGURED IS NOT WORKING. That distinction is the entire module. Reading the
+config is free and instant, so this runs on every dashboard poll; proving the
+APIs costs money and time, so that only happens on a preflight and the result is
+remembered here.
+
+WHAT EACH SECTOR NEEDS, AND WHY
+
+Not invented — read off what the pipelines actually borrow and read:
+
+  seo      seo_data   pipelines/seo_gap.py borrows it for volumes
+           crawler    pipelines/competitors.py borrows it to read rival pages
+  leads    maps       pipelines/leads_hunt.py needs a Places key or it finds nobody
+           email      pipelines/mail.py borrows it to send
+  content  stock_images / image_gen — optional. A page without a picture still
+           publishes; the sector is not blocked by it.
+  it       SITE_URL. There is nothing to check the health of without one.
+  report   somewhere to send the digest, or the day's score is written to a
+           table nobody opens.
+
+MD AND SECURITY WANT TWO BRAINS, NOT ONE
+
+Both put hard calls to two models and treat disagreement as the signal (see
+providers/routing.deliberate and coordination/clearance.py). With one model
+configured they still run, but the cross-check silently stops happening — so one
+brain reads as 'thin' for those two, and only for those two.
+"""
+import json
+import sqlite3
+import time
+
+try:
+    from . import board
+except ImportError:  # pragma: no cover
+    import board
+
+# Where the cabinet lives is board's to say — see the note in state.py.
+def _db():
+    return board.DB
+
+READY, UNCHECKED, THIN, BLOCKED = "ready", "unchecked", "thin", "blocked"
+_RANK = {BLOCKED: 0, THIN: 1, UNCHECKED: 2, READY: 3}
+
+# sector key -> (routing task, office room key, label)
+SECTORS = [
+    ("md", "Director", "Director's Office"),
+    ("it", "IT", "IT & Site Health"),
+    ("content", "Content", "Content & Social"),
+    ("seo", "SEO", "SEO & Rankings"),
+    ("leads", "Leads", "Leads & Outreach"),
+    ("report", "Report", "Reports"),
+    ("security", "Security", "Security"),
+]
+
+# how many brains the sector's own design assumes
+WANTS_TWO = {"md", "security"}
+
+# shelves each sector borrows, and whether it can work without them
+SHELVES = {
+    "seo": {"seo_data": True, "crawler": True},
+    "leads": {"maps": True, "email": True},
+    "content": {"stock_images": False, "image_gen": False},
+}
+
+# .env keys a sector cannot work without, with the plain reason
+ENV_NEEDS = {
+    "it": [("SITE_URL", "there is no site to check the health of")],
+    "leads": [("SMTP_HOST", "outreach has no way to send")],
+}
+
+# a soft need: the sector runs, but the output goes nowhere useful
+ENV_WANTS = {
+    "report": [("NTFY_TOPIC", "the daily digest is written to a table nobody opens")],
+    "leads": [("OUTREACH_DOMAIN", "outreach stays off until a sending domain is set")],
+}
+
+
+def _read_env() -> dict:
+    try:
+        from providers import integrations
+        return integrations.read_env()
+    except Exception:
+        return {}
+
+
+def _brains(task):
+    """The sector's model chain, and how much of it has been proven to answer."""
+    try:
+        from providers import routing, store
+    except Exception as e:
+        return {"n": 0, "verified": 0, "names": [], "error": str(e)}
+    try:
+        r = routing.resolve_task(task)
+    except Exception as e:
+        return {"n": 0, "verified": 0, "names": [], "error": str(e)}
+    if not r.get("ok"):
+        return {"n": 0, "verified": 0, "names": [], "error": r.get("error")}
+
+    names, verified, tested = [], 0, 0
+    for cand in r.get("candidates", []):
+        names.append(f'{cand.get("credential_name", "?")} · {cand.get("api_model_id", "?")}')
+        try:
+            _cred, model = store.find_model(cand["model_id"])
+            last = (model or {}).get("last_test_result") or {}
+        except Exception:
+            last = {}
+        if last.get("ok") is True:
+            verified += 1
+        if "ok" in last:
+            tested += 1
+    return {"n": len(names), "verified": verified, "tested": tested, "names": names}
+
+
+def _shelf_state(names):
+    """{shelf: {items, names}} for the shelves asked about. Cheap, config only."""
+    out = {}
+    try:
+        from providers import store
+        cat = store.shelf_catalogue()
+    except Exception:
+        cat = {}
+    for n in names:
+        items = cat.get(n, [])
+        working = sum(1 for i in items
+                      if ((i.get("last_test_result") or {}).get("ok") is True))
+        out[n] = {"items": len(items),
+                  "names": [i.get("name", "") for i in items],
+                  "working": working}
+    return out
+
+
+def _worst(*states):
+    return min(states, key=lambda s: _RANK[s])
+
+
+def sector(key, task, env=None, shelf=None) -> dict:
+    """One sector's verdict, with the reason spelled out in plain words."""
+    env = _read_env() if env is None else env
+    wanted = list(SHELVES.get(key, {}))
+    shelf = _shelf_state(wanted) if shelf is None else shelf
+
+    b = _brains(task)
+    notes, blocking, thin = [], [], []
+    state = READY
+
+    # ---- the brain -----------------------------------------------------
+    if b["n"] == 0:
+        state = BLOCKED
+        blocking.append("no brain routed — this sector cannot reason at all")
+    else:
+        if b["verified"] == 0:
+            state = _worst(state, UNCHECKED)
+            notes.append(f"{b['n']} brain{'s' if b['n'] > 1 else ''} configured, "
+                         "none proven yet — run the check")
+        elif b["verified"] == 1 and b["n"] == 1:
+            state = _worst(state, THIN)
+            thin.append("one brain and no fallback")
+        if key in WANTS_TWO and b["n"] < 2:
+            state = _worst(state, THIN)
+            thin.append("this sector puts hard calls to two models; with one, "
+                        "the cross-check silently stops happening")
+
+    # ---- the shelves it borrows ----------------------------------------
+    for name, required in SHELVES.get(key, {}).items():
+        s = shelf.get(name, {"items": 0, "working": 0})
+        if s["items"] == 0:
+            if required:
+                state = BLOCKED
+                blocking.append(f"the {name} shelf is empty and this sector needs it")
+            else:
+                notes.append(f"no {name} API — optional, the sector works without it")
+        elif s["working"] == 0:
+            state = _worst(state, UNCHECKED)
+            notes.append(f"{name}: {s['items']} API saved, not proven yet")
+        elif s["items"] == 1 and required:
+            state = _worst(state, THIN)
+            thin.append(f"one API on the {name} shelf and no fallback")
+
+    # ---- keys in .env ---------------------------------------------------
+    for k, why in ENV_NEEDS.get(key, []):
+        if not (env.get(k) or "").strip():
+            state = BLOCKED
+            blocking.append(f"{k} is not set — {why}")
+    for k, why in ENV_WANTS.get(key, []):
+        if not (env.get(k) or "").strip():
+            state = _worst(state, THIN)
+            thin.append(f"{k} is not set — {why}")
+
+    says = (blocking[0] if blocking else
+            thin[0] if thin else
+            notes[0] if notes and state == UNCHECKED else
+            "brain answers, every key it needs is on the shelf")
+
+    return {"sector": key, "state": state, "says": says,
+            "brains": b, "shelves": shelf,
+            "blocking": blocking, "thin": thin, "notes": notes}
+
+
+def all_sectors() -> dict:
+    """Every sector's light, plus the one-line summary of the floor."""
+    env = _read_env()
+    wanted = sorted({n for m in SHELVES.values() for n in m})
+    shelf = _shelf_state(wanted)
+    out = []
+    for key, room, label in SECTORS:
+        r = sector(key, key, env=env,
+                   shelf={n: shelf[n] for n in SHELVES.get(key, {})})
+        r["room"] = room
+        r["label"] = label
+        out.append(r)
+
+    counts = {s: sum(1 for r in out if r["state"] == s)
+              for s in (READY, UNCHECKED, THIN, BLOCKED)}
+    if counts[BLOCKED]:
+        head = f"{counts[BLOCKED]} sector{'s' if counts[BLOCKED] > 1 else ''} cannot run"
+    elif counts[UNCHECKED]:
+        head = f"{counts[UNCHECKED]} not proven yet — run the check"
+    elif counts[THIN]:
+        head = f"{counts[THIN]} running with no fallback"
+    else:
+        head = "all sectors ready"
+
+    return {"ok": True, "at": int(time.time()), "sectors": out,
+            "counts": counts, "head": head,
+            "can_run": counts[BLOCKED] == 0, "checked": last_check()}
+
+
+# ---------------------------------------------------------------------------
+# THE REMEMBERED CHECK
+#
+# Proving an API costs a call. Doing that on every dashboard poll would burn the
+# spend cap on a screen nobody is looking at, so the sweep runs when the owner
+# asks for it and the result is kept here for the lights to read.
+# ---------------------------------------------------------------------------
+
+def record_check(payload: dict) -> None:
+    board.ensure_schema()
+    try:
+        with sqlite3.connect(_db(), timeout=30) as c:
+            c.execute("INSERT INTO preflight_runs(at, ready, blocking, payload)"
+                      " VALUES(?,?,?,?)",
+                      (int(time.time()), 1 if payload.get("ready") else 0,
+                       json.dumps(payload.get("blocking") or []),
+                       json.dumps(payload)[:400000]))
+            # keep the last 30; this is a light, not an archive
+            c.execute("DELETE FROM preflight_runs WHERE id NOT IN"
+                      " (SELECT id FROM preflight_runs ORDER BY at DESC LIMIT 30)")
+    except Exception:
+        pass
+
+
+def last_check() -> dict:
+    board.ensure_schema()
+    try:
+        with sqlite3.connect(_db(), timeout=30) as c:
+            r = c.execute("SELECT at, ready, blocking FROM preflight_runs"
+                          " ORDER BY at DESC LIMIT 1").fetchone()
+    except Exception:
+        return {}
+    if not r:
+        return {}
+    try:
+        blocking = json.loads(r[2] or "[]")
+    except Exception:
+        blocking = []
+    return {"at": r[0], "ready": bool(r[1]), "blocking": blocking,
+            "ago": int(time.time()) - int(r[0] or 0)}
+
+
+def as_text() -> str:
+    d = all_sectors()
+    mark = {READY: "●", UNCHECKED: "○", THIN: "◐", BLOCKED: "✕"}
+    L = [f"SECTOR READINESS — {d['head']}"]
+    for s in d["sectors"]:
+        L.append(f"  {mark[s['state']]} {s['label']:22} {s['state']:9} {s['says']}")
+    ck = d["checked"]
+    L.append("")
+    L.append(f"  last proven: {ck['ago'] // 60} min ago" if ck
+             else "  never proven — nothing here has been tested against a live API")
+    return "\n".join(L)
+
+
+if __name__ == "__main__":
+    import sys
+    if "--json" in sys.argv:
+        print(json.dumps(all_sectors()))
+    else:
+        print(as_text())

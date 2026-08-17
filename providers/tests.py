@@ -125,13 +125,25 @@ def test_preflight_cover():
     fallback is configured — that is the failure people don't see coming.
     """
     print("Fallback cover verdicts:")
-    from .preflight import _cover, COVERED, SINGLE, DOWN, EMPTY, _ModelCache
+    from .preflight import (_cover, _verdict, COVERED, SINGLE, DOWN, EMPTY,
+                            UNKNOWN, _ModelCache)
     check("two of two work -> COVERED", _cover(2, 2), COVERED)
     check("two of three work -> COVERED", _cover(2, 3), COVERED)
     check("primary works, fallback dead -> SINGLE", _cover(1, 2), SINGLE)
     check("lone provider -> SINGLE", _cover(1, 1), SINGLE)
     check("nothing works -> DOWN", _cover(0, 2), DOWN)
     check("nothing configured -> EMPTY", _cover(0, 0), EMPTY)
+
+    # 'I did not look' is not 'I looked and it is dead'. Under --quick every
+    # link comes back ok=None, and reading that as DOWN made the cheap check
+    # announce that every sector in the agency had no working brain.
+    quick = [{"ok": None}, {"ok": None}]
+    check("not called -> UNKNOWN, not DOWN", _verdict(quick), UNKNOWN)
+    check("tested and dead -> DOWN", _verdict([{"ok": False}, {"ok": False}]), DOWN)
+    check("one alive, one untested -> SINGLE",
+          _verdict([{"ok": True}, {"ok": None}]), SINGLE)
+    check("one dead, one untested -> UNKNOWN",
+          _verdict([{"ok": False}, {"ok": None}]), UNKNOWN)
 
     # a brain shared by five sectors must cost one call, not five
     calls = []

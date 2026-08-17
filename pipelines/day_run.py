@@ -1,0 +1,473 @@
+"""
+day_run.py — the Run button. Check everything, take the owner's instructions,
+then work.
+
+    python3 -m pipelines.day_run --check            just the preflight, no work
+    python3 -m pipelines.day_run --start            check, then run the day
+    python3 -m pipelines.day_run --start --force    run even though something is broken
+    python3 -m pipelines.day_run --status           what the current/last run did
+
+WHAT "CHECK EVERYTHING" ACTUALLY MEANS
+
+The owner asked for a button that "will firstly check the whole program like
+apis, connectors, each agent and sector working or not and then user's input and
+then will start to work". Four checks, in the order that fails cheapest first:
+
+  1. the cabinet    is there a database, and does it have the tables? Free.
+  2. the sectors    does each one have a brain and the keys it borrows?
+                    (coordination/readiness.py — config only, free)
+  3. the pipelines  does every module on today's list actually IMPORT? This one
+                    is easy to skip and it is the one that bites: a typo in
+                    seo_gap.py does not show up in any API test, it shows up
+                    forty minutes into the run as a step that produced nothing.
+                    Importing is cheap and it is the closest honest answer to
+                    "is each agent working".
+  4. the APIs       every model in every chain, every API on every shelf, and
+                    the notification channel. This one spends money, so it is
+                    the only part you can turn off (--quick).
+
+BLOCKING VS WARNING, AND WHY FORCE EXISTS
+
+Blocking means a sector cannot run at all. The day stops and the owner is told
+which sector and why — starting anyway would produce a run that looks like it
+worked and quietly did a third of the job, which is worse than not running.
+
+But the owner is the tie-breaker, not this file. --force runs it anyway, records
+forced=1 against the run, and the office shows it as forced. A safety rail you
+cannot override is a safety rail people work around; one that makes you say so
+out loud, in writing, is one that holds.
+
+ONE DAY AT A TIME
+
+The whole run takes the 'day_run' resource lock. Two presses of the button is
+the most obvious way to get two MDs planning the same day and two Hunters
+mailing the same lead, and the lock is the primitive the handbook already
+provides for exactly that. Second press is refused, plainly, and told who holds it.
+"""
+import argparse
+import json
+import sqlite3
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from coordination import board, proposals, readiness   # noqa: E402
+
+PY = sys.executable or "python3"
+LOCK = "day_run"
+LOCK_HOLDER = "owner-run-button"
+
+# The order the handbook lays down, mirrored from run.py's DAY. The MD plans
+# first or the board is empty and every sector correctly refuses to invent work.
+STEPS = [
+    ("The MD plans the day", "pipelines.md_cycle", "Director"),
+    ("IT checks the site", "pipelines.it_health", "IT"),
+    ("Leads maps its sources", "pipelines.leads_sources", "Leads"),
+    ("Leads collects", "pipelines.leads_hunt", "Leads"),
+    ("Security screens what came in", "pipelines.security_screen", "Security"),
+    ("SEO finds the gaps", "pipelines.seo_gap", "SEO"),
+    ("SEO watches the rivals", "pipelines.competitors", "SEO"),
+    ("Content briefs the pages", "pipelines.content_briefs", "Content"),
+    ("Report scores the day", "pipelines.report_daily", "Report"),
+]
+
+STEP_TIMEOUT = 420
+
+
+def _now():
+    return int(time.time())
+
+
+# ---------------------------------------------------------------------------
+# 1-4. THE PREFLIGHT
+# ---------------------------------------------------------------------------
+
+def check_cabinet() -> dict:
+    if not Path(board.DB).exists():
+        return {"name": "Filing cabinet", "ok": False,
+                "says": "no database yet — it builds itself when you save the website form"}
+    board.ensure_schema()
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            have = {r[0] for r in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+    except Exception as e:
+        return {"name": "Filing cabinet", "ok": False, "says": f"cannot be opened: {e}"}
+    need = {"tasks", "agent_runs", "decisions", "leads", "site_issues",
+            "proposals", "day_runs"}
+    missing = sorted(need - have)
+    return {"name": "Filing cabinet", "ok": not missing,
+            "says": f"{len(have)} tables, all present" if not missing
+                    else f"missing: {', '.join(missing)}"}
+
+
+def check_pipelines() -> list:
+    """
+    Does every module on today's list import cleanly?
+
+    Run in a SUBPROCESS on purpose. Importing them into this process would let a
+    module with a side effect at import time — one that opens the cabinet, or
+    posts something — do it during a check the owner thinks is read-only.
+    """
+    out = []
+    for label, mod, room in STEPS:
+        code = f"import importlib,sys; importlib.import_module({mod!r})"
+        p = subprocess.run([PY, "-c", code], cwd=str(ROOT), capture_output=True,
+                           text=True, timeout=120)
+        if p.returncode == 0:
+            out.append({"name": label, "module": mod, "room": room, "ok": True,
+                        "says": "loads"})
+        else:
+            last = [l for l in (p.stderr or "").strip().splitlines() if l.strip()]
+            out.append({"name": label, "module": mod, "room": room, "ok": False,
+                        "says": (last[-1] if last else "would not import")[:200]})
+    return out
+
+
+def check_apis(quick=False) -> dict:
+    try:
+        from providers import preflight
+        return preflight.sweep(quick=quick)
+    except Exception as e:
+        return {"ok": False, "ready": False, "blocking": [f"could not sweep the APIs: {e}"],
+                "warnings": [], "routing": [], "shelf": [], "integrations": []}
+
+
+def _once(lines):
+    """Same complaint from two checks is still one problem. Order preserved."""
+    seen, out = set(), []
+    for l in lines:
+        k = (l or "").strip().lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(l)
+    return out
+
+
+def preflight(quick=False) -> dict:
+    """The whole check, in one shape the UI can render top to bottom."""
+    t0 = time.time()
+    cab = check_cabinet()
+    sect = readiness.all_sectors()
+    pipes = check_pipelines()
+    apis = check_apis(quick=quick)
+
+    blocking, warnings = [], []
+    if not cab["ok"]:
+        blocking.append(f"Filing cabinet: {cab['says']}")
+    for s in sect["sectors"]:
+        for b in s["blocking"]:
+            blocking.append(f"{s['label']}: {b}")
+        for t in s["thin"]:
+            warnings.append(f"{s['label']}: {t}")
+    for p in pipes:
+        if not p["ok"]:
+            blocking.append(f"{p['name']} will not even load: {p['says']}")
+    blocking += list(apis.get("blocking") or [])
+    warnings += list(apis.get("warnings") or [])
+
+    # Deduplicate: a dead brain shows up in both the sector light and the API
+    # sweep, and telling the owner the same thing twice trains him to skim.
+    blocking = _once(blocking)
+    warnings = _once(warnings)
+
+    res = {"ok": True, "at": _now(), "quick": quick,
+           "took_ms": int((time.time() - t0) * 1000),
+           "cabinet": cab, "sectors": sect, "pipelines": pipes, "apis": apis,
+           "ready": not blocking, "blocking": blocking, "warnings": warnings,
+           "head": ("ready to run" if not blocking else
+                    f"{len(blocking)} thing{'s' if len(blocking) > 1 else ''} "
+                    "must be fixed first")}
+    readiness.record_check(res)
+    return res
+
+
+# ---------------------------------------------------------------------------
+# THE RUN ITSELF
+# ---------------------------------------------------------------------------
+
+def _open_run(note, forced, blocking):
+    rid = uuid.uuid4().hex[:12]
+    board.ensure_schema()
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        c.execute("INSERT INTO day_runs(id,started_at,status,started_by,note,forced,"
+                  "blocking,steps_total,steps_done) VALUES(?,?,?,?,?,?,?,?,0)",
+                  (rid, _now(), "running", "owner", (note or "")[:2000],
+                   1 if forced else 0, json.dumps(blocking or []), len(STEPS)))
+        for i, (label, mod, room) in enumerate(STEPS):
+            c.execute("INSERT INTO day_steps(run_id,seq,label,module,status)"
+                      " VALUES(?,?,?,?, 'waiting')", (rid, i, label, mod))
+    return rid
+
+
+def _step(rid, seq, **fields):
+    sets = ", ".join(f"{k}=?" for k in fields)
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        c.execute(f"UPDATE day_steps SET {sets} WHERE run_id=? AND seq=?",
+                  (*fields.values(), rid, seq))
+
+
+def _close_run(rid, status):
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        done = c.execute("SELECT count(*) FROM day_steps WHERE run_id=?"
+                         " AND status IN ('ok','idle')", (rid,)).fetchone()[0]
+        c.execute("UPDATE day_runs SET status=?, ended_at=?, steps_done=? WHERE id=?",
+                  (status, _now(), done, rid))
+
+
+def _as_json(text):
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    i = text.find("{")
+    if i >= 0:
+        try:
+            return json.loads(text[i:])
+        except Exception:
+            pass
+    return None
+
+
+def _summarise(out, code):
+    """
+    One line saying what the step did.
+
+    Most pipelines answer in pretty-printed JSON, so "the last line of output"
+    — the obvious implementation — put a single closing brace next to every
+    step in the owner's run panel. Read the object instead, and fall back to
+    the FIRST line for the human-readable ones, because a pipeline that prints
+    prose leads with its headline and trails off into detail.
+    """
+    text = (out or "").strip()
+    if not text:
+        return f"no output (exit {code})"
+
+    obj = _as_json(text)
+    if isinstance(obj, dict):
+        if obj.get("ok") is False:
+            return (str(obj.get("error") or obj.get("why")
+                        or "the step reported it did not run"))[:300]
+        bits = []
+        for k in ("note", "summary", "head", "why"):
+            if obj.get(k):
+                bits.append(str(obj[k]))
+                break
+        # the counts a pipeline reports ARE its summary — 'gaps found 69' says
+        # more than any sentence we could compose about it
+        for k, v in obj.items():
+            if isinstance(v, bool) or k in ("ok", "at", "ts"):
+                continue
+            if isinstance(v, int) and v:
+                bits.append(f"{k.replace('_', ' ')} {v}")
+            elif isinstance(v, list) and v:
+                bits.append(f"{k.replace('_', ' ')} {len(v)}")
+        return (", ".join(bits[:5]) or "finished")[:300]
+
+    lines = [l.rstrip() for l in text.splitlines() if l.strip()]
+    if any(l.startswith("Traceback") for l in lines):
+        return lines[-1].strip()[:300]
+    return lines[0][:300]
+
+
+def _verdict(out, code):
+    """
+    Three outcomes, not two.
+
+    Exit code alone reads 'IT had no task on the board' as a clean success, and
+    the run panel then shows a green tick beside the words "did not run" — which
+    is the dashboard contradicting itself. A pipeline that exits 0 while
+    reporting ok:false did nothing wrong AND did nothing: that is 'idle', its
+    own state, so a day where four sectors sat out cannot be read as a full day.
+    """
+    if code != 0:
+        return "failed"
+    obj = _as_json((out or "").strip())
+    if isinstance(obj, dict) and obj.get("ok") is False:
+        return "idle"
+    return "ok"
+
+
+def start(orders=None, note="", force=False, quick=False, skip_check=False) -> dict:
+    """
+    Check, take the owner's instructions, then work. Returns when the day is done.
+
+    `orders` is {sector: what the owner wants today}. It is written to the board
+    BEFORE the MD plans, which is the whole point — an order that arrives after
+    the plan is written is an order the MD never saw.
+    """
+    pre = {"ready": True, "blocking": [], "warnings": []} if skip_check \
+        else preflight(quick=quick)
+    if not pre["ready"] and not force:
+        return {"ok": False, "ran": False, "refused": True, "preflight": pre,
+                "why": ("The day was not started. " + "; ".join(pre["blocking"][:3])
+                        + ". Fix these, or press Run again with 'run anyway'.")}
+
+    if not board.acquire_lock(LOCK, LOCK_HOLDER, wait=False, ttl=3 * 3600):
+        return {"ok": False, "ran": False, "busy": True,
+                "why": "A day is already running. Wait for it to finish — two "
+                       "runs at once means two MDs planning the same day."}
+
+    # the owner's words go on the board first, so the MD plans around them
+    written = {}
+    for sec, text in (orders or {}).items():
+        if (text or "").strip():
+            proposals.set_orders(sec, text)
+            written[sec] = text.strip()
+
+    rid = _open_run(note, force and not pre["ready"], pre.get("blocking"))
+    failed = 0
+    try:
+        for i, (label, mod, room) in enumerate(STEPS):
+            _step(rid, i, status="running", started_at=_now())
+            try:
+                p = subprocess.run([PY, "-m", mod], cwd=str(ROOT), capture_output=True,
+                                   text=True, timeout=STEP_TIMEOUT)
+                code, out = p.returncode, (p.stdout or "") + (p.stderr or "")
+            except subprocess.TimeoutExpired:
+                code, out = 124, f"timed out after {STEP_TIMEOUT}s"
+            except Exception as e:                       # pragma: no cover
+                code, out = 1, str(e)
+            verdict = _verdict(out, code)
+            failed += 1 if verdict == "failed" else 0
+            _step(rid, i, status=verdict, ended_at=_now(),
+                  code=code, summary=_summarise(out, code))
+            with sqlite3.connect(board.DB, timeout=30) as c:
+                c.execute("UPDATE day_runs SET steps_done=steps_done+1 WHERE id=?", (rid,))
+        # A step that fails is not a day that failed. IT going down should not
+        # stop Report scoring what Leads did — so every step runs, and the
+        # verdict at the end says how many did not.
+        _close_run(rid, "done" if not failed else "partial")
+    except BaseException:
+        _close_run(rid, "failed")
+        raise
+    finally:
+        board.release_lock(LOCK, LOCK_HOLDER)
+
+    return {"ok": True, "ran": True, "run_id": rid, "orders": written,
+            "failed_steps": failed, "preflight": pre,
+            "why": ("The day ran clean." if not failed
+                    else f"The day ran; {failed} of {len(STEPS)} steps failed.")}
+
+
+# ---------------------------------------------------------------------------
+# WHAT THE UI POLLS WHILE IT RUNS
+# ---------------------------------------------------------------------------
+
+def status(run_id=None) -> dict:
+    board.ensure_schema()
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.row_factory = sqlite3.Row
+            r = (c.execute("SELECT * FROM day_runs WHERE id=?", (run_id,)).fetchone()
+                 if run_id else
+                 c.execute("SELECT * FROM day_runs ORDER BY started_at DESC LIMIT 1").fetchone())
+            if not r:
+                return {"ok": True, "run": None, "steps": [],
+                        "head": "the agency has never been run from the button"}
+            steps = [dict(s) for s in c.execute(
+                "SELECT seq,label,module,status,started_at,ended_at,code,summary"
+                " FROM day_steps WHERE run_id=? ORDER BY seq", (r["id"],))]
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    run = dict(r)
+    try:
+        run["blocking"] = json.loads(run.get("blocking") or "[]")
+    except Exception:
+        run["blocking"] = []
+    live = next((s for s in steps if s["status"] == "running"), None)
+    done = sum(1 for s in steps if s["status"] in ("ok", "idle", "failed"))
+    bad = sum(1 for s in steps if s["status"] == "failed")
+    sat_out = sum(1 for s in steps if s["status"] == "idle")
+    run["running"] = run["status"] == "running"
+    if live:
+        head = live["label"] + "…"
+    elif run["status"] not in ("done", "partial", "failed"):
+        head = run["status"]
+    elif bad:
+        head = f"finished — {bad} step{'s' if bad != 1 else ''} failed"
+    elif sat_out:
+        head = f"finished — {sat_out} sector{'s' if sat_out != 1 else ''} had nothing to do"
+    else:
+        head = "finished clean"
+    return {"ok": True, "run": run, "steps": steps,
+            "doing": live["label"] if live else None,
+            "progress": [done, len(steps)], "idle": sat_out, "failed": bad,
+            "head": head}
+
+
+def _print_check(p):
+    print(f"PREFLIGHT — {p['head']}  ({p['took_ms']}ms)")
+    print(f"  {'ok ' if p['cabinet']['ok'] else 'BAD'} {p['cabinet']['name']}: {p['cabinet']['says']}")
+    print()
+    print(readiness.as_text())
+    print()
+    print("PIPELINES")
+    for s in p["pipelines"]:
+        print(f"  {'ok ' if s['ok'] else 'BAD'} {s['name']:34} {s['says']}")
+    if p["blocking"]:
+        print("\nSTOPPING THE RUN")
+        for b in p["blocking"]:
+            print("  ✕ " + b)
+    if p["warnings"]:
+        print("\nWORTH KNOWING")
+        for w in p["warnings"]:
+            print("  ! " + w)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Check everything, then run the day.")
+    ap.add_argument("--check", action="store_true", help="preflight only, run nothing")
+    ap.add_argument("--start", action="store_true", help="preflight, then run the day")
+    ap.add_argument("--status", action="store_true", help="what the last run did")
+    ap.add_argument("--force", action="store_true", help="run even if something is broken")
+    ap.add_argument("--quick", action="store_true", help="skip the live API calls")
+    ap.add_argument("--skip-check", action="store_true", help="run without checking first")
+    ap.add_argument("--note", default="", help="what you want out of today")
+    ap.add_argument("--order", nargs=2, action="append", metavar=("SECTOR", "TEXT"),
+                    default=[], help="today's order for one sector (repeatable)")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--stdin", action="store_true",
+                    help="read {orders, note, force, quick} as JSON on stdin")
+    a = ap.parse_args()
+
+    body = {}
+    if a.stdin:
+        try:
+            body = json.loads(sys.stdin.read() or "{}")
+        except Exception as e:
+            print(json.dumps({"ok": False, "error": f"bad input: {e}"}))
+            return 2
+
+    if a.status:
+        print(json.dumps(status()) if a.json else json.dumps(status(), indent=2))
+        return 0
+    if a.check and not a.start:
+        p = preflight(quick=a.quick or bool(body.get("quick")))
+        print(json.dumps(p)) if a.json else _print_check(p)
+        return 0 if p["ready"] else 1
+
+    orders = dict(body.get("orders") or {})
+    orders.update({s: t for s, t in a.order})
+    r = start(orders=orders,
+              note=body.get("note", a.note),
+              force=bool(body.get("force")) or a.force,
+              quick=bool(body.get("quick")) or a.quick,
+              skip_check=bool(body.get("skip_check")) or a.skip_check)
+    if a.json or a.stdin:
+        print(json.dumps(r))
+    else:
+        if r.get("preflight") and not r["ok"]:
+            _print_check(r["preflight"])
+        print("\n" + r["why"])
+    return 0 if r.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

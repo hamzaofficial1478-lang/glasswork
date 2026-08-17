@@ -170,6 +170,105 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .toggle.on{background:var(--glass-dim);border-color:var(--glass)}.toggle.on::after{left:20px;background:var(--glass)}
 .pbtn{width:100%;padding:12px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:14px;cursor:pointer;margin-top:4px}
 
+/* ---- CAN THIS SECTOR WORK? ------------------------------------------------
+   The bulbs say what a sector HAS DONE. This says what it COULD do, which is a
+   different question and was missing: a sector with no brain and no key looked
+   exactly like one that had a quiet morning — both dark, both silent.
+
+   Four states, not two, because green/red would lie in both directions:
+     ready      proven — an API was actually called and answered
+     unchecked  configured but never called. A saved key is not a working key,
+                so this is deliberately NOT green
+     thin       runs, but one thing dying stops it
+     blocked    cannot run at all
+   ------------------------------------------------------------------------- */
+.rdy{position:absolute;top:-11px;right:12px;z-index:4;display:flex;align-items:center;gap:5px;
+     padding:3px 8px;border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:9px;
+     letter-spacing:.1em;text-transform:uppercase;cursor:help;white-space:nowrap;
+     background:var(--panel2);border:1px solid var(--line2);color:var(--muted)}
+.rdy .b{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.rdy.ready{border-color:var(--ok);color:var(--ok)}
+.rdy.ready .b{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+.rdy.unchecked{border-color:var(--line2);color:var(--etch)}
+.rdy.unchecked .b{background:transparent;border:1px solid var(--etch)}
+.rdy.thin{border-color:var(--amber);color:var(--amber)}
+.rdy.thin .b{background:var(--amber);box-shadow:0 0 7px var(--amber)}
+.rdy.blocked{border-color:var(--danger);color:var(--danger)}
+.rdy.blocked .b{background:var(--danger);box-shadow:0 0 8px var(--danger);animation:pulse 1.6s infinite}
+/* a sector that cannot run gets a wash across the whole room, not just a chip —
+   the chip is easy to miss when you are looking at the desks */
+.room.rd-blocked{background:linear-gradient(180deg,rgba(229,86,91,.09),rgba(10,16,20,.8))}
+.room.rd-thin{background:linear-gradient(180deg,rgba(234,165,67,.06),rgba(10,16,20,.8))}
+
+/* ---- THE RUN BUTTON ---- */
+.runbtn{display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:10px;
+        border:1px solid var(--ok);background:rgba(92,192,136,.14);color:var(--ok);
+        font-size:13px;font-weight:600;cursor:pointer}
+.runbtn:hover{background:rgba(92,192,136,.24)}
+.runbtn.busy{border-color:var(--glass);background:var(--glass-dim);color:var(--glass)}
+.runbtn .b{width:8px;height:8px;border-radius:50%;background:currentColor}
+.runbtn.busy .b{animation:pulse 1.1s infinite}
+/* A wider panel must also park further off-screen. Widening it alone left
+   100px of an invisible panel sitting over the right of the header, swallowing
+   clicks on the Run button and on whichever panel was actually open. */
+.panel.wide{width:560px;right:-560px}
+/* .panel.open is declared earlier and has the same specificity, so without this
+   the wide panels would never slide in — they'd open off-screen. */
+.panel.wide.open{right:0}
+.step{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.step .n{width:18px;height:18px;border-radius:50%;border:1px solid var(--line2);color:var(--faint);
+         font-family:'IBM Plex Mono',monospace;font-size:9px;display:flex;align-items:center;
+         justify-content:center;flex:none}
+.step.ok .n{border-color:var(--ok);color:var(--ok)}
+/* 'idle' is its own outcome: the sector ran and had nothing to do. A green tick
+   beside the words "no task on the board" is the dashboard contradicting itself. */
+.step.idle .n{border-color:var(--line2);color:var(--faint)}
+.step.idle .t{color:var(--muted)}
+.step.failed .n{border-color:var(--danger);color:var(--danger)}
+.step.running .n{border-color:var(--glass);color:var(--glass);animation:pulse 1.1s infinite}
+.step .t{flex:1}.step .t small{display:block;color:var(--muted);font-size:10.5px;
+         font-family:'IBM Plex Mono',monospace;margin-top:2px}
+.chk{display:flex;gap:9px;padding:7px 0;font-size:12.5px;align-items:flex-start}
+.chk .m{font-family:'IBM Plex Mono',monospace;flex:none;width:14px}
+.chk.ok .m{color:var(--ok)}.chk.bad .m{color:var(--danger)}.chk.warn .m{color:var(--amber)}
+.chk.dim .m{color:var(--faint)}
+.chk small{display:block;color:var(--muted);font-size:10.5px;margin-top:1px}
+.bar{height:5px;border-radius:3px;background:var(--panel2);overflow:hidden;margin:10px 0 4px}
+.bar i{display:block;height:100%;background:var(--glass);transition:width .4s ease}
+.field textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;
+                color:var(--text);padding:10px 12px;font-size:12.5px;font-family:inherit;
+                resize:vertical;min-height:46px}
+.field textarea:focus{outline:none;border-color:var(--glass)}
+.warnbox{border:1px solid var(--danger);background:var(--danger-dim);border-radius:10px;padding:12px;
+         font-size:12.5px;margin-bottom:12px}
+.warnbox b{color:var(--danger)}
+.tick{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);margin:10px 0;cursor:pointer}
+.tick .bx{width:16px;height:16px;border-radius:4px;border:1px solid var(--line2);flex:none}
+.tick.on .bx{background:var(--danger);border-color:var(--danger)}
+
+/* ---- WHAT EACH AGENT GOT, GRABBED, PUSHED, DELIVERED, BROKE ON ---- */
+.act{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.act .tm{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--faint);width:38px;flex:none;padding-top:2px}
+.act .vb{font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;
+         padding:2px 6px;border-radius:4px;height:16px;flex:none;border:1px solid var(--line2);color:var(--muted)}
+.act.got .vb{border-color:var(--amber);color:var(--amber)}
+.act.grabbed .vb{border-color:var(--glass);color:var(--glass)}
+.act.pushed .vb{border-color:var(--line2);color:var(--etch)}
+.act.delivered .vb{border-color:var(--ok);color:var(--ok)}
+.act.errored .vb{border-color:var(--danger);color:var(--danger)}
+.act .bd{flex:1;min-width:0}
+.act .bd b{font-weight:500;display:block;word-break:break-word}
+.act .bd small{color:var(--muted);font-size:10.5px;font-family:'IBM Plex Mono',monospace}
+.act .bd em{font-style:normal;color:var(--faint);font-size:10px}
+.act.live .bd b{color:var(--glass)}
+.ticker{position:fixed;left:0;right:0;bottom:0;height:34px;z-index:45;display:none;align-items:center;
+        gap:14px;padding:0 22px;background:rgba(19,29,35,.94);backdrop-filter:blur(8px);
+        border-top:1px solid var(--line);font-size:12px}
+.ticker.on{display:flex}
+.ticker .lb{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--glass);flex:none}
+.ticker .ln{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticker .more{margin-left:auto;color:var(--glass);cursor:pointer;font-size:11.5px;flex:none}
+
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.15)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
@@ -187,9 +286,11 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
     <div class="site-menu" id="siteMenu"></div>
   </div>
   <button class="htab on">Office</button>
+  <button class="htab" onclick="openActivity()">Activity <span id="actBadge"></span></button>
   <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
   <button class="htab" onclick="openPanel('connPanel')">Connections</button>
   <div class="spacer"></div>
+  <button class="runbtn" id="runBtn" onclick="openRun()"><span class="b"></span><span id="runLabel">Run the day</span></button>
   <span class="live"><span class="d"></span>Open</span>
   <span class="clock" id="clock">--:--</span>
 </header>
@@ -216,6 +317,29 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
     <button class="pbtn" onclick="addSite()">Create office for this website</button>
     <p style="font-size:11.5px;color:var(--muted);margin-top:12px">A fresh office opens with all six sectors staffed, kept completely separate from your other websites.</p>
   </div>
+</div>
+
+<!-- WHAT EVERY AGENT GOT, GRABBED, PUSHED, DELIVERED OR BROKE ON.
+     Derived from the rows the work itself wrote — a claimed task, a granted
+     borrow, a finished run — never from a log an agent had to remember to
+     write. See coordination/activity.py for why. -->
+<div class="panel wide" id="actPanel">
+  <h2><span>Activity <small id="actHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <button class="x" onclick="closeAll()">×</button></h2>
+  <div class="pgroup" id="actBody"></div>
+</div>
+
+<!-- THE RUN BUTTON. Three beats: check everything, take the owner's orders,
+     then work. Each beat is its own screen so nothing starts by accident. -->
+<div class="panel wide" id="runPanel">
+  <h2><span>Run the agency</span><button class="x" onclick="closeAll()">×</button></h2>
+  <div id="runBody"></div>
+</div>
+
+<div class="ticker" id="ticker">
+  <span class="lb" id="tickLabel">Live</span>
+  <span class="ln" id="tickLine">—</span>
+  <span class="more" onclick="openActivity()">see everything →</span>
 </div>
 
 <script>
@@ -248,8 +372,10 @@ function renderFloor(){
   st.rooms.forEach(rm=>{
     const L=LAYOUT[rm.key]; if(!L)return;
     const room=document.createElement('div');
-    room.className='room '+rm.cls; room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
-    room.innerHTML=`<div class="plaque">${rm.name}</div><div class="desks">`+
+    const rd=readyOf(rm.key);
+    room.className='room '+rm.cls+(rd?' rd-'+rd.state:'');
+    room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
+    room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+`<div class="desks">`+
       rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls}" data-k="${rm.key}" data-i="${i}"><div class="status"></div><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role">${a.role.split(' ')[0]}</div></div>`).join('')
       +`</div>`;
     floor.appendChild(room);
@@ -260,6 +386,29 @@ function renderFloor(){
   renderShelfRoom(floor);
   [['🪴',430,662],['🌿',600,192]].forEach(([e,x,y])=>{const p=document.createElement('div');p.className='plant';p.style.cssText=`position:absolute;z-index:2;font-size:19px;opacity:.75;left:${x}px;top:${y}px`;p.textContent=e;floor.appendChild(p);});
   drawLinks();
+}
+
+/* ---- CAN THIS SECTOR WORK? -----------------------------------------------
+   Read straight from coordination/readiness.py, which comes down inside the
+   same /api/state poll. The wording is the server's, not the browser's: if the
+   reason a sector cannot run ever changes, it changes in one place. --------- */
+const RDY_WORD={ready:'apis working',unchecked:'not proven',thin:'no fallback',blocked:'cannot run'};
+function readyOf(key){
+  const rs=(LIVE&&LIVE.readiness&&LIVE.readiness.sectors)||[];
+  return rs.find(s=>s.room===key)||null;
+}
+/* The chip sits on the same border line as the room's plaque, so on a narrow
+   room the two collide and the plaque loses its last few letters. When there
+   isn't room for both, the word drops and the lamp stays — the colour is the
+   part you read from across the screen; the words are in the tooltip. */
+function readyChip(rd, roomName, width){
+  if(!rd) return '';
+  const tip=[rd.says,...(rd.blocking||[]),...(rd.thin||[]),...(rd.notes||[])]
+    .filter((v,i,a)=>v&&a.indexOf(v)===i).join('\n');
+  const word = RDY_WORD[rd.state]||rd.state;
+  const fits = width >= String(roomName||'').length*6.4 + word.length*5.6 + 74;
+  return `<div class="rdy ${rd.state}" title="${escA((fits?'':word+' — ')+tip)}">`
+       + `<span class="b"></span>${fits?word:''}</div>`;
 }
 
 /* THE SHELF — a cabinet standing against the right wall of the office. Each slot
@@ -460,6 +609,10 @@ let cur;
    holds — and has the sector's brain explain it. The opening line is built from
    live state too, so a broken agent leads with what broke. ------------------ */
 const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+/* Attribute context needs the quotes too. esc() alone inside title="…" lets a
+   sector name or an error message containing a double quote close the attribute
+   and start writing markup. */
+const escA=(s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 function bubble(kind, html){
   $('#dBody').insertAdjacentHTML('beforeend',`<div class="msg ${kind}">${html}</div>`);
   $('#dBody').scrollTop=$('#dBody').scrollHeight;
@@ -553,6 +706,12 @@ function applyLive(j){
     rm.foot  = live.foot;
     seatLive(rm, live.agents||[]);
   });
+  renderRunButton(); renderTicker(); renderActBadge();
+  if($('#actPanel').classList.contains('open')) renderActivity();
+  // Only redraw the run panel from the poll while a day is actually going —
+  // otherwise a poll landing mid-typing would wipe the orders the owner is
+  // still writing into the form.
+  if($('#runPanel').classList.contains('open') && RUN.view==='progress') renderRun();
 }
 
 /* Put each live line at the desk it belongs to.
@@ -596,12 +755,260 @@ function shelfSummary(j){
   return busy ? (busy+" in use") : (stocked+"/"+sh.length);
 }
 
+/* ---- THE ACTIVITY LOG -----------------------------------------------------
+   Every line here came out of a row the work itself wrote. Nothing is
+   summarised into existence by the browser: if it is on this list it happened,
+   and the verb is the server's word for it. -------------------------------- */
+function openActivity(){ openPanel('actPanel'); renderActivity(); }
+
+function renderActivity(){
+  const a = (LIVE&&LIVE.activity)||{};
+  const ev = a.events||[];
+  $('#actHead').textContent = a.head ? '· '+a.head : '';
+  if(!ev.length){
+    $('#actBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
+      + `Nothing has run in the last 24 hours, so there is nothing to show. This fills in `
+      + `on its own the moment a sector picks something up — press <b>Run the day</b> to start one.</p>`;
+    return;
+  }
+  $('#actBody').innerHTML = ev.map(e=>
+    `<div class="act ${e.verb} ${e.level==='live'?'live':''}">`
+    + `<span class="tm">${esc(e.hhmm)}</span>`
+    + `<span class="vb">${esc(e.verb)}</span>`
+    + `<span class="bd"><b>${esc(e.what)}</b>`
+    // 'SEO · SEO' tells you nothing twice — name the desk only when it is not
+    // just the room's own name repeated back
+    + `<small>${esc(e.room||'—')}${e.who && e.who.toLowerCase()!==String(e.room||'').toLowerCase() ? ' · '+esc(e.who) : ''}</small>`
+    + (e.detail?` <em>${esc(e.detail)}</em>`:'')
+    + `</span></div>`).join('');
+}
+
+function renderActBadge(){
+  const a=(LIVE&&LIVE.activity)||{};
+  const b=$('#actBadge');
+  if(a.live)       b.innerHTML = `<span style="color:var(--glass)">${a.live}</span>`;
+  else if(a.errors)b.innerHTML = `<span style="color:var(--danger)">${a.errors}</span>`;
+  else             b.innerHTML = '';
+}
+
+/* The bottom strip: one line, only while something is actually happening. A
+   ticker that is always on is wallpaper — you stop reading it. */
+function renderTicker(){
+  const a=(LIVE&&LIVE.activity)||{}, run=(LIVE&&LIVE.run)||{};
+  const running = !!(run.run && run.run.running);
+  const newest = (a.events||[]).find(e=>e.level==='live')||(a.events||[])[0];
+  const on = running || (a.live>0);
+  $('#ticker').classList.toggle('on', on);
+  if(!on) return;
+  $('#tickLabel').textContent = running ? (run.head||'running') : 'live';
+  $('#tickLine').textContent = newest
+    ? `${newest.hhmm} · ${newest.who} ${newest.verb} — ${newest.what}`
+    : 'starting…';
+}
+
+/* ---- THE RUN BUTTON -------------------------------------------------------
+   Four views, in the order the owner asked for: check, then his instructions,
+   then work, then what happened. Never one screen — a single "go" button that
+   silently preflights is a button people press without reading. ------------ */
+const RUN = {view:'idle', check:null, busy:false, force:false, orders:{}, note:''};
+const RUN_SECTORS = [
+  ['IT','IT & Site Health'],['Content','Content & Social'],['SEO','SEO & Rankings'],
+  ['Leads','Leads & Outreach'],['Report','Reports'],['Security','Security'],
+];
+
+function renderRunButton(){
+  const run=(LIVE&&LIVE.run&&LIVE.run.run)||null;
+  const btn=$('#runBtn');
+  const live = !!(run && run.running);
+  btn.classList.toggle('busy', live);
+  $('#runLabel').textContent = live
+    ? (((LIVE.run.progress||[0,0])[0])+'/'+((LIVE.run.progress||[0,0])[1])+' · running')
+    : 'Run the day';
+}
+
+function openRun(){
+  openPanel('runPanel');
+  const run=(LIVE&&LIVE.run&&LIVE.run.run)||null;
+  RUN.view = (run && run.running) ? 'progress' : (RUN.check ? 'orders' : 'idle');
+  renderRun();
+}
+
+function renderRun(){
+  const B=$('#runBody');
+  if(RUN.view==='idle')      B.innerHTML = runIdle();
+  else if(RUN.view==='checking') B.innerHTML = runChecking();
+  else if(RUN.view==='orders')   B.innerHTML = runCheckResult()+runOrders();
+  else                           B.innerHTML = runProgress();
+}
+
+function runIdle(){
+  return `<div class="pgroup">
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.65;margin:0 0 14px">
+      Pressing this checks the whole program first — the filing cabinet, every sector's
+      brain and keys, whether each pipeline even loads, and every API and connector —
+      then asks what you want out of today, and only then starts work.</p>
+    <p style="font-size:12px;color:var(--faint);line-height:1.6;margin:0 0 14px">
+      The check calls your models and your shelf APIs for real, so it costs a little and
+      takes a moment. That is the point: a saved key is not a working key.</p>
+    <button class="pbtn" onclick="doCheck(false)">Check everything</button>
+    <button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+            onclick="doCheck(true)">Quick check — read the config, call nothing</button>
+  </div>`;
+}
+
+function runChecking(){
+  return `<div class="pgroup">
+    <div class="bar"><i style="width:35%"></i></div>
+    <p style="font-size:12.5px;color:var(--glass)">Checking… calling every model and every shelf API once.</p>
+    <p style="font-size:11.5px;color:var(--muted)">This can take a minute with several providers configured. Leave it open.</p>
+  </div>`;
+}
+
+async function doCheck(quick){
+  RUN.view='checking'; renderRun();
+  let j=null;
+  try{
+    const r=await fetch('/api/run/check',{method:'POST',headers:{'Content-Type':'application/json'},
+                                          body:JSON.stringify({quick:!!quick})});
+    j=await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
+  RUN.check=j; RUN.view='orders'; renderRun();
+  const s=await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+}
+
+function chk(tone,mark,text,sub){
+  return `<div class="chk ${tone}"><span class="m">${mark}</span><span>${esc(text)}`
+       + (sub?`<small>${esc(sub)}</small>`:'')+`</span></div>`;
+}
+
+function runCheckResult(){
+  const c=RUN.check;
+  if(!c) return '';
+  if(c.ok===false) return `<div class="pgroup"><div class="warnbox"><b>The check itself failed.</b><br>${esc(c.error||'no detail')}</div></div>`;
+  const sect=(c.sectors&&c.sectors.sectors)||[];
+  let H = `<div class="pgroup"><div class="gh etch">The check — ${esc(c.head||'')}</div>`;
+  H += chk(c.cabinet.ok?'ok':'bad', c.cabinet.ok?'✓':'✕', c.cabinet.name, c.cabinet.says);
+  sect.forEach(s=>{
+    const tone={ready:'ok',unchecked:'dim',thin:'warn',blocked:'bad'}[s.state]||'dim';
+    const mark={ready:'✓',unchecked:'·',thin:'!',blocked:'✕'}[s.state]||'·';
+    H += chk(tone, mark, s.label+' — '+s.state, s.says);
+  });
+  const badPipes=(c.pipelines||[]).filter(p=>!p.ok);
+  H += badPipes.length
+     ? badPipes.map(p=>chk('bad','✕',p.name+' will not load',p.says)).join('')
+     : chk('ok','✓',`All ${(c.pipelines||[]).length} pipelines load`,'every sector’s code imports cleanly');
+  H += `</div>`;
+
+  if((c.blocking||[]).length){
+    H += `<div class="pgroup"><div class="warnbox"><b>${c.blocking.length} thing${c.blocking.length>1?'s':''} stop${c.blocking.length>1?'':'s'} the day running.</b>`
+       + `<ul style="margin:8px 0 0 16px;padding:0">`+c.blocking.map(b=>`<li>${esc(b)}</li>`).join('')+`</ul></div>`
+       + `<div class="tick ${RUN.force?'on':''}" onclick="RUN.force=!RUN.force;renderRun()">`
+       + `<span class="bx"></span><span>Run anyway. I understand those sectors will do nothing, `
+       + `and the run will be recorded as forced.</span></div></div>`;
+  }
+  if((c.warnings||[]).length){
+    H += `<div class="pgroup"><div class="gh etch">Worth knowing</div>`
+       + c.warnings.map(w=>chk('warn','!',w)).join('')+`</div>`;
+  }
+  return H;
+}
+
+function runOrders(){
+  const c=RUN.check, blocked=(c&&(c.blocking||[]).length)&&!RUN.force;
+  let H=`<div class="pgroup"><div class="gh etch">What do you want out of today?</div>
+    <p style="font-size:11.5px;color:var(--muted);margin:0 0 12px;line-height:1.6">
+      Anything you type here goes on the board <b>before</b> the MD plans, so it plans
+      around your words instead of over them. Leave a box empty and that sector takes
+      the MD's allocation as usual.</p>
+    <div class="field"><label>For the whole agency (optional)</label>
+      <textarea id="runNote" placeholder="e.g. two villa jobs finished this week — get them online">${esc(RUN.note)}</textarea></div>`;
+  RUN_SECTORS.forEach(([k,label])=>{
+    H+=`<div class="field"><label>${esc(label)}</label>`
+      +`<textarea data-sec="${escA(k)}" placeholder="today's order for ${esc(label)}">${esc(RUN.orders[k]||'')}</textarea></div>`;
+  });
+  H+=`<button class="pbtn" ${blocked?'disabled style="opacity:.45;cursor:not-allowed"':''} onclick="doStart()">`
+    +(blocked?'Blocked — fix the list above, or tick "run anyway"':'Start the day')+`</button>`;
+  H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+        onclick="RUN.check=null;RUN.view='idle';renderRun()">Check again</button></div>`;
+  return H;
+}
+
+function collectOrders(){
+  RUN.note = ($('#runNote')&&$('#runNote').value||'').trim();
+  RUN.orders = {};
+  document.querySelectorAll('#runBody textarea[data-sec]').forEach(t=>{
+    const v=(t.value||'').trim(); if(v) RUN.orders[t.dataset.sec]=v;
+  });
+}
+
+async function doStart(){
+  collectOrders();
+  RUN.busy=true;
+  let j=null;
+  try{
+    const r=await fetch('/api/run/start',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({orders:RUN.orders, note:RUN.note, force:RUN.force})});
+    j=await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
+  RUN.busy=false;
+  if(!j || !j.ok){
+    $('#runBody').insertAdjacentHTML('afterbegin',
+      `<div class="pgroup"><div class="warnbox"><b>It did not start.</b><br>${esc((j&&(j.why||j.error))||'no detail')}</div></div>`);
+    return;
+  }
+  RUN.view='progress'; renderRun();
+  // poll hard for a moment so the first step appears immediately rather than
+  // on the next slow tick — the owner just pressed a button and deserves a sign
+  for(let i=0;i<6;i++){
+    await new Promise(r=>setTimeout(r,900));
+    const s=await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+    if(RUN.view==='progress') renderRun();
+  }
+}
+
+function runProgress(){
+  const R=(LIVE&&LIVE.run)||{};
+  const run=R.run;
+  if(!run) return `<div class="pgroup"><p style="color:var(--muted);font-size:12.5px">Starting…</p></div>`;
+  const [done,total]=R.progress||[0,0];
+  const pct = total? Math.round(done/total*100) : 0;
+  let H=`<div class="pgroup"><div class="gh etch">${esc(R.head||run.status)}</div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <p style="font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace">${done}/${total} steps</p>`;
+  if(run.forced) H+=`<div class="warnbox" style="margin-top:10px"><b>Forced.</b> You started this with
+    ${(run.blocking||[]).length} known problem${(run.blocking||[]).length===1?'':'s'} — those sectors will do nothing.</div>`;
+  H+=`</div><div class="pgroup">`;
+  (R.steps||[]).forEach(s=>{
+    const mark={ok:'✓',idle:'–',failed:'✕',running:'▸',waiting:'·'}[s.status]||'·';
+    H+=`<div class="step ${s.status}"><span class="n">${mark}</span><span class="t">${esc(s.label)}`
+      +(s.summary?`<small>${esc(s.summary)}</small>`:'')+`</span></div>`;
+  });
+  H+=`</div><div class="pgroup"><button class="pbtn" onclick="openActivity()">See what each agent did →</button></div>`;
+  return H;
+}
+
 async function boot(){
   renderFloor(); renderPerf();          // draw immediately from what we have
   LIVE = await pullLive();
   if(LIVE){ applyLive(LIVE); renderFloor(); renderPerf(); }
 }
-setInterval(async ()=>{ const j=await pullLive(); if(j){ LIVE=j; applyLive(j); renderFloor(); renderPerf(); } }, 15000);
+
+/* The floor polls faster while a day is running. At 15 seconds a pipeline that
+   claims, works and finishes inside one tick is never once seen 'working' —
+   the bulbs go straight from dark to done and the office looks like nothing
+   happened. Four seconds is the difference between a live floor and a report. */
+let POLL_MS = 15000, pollTimer = null;
+function schedulePoll(){
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async ()=>{
+    const j = await pullLive();
+    if(j){ LIVE=j; applyLive(j); renderFloor(); renderPerf(); }
+    const live = !!(j && j.run && j.run.run && j.run.run.running);
+    POLL_MS = live ? 4000 : 15000;
+    schedulePoll();
+  }, POLL_MS);
+}
+schedulePoll();
 renderSiteMenu();renderConns();boot();
 setInterval(fireComm,2200);
 setInterval(()=>{const d=new Date();$('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');},1000);

@@ -815,7 +815,7 @@ $('#testNtfy').onclick =()=>testChannel('ntfy',$('#testNtfy'),$('#optMsg'));
 $('#ntfyPing').onclick =()=>testChannel('ntfy',$('#ntfyPing'),$('#optMsg'),true);
 
 /* ---- preflight ---- */
-const PF_TONE={COVERED:'ok',SINGLE:'warn',DOWN:'err',EMPTY:'dim'};
+const PF_TONE={COVERED:'ok',SINGLE:'warn',DOWN:'err',EMPTY:'dim',UNKNOWN:'dim'};
 function pfMark(ok){ return ok===true?'<span class="ok">✓</span>':ok===false?'<span class="err">✕</span>':'<span class="dim">·</span>'; }
 function pfChain(chain){
   if(!chain||!chain.length) return '';

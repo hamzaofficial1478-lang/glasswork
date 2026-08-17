@@ -12,7 +12,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "ui")));
@@ -375,6 +375,82 @@ app.post("/api/integrations/test", (req, res) =>
 // longer budget than an ordinary provider command.
 app.post("/api/preflight", (req, res) =>
   res.json(pyProvider("preflight", req.body, 900000)));
+
+// ---- THE RUN BUTTON ---------------------------------------------------------
+// Three endpoints, one for each beat of "check, ask me, then work".
+//
+//   /api/run/check   the whole preflight — cabinet, sectors, pipelines, APIs.
+//                    Blocking, so the owner watches it finish before deciding.
+//   /api/run/start   the day itself. NOT blocking: a day takes many minutes and
+//                    a request held open that long dies to a proxy timeout, so
+//                    this hands off to a detached process and answers at once.
+//                    Everything it does lands in the cabinet, which is what
+//                    /api/run/status and the office floor read.
+//   /api/run/status  where that process has got to.
+app.post("/api/run/check", (req, res) => {
+  const quick = !!(req.body && req.body.quick);
+  res.json(pyModule("pipelines.day_run",
+    ["--check", "--json", ...(quick ? ["--quick"] : [])], 900000));
+});
+
+app.get("/api/run/status", (_q, res) =>
+  res.json(pyModule("pipelines.day_run", ["--status", "--json"], 60000)));
+
+app.post("/api/run/start", (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const b = req.body || {};
+
+  // Refuse a second press here as well as in Python. Python holds the real
+  // guard (the day_run resource lock); this one exists so the owner gets a
+  // plain answer instead of a process that starts, loses the lock race and
+  // dies silently a second later.
+  const st = pyModule("pipelines.day_run", ["--status", "--json"], 60000);
+  if (st && st.run && st.run.running) {
+    return res.json({ ok: false, busy: true,
+      why: "A day is already running — wait for it to finish. Two at once means two MDs planning the same day." });
+  }
+
+  const orders = {};
+  for (const [k, v] of Object.entries(b.orders || {})) {
+    const text = String(v == null ? "" : v).slice(0, 4000).trim();
+    if (text) orders[String(k).slice(0, 40)] = text;
+  }
+  const payload = JSON.stringify({
+    orders,
+    note: String(b.note || "").slice(0, 4000),
+    force: !!b.force,
+    // The owner just watched the full sweep finish in /api/run/check, so the
+    // re-check here is the cheap one: it catches a key deleted while the form
+    // was open without paying for every model call a second time.
+    quick: true,
+    skip_check: false,
+  });
+
+  let child;
+  try {
+    child = spawn(py.cmd, [...py.prefix, "-m", "pipelines.day_run", "--stdin", "--json"], {
+      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"],
+    });
+  } catch (e) {
+    return res.json({ ok: false, error: "Could not start the run: " + e.message });
+  }
+  child.on("error", () => { /* the cabinet stays empty; status says so */ });
+  try { child.stdin.end(payload); } catch (_) {}
+  child.unref();
+  res.json({ ok: true, started: true, orders,
+    why: "Running. Watch the office floor — the lamps come on as each sector picks up." });
+});
+
+// ---- what every sector and agent is doing right now -------------------------
+// Both are also folded into /api/state so the office gets them in one poll;
+// these exist for anything that wants just the one thing.
+app.get("/api/readiness", (_q, res) =>
+  res.json(pyModule("coordination.readiness", ["--json"], 60000)));
+app.get("/api/activity", (req, res) => {
+  const n = Math.max(1, Math.min(300, parseInt(req.query.limit, 10) || 60));
+  res.json(pyModule("coordination.activity", ["--json", "--limit", String(n)], 60000));
+});
 
 // ---- the owner's daily targets ---------------------------------------------
 // The numbers the agency works to. Read and written through coordination.targets

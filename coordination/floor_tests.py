@@ -55,8 +55,8 @@ def _room(snapshot, key):
 
 def test_a_run_is_recorded():
     print("Work leaves a trace:")
-    real_b, real_s = board.DB, state.DB
-    board.DB = state.DB = _fresh_db()
+    real_b = board.DB
+    board.DB = _fresh_db()
     try:
         with board.agent_run("it-watcher") as run:
             run.note("checking glassworks.ae")
@@ -69,13 +69,13 @@ def test_a_run_is_recorded():
         check("after the run the desk shows the work it did", after[0]["s"], "done")
         check("with how long ago", after[0]["t"].endswith("just now"), True)
     finally:
-        board.DB, state.DB = real_b, real_s
+        board.DB = real_b
 
 
 def test_a_crash_is_not_a_clean_finish():
     print("A crash is not a clean finish:")
-    real_b, real_s = board.DB, state.DB
-    board.DB = state.DB = _fresh_db()
+    real_b = board.DB
+    board.DB = _fresh_db()
     try:
         try:
             with board.agent_run("leads-hunter") as run:
@@ -89,13 +89,13 @@ def test_a_crash_is_not_a_clean_finish():
         desk = _room(state.build(), "Leads")["agents"][0]
         check("the floor shows it blocked, not done", desk["s"], "blocked")
     finally:
-        board.DB, state.DB = real_b, real_s
+        board.DB = real_b
 
 
 def test_a_desk_that_did_nothing_stays_dark():
     print("A desk that did nothing reports no activity:")
-    real_b, real_s = board.DB, state.DB
-    board.DB = state.DB = _fresh_db()
+    real_b = board.DB
+    board.DB = _fresh_db()
     try:
         snap = state.build()
         for key in ("Director", "IT", "Content", "SEO", "Leads", "Report", "Security"):
@@ -112,7 +112,7 @@ def test_a_desk_that_did_nothing_stays_dark():
         check("yesterday's run is not today's activity",
               _room(state.build(), "SEO")["agents"], [])
     finally:
-        board.DB, state.DB = real_b, real_s
+        board.DB = real_b
 
 
 def test_the_run_wins_over_a_stale_task_row():
@@ -121,8 +121,8 @@ def test_the_run_wins_over_a_stale_task_row():
     is the live picture, and the two must not double up into one desk twice.
     """
     print("One line per desk:")
-    real_b, real_s = board.DB, state.DB
-    board.DB = state.DB = _fresh_db()
+    real_b = board.DB
+    board.DB = _fresh_db()
     try:
         tid = board.post_task("IT", "Read-only health baseline", "detail")
         board.claim_task(tid, "it-watcher")
@@ -138,13 +138,13 @@ def test_the_run_wins_over_a_stale_task_row():
         check("plus the unclaimed task, waiting", sorted(a["s"] for a in agents),
               ["done", "waiting"])
     finally:
-        board.DB, state.DB = real_b, real_s
+        board.DB = real_b
 
 
 def test_each_agent_reaches_its_own_desk():
     print("The right bulb lights:")
-    real_b, real_s = board.DB, state.DB
-    board.DB = state.DB = _fresh_db()
+    real_b = board.DB
+    board.DB = _fresh_db()
     try:
         for agent in ("it-watcher", "content-writer", "seo-strategist",
                       "leads-hunter", "security-screener"):
@@ -158,7 +158,7 @@ def test_each_agent_reaches_its_own_desk():
         check("Leads -> Hunter", got["Leads"], [("leads-hunter", "hunter")])
         check("Security -> Screener", got["Security"], [("security-screener", "screener")])
     finally:
-        board.DB, state.DB = real_b, real_s
+        board.DB = real_b
 
 
 def test_the_ui_does_not_open_on_a_lie():
@@ -209,8 +209,8 @@ def test_lit_means_alive_and_dark_means_broken():
 def test_a_dark_bulb_always_says_why():
     """A desk that goes dark without a reason is just a bug you cannot see."""
     print("A dark bulb carries its reason:")
-    real_b, real_s = board.DB, state.DB
-    board.DB = state.DB = _fresh_db()
+    real_b = board.DB
+    board.DB = _fresh_db()
     try:
         try:
             with board.agent_run("it-watcher") as run:
@@ -227,7 +227,7 @@ def test_a_dark_bulb_always_says_why():
         check("and there is a why to show in the drawer", bool(desk.get("why")), True)
 
         # a claim nobody is working is a stall, and it blocks everyone else
-        board.DB = state.DB = _fresh_db()
+        board.DB = _fresh_db()
         tid = board.post_task("Leads", "Collect hotel leads", "detail")
         board.claim_task(tid, "leads-hunter")
         con = sqlite3.connect(board.DB)
@@ -239,13 +239,13 @@ def test_a_dark_bulb_always_says_why():
         check("and it says so", "nothing running" in desk["t"], True)
 
         # ...but a claim made moments ago is just work in progress
-        board.DB = state.DB = _fresh_db()
+        board.DB = _fresh_db()
         tid = board.post_task("Leads", "Collect hotel leads", "detail")
         board.claim_task(tid, "leads-hunter")
         check("a fresh claim is not a stall",
               _room(state.build(), "Leads")["agents"][0]["s"], "working")
     finally:
-        board.DB, state.DB = real_b, real_s
+        board.DB = real_b
 
 
 def test_the_agent_chat_is_not_canned():
@@ -339,17 +339,25 @@ def test_tracing_never_breaks_the_work():
 
 def test_spend_still_adds_up():
     print("Cost governor still reads the runs:")
-    real_b, real_s = board.DB, state.DB
-    board.DB = state.DB = _fresh_db()
+    real_b = board.DB
+    board.DB = _fresh_db()
     try:
         with board.agent_run("seo-strategist") as run:
             run.spent(0.42, tokens_in=1200, tokens_out=300)
         check("today's spend includes the run", state.build()["metrics"]["spend"], "$0.42")
     finally:
-        board.DB, state.DB = real_b, real_s
+        board.DB = real_b
+
+
+from providers import store as _store
 
 
 def main():
+    with _store.isolated():
+        _main()
+
+
+def _main():
     test_a_run_is_recorded()
     test_a_crash_is_not_a_clean_finish()
     test_a_desk_that_did_nothing_stays_dark()
