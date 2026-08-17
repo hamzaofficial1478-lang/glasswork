@@ -280,7 +280,143 @@ def test_the_card_measures_management_not_just_outcome():
         board.DB, state.DB, targets.DB = real_b, real_s, real_t
 
 
+def test_the_sector_proposal_queue():
+    """
+    A sector knows its own domain better than six hardcoded rules do. It asks;
+    the MD ranks and allocates. A proposal is deliberately NOT claimable — a
+    sector that could post its own task would decide the work, do the work and
+    report on it, with nobody ranking it against anything else.
+    """
+    print("Sectors ask, the MD allocates:")
+    from coordination import proposals as P
+    real_b, real_s, real_t = board.DB, state.DB, targets.DB
+    board.DB = state.DB = targets.DB = _fresh_db()
+    try:
+        check("a hunch with no evidence is refused at the door",
+              P.propose("SEO", "have a look around", evidence=""), None)
+        pid = P.propose("Content", "Write the Al Barsha shower glass page",
+                        evidence="3 rival pages on shower glass this week", urgency=2)
+        check("a grounded proposal is accepted into the queue", bool(pid), True)
+        check("asking twice is one ask",
+              P.propose("Content", "Write the Al Barsha shower glass page",
+                        evidence="same thing again"), pid)
+        check("it is waiting, not claimable", len(P.open_proposals()), 1)
+
+        out = MD.run()
+        titles = [p["title"] for p in out["posted"]]
+        check("the MD turned it into real work",
+              "Write the Al Barsha shower glass page" in titles, True)
+
+        con = sqlite3.connect(board.DB)
+        status, why = con.execute(
+            "SELECT status, why FROM proposals WHERE id=?", (pid,)).fetchone()
+        con.close()
+        check("and the proposal was answered", status, "accepted")
+        check("with a reason the sector can read", bool(why), True)
+    finally:
+        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+
+
+def test_a_rejected_proposal_is_never_binned_silently():
+    print("Nothing disappears without a reason:")
+    from coordination import proposals as P
+    real_b, real_s, real_t = board.DB, state.DB, targets.DB
+    board.DB = state.DB = targets.DB = _fresh_db()
+    try:
+        pid = P.propose("Leads", "Collect hotel leads",
+                        evidence="owner wants hotels", needs="maps")
+        MD.run()
+        con = sqlite3.connect(board.DB)
+        status, why = con.execute(
+            "SELECT status, why FROM proposals WHERE id=?", (pid,)).fetchone()
+        con.close()
+        check("it was rejected", status, "rejected")
+        check("and the sector is told the shelf is empty", "maps" in (why or ""), True)
+
+        try:
+            P.decide(pid, "rejected", "")
+            silent = True
+        except ValueError:
+            silent = False
+        check("a decision with no reason is impossible", silent, False)
+    finally:
+        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+
+
+def test_a_sector_can_refuse_the_wrong_work():
+    """
+    The board could always say 'claim, don't grab'. It had no way to say 'you
+    have handed me the wrong thing', so a mis-routed task could only be done
+    badly or left to rot.
+    """
+    print("The right of reply:")
+    from coordination import proposals as P
+    real_b, real_s, real_t = board.DB, state.DB, targets.DB
+    board.DB = state.DB = targets.DB = _fresh_db()
+    try:
+        tid = board.post_task("Leads", "Write a service page", "d", created_by="MD")
+        board.claim_task(tid, "leads-hunter")
+
+        check("an invented objection is refused",
+              _raises(lambda: P.object_to_task(tid, "Leads", "cannot-be-bothered")), True)
+
+        ok = P.object_to_task(tid, "Leads", "wrong_sector", "that is Content's job")
+        check("a real objection is accepted", ok, True)
+
+        t = board.get_task(tid)
+        check("the task is handed back, unowned", t["owner"], None)
+        check("and reopened for re-routing", t["status"], "open")
+        check("the refusal is visible on the task itself",
+              "objected" in (t["detail"] or ""), True)
+        check("and it is on the record for the MD's score",
+              len(P.objections()), 1)
+
+        # work already finished cannot be refused after the fact
+        t2 = board.post_task("IT", "done job", "d")
+        board.claim_task(t2, "it-watcher")
+        board.finish_task(t2, "it-watcher", "done", status="done")
+        check("a finished task cannot be objected to",
+              P.object_to_task(t2, "IT", "wrong_sector"), False)
+    finally:
+        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+
+
+def test_the_owner_outranks_the_md():
+    print("The owner's own orders:")
+    from coordination import proposals as P
+    real_b, real_s, real_t = board.DB, state.DB, targets.DB
+    board.DB = state.DB = targets.DB = _fresh_db()
+    try:
+        P.set_orders("IT", "check the site twice today, the form felt slow")
+        out = MD.run()
+        check("the owner's order reaches the board",
+              any("Owner's order" in p["title"] for p in out["posted"]), True)
+
+        # an order that cannot run is NEWS, not a quiet rejection
+        board.DB = state.DB = targets.DB = _fresh_db()
+        P.set_orders("Leads", "focus on Sharjah hotels today")
+        out = MD.run()
+        check("a blocked order is surfaced, not binned",
+              len(out.get("owner_blocked") or []), 1)
+        check("in words the owner will notice",
+              "CANNOT RUN" in out["summary"], True)
+    finally:
+        board.DB, state.DB, targets.DB = real_b, real_s, real_t
+
+
+def _raises(fn):
+    try:
+        fn()
+        return False
+    except Exception:
+        return True
+
+
 def main():
+    test_the_sector_proposal_queue()
+    test_a_rejected_proposal_is_never_binned_silently()
+    test_a_sector_can_refuse_the_wrong_work()
+    test_the_owner_outranks_the_md()
     test_the_md_does_not_grade_itself()
     test_the_card_measures_management_not_just_outcome()
     test_the_brain_never_touches_the_hands()

@@ -133,12 +133,34 @@ _ADDED_COLUMNS = (
     ("decisions",    "outcome_note", "TEXT"),
 )
 
+# Tables added after the first cabinets were built. CREATE IF NOT EXISTS is
+# cheap and idempotent, and an owner who built his cabinet last week should not
+# have to rebuild it to get the proposal queue.
+_ADDED_TABLES = (
+    """CREATE TABLE IF NOT EXISTS proposals (
+         id TEXT PRIMARY KEY, sector TEXT NOT NULL, title TEXT NOT NULL,
+         detail TEXT, evidence TEXT, needs TEXT, urgency INTEGER DEFAULT 5,
+         status TEXT DEFAULT 'open', task_id TEXT, why TEXT,
+         created_at INTEGER, decided_at INTEGER)""",
+    """CREATE TABLE IF NOT EXISTS task_objections (
+         id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+         sector TEXT NOT NULL, reason TEXT NOT NULL, detail TEXT, at INTEGER)""",
+    """CREATE TABLE IF NOT EXISTS sector_orders (
+         day TEXT NOT NULL, sector TEXT NOT NULL, orders TEXT,
+         updated_at INTEGER, PRIMARY KEY (day, sector))""",
+)
+
 
 def _migrate(c):
     """Columns added after the first cabinets were built. Safe to run repeatedly."""
     key = str(DB)
     if key in _MIGRATED:
         return
+    for ddl in _ADDED_TABLES:
+        try:
+            c.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
     for table, col, coltype in _ADDED_COLUMNS:
         try:
             cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}

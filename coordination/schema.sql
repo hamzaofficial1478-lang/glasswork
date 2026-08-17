@@ -239,3 +239,49 @@ CREATE TABLE IF NOT EXISTS daily_reports (
   sector_scores TEXT,                  -- json: which sector is winning / bleeding
   summary TEXT, actions TEXT, spend_usd REAL, created_at INTEGER
 );
+
+-- ---- the sector proposal queue --------------------------------------------
+-- A sector knows its own domain better than the MD does. Rather than the MD
+-- guessing every sector's work from a handful of hardcoded rules, each sector
+-- PROPOSES what it thinks it needs, and the MD ranks and allocates against the
+-- owner's daily orders. A proposal is a request for work, never work itself:
+-- nothing here is claimable until the MD turns it into a task.
+CREATE TABLE IF NOT EXISTS proposals (
+  id         TEXT PRIMARY KEY,
+  sector     TEXT NOT NULL,        -- who is asking
+  title      TEXT NOT NULL,
+  detail     TEXT,
+  evidence   TEXT,                 -- the row that justifies it; no evidence, no hearing
+  needs      TEXT,                 -- shelf it cannot run without (maps, llm, ...)
+  urgency    INTEGER DEFAULT 5,    -- 1 highest .. 9 lowest, the SECTOR's own view
+  status     TEXT DEFAULT 'open',  -- open | accepted | rejected | superseded
+  task_id    TEXT,                 -- set when the MD turns it into real work
+  why        TEXT,                 -- the MD's reason, always, accepted or not
+  created_at INTEGER,
+  decided_at INTEGER
+);
+
+-- ---- turn-taking in the other direction -----------------------------------
+-- The MD allocates, but it can allocate wrongly. A sector handed work that is
+-- not its job says so instead of silently dropping it or doing it badly, and
+-- the objection is on the record so the MD's DIRECTION score feels it.
+CREATE TABLE IF NOT EXISTS task_objections (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    TEXT NOT NULL,
+  sector     TEXT NOT NULL,        -- who is refusing it
+  reason     TEXT NOT NULL,        -- wrong_sector | not_our_call | missing_capability | unclear
+  detail     TEXT,
+  at         INTEGER
+);
+
+-- ---- the owner's orders, per sector ---------------------------------------
+-- targets holds HOW MUCH of each job. This holds WHAT the owner wants a given
+-- sector to do today, in his own words. The MD must plan around it, and the
+-- Critic rejects a plan that ignores a sector the owner gave orders to.
+CREATE TABLE IF NOT EXISTS sector_orders (
+  day        TEXT NOT NULL,
+  sector     TEXT NOT NULL,
+  orders     TEXT,
+  updated_at INTEGER,
+  PRIMARY KEY (day, sector)
+);
