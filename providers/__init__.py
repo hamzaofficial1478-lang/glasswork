@@ -11,7 +11,7 @@ Configuration (credentials, models, per-task routing) lives in
 config/providers.local.json (git-ignored) and is managed via the /setup UI or the
 store functions here. Keys are always masked/redacted before they leave the server.
 """
-from .routing import call_task, resolve_task
+from .routing import call_task, deliberate, resolve_task
 from . import store, client, urls, auth
 
-__all__ = ["resolve_task", "call_task", "store", "client", "urls", "auth"]
+__all__ = ["resolve_task", "call_task", "deliberate", "store", "client", "urls", "auth"]

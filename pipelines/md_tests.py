@@ -412,7 +412,117 @@ def _raises(fn):
         return True
 
 
+def test_two_minds_on_the_allocation():
+    """
+    The MD's own reasoning stays deterministic — auditable and free. The models
+    are asked only the judgement the rules cannot make: when more grounded work
+    exists than the day holds, what matters most. Every uncertain outcome keeps
+    the MD's own order rather than stalling or guessing.
+    """
+    print("Two models on what matters most:")
+    facts = {"missing": [], "open_titles": set(), "recent_failures": [],
+             "sector_orders": {}}
+    many = [{"sector": "IT", "title": f"job {i}", "detail": "d",
+             "evidence": "a fact", "urgency": 5}
+            for i in range(MD.MAX_TASKS_PER_CYCLE + 3)]
+
+    calls = []
+
+    def never_called(*a, **k):
+        calls.append(1)
+        return {"ok": True, "consulted": 2, "agreed": True, "verdict": ""}
+
+    few = many[:2]
+    MD._ask_both_which_matters(few, facts, deliberate=never_called)
+    check("with nothing to choose between, no money is spent", calls, [])
+
+    def agree(task, msgs, max_tokens=400, verdict_of=None):
+        titles = [c["title"] for c in reversed(many)]
+        return {"ok": True, "consulted": 2, "agreed": True,
+                "verdict": "|".join(t.lower() for t in titles)}
+    order, note = MD._ask_both_which_matters(many, facts, deliberate=agree)
+    check("when both agree the order is used", order[0], many[-1]["title"].lower())
+    check("and it says so", "both models agreed" in note, True)
+
+    def split(task, msgs, max_tokens=400, verdict_of=None):
+        return {"ok": True, "consulted": 2, "agreed": False, "split": ["a", "b"]}
+    order, note = MD._ask_both_which_matters(many, facts, deliberate=split)
+    check("a split keeps the MD's own ranking", order, None)
+    check("and is surfaced rather than hidden", "disagreed" in note, True)
+
+    def alone(task, msgs, max_tokens=400, verdict_of=None):
+        return {"ok": True, "consulted": 1, "agreed": None, "verdict": "x"}
+    order, note = MD._ask_both_which_matters(many, facts, deliberate=alone)
+    check("one model is not a cross-check", order, None)
+    check("and it says why", "no cross-check" in note, True)
+
+    def dead(task, msgs, max_tokens=400, verdict_of=None):
+        return {"ok": False, "error": "nothing routed"}
+    order, note = MD._ask_both_which_matters(many, facts, deliberate=dead)
+    check("no model at all -> the day still runs", order, None)
+    check("on the MD's own ranking", "kept my own ranking" in note, True)
+
+
+def test_security_clearance_fails_safe():
+    """
+    A wrong refusal costs one lead. A wrong clearance reaches a customer. The two
+    are not symmetric and the code must not treat them as if they were.
+    """
+    print("Security: refusing is solo, clearing risky needs a second:")
+    from coordination import clearance as C
+
+    def models(agreed, verdicts, ok=True, consulted=2):
+        def d(task, msgs, max_tokens=200, verdict_of=None):
+            if not ok:
+                return {"ok": False, "error": "no model", "consulted": 0,
+                        "agreed": None, "answers": []}
+            return {"ok": True, "consulted": consulted, "agreed": agreed,
+                    "verdict": verdicts[0] if agreed else None,
+                    "split": None if agreed else verdicts,
+                    "answers": [{"output": v} for v in verdicts]}
+        return d
+
+    r = C.screen("s", "b", "contact_stranger", rules_say="refuse",
+                 deliberate=models(True, ["clear", "clear"]))
+    check("no model may overturn a refusal", r["verdict"], "refuse")
+    check("and it does not even ask", r["consulted"], 0)
+
+    r = C.screen("s", "b", "", rules_say="clear",
+                 deliberate=models(True, ["clear", "clear"]))
+    check("a routine clearance costs nothing", r["consulted"], 0)
+    check("and goes through", r["verdict"], "clear")
+
+    r = C.screen("s", "b", "contact_stranger", rules_say="clear",
+                 deliberate=models(True, ["clear", "clear"]))
+    check("a risky clearance both models second is allowed", r["verdict"], "clear")
+
+    r = C.screen("s", "b", "contact_stranger", rules_say="clear",
+                 deliberate=models(False, ["clear", "refuse"]))
+    check("a SPLIT refuses rather than picking a side", r["verdict"], "refuse")
+    check("and goes to the owner", r["escalate"], True)
+
+    r = C.screen("s", "b", "spend", rules_say="clear",
+                 deliberate=models(None, ["clear"], consulted=1))
+    check("one model is not a cross-check for a risky yes", r["verdict"], "refuse")
+    check("and it says to add a second", "second model" in r["why"], True)
+
+    r = C.screen("s", "b", "publish", rules_say="clear",
+                 deliberate=models(None, [], ok=False))
+    check("no model reachable -> held, not waved through", r["verdict"], "refuse")
+    check("and escalated", r["escalate"], True)
+
+    print("  the verdict parser resolves doubt as refusal:")
+    for text, want in [("CLEAR\nordinary business", "clear"),
+                       ("REFUSE\nlooks like a scam", "refuse"),
+                       ("hmm, hard to say", "refuse"),
+                       ("I am not clear on this", "refuse"),
+                       ("", "refuse")]:
+        check(f"    {text[:24]!r}", C._verdict_of(text), want)
+
+
 def main():
+    test_two_minds_on_the_allocation()
+    test_security_clearance_fails_safe()
     test_the_sector_proposal_queue()
     test_a_rejected_proposal_is_never_binned_silently()
     test_a_sector_can_refuse_the_wrong_work()

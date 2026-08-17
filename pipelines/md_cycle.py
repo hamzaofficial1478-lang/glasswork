@@ -51,6 +51,63 @@ MAX_TASKS_PER_CYCLE = 6      # a plan nobody can finish is not a plan
 
 
 # ---------------------------------------------------------------------------
+# TWO MINDS ON THE ALLOCATION
+# ---------------------------------------------------------------------------
+#
+# The MD's own reasoning is deterministic and stays that way — the rules above
+# are auditable and free, and replacing them with a model would make the plan
+# harder to check, not better.
+#
+# What the models are for is the ONE judgement the rules genuinely cannot make:
+# when more work is grounded than the day can hold, which of it matters most.
+# Getting that wrong costs a real day, so it is asked of both models and a
+# disagreement is treated as information rather than noise.
+#
+# The safe default matters here. If the models split, or none is configured, the
+# MD keeps its own deterministic ranking and says so — it does not stall, and it
+# does not pretend a coin-flip was a decision.
+
+def _ask_both_which_matters(candidates, facts, deliberate=None):
+    """
+    Returns (ordered_titles, note). On any doubt the MD's own order is kept.
+    """
+    if len(candidates) <= MAX_TASKS_PER_CYCLE:
+        return None, ""          # nothing to choose between; do not spend
+    if deliberate is None:
+        try:
+            from providers import deliberate as _d
+            deliberate = _d
+        except Exception:
+            return None, "no provider layer — kept my own ranking"
+
+    listing = "\n".join(f"- [{c['sector']}] {c['title']}  (because: {c['evidence']})"
+                         for c in candidates)
+    orders = "; ".join(f"{k}: {v}" for k, v in (facts.get("sector_orders") or {}).items())
+    r = deliberate(
+        "md",
+        [{"role": "system", "content":
+          "You rank a day's work for a UAE glass and aluminium business. Reply with "
+          "the titles only, most important first, one per line, nothing else. A dead "
+          "enquiry path outranks everything; the owner's own orders come next."},
+         {"role": "user", "content":
+          f"The owner's orders today: {orders or 'none'}\n\nCandidates:\n{listing}"}],
+        max_tokens=400,
+        verdict_of=lambda t: "|".join(l.strip().lstrip("-0123456789. ").lower()
+                                      for l in (t or "").splitlines() if l.strip()))
+    if not r.get("ok"):
+        return None, f"kept my own ranking ({r.get('error')})"
+    if r.get("consulted", 0) < 2:
+        return None, "kept my own ranking — only one model, so no cross-check"
+    if not r.get("agreed"):
+        # A split on what matters most is worth the owner knowing about; it is
+        # not worth stalling the day over, so the deterministic order stands.
+        return None, ("the two models disagreed on what matters most today, "
+                      "so I kept my own ranking — worth a look")
+    return [t for t in (r.get("verdict") or "").split("|") if t], \
+           "both models agreed on the order"
+
+
+# ---------------------------------------------------------------------------
 # SENSE — read the live state of the business. No judgement here, just facts.
 # ---------------------------------------------------------------------------
 
@@ -291,6 +348,14 @@ def critic_check(candidates: list, facts: dict) -> tuple:
     # ceiling yields, because a limit that silently bins the owner's instruction
     # is worse than a long day.
     kept.sort(key=lambda c: (int(c.get("urgency") or 5), c["sector"]))
+    order, note = _ask_both_which_matters(kept, facts)
+    if order:
+        rank = {t: i for i, t in enumerate(order)}
+        # the owner's orders stay pinned to the front whatever the models think
+        kept.sort(key=lambda c: (int(c.get("urgency") or 5) > 1,
+                                 rank.get(c["title"].strip().lower(), 999)))
+    if note:
+        facts["ranking_note"] = note
     if len(kept) > MAX_TASKS_PER_CYCLE:
         overflow = [c for c in kept[MAX_TASKS_PER_CYCLE:] if int(c.get("urgency") or 5) > 1]
         owner_work = [c for c in kept[MAX_TASKS_PER_CYCLE:] if int(c.get("urgency") or 5) <= 1]
@@ -383,9 +448,11 @@ def _cycle(agent, dry_run):
                                              if "shelf is empty" in r["why"]})})
 
     stuck = [r for r in rejected if r.get("owner_blocked")]
+    note = facts.get("ranking_note") or ""
     summary = (f"posted {len(posted)} task(s), Critic rejected {len(rejected)}"
                + (f", answered {answered} proposal(s)" if answered else "")
-               + (f" — {len(stuck)} OF YOUR OWN ORDER(S) CANNOT RUN" if stuck else ""))
+               + (f" — {len(stuck)} OF YOUR OWN ORDER(S) CANNOT RUN" if stuck else "")
+               + (f". {note}" if note else ""))
     return {"ok": True, "agent": agent, "posted": posted, "rejected": rejected,
             "owner_blocked": stuck, "decision_id": did, "facts": facts,
             "summary": summary}
