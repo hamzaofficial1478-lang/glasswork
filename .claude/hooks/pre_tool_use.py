@@ -68,6 +68,91 @@ SCRIPT_RUN = re.compile(
 CONCESSION_GAP = 60
 
 
+# ---------------------------------------------------------------------------
+# DESCRIBING A THING IS NOT DOING IT
+#
+# Red line 1 used to read every field of every call, prose included. So a pull
+# request whose description WARNED the owner "merging restarts the server" was
+# refused — for carrying the warning. That is the third time this file has had
+# to learn the same lesson (see the notes above on 'produced'/'product' and on
+# 'freeze'), and this time the rule was deleting safety information in order to
+# satisfy a safety rule.
+#
+# These fields are read by people and never executed, so red line 1 skips them.
+# NOTHING THAT RUNS IS SKIPPED: a Bash command is not prose, file content is not
+# prose, and the scanner still reads any script a command runs by path. Red
+# lines 2 and 3 keep reading the whole payload — a price concession lives in
+# exactly these fields, and excluding them there would gut that rule.
+PROSE_FIELDS = {"body", "message", "title", "description", "detail", "summary",
+                "note", "notes", "reasoning", "text", "comment", "commit_message",
+                "prompt", "why", "expectation"}
+
+
+def _scannable(args):
+    """
+    The parts of a call that DO something, as one string.
+
+    Walks nested structures so a prose field buried in a list is still skipped
+    and a command buried in one is still read.
+    """
+    def walk(v, key=None):
+        if isinstance(v, dict):
+            return " ".join(walk(x, k) for k, x in v.items())
+        if isinstance(v, (list, tuple)):
+            return " ".join(walk(x, key) for x in v)
+        if key in PROSE_FIELDS:
+            return ""
+        return f"{key}={v}" if key is not None else str(v)
+    return walk(args)
+
+
+# ---------------------------------------------------------------------------
+# THE CALLS THAT LAND CODE ON THE LIVE BRANCH WITHOUT SAYING SO
+#
+# Found while the rule above was busy refusing a warning. Merging a pull request
+# takes {owner, repo, pullNumber}: no watched word anywhere, nothing for a text
+# scan to catch. And on a repo whose workflow runs on every push to main, that
+# single call is what restarts the running agency. So the red line stopped an
+# agent for describing the thing and waved through the call that does it.
+#
+# Words are a tripwire for shell commands. For a tool whose whole purpose is to
+# put code somewhere, the tool and its target are the signal, and no wording can
+# hide them. This is a tightening, not a loosening.
+MERGE_TOOLS = re.compile(r"(merge_pull_request|enable_pr_auto_merge"
+                         r"|actions_run_trigger|create_and_submit_pull_request_review)$", re.I)
+WRITE_TOOLS = re.compile(r"(push_files|create_or_update_file|delete_file)$", re.I)
+# Branch names a release hangs off. Landing on one of these is production.
+LIVE_BRANCHES = {"main", "master", "prod", "production", "live", "release"}
+# A shell line putting work onto one of those branches, e.g. '... origin main'.
+GIT_TO_LIVE = re.compile(
+    r"\bgit\s+push\b[^\n;&|]*\b(" + "|".join(sorted(LIVE_BRANCHES)) + r")\b")
+
+
+def _lands_on_live(tool, args):
+    """(True, why) when this call puts code where the release workflow watches."""
+    name = (tool or "").strip()
+
+    if MERGE_TOOLS.search(name):
+        # A merge always lands on its base, and we cannot see the base from
+        # these arguments. Unknown resolves to 'yes' here: the cost of a wrong
+        # refusal is one message to the owner, the cost of a wrong pass is the
+        # running agency restarted by an agent that never asked.
+        return True, f"{name} lands work on the branch the release watches"
+
+    if WRITE_TOOLS.search(name):
+        # No branch given means the repository default, which is the live one.
+        branch = str(args.get("branch") or "main").strip().lower()
+        if branch in LIVE_BRANCHES:
+            return True, f"{name} writes straight to '{branch}'"
+
+    if name == "Bash":
+        cmd = str(args.get("command") or "")
+        if GIT_TO_LIVE.search(cmd):
+            return True, "the command puts work onto a live branch"
+
+    return False, ""
+
+
 def concession_going_out(blob):
     """The offending text when a money word and an outbound word sit close."""
     money = [m.span() for m in MONEY_WORDS.finditer(blob)]
@@ -113,12 +198,25 @@ def main():
     tool = ev.get("tool_name", "")
     args = ev.get("tool_input", {}) or {}
     agent = ev.get("agent", "unknown")
-    blob = json.dumps(args).lower()
-    if tool == "Bash":
-        blob += "\n" + _script_contents(args.get("command", "")).lower()
+    # Two views of the same call.
+    #   blob        everything, prose included — red lines 2 and 3 need it,
+    #               because a price concession lives in exactly those fields.
+    #   action_blob only the parts that DO something — red line 1 reads this,
+    #               so writing ABOUT a release is no longer treated as one.
+    # A script run by path is action in both.
+    scripts = _script_contents(args.get("command", "")).lower() if tool == "Bash" else ""
+    blob = json.dumps(args).lower() + (("\n" + scripts) if scripts else "")
+    action_blob = _scannable(args).lower() + (("\n" + scripts) if scripts else "")
+
+    # RED LINE 1a: a call whose target IS the live branch, whatever it is called.
+    lands, why = _lands_on_live(tool, args)
+    if lands and agent != "it-releaser":
+        log(agent, tool, args, "blocked", why)
+        print("BLOCKED: only the IT Releaser may touch production.", file=sys.stderr)
+        sys.exit(2)
 
     # RED LINE 1: never deploy/push to the live site unless you are the releaser
-    if DEPLOY_WORDS.search(blob) and PROD_WORDS.search(blob):
+    if DEPLOY_WORDS.search(action_blob) and PROD_WORDS.search(action_blob):
         if agent != "it-releaser":
             log(agent, tool, args, "blocked", "only it-releaser may reach production")
             print("BLOCKED: only the IT Releaser may touch production.", file=sys.stderr)

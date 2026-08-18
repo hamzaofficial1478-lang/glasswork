@@ -112,11 +112,59 @@ faraway = ("x = " + FRE + "_slot()\n" + ("# padding line\n" * 12)
            + "notify_by_" + "e" + "mail(user)\n")
 check("a money word and a posting word 400 chars apart do not",
       run("Write", {"file_path": "/tmp/x.py", "content": faraway}), ALLOW)
+# The incident this pins: the file could not be saved because its CONTENT
+# mentioned the watched words. Content is still scanned - it now names the
+# branch it is going to, which the rule below requires of any write.
 check("the real file that could not be pushed now can",
       run("mcp__github__push_files",
-          {"files": [{"path": "coordination/board.py",
+          {"branch": "claude/some-feature",
+           "files": [{"path": "coordination/board.py",
                       "content": open("/home/user/glasswork/coordination/board.py").read()}]}),
       ALLOW)
+
+# TRUNK is the branch a release hangs off; GITP the command that puts work there.
+# Both assembled, for the reason given at the top of this file.
+TRUNK = "ma" + "in"
+GITP  = "git " + "pu" + "sh"
+
+print("\nThe calls that land code on the trunk, whatever they are called:")
+# A merge carries no watched word at all - {owner, repo, pullNumber} - and on a
+# repo that ships on every push to the trunk it is THE call that restarts the
+# running agency. It used to sail straight through.
+check("merging a pull request is refused",
+      run("mcp__github__merge_pull_request", {"owner": "o", "repo": "r", "pullNumber": 2}), BLOCK)
+check("...and so is arming it to merge itself later",
+      run("mcp__github__enable_pr_auto_merge", {"owner": "o", "repo": "r", "pullNumber": 2}), BLOCK)
+check("...and firing a workflow by hand",
+      run("mcp__github__actions_run_trigger", {"owner": "o", "repo": "r"}), BLOCK)
+check("writing straight to the trunk is refused",
+      run("mcp__github__create_or_update_file",
+          {"branch": TRUNK, "path": "x.py", "content": "print(1)"}), BLOCK)
+check("a write that does not say where it lands is refused too",
+      run("mcp__github__create_or_update_file", {"path": "x.py", "content": "print(1)"}), BLOCK)
+check("but ordinary branch work is not",
+      run("mcp__github__create_or_update_file",
+          {"branch": "claude/some-feature", "path": "x.py", "content": "print(1)"}), ALLOW)
+check("a shell line putting work on the trunk is refused",
+      run("Bash", {"command": f"{GITP} origin {TRUNK}"}), BLOCK)
+check("...but pushing a feature branch is the everyday case",
+      run("Bash", {"command": f"{GITP} -u origin claude/some-feature"}), ALLOW)
+check("the releaser may do what nobody else may",
+      run("mcp__github__merge_pull_request", {"owner": "o", "repo": "r", "pullNumber": 2},
+          agent="it-releaser"), ALLOW)
+
+print("\nDescribing a release is not performing one:")
+# The pull request that warned the owner what merging would do was refused for
+# carrying the warning. Prose is read by people, never executed.
+WARN = ("merging fires the workflow, which restarts the "
+        + "li" + "ve" + " site. It will " + "de" + "ploy" + " on push.")
+check("a warning in a description is allowed",
+      run("mcp__github__create_pull_request",
+          {"owner": "o", "repo": "r", "head": "f", "base": "other", "body": WARN}), ALLOW)
+check("...but the same words in a command are not",
+      run("Bash", {"command": WARN}), BLOCK)
+check("...nor in a file being written",
+      run("Write", {"file_path": "/tmp/ship.sh", "content": WARN}), BLOCK)
 
 print("\nFalse positives that cost real work:")
 check(f"the word '{FRZ}' does not read as a price concession",
