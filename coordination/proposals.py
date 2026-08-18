@@ -258,13 +258,21 @@ if __name__ == "__main__":
                     help="set the owner's order for a sector today")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    # Every other module the server shells into answers with an "ok" key, and
+    # server.js decides success by reading it. This one did not, so a caller
+    # checking r.ok on a perfectly good reply read it as a failure. Nothing
+    # depends on that today — which is exactly when it is cheap to fix.
     if a.order:
         try:
-            print(json.dumps(set_orders(a.order[0], a.order[1]), indent=2))
+            print(json.dumps({"ok": True, **set_orders(a.order[0], a.order[1])}, indent=2))
         except ValueError as e:
-            # a typo at the command line should read like a sentence, not a
-            # traceback — the order did not land and he needs to know why
+            # a typo should read like a sentence, not a traceback — the order
+            # did not land and he needs to know why
+            if a.json:
+                print(json.dumps({"ok": False, "error": str(e)}))
+                raise SystemExit(1)
             raise SystemExit(f"Nothing was set: {e}")
     else:
-        print(json.dumps({"proposals": open_proposals(), "orders": orders()}, indent=2)
+        print(json.dumps({"ok": True, "proposals": open_proposals(),
+                          "orders": orders()}, indent=2)
               if a.json else as_text())
