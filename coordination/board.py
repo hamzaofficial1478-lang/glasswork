@@ -586,6 +586,47 @@ def decide_site_change(change_id, decision):
                   (decision, _now(), change_id))
 
 
+def decide_approval(kind, ref, decision):
+    """
+    The owner's yes or no on one amber item, actually written down.
+
+    The Control Room's Approve button used to set an opacity and print
+    "approved — sent to the agent". Nothing was sent to anything: the row was
+    untouched and the next poll brought the item straight back. On the one
+    control the handbook makes the owner the tie-breaker for, that is the worst
+    possible failure — he believes he has decided, the agency never hears it,
+    and both sides think they are waiting on the other.
+
+    Two kinds, because there are two things that queue for him:
+      site_change  a change the agents want to make to the live site
+      task         a task the MD marked amber or red
+
+    Approving a task drops it to green and stamps who said so, which is what
+    takes it off this list; refusing blocks it. The reason is appended to the
+    task rather than replacing anything — append, don't overwrite.
+    """
+    if decision not in ("approved", "rejected"):
+        raise ValueError(f"not a decision: {decision}")
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(_now()))
+    if kind == "site_change":
+        decide_site_change(int(ref), decision)
+        return {"ok": True, "kind": kind, "ref": ref, "decision": decision}
+    if kind != "task":
+        raise ValueError(f"nothing of kind '{kind}' queues for approval")
+    with _conn() as c:
+        row = c.execute("SELECT status FROM tasks WHERE id=?", (ref,)).fetchone()
+        if not row:
+            return {"ok": False, "error": "that task is no longer on the board"}
+        note = f"\n\n[owner {decision} this on {when}]"
+        if decision == "approved":
+            c.execute("UPDATE tasks SET risk='green', detail=COALESCE(detail,'')||?"
+                      " WHERE id=?", (note, ref))
+        else:
+            c.execute("UPDATE tasks SET status='blocked', detail=COALESCE(detail,'')||?"
+                      " WHERE id=?", (note, ref))
+    return {"ok": True, "kind": kind, "ref": ref, "decision": decision}
+
+
 if __name__ == "__main__":
     # tiny smoke test
     from init_db import init

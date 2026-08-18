@@ -174,7 +174,10 @@ def test_the_ui_does_not_open_on_a_lie():
     check("no desk ships as waiting", 's:"waiting"' in body, False)
     desks = re.findall(r'(?<![a-z])s:"(\w+)"', body)   # not cls:"dir"
     check("every desk starts idle", set(desks), {"idle"})
-    check("and all sixteen desks are still there", len(desks), 16)
+    # 17 since the SEO room gained a Rival desk: pipelines/competitors.py runs
+    # as 'seo-rival' every day and had no chair, so its work lit the Auditor's
+    # lamp instead. Pinned so nobody silently drops a desk.
+    check("and all seventeen desks are still there", len(desks), 17)
 
 
 def test_lit_means_alive_and_dark_means_broken():

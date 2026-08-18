@@ -453,6 +453,26 @@ app.post("/api/run/start", (req, res) => {
     why: "Running. Watch the office floor — the lamps come on as each sector picks up." });
 });
 
+// ---- the owner's yes or no on one amber item --------------------------------
+// The Control Room's Approve button used to change an opacity and say "sent to
+// the agent". This is where it now actually goes.
+app.post("/api/approve", (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const b = req.body || {};
+  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.approve"], {
+    cwd: __dirname,
+    input: JSON.stringify({ kind: String(b.kind || ""), id: b.id,
+                            decision: String(b.decision || "") }),
+    timeout: 60000, maxBuffer: 4 * 1024 * 1024,
+  });
+  if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
+  const out = String(r.stdout || "");
+  if (!out) return res.json({ ok: false, error: "approve error: " + String(r.stderr || "no output") });
+  try { return res.json(JSON.parse(out)); }
+  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+});
+
 // ---- the owner's standing orders, per sector --------------------------------
 // The same boxes the Run panel shows, settable without starting a day. One
 // form, one store: an order saved here is the order the MD reads when the day

@@ -201,7 +201,7 @@
 
   <aside class="desk">
     <div class="card">
-      <div class="ch"><b>Your desk · Telegram bridge</b><span class="badge amber" id="pendBadge">0</span></div>
+      <div class="ch"><b>Your desk · waiting on you</b><span class="badge amber" id="pendBadge">0</span></div>
       <div id="approvals"></div>
     </div>
 
@@ -227,80 +227,42 @@
 <script>
 /* ---------------------------------------------------------------------------
    STATE. fetchState() reads /api/state (the filing cabinet, through the server).
-   MOCK below is only a fallback if that call fails; everything renders from
-   whatever fetchState() returns.
+   If that call fails the screen goes EMPTY and says so — it never falls back to
+   plausible-looking numbers. See OFFLINE below.
 --------------------------------------------------------------------------- */
-const MOCK = {
-  md:{state:"planning today"},
-  metrics:{health:82, leads:6, spend:"$4.12"},
-  rooms:[
-    {key:"IT", name:"IT & Site Health", score:88, foot:["12 checks passed","1 ticket open"], agents:[
-      {n:"Watcher", t:"Contact-form test passed 07:02", s:"working"},
-      {n:"Fixer", t:"Patching slow gallery on /pergolas", s:"working"},
-      {n:"Releaser", t:"Holding — waiting on tests", s:"idle"},
-    ]},
-    {key:"Content", name:"Content & Social", score:74, foot:["2 drafts in review","4 posts queued"], agents:[
-      {n:"Scout", t:"Trend: frameless glass balustrades", s:"working"},
-      {n:"Writer", t:"Case study — Marina villa railing", s:"working"},
-      {n:"Illustrator", t:"Rendering 3 images", s:"working"},
-      {n:"Publisher", t:"Waiting Auditor sign-off", s:"waiting"},
-    ]},
-    {key:"SEO", name:"SEO & Rankings", score:69, foot:["312 keywords tracked","+3 positions wk"], agents:[
-      {n:"Auditor", t:"Schema check on 8 pages", s:"working"},
-      {n:"Rank & Rival", t:"Competitor sitemap: 2 new pages", s:"working"},
-      {n:"Strategist", t:"Gap: 'aluminium doors Al Barsha'", s:"working"},
-    ]},
-    {key:"Leads", name:"Leads & Outreach", score:79, foot:["6 valid today","3 replies"], agents:[
-      {n:"Hunter", t:"41 fit-out firms, Business Bay", s:"working"},
-      {n:"Verifier", t:"38 valid · 3 bounced", s:"working"},
-      {n:"Outreach", t:"18/25 sent · under cap", s:"working"},
-      {n:"Responder", t:"Reply from Aster Interiors", s:"waiting"},
-      {n:"Nurture", t:"Idle — no notes pending", s:"idle"},
-    ]},
-    {key:"Report", name:"Reports & Scorecard", score:91, foot:["MD hit-rate 71%","digest 07:15"], agents:[
-      {n:"Reporter", t:"Scored 9 decisions overnight", s:"working"},
-    ]},
-    {key:"Security", name:"Security", score:95, foot:["0 intrusions","2 leads flagged"], sec:true, agents:[
-      {n:"Screener", t:"Flagged 2 scam leads", s:"working"},
-      {n:"Injection guard", t:"Scraped text quarantined ×1", s:"working"},
-      {n:"Site watch", t:"SSL ok · logins normal", s:"idle"},
-    ]},
-  ],
-  approvals:[
-    {lvl:"amber · IT", text:"Ship the gallery speed fix to the pergolas page?",
-     why:"Tests pass. Touches a core template, so the Releaser is holding for your nod."},
-    {lvl:"amber · Content", text:"Publish the Marina villa case study to site + Instagram?",
-     why:"Passed the Auditor. Real job, real photos — strong piece."},
-  ],
-  security:[
-    {sev:"hi", title:"Scam lead blocked", sub:"Advance-fee pattern · 'buildcorp-uae@gmail'", time:"08:41"},
-    {sev:"mid",title:"Prompt injection caught", sub:"Hidden instruction in scraped competitor page", time:"08:12"},
-    {sev:"lo", title:"Login attempts normal", sub:"No spikes overnight", time:"07:00"},
-  ],
-  connections:[
-    {ic:"◧", name:"Website", sub:"yoursite.ae · custom", on:true},
-    {ic:"⌕", name:"DataForSEO", sub:"rank tracking", on:true},
-    {ic:"✈", name:"Telegram bridge", sub:"@owner", on:true},
-    {ic:"♾", name:"Instagram", sub:"not connected", on:false},
-    {ic:"♪", name:"TikTok", sub:"not connected", on:false},
-    {ic:"✉", name:"Outreach domain", sub:"mail.yoursite.ae", on:true},
-  ],
+/* WHEN THE SERVER IS DOWN, SAY SO.
+
+   There used to be a MOCK here: six rooms of agents "working", two approvals
+   waiting, scam leads blocked, 82 health, $4.12 spent — rendered whenever
+   /api/state could not be reached. So the one moment the owner most needs to
+   know something is wrong was the exact moment this screen showed him a
+   thriving agency. The office floor had already been fixed for this; the
+   control room had not.
+
+   Empty now, and the header says why. Nothing invents a number it was not
+   given. */
+const OFFLINE = {
+  ok:false, offline:true,
+  md:{state:"can't reach the server"},
+  metrics:{health:"—", leads:"—", spend:"—"},
+  rooms:[], approvals:[], security:[], shelf:[], connections:[],
 };
 
 function normalise(j){
+  j.offline = !!j.offline;
   j.md=j.md||{state:'—'}; j.metrics=j.metrics||{health:0,leads:0,spend:'$0.00'};
   j.rooms=j.rooms||[]; j.approvals=j.approvals||[]; j.security=j.security||[];
   j.connections=j.connections||[]; j.shelf=j.shelf||[];
   return j;
 }
 async function fetchState(){
-  // reads the filing cabinet through the server; MOCK is only a fallback if that's down
+  // reads the filing cabinet through the server; if it's down we show nothing
   try{
     const r=await fetch('/api/state',{cache:'no-store'});
     const j=await r.json();
     if(j && j.ok) return normalise(j);
   }catch(_){}
-  return MOCK;
+  return normalise({...OFFLINE});
 }
 
 /* ---- render ---- */
@@ -317,6 +279,18 @@ function ring(score){
 }
 
 function renderRooms(st){
+  if(st.offline){
+    $('#rooms').innerHTML = `<div class="empty" style="padding:26px;line-height:1.7">`
+      + `<b style="color:var(--danger)">Can't reach the server.</b><br>`
+      + `Nothing on this page is live, so nothing is being shown. Start it with `
+      + `<span class="mono">python run.py</span> and this fills in by itself.</div>`;
+    return;
+  }
+  if(!st.rooms.length){
+    $('#rooms').innerHTML = `<div class="empty" style="padding:26px">`
+      + `The cabinet is empty — no sector has run yet.</div>`;
+    return;
+  }
   $('#rooms').innerHTML = st.rooms.map(rm=>`
     <div class="room ${rm.sec?'sec':''}">
       ${rm.sec?'<div class="scanline"></div>':''}
@@ -338,7 +312,11 @@ function renderRooms(st){
 
 function renderApprovals(st){
   const box=$('#approvals');
-  if(!st.approvals.length){ box.innerHTML='<div class="empty">Nothing waiting on you. The agency&rsquo;s running clean.</div>'; }
+  // "Nothing waiting on you" is a CLAIM about the cabinet. With the server down
+  // we have not read the cabinet, so we are not entitled to make it — an owner
+  // who reads "running clean" off a dead page stops checking.
+  if(st.offline){ box.innerHTML='<div class="empty">Unknown — the server is not answering.</div>'; }
+  else if(!st.approvals.length){ box.innerHTML='<div class="empty">Nothing waiting on you. The agency&rsquo;s running clean.</div>'; }
   else box.innerHTML = st.approvals.map((a,i)=>`
     <div class="approval" data-i="${i}">
       <span class="lvl">${a.lvl}</span>
@@ -349,12 +327,13 @@ function renderApprovals(st){
         <button class="btn no" onclick="resolve(${i},false)">Not now</button>
       </div>
     </div>`).join('');
-  $('#pendBadge').textContent = st.approvals.length;
-  $('#mPend').textContent = st.approvals.length;
+  $('#pendBadge').textContent = st.offline ? '—' : st.approvals.length;
+  $('#mPend').textContent = st.offline ? '—' : st.approvals.length;
 }
 
 function renderSecurity(st){
   const box=$('#secfeed');
+  if(st.offline){ box.innerHTML='<div class="empty">Unknown — the server is not answering.</div>'; $('#secBadge').textContent='—'; return; }
   if(!st.security.length){ box.innerHTML='<div class="empty">Nothing flagged.</div>'; $('#secBadge').textContent=0; return; }
   box.innerHTML = st.security.map(e=>`
     <div class="sec-event">
@@ -366,18 +345,23 @@ function renderSecurity(st){
 }
 
 function renderConns(st){
-  $('#conns').innerHTML = st.connections.map((c,i)=>`
+  // Controls that do nothing are worse than no controls. The toggle flipped a
+  // CSS class and told the server nothing, so switching a connection "off"
+  // changed exactly one thing: what this page claimed. The Add box pushed a
+  // row into a local array that the next poll threw away. Both are gone —
+  // connections are set on /setup, which is where the keys actually live.
+  $('#conns').innerHTML = (st.connections.length
+    ? st.connections.map(c=>`
     <div class="conn">
       <div class="ic">${c.ic}</div>
-      <div class="nm"><b>${c.name}</b><span>${c.sub}</span></div>
-      <div class="toggle ${c.on?'on':''}" onclick="this.classList.toggle('on')"></div>
-    </div>`).join('') + `
-    <div class="add-row">
-      <input id="connIn" placeholder="paste a social link or API key…">
-      <button onclick="addConn()">Add</button>
-    </div>`;
+      <div class="nm"><b>${c.name}</b><span>${c.on?(c.sub||''):(c.sub==='not set'?'':c.sub||'')}</span></div>
+      <div class="mono" style="font-size:10px;color:${c.on?'var(--ok)':'var(--faint)'}">${c.on?'ON':'not set'}</div>
+    </div>`).join('')
+    : `<div class="empty">${st.offline ? 'Unknown — the server is not answering.'
+                                       : 'Nothing connected yet.'}</div>`) + `
+    <div class="add-row"><a class="btn" href="/setup" style="text-align:center;text-decoration:none;padding:8px 0">Add or change a connection on /setup</a></div>`;
   const on=st.connections.filter(c=>c.on).length;
-  $('#connCount').textContent = on+'/'+st.connections.length+' on';
+  $('#connCount').textContent = st.offline ? '—' : on+'/'+st.connections.length+' on';
 }
 
 function renderShelf(st){
@@ -408,20 +392,34 @@ function renderShelf(st){
 
 /* ---- interactions (in-memory) ---- */
 let STATE;
-function resolve(i,ok){
-  const el=document.querySelector(`.approval[data-i="${i}"]`);
-  el.style.opacity=.35; el.querySelector('.btns').innerHTML =
-    `<span class="mono" style="font-size:12px;color:${ok?'var(--ok)':'var(--muted)'}">${ok?'✓ approved — sent to the agent':'✗ held'}</span>`;
-  STATE.approvals[i]._done=true;
-  const left=STATE.approvals.filter(a=>!a._done).length;
-  $('#pendBadge').textContent=left; $('#mPend').textContent=left;
-}
-function addConn(){
-  const v=$('#connIn').value.trim(); if(!v) return;
-  STATE.connections.push({ic:"＋",name:v.slice(0,22),sub:"pending verify",on:false});
-  renderConns(STATE);
-}
+/* The owner's decision goes to the cabinet, and the button only claims what
+   actually happened. It used to dim the row and print "sent to the agent" with
+   nothing behind it — the row was untouched and the next poll brought the item
+   straight back. On the one control the handbook makes him the tie-breaker for,
+   that is the worst failure there is: he thinks he has decided, the agency
+   never hears it, and both sides sit waiting on the other. */
+async function resolve(i, ok){
+  const a = STATE.approvals[i];
+  const el = document.querySelector(`.approval[data-i="${i}"]`);
+  const btns = el.querySelector('.btns');
+  btns.innerHTML = '<span class="mono" style="font-size:12px;color:var(--muted)">saving…</span>';
+  let j=null;
+  try{
+    const r = await fetch('/api/approve',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind:a.kind, id:a.id, decision: ok?'approved':'rejected'})});
+    j = await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
 
+  if(!j || !j.ok){
+    btns.innerHTML = `<span class="mono" style="font-size:12px;color:var(--danger)">`
+      + `✕ not saved — ${(j&&(j.error||j.why))||'unknown error'}</span>`;
+    return;   // the row stays; nothing was decided
+  }
+  el.style.opacity=.35;
+  btns.innerHTML = `<span class="mono" style="font-size:12px;color:${ok?'var(--ok)':'var(--muted)'}">`
+    + `${ok?'✓ approved — written to the cabinet':'✗ held — written to the cabinet'}</span>`;
+  refresh();   // read it back rather than guessing what the cabinet now says
+}
 /* ---- boot ---- */
 async function refresh(){
   STATE=await fetchState();

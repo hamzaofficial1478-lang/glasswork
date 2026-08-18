@@ -232,6 +232,70 @@ def _activity_tests():
 # THE RUN ITSELF
 # ---------------------------------------------------------------------------
 
+def _approval_tests():
+    """The owner's yes must actually land in the cabinet."""
+    now = _now()
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO tasks(id,sector,title,detail,risk,status,created_by,created_at)"
+                " VALUES('amb1','IT','Ship the gallery fix','touches a core template',"
+                "'amber','open','MD',?)", (now - 60,))
+    con.execute("INSERT INTO tasks(id,sector,title,risk,status,created_by,created_at)"
+                " VALUES('amb2','Content','Publish the case study','amber','open','MD',?)",
+                (now - 60,))
+    con.execute("INSERT INTO site_queue(agent,kind,detail,status,queued_at)"
+                " VALUES('it-releaser','upsert_page','the pergolas page','pending',?)",
+                (now - 60,))
+    con.commit(); con.close()
+
+    from coordination import state as _state
+    apps = _state.build()["approvals"]
+    print("\nEvery item waiting on the owner can be addressed:")
+    check("all three are listed", len(apps), 3)
+    check("each carries what it is", sorted({a["kind"] for a in apps}),
+          ["site_change", "task"])
+    check("and an id to decide against", all(a.get("id") is not None for a in apps), True)
+
+    print("\nApproving one writes it down, rather than dimming a row:")
+    board.decide_approval("task", "amb1", "approved")
+    con = sqlite3.connect(board.DB)
+    risk, detail = con.execute("SELECT risk, detail FROM tasks WHERE id='amb1'").fetchone()
+    con.close()
+    check("the task is no longer amber", risk, "green")
+    check("and the approval is on the record", "owner approved this on" in detail, True)
+    check("so it drops off the waiting list",
+          [a["id"] for a in _state.build()["approvals"] if a["id"] == "amb1"], [])
+
+    print("\nRefusing blocks it — it does not quietly proceed:")
+    board.decide_approval("task", "amb2", "rejected")
+    con = sqlite3.connect(board.DB)
+    st = con.execute("SELECT status FROM tasks WHERE id='amb2'").fetchone()[0]
+    con.close()
+    check("blocked", st, "blocked")
+
+    print("\nA queued site change goes through the same door:")
+    board.decide_approval("site_change", 1, "approved")
+    con = sqlite3.connect(board.DB)
+    st = con.execute("SELECT status FROM site_queue WHERE id=1").fetchone()[0]
+    con.close()
+    check("approved in site_queue", st, "approved")
+    check("nothing is left waiting", _state.build()["approvals"], [])
+
+    print("\nNothing else may be decided this way:")
+    for kind, ref in (("shelf", "seo_data"), ("", "x"), ("decision", "d1")):
+        try:
+            board.decide_approval(kind, ref, "approved")
+            check(f"'{kind}' is refused", "no error", "ValueError")
+        except ValueError:
+            check(f"'{kind}' is refused", True, True)
+    try:
+        board.decide_approval("task", "amb1", "maybe")
+        check("a decision must be yes or no", "no error", "ValueError")
+    except ValueError:
+        check("a decision must be yes or no", True, True)
+    check("deciding a task that has gone is reported, not silent",
+          board.decide_approval("task", "no-such-task", "approved")["ok"], False)
+
+
 def _day_run_tests():
     from . import day_run
 
@@ -384,6 +448,7 @@ def main():
     try:
         _readiness_tests()
         _activity_tests()
+        _approval_tests()
         _day_run_tests()
     finally:
         board.DB, store.STORE = real_db, real_store

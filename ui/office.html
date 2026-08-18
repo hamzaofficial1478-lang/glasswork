@@ -355,12 +355,23 @@ function sectors(){return [
   {key:"Director",name:"Director's Office",cls:"dir",agents:[{n:"Director",role:"Plans the day",s:"idle",t:"—",av:"🔮"}]},
   {key:"IT",name:"IT & Site Health",cls:"",agents:[{n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"}]},
   {key:"Content",name:"Content & Social",cls:"",agents:[{n:"Writer",role:"Drafts in your voice",s:"idle",t:"—",av:"✍"},{n:"Illustrator",role:"AI images",s:"idle",t:"—",av:"🎨"},{n:"Publisher",role:"Publishes after Auditor",s:"idle",t:"—",av:"📤"}]},
-  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"}]},
+  /* Rival has a desk of its own because pipelines/competitors.py runs as
+     'seo-rival' every day. Without one it fell through to the first free desk
+     and lit the Auditor's lamp instead — work credited to the wrong chair. */
+  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"},{n:"Rival",role:"Watches competitors",s:"idle",t:"—",av:"👁"}]},
   {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{n:"Hunter",role:"Finds UAE leads",s:"idle",t:"—",av:"🎯"},{n:"Scanner",role:"Blocks duplicates",s:"idle",t:"—",av:"♻"},{n:"Outreach",role:"Mail + DMs, under cap",s:"idle",t:"—",av:"✉"},{n:"Responder",role:"Handles replies",s:"idle",t:"—",av:"💬"}]},
   {key:"Report",name:"Reports",cls:"",agents:[{n:"Reporter",role:"Scores the agency",s:"idle",t:"—",av:"📋"}]},
   {key:"Security",name:"Security",cls:"sec",agents:[{n:"Screener",role:"Scam & fraud filter",s:"idle",t:"—",av:"🛡"},{n:"Guard",role:"Untrusts scraped text",s:"idle",t:"—",av:"⚠"}]}
 ];}
-const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",metrics:[["82","Agency health","glass"],["6","Leads today",""],["3","Awaiting you","amber"],["—","Shelf","ok"],["$4.12","Spend today","mono"]],rooms:sectors()}};
+/* Dashes, not numbers, until the server answers. The desks were fixed for this
+   already — they used to ship lit and go dark a beat later — but the header
+   still opened on 82 health, 6 leads and $4.12 spent, on a machine that had
+   never run anything. A number you have not been given is not a number. */
+const BLANK_METRICS=[["—","Agency health","glass"],["—","Leads today",""],
+                     ["—","Awaiting you","amber"],["—","Shelf","ok"],
+                     ["—","Spend today","mono"]];
+const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",
+                 metrics:BLANK_METRICS.map(m=>m.slice()),rooms:sectors()}};
 let CURRENT="gd";
 const LAYOUT={Director:{x:24,y:22,w:320,h:150},Report:{x:372,y:22,w:230,h:150},Security:{x:630,y:22,w:266,h:150},Leads:{x:24,y:210,w:400,h:210},SEO:{x:454,y:210,w:210,h:210},Content:{x:694,y:210,w:202,h:210},IT:{x:24,y:452,w:872,h:242}};
 const $=s=>document.querySelector(s);
@@ -584,22 +595,46 @@ function shelfPanel(){
     + `<div style="width:${health}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`
     + rows + `</div>`;
 }
-const CONNS=[
-  {g:"Website & backend",items:[{ic:"◧",n:"Website",s:"custom · connected",on:true},{ic:"🗄",n:"Filing cabinet (DB)",s:"agency.db",on:true}]},
-  {g:"SEO & data",items:[{ic:"⌕",n:"DataForSEO",s:"rank tracking",on:true},{ic:"📈",n:"Search Console",s:"not connected",on:false}]},
-  {g:"Messaging",items:[{ic:"✈",n:"Telegram bridge",s:"@owner",on:true}]},
-  {g:"Social",items:[{ic:"⌾",n:"Instagram",s:"not connected",on:false},{ic:"♪",n:"TikTok",s:"not connected",on:false},{ic:"f",n:"Facebook",s:"not connected",on:false}]},
-  {g:"Outreach",items:[{ic:"✉",n:"Outreach domain",s:"mail.glassworks.ae",on:true}]}
-];
+/* CONNECTIONS — read from .env through the server, not made up here.
+
+   This panel used to be a hardcoded list. It showed a "Telegram bridge ·
+   @owner" toggled ON, a DataForSEO account and an outreach domain that reads
+   mail.glassworks.ae — all of it on a machine where none of those were set,
+   and none of it changing when they were. /api/state has carried the real
+   list the whole time (server.js readConnections), so the panel was inventing
+   an answer next to the truth.
+
+   The toggles are gone with it: a switch you can flick that changes nothing on
+   the server is worse than no switch, because it looks like you turned
+   something off. Connections are set on /setup, which is where the keys live. */
 function renderConns(){
-  $('#connBody').innerHTML=CONNS.map(grp=>`<div class="pgroup"><div class="gh etch">${grp.g}</div>`+grp.items.map(it=>`<div class="conn"><div class="ic">${it.ic}</div><div class="nm"><b>${it.n}</b><span>${it.s}</span></div><div class="toggle ${it.on?'on':''}" onclick="this.classList.toggle('on')"></div></div>`).join('')+`</div>`).join('')+`<div class="pgroup"><div class="gh etch">Add a key or link</div><div class="field"><label>Name</label><input placeholder="e.g. Instagram token"></div><div class="field"><label>Value / URL</label><input placeholder="paste here"></div><button class="pbtn" onclick="alert('Stored on the server, never in the browser or git.')">Add connection</button></div>`;
+  const conns = (LIVE && LIVE.connections) || null;
+  if(!conns){
+    $('#connBody').innerHTML = `<div class="pgroup"><p style="color:var(--muted);font-size:12.5px">`
+      + `Waiting for the server…</p></div>`;
+    return;
+  }
+  const on = conns.filter(c=>c.on).length;
+  $('#connBody').innerHTML =
+    `<div class="pgroup"><div class="gh etch">${on} of ${conns.length} connected</div>`
+    + conns.map(c=>`<div class="conn"><div class="ic">${esc(c.ic||'·')}</div>`
+        // "Website · not set · not set" — the server already says 'not set' in
+        // the sub when there is nothing to show, and the column says it again
+        + `<div class="nm"><b>${esc(c.name)}</b><span>${esc(c.on?(c.sub||''):(c.sub==='not set'?'':c.sub||''))}</span></div>`
+        + `<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;`
+        + `color:${c.on?'var(--ok)':'var(--faint)'}">${c.on?'ON':'not set'}</div></div>`).join('')
+    + `</div><div class="pgroup"><p style="font-size:11.5px;color:var(--muted);line-height:1.6">`
+    + `Keys and addresses are set on the setup screen and stored on the server — `
+    + `never in this browser, never in git.</p>`
+    + `<a class="pbtn" href="/setup" style="display:block;text-align:center;text-decoration:none">`
+    + `Open setup</a></div>`;
 }
 function renderSiteMenu(){
   $('#siteMenu').innerHTML=Object.entries(SITES).map(([id,s])=>`<div class="site-item" onclick="switchSite('${id}')"><span class="fav">${s.fav}</span><div><b>${s.name}</b><small>${s.url}</small></div></div>`).join('')+`<div class="site-add" onclick="openPanel('sitePanel');toggleSites()">+ Add another website</div>`;
 }
 function toggleSites(e){if(e)e.stopPropagation();$('#siteMenu').classList.toggle('open');}
 function switchSite(id){CURRENT=id;$('#curSite').textContent=SITES[id].name;$('#curFav').textContent=SITES[id].fav;$('#siteMenu').classList.remove('open');boot();}
-function addSite(){const name=($('#nsName').value.trim()||'New Website'),url=($('#nsUrl').value.trim()||'example.com');const id='s'+Object.keys(SITES).length,fav=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();SITES[id]={name,fav,url,metrics:[["—","Agency health","glass"],["0","Leads today",""],["0","Awaiting you","amber"],["—","Shelf","ok"],["$0.00","Spend today","mono"]],rooms:sectors()};renderSiteMenu();switchSite(id);closeAll();}
+function addSite(){const name=($('#nsName').value.trim()||'New Website'),url=($('#nsUrl').value.trim()||'example.com');const id='s'+Object.keys(SITES).length,fav=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();SITES[id]={name,fav,url,metrics:BLANK_METRICS.map(m=>m.slice()),rooms:sectors()};renderSiteMenu();switchSite(id);closeAll();}
 let cur;
 /* ---- TALKING TO AN AGENT ------------------------------------------------
    The drawer used to reply "On it. I'll claim that as a task on the board…" to
@@ -714,7 +749,7 @@ function applyLive(j){
     rm.foot  = live.foot;
     seatLive(rm, live.agents||[]);
   });
-  renderRunButton(); renderTicker(); renderActBadge();
+  renderRunButton(); renderTicker(); renderActBadge(); renderConns();
   if($('#actPanel').classList.contains('open')) renderActivity();
   // Only redraw the run panel from the poll while a day is actually going —
   // otherwise a poll landing mid-typing would wipe the orders the owner is

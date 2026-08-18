@@ -299,19 +299,25 @@ def build():
     md_state = f"{open_all} tasks on the board" if open_all else "idle — board clear"
 
     # ---- approvals waiting on the owner (amber/red tasks + queued site changes) ----
+    # Each item carries the id and kind it was read from. Without them the
+    # Control Room could draw an Approve button but had nothing to address the
+    # decision TO, which is how it ended up printing "sent to the agent" while
+    # sending nothing. See board.decide_approval.
     approvals = []
     try:
-        for t in c.execute("SELECT sector,title,detail,risk FROM tasks"
+        for t in c.execute("SELECT id,sector,title,detail,risk FROM tasks"
                            " WHERE risk IN ('amber','red') AND status IN ('open','in_progress')"
                            " ORDER BY created_at DESC LIMIT 6"):
-            approvals.append({"lvl": f"{t['risk']} · {t['sector']}", "text": t["title"],
+            approvals.append({"kind": "task", "id": t["id"],
+                              "lvl": f"{t['risk']} · {t['sector']}", "text": t["title"],
                               "why": t["detail"] or "Needs your nod."})
     except Exception:
         pass
     try:
-        for s in c.execute("SELECT agent,kind,detail FROM site_queue WHERE status='pending'"
+        for s in c.execute("SELECT id,agent,kind,detail FROM site_queue WHERE status='pending'"
                            " ORDER BY queued_at DESC LIMIT 3"):
-            approvals.append({"lvl": "amber · IT", "text": f"Apply queued change: {s['kind']}",
+            approvals.append({"kind": "site_change", "id": s["id"],
+                              "lvl": "amber · IT", "text": f"Apply queued change: {s['kind']}",
                               "why": ((s["detail"] or "")[:150] + " — queued by " + (s["agent"] or "IT"))})
     except Exception:
         pass
