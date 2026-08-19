@@ -166,6 +166,24 @@ check("...but the same words in a command are not",
 check("...nor in a file being written",
       run("Write", {"file_path": "/tmp/ship.sh", "content": WARN}), BLOCK)
 
+print("\nThe two halves must sit in the same breath, not the same document:")
+# Red line 3 was fixed this way long ago; red line 1 never was, so it kept
+# firing on ordinary English. The site list holds a very common verb, and a
+# commit message using it two thousand characters below an action word read as
+# an attempt to ship. Fourth false positive of the same shape.
+far = (ACT + " the build\n" + ("# an ordinary paragraph of commit message\n" * 30)
+       + "it is the one file his secrets " + SITE + " in\n")
+check("an action word and a site word far apart do NOT block",
+      run("Bash", {"command": far}), ALLOW)
+check("...but in the same breath they still do",
+      run("Bash", {"command": f"{ACT} ./out/ host:/var/www/{SITE}/"}), BLOCK)
+check("...in either order",
+      run("Bash", {"command": f"the {SITE} site needs it, so {ACT} the build"}), BLOCK)
+check("a site word with no action word is nothing",
+      run("Bash", {"command": f"the {SITE} chat is open"}), ALLOW)
+check("an action word with no site word is nothing",
+      run("Bash", {"command": f"{ACT} ./out/ host:/home/backups/"}), ALLOW)
+
 print("\nFalse positives that cost real work:")
 check(f"the word '{FRZ}' does not read as a price concession",
       run("Bash", {"command": f"git commit -m '{FRZ} the schema' && {SND} nothing"}), ALLOW)

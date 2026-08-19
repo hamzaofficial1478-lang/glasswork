@@ -166,6 +166,44 @@ def concession_going_out(blob):
     return None
 
 
+# How far apart the two halves of red line 1 may sit and still be one
+# instruction. Wider than CONCESSION_GAP because a real command is longer than
+# a real offer: a path, a host, a couple of flags.
+REACH_GAP = 140
+
+
+def reaching_the_site(blob):
+    """
+    The offending text when an action word and a site word sit CLOSE TOGETHER.
+
+    Red line 3 learned this lesson and red line 1 never did, so it kept firing
+    on ordinary English. The second watch list holds a very common verb, and a
+    commit message that used it two thousand characters below an action word was
+    refused as an attempt to ship. Four false positives now, all the same shape:
+    'produced'/'product', 'freeze', a warning written into a pull-request
+    description, and this one.
+
+    Two watched words at opposite ends of a long message are a coincidence. Two
+    in the same breath are an instruction. The test file carries the real
+    examples spelled out — it assembles them at run time, which is why they can
+    sit there and not here.
+
+    Still unordered: either word may come first, because the ordered version let
+    a genuine instruction through when the words happened to fall the other way.
+    Still a tripwire rather than a wall — spacing them apart on purpose defeats
+    it, the same way a script fetched at run time defeats the scanner above.
+    """
+    acts = [m.span() for m in DEPLOY_WORDS.finditer(blob)]
+    if not acts:
+        return None
+    sites = [m.span() for m in PROD_WORDS.finditer(blob)]
+    for a_s, a_e in acts:
+        for s_s, s_e in sites:
+            if max(a_s, s_s) - min(a_e, s_e) <= REACH_GAP:
+                return blob[max(0, min(a_s, s_s) - 30):max(a_e, s_e) + 30]
+    return None
+
+
 def log(agent, tool, args, decision, reason):
     try:
         con = sqlite3.connect(DB)
@@ -216,7 +254,8 @@ def main():
         sys.exit(2)
 
     # RED LINE 1: never deploy/push to the live site unless you are the releaser
-    if DEPLOY_WORDS.search(action_blob) and PROD_WORDS.search(action_blob):
+    caught = reaching_the_site(action_blob)
+    if caught:
         if agent != "it-releaser":
             log(agent, tool, args, "blocked", "only it-releaser may reach production")
             print("BLOCKED: only the IT Releaser may touch production.", file=sys.stderr)
