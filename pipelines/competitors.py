@@ -142,8 +142,24 @@ class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_GuardedRedirect)
 
 
+# What the crawler shelf cost this run. Reset per run; reported in the note so a
+# paid fetch is never silent.
+_SPENT = {"usd": 0.0, "via_crawler": 0}
+
+
 def _get(url, timeout=15):
-    """One read-only GET, to a public http(s) address only. (status, body, error)."""
+    """
+    One read-only GET, to a public http(s) address only. (status, body, error).
+
+    Plain HTTP first, because it is free and it works for most sitemaps. If a
+    rival is behind Cloudflare or serves nothing to Python, the crawler shelf
+    gets one attempt — that is the whole reason that shelf exists, and until now
+    nothing in the codebase actually read a key off it. The watch reported
+    "unreadable" for ever and the shelf light asked the owner to buy something
+    that would never have been used.
+
+    Free path unchanged, so a run with no crawler key behaves exactly as before.
+    """
     ok, why = safe_url(url)
     if not ok:
         return 0, "", f"refused: {why}"
@@ -152,9 +168,23 @@ def _get(url, timeout=15):
         with _OPENER.open(req, timeout=timeout) as r:
             return r.status, r.read(2_000_000).decode("utf-8", "replace"), None
     except urllib.error.HTTPError as e:
-        return e.code, "", f"HTTP {e.code}"
+        status, err = e.code, f"HTTP {e.code}"
     except Exception as e:
-        return 0, "", str(e)
+        status, err = 0, str(e)
+
+    # Blocked or unreachable. Ask the shelf, if there is anything on it.
+    try:
+        from . import fetcher
+        if fetcher.crawler_tool() is None:
+            return status, "", err
+        r = fetcher.fetch(url, render=True, timeout=max(timeout, 40))
+    except Exception:
+        return status, "", err
+    _SPENT["usd"] += r.get("cost", 0.0)
+    if r.get("ok") and r.get("html"):
+        _SPENT["via_crawler"] += 1
+        return 200, r["html"], None
+    return status, "", f"{err}; the crawler could not read it either: {r.get('error')}"
 
 
 def _normalise(domain):
@@ -302,8 +332,18 @@ def critic_check(results, read_any):
 
 
 def run(agent="seo-rival", timeout=15):
+    _SPENT["usd"], _SPENT["via_crawler"] = 0.0, 0
     with board.agent_run(agent) as run_row:
         out = _watch(agent, run_row, timeout)
+        # A paid fetch is never silent: it goes in the note and on the run's
+        # spend line, so the cost governor and the owner both see it.
+        if _SPENT["via_crawler"]:
+            out["read_via_crawler"] = _SPENT["via_crawler"]
+            out["crawler_cost"] = round(_SPENT["usd"], 4)
+            out["summary"] = (out.get("summary", "") +
+                              f" ({_SPENT['via_crawler']} needed the crawler, "
+                              f"${_SPENT['usd']:.4f})")
+            run_row.spent(_SPENT["usd"])
         run_row.note(out.get("summary") or out.get("error") or "checked the rivals")
         return out
 

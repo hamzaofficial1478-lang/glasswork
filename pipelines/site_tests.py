@@ -297,12 +297,127 @@ def test_site_search_never_publishes_the_write_key():
     thin = [{"objectID": "/", "body": "hi", "service": ""}]
     ok, why = search.critic_check(thin, cfg)
     check("a JavaScript shell with no readable text is rejected", ok, False)
-    check("and it says what it thinks it saw",
-          any("JavaScript shell" in r for r in why), True)
+    check("and it points at the fix rather than just naming the fault",
+          any("crawler" in r and "Zyte" in r for r in why), True)
     dupe = [{"objectID": "/a", "body": "x" * 200, "service": ""},
             {"objectID": "/a", "body": "y" * 200, "service": ""}]
     ok, why = search.critic_check(dupe, cfg)
     check("two records sharing an objectID is rejected", ok, False)
+
+
+def test_the_fetcher_pays_only_when_it_has_to():
+    """
+    One way to read a page, with a renderer behind it.
+
+    The rule that matters is the ORDER: free HTTP first, always. A crawler API
+    billed per request will happily charge for forty pages that plain HTTP could
+    have read, and nobody notices until the invoice.
+    """
+    from . import fetcher as fx
+
+    print("\nA JavaScript shell is told apart from a short page:")
+    shell = ('<html><head><title>x</title></head><body><div id="root"></div>'
+             '<script>__NEXT_DATA__={}</script></body></html>')
+    real = "<html><body><h1>Pergolas</h1><p>" + ("We install pergolas. " * 40) + "</p></body></html>"
+    check("the shell is spotted", fx.looks_unrendered(shell), True)
+    check("a real page is not", fx.looks_unrendered(real), False)
+    check("nothing at all counts as unrendered", fx.looks_unrendered(""), True)
+    # A framework marker ALONE must not condemn a page — plenty of real sites
+    # are built with React and render server-side.
+    big_react = ('<div data-reactroot></div><p>' + ("real copy " * 90) + "</p>")
+    check("a React page with real text is left alone",
+          fx.looks_unrendered(big_react), False)
+
+    print("\nThe address is checked before either path — crawler or not:")
+    for bad in ("http://169.254.169.254/latest/meta-data/", "file:///etc/passwd",
+                "http://127.0.0.1:3000/", "http://10.0.0.5/"):
+        r = fx.fetch(bad)
+        check(f"{bad.split('/')[2] if '//' in bad else bad} is refused",
+              r["how"], "refused")
+    check("and it costs nothing to refuse", fx.fetch("file:///etc/passwd")["cost"], 0.0)
+
+    print("\nWith no crawler key it says what one would buy, and never pretends:")
+    real_tool = fx.crawler_tool
+    fx.crawler_tool = lambda: None
+    try:
+        r = fx.fetch("https://example.com", render=True)
+        check("a render without a key fails", r["ok"], False)
+        check("and names the shelf to put it on", "'crawler' shelf" in r["error"], True)
+        check("and charges nothing", r["cost"], 0.0)
+    finally:
+        fx.crawler_tool = real_tool
+
+    print("\nThe free path is tried first, and a good page never costs anything:")
+    real_plain = fx._plain
+    fx._plain = lambda u, t: (real, "", 200)
+    fx.crawler_tool = lambda: {"name": "Zyte API", "api_key": "K",
+                               "base_url": "https://api.zyte.com/v1/extract",
+                               "auth_style": "basic", "enabled": True}
+    try:
+        r = fx.fetch("https://example.com")
+        check("read for free", r["how"], "plain")
+        check("cost nothing", r["cost"], 0.0)
+        check("and the crawler was never called", r["ok"], True)
+    finally:
+        fx._plain, fx.crawler_tool = real_plain, real_tool
+
+    print("\nA shell falls through to the renderer, and only then costs money:")
+    calls = []
+    fx._plain = lambda u, t: (shell, "", 200)
+    fx.crawler_tool = lambda: {"name": "Zyte API", "api_key": "MYKEY",
+                               "base_url": "https://api.zyte.com/v1/extract",
+                               "auth_style": "basic", "enabled": True}
+    real_zyte = fx._zyte
+    fx._zyte = lambda url, tool, render, timeout: (calls.append((url, render, tool)) or
+                                                   (real, "", 200))
+    try:
+        r = fx.fetch("https://example.com/pergolas")
+        check("it rendered", r["how"], "crawler-render")
+        check("and the page is real now", fx.looks_unrendered(r["html"]), False)
+        check("it cost the render price", r["cost"], fx.COST_RENDER)
+        check("the renderer was asked for a browser render",
+              calls[0][1], True)
+    finally:
+        fx._zyte, fx._plain, fx.crawler_tool = real_zyte, real_plain, real_tool
+
+    print("\nZyte is called the way Zyte documents:")
+    import base64 as _b64, json as _json, threading, http.server, socketserver
+    seen = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen["auth"] = self.headers.get("Authorization")
+            n = int(self.headers.get("Content-Length") or 0)
+            seen["body"] = _json.loads(self.rfile.read(n) or b"{}")
+            out = _json.dumps({"browserHtml": real}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *a):
+            pass
+
+    srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        tool = {"name": "Zyte API", "api_key": "MYZYTEKEY", "auth_style": "basic",
+                "base_url": f"http://127.0.0.1:{srv.server_address[1]}/v1/extract",
+                "enabled": True}
+        html, err, status = fx._zyte("https://example.com/p", tool, True, 20)
+        check("it answered", (bool(html), err), (True, ""))
+        # The owner pastes the bare key. Zyte wants it as the Basic USERNAME with
+        # an empty password, so the trailing colon is ours to add, not his.
+        creds = _b64.b64decode(seen["auth"].split()[1]).decode()
+        check("HTTP Basic, key as the username", creds, "MYZYTEKEY:")
+        check("and he did not have to type the colon", "MYZYTEKEY::" in creds, False)
+        check("browserHtml is what we asked for", seen["body"].get("browserHtml"), True)
+        check("redirects followed", seen["body"].get("followRedirect"), True)
+        check("the target url is passed through",
+              seen["body"].get("url"), "https://example.com/p")
+    finally:
+        srv.shutdown()
 
 
 def main():
@@ -315,6 +430,7 @@ def main():
     test_no_site_configured()
     test_only_our_own_site_is_followed()
     test_site_search_never_publishes_the_write_key()
+    test_the_fetcher_pays_only_when_it_has_to()
 
     print()
     if _fail:

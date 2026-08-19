@@ -50,8 +50,9 @@ import urllib.request
 from coordination import board, site
 
 try:
-    from . import services, site_services
+    from . import fetcher, services, site_services
 except ImportError:  # pragma: no cover
+    import fetcher
     import services
     import site_services
 
@@ -92,30 +93,29 @@ def _text(html):
 
 def _fetch(url, timeout=15):
     """
-    The owner's own site, read through the same guard the rival watch uses.
+    One page of the owner's own site. Free HTTP first; the renderer only if the
+    page turns out to be built by JavaScript.
 
-    It is his site and the address comes from his own config, so this is belt
-    and braces — but a SITE_URL pointed at an internal address by accident is
-    exactly the kind of thing that only bites once.
+    This used to be plain urllib and nothing else, which meant a React or Next
+    site indexed as forty copies of `<div id="root"></div>`. The critic caught
+    that and said so, which was honest but not much use — the owner still had no
+    search. pipelines/fetcher.py decides: it reads free, notices a shell, and
+    pays for a render only for the pages that need one.
+
+    Returns (html, error) as before; the cost and the route are reported
+    separately through _LAST so build_records can total them without every
+    caller having to thread a third value through.
     """
-    try:
-        from . import competitors
-        ok, why = competitors.safe_url(url)
-        if not ok:
-            return "", why
-    except Exception:
-        pass
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            if "html" not in ctype:
-                return "", "not an HTML page"
-            return r.read(1_500_000).decode("utf-8", "replace"), ""
-    except urllib.error.HTTPError as e:
-        return "", f"HTTP {e.code}"
-    except Exception as e:
-        return "", str(e)
+    r = fetcher.fetch(url, timeout=timeout)
+    _LAST["cost"] += r["cost"]
+    if r["how"] == "crawler-render":
+        _LAST["rendered"] += 1
+    return r["html"], r["error"]
+
+
+# Running totals for one build_records pass. Reset at the top of it, never read
+# across passes — a module-level counter that nobody resets is a slow lie.
+_LAST = {"cost": 0.0, "rendered": 0}
 
 
 def build_records(url, max_pages=40, timeout=15):
@@ -126,6 +126,7 @@ def build_records(url, max_pages=40, timeout=15):
     UPDATE rather than a second copy of the whole site: run this daily and the
     index tracks the site instead of growing by 40 records a day.
     """
+    _LAST["cost"], _LAST["rendered"] = 0.0, 0
     if not url:
         return [], "no website saved — put it on /setup first"
     if "://" not in url:
@@ -317,8 +318,9 @@ def critic_check(records, cfg):
     if not records:
         reasons.append("no pages were read, so there is nothing to search")
     if records and all(len(r["body"]) < 80 for r in records):
-        reasons.append("every page came back nearly empty — the reader is probably "
-                       "seeing a JavaScript shell rather than the real content")
+        reasons.append("every page came back nearly empty — the site is built by "
+                       "JavaScript and there is no crawler API on the 'crawler' "
+                       "shelf to render it. Add Zyte on /setup and run this again")
     if len({r["objectID"] for r in records}) != len(records):
         reasons.append("two records share an objectID; a re-index would silently "
                        "overwrite one page with another")
@@ -353,6 +355,8 @@ def _work(agent, dry_run, max_pages) -> dict:
     ok, reasons = critic_check(records, cfg)
     result = {"ok": True, "agent": agent, "site": url,
               "pages_indexed": len(records),
+              "pages_rendered": _LAST["rendered"],
+              "crawler_cost": round(_LAST["cost"], 4),
               "services_matched": len({r["service"] for r in records if r["service"]}),
               "dry_run": bool(dry_run)}
     if not ok:
@@ -365,8 +369,11 @@ def _work(agent, dry_run, max_pages) -> dict:
     if dry_run:
         result["sample"] = [{"objectID": r["objectID"], "title": r["title"],
                              "service": r["service_label"]} for r in records[:8]]
-        result["summary"] = (f"{len(records)} page(s) ready to index from {url}; "
-                             "nothing was pushed")
+        result["summary"] = (
+            f"{len(records)} page(s) ready to index from {url}"
+            + (f" ({_LAST['rendered']} needed rendering, ${_LAST['cost']:.4f})"
+               if _LAST["rendered"] else "")
+            + "; nothing was pushed")
         return result
 
     # Writing to OUR OWN Algolia index is not a site change and needs no release.
@@ -402,8 +409,11 @@ def _work(agent, dry_run, max_pages) -> dict:
         evidence={"pages": [r["objectID"] for r in records],
                   "site_queue_id": change_id})
     result.update({"widget_queued": change_id, "decision_id": did,
-                   "summary": (f"indexed {len(records)} page(s) into Algolia; the search "
-                               f"box is queued for your approval (change #{change_id})")})
+                   "summary": (f"indexed {len(records)} page(s) into Algolia"
+                               + (f" ({_LAST['rendered']} rendered, ${_LAST['cost']:.4f})"
+                                  if _LAST["rendered"] else "")
+                               + f"; the search box is queued for your approval "
+                                 f"(change #{change_id})")})
     return result
 
 
