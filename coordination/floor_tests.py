@@ -191,22 +191,25 @@ def test_the_ui_does_not_open_on_a_lie():
 
 def test_the_bulb_says_powered_working_or_broken():
     """
-    The rule the owner set, revised by him after using it.
+    The rule the owner set, revised twice by him after using it.
 
-    Version one was: lit = alive, blinking = working, dark = broken. That fixed a
-    real fault (idle desks went dark, so a quiet agency looked dead) but it tied
-    the bulb to ACTIVITY alone - which meant a sector with every key in place
-    looked identical to one with nothing configured, because neither happened to
-    be mid-run at that second.
+    v1: lit = alive, blinking = working, dark = broken. Fixed a real fault but
+        tied the lamp to ACTIVITY alone, so a sector with every key in place
+        looked the same as one with nothing configured.
+    v2: dark = no API, steady = powered, blinking = working, red = broken.
+        Right rule, and it still did not glow — see the two faults below.
 
-    Version two, which this pins:
+    FAULT ONE: two lamps. A separate 9px `.status` dot sat at z-index:4 directly
+    over the bulb and was painted flat grey whenever an agent was idle, which is
+    most of the day. Every fix went to the bulb underneath it.
 
-      dark      the sector has no working API; the agent has nothing to reach
-      steady    it HAS its sector's API. Powered, not busy. The resting state.
-      blinking  working right now
-      RED       this agent has fallen over
+    FAULT TWO: the "lit" colour was #8fa4ad — a grey bead with a grey halo. It
+    satisfied every assertion about not being the off colour and read as OFF to
+    a person. I confirmed each fix by reading the computed value instead of
+    looking at the screen, which is how this ran for ten rounds.
 
-    Capability and activity are different questions and both are on the lamp now.
+    So this test now asserts what a PERSON would see, not merely that a value
+    changed.
     """
     print("The bulb says powered, working, or broken:")
     html = (ROOT / "ui" / "office.html").read_text()
@@ -214,38 +217,48 @@ def test_the_bulb_says_powered_working_or_broken():
     def seg(sel):
         return html.split(sel + "{")[1].split("}")[0]
 
-    # unpowered is the DEFAULT, and it is dark - a desk whose sector has no
-    # working API must not look ready for work
-    default = seg(".antenna::after")
-    check("with no API behind it the bulb is dark", "background:#2b3940" in default, True)
-    check("and carries no glow", "box-shadow:none" in default, True)
+    print("\n  There is only ONE lamp:")
+    check("the covering status dot is gone from the markup",
+          'class="status"' in html, False)
+    check("and its rules are gone with it", ".emp.idle .status" in html, False)
 
-    # powered is the resting state, and it must be visibly lit
+    print("\n  No API behind it -> dark:")
+    off = seg(".antenna::after")
+    check("a dark bead", "#26333a" in off, True)
+    check("no halo at all", "box-shadow:none" in off, True)
+
+    print("\n  Powered -> visibly lit, not merely a different hex:")
     powered = seg(".emp.pw .antenna::after")
-    check("a powered desk is LIT", "background:#8fa4ad" in powered, True)
-    check("with a glow", "box-shadow:0 0 6px" in powered, True)
+    check("not the old grey that read as off", "#8fa4ad" in powered, False)
+    check("a real colour", "var(--ok)" in powered, True)
+    check("a halo big enough to see across the room", "0 0 20px" in powered, True)
     check("and it does not blink when it is only powered",
           "animation" in powered, False)
+    check("the HEAD is outlined too, not just the bead",
+          "var(--ok)" in seg(".emp.pw .head"), True)
 
-    working = seg(".emp.pw.working .antenna::after")
-    check("working blinks", "animation:pulse" in working, True)
+    print("\n  Working -> the same lamp, blinking:")
+    working = seg(".emp.working .antenna::after,\n.emp.pw.working .antenna::after")
+    check("it blinks", "animation:pulse" in working, True)
+    check("in the working colour", "var(--glass)" in working, True)
+    check("and it blinks even before the sector has been proven — mid-run is mid-run",
+          ".emp.working .antenna::after" in html, True)
 
-    for st in ("done", "waiting"):
-        x = seg(f".emp.pw.{st} .antenna::after")
-        check(f"{st} is lit", "box-shadow:0 0 7px" in x, True)
-        check(f"{st} does not blink", "animation" in x, False)
+    print("\n  Waiting -> lit amber, steady:")
+    waiting = seg(".emp.pw.waiting .antenna::after")
+    check("amber", "var(--amber)" in waiting, True)
+    check("steady", "animation" in waiting, False)
 
-    # red is the loud one, and it is no longer the same as "no API"
+    print("\n  Broken -> red, and red beats everything:")
     broken = seg(".emp.blocked .antenna::after,\n.emp.pw.blocked .antenna::after")
-    check("a broken agent goes RED, not dark", "var(--danger)" in broken, True)
-    check("and it blinks for attention", "animation:pulse" in broken, True)
-    check("dark and broken are no longer the same signal",
-          "background:#2b3940" in broken, False)
-    check("its status lamp is red too",
-          "var(--danger)" in seg(".emp.blocked .status"), True)
+    check("red, not dark", "var(--danger)" in broken, True)
+    check("and it throbs for attention", "animation:pulse" in broken, True)
+    check("dark and broken are no longer the same signal", "#26333a" in broken, False)
+    check("a powered desk that broke still goes red",
+          ".emp.pw.blocked .antenna::after" in html, True)
 
-    # the room only hands down 'pw' when readiness says the sector can run
-    check("power comes from the sector's readiness, not from a guess",
+    print("\n  Power comes from readiness, not from a guess:")
+    check("the room asks the sector's own state",
           "rd.state !== 'blocked'" in html, True)
 
 
