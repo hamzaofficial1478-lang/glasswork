@@ -273,6 +273,43 @@ def services_for_segment(segment: str) -> list:
     return [k for k, s in SERVICES.items() if seg in s["buyers"]]
 
 
+def buyers_of(service_key: str) -> list:
+    """
+    The reverse question, and the one the owner asked for: given a service we
+    want work on, WHICH KIND OF BUSINESS buys it.
+
+    services_for_segment answers "I found a hotel, what does it need?" — useful
+    once you already have the lead. This answers "we want shower-glass jobs, who
+    do we go and look for?", which is how you actually fill a week. Same table,
+    read the other way, so the two can never drift apart.
+    """
+    s = SERVICES.get((service_key or "").strip().lower())
+    return list(s["buyers"]) if s else []
+
+
+def resolve_service(text: str) -> str:
+    """
+    A service key from whatever the owner typed. 'shower glass', 'Frameless
+    Shower', 'shower_glass' all land on the same job.
+
+    Exact key first, then the service's own names, then a loose contains. He
+    should not have to learn our internal spelling to ask for a week of
+    shower-glass work.
+    """
+    t = (text or "").strip().lower().replace(" ", "_")
+    if t in SERVICES:
+        return t
+    plain = (text or "").strip().lower()
+    for k, s in SERVICES.items():
+        if plain == s["label"].lower() or plain in [n.lower() for n in s["names"]]:
+            return k
+    for k, s in SERVICES.items():
+        if plain and (plain in s["label"].lower()
+                      or any(plain in n.lower() or n.lower() in plain for n in s["names"])):
+            return k
+    return ""
+
+
 def match_service(*texts, segment: str = "") -> tuple:
     """
     Work out which service a business most likely needs, from whatever we know

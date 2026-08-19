@@ -268,25 +268,98 @@ def enrich(candidate, timeout=12):
 # 3. the run
 # ---------------------------------------------------------------------------
 
-def plan_targets(segment=None, area=None, per_segment=2):
+def local_first(areas):
     """
-    Which searches to run. No segment named means the whole market, which is the
-    point — the Hunter is not restricted to a chosen few.
+    Nearest out. The owner's own base first, then the rest of that emirate, then
+    the others.
+
+    "Main target is locals" is not a preference, it is how this trade makes
+    money: a Business Bay enquiry gets surveyed tomorrow and quoted the same
+    week, while a Ras Al Khaimah one is two hours each way before anybody has
+    measured anything. The search budget always runs out — it should run out at
+    the far end.
+
+    The base comes from the address the owner saved on /setup. With none saved
+    the list is left exactly as written, which already starts in Dubai; guessing
+    a home city from nothing would be inventing a fact.
+    """
+    try:
+        from coordination import site
+        base = (site.status().get("url") or "")
+    except Exception:
+        base = ""
+    home = ""
+    for city in ("dubai", "abu dhabi", "sharjah", "ajman", "ras al khaimah", "al ain"):
+        if city.replace(" ", "") in base.lower().replace(" ", "").replace("-", ""):
+            home = city
+            break
+    if not home:
+        return list(areas)
+
+    def rank(a):
+        al = a.lower()
+        if al == home:
+            return 0                      # the emirate itself
+        if home == "dubai" and al not in ("abu dhabi", "al ain", "sharjah",
+                                          "ajman", "ras al khaimah"):
+            return 1                      # a Dubai district
+        return 2
+    return sorted(areas, key=rank)
+
+
+def plan_targets(segment=None, area=None, per_segment=2, service=None):
+    """
+    Which searches to run.
+
+    Three ways to aim it, and the third is the one the owner asked for:
+
+      nothing named   the whole market. The Hunter is not restricted to a chosen
+                      few, which is the point of the segment table.
+      a segment       just that kind of business.
+      A SERVICE       every kind of business that BUYS that service, and nobody
+                      else. "Get me shower-glass work this week" now targets
+                      hotels, gyms, villas and fit-out contractors — not a
+                      warehouse that will never want one. The buyer list comes
+                      off services.py, so it can never drift from what the mail
+                      will end up writing about.
+
+    Aiming by service also STAMPS the service onto every target, so a lead
+    collected for shower glass is stored knowing that. Before, the service was
+    guessed back out of the business's own listing afterwards — fine when you
+    are sweeping the market, wrong when you went looking for one specific job.
+
+    LOCALS FIRST. Areas are searched nearest-out: the owner's own districts
+    before the far emirates. A glass firm in Dubai wins a Business Bay job it
+    can survey tomorrow; a Ras Al Khaimah enquiry is two hours each way before
+    anyone has quoted anything. When the search budget runs out — and it always
+    does — it should run out on the far end, not the near one.
 
     The order is round-robin across segments, not segment by segment. It matters
     because callers cap the number of searches: nested loops would spend the
     whole budget on fit-out contractors in six districts and never reach a hotel,
     which is exactly the narrowness this sector was rebuilt to get away from.
     """
-    segs = [segment] if segment else list(ls.SEGMENTS)
-    areas = [area] if area else ls.DISTRICTS
+    svc = services.resolve_service(service) if service else ""
+    if service and not svc:
+        return []                      # an unknown service must find nobody
+
+    if segment:
+        segs = [segment]
+    elif svc:
+        # only the segments that actually buy this job
+        segs = [s for s in services.buyers_of(svc) if s in ls.SEGMENTS]
+    else:
+        segs = list(ls.SEGMENTS)
+
+    areas = [area] if area else local_first(ls.DISTRICTS)
 
     per_seg = []
     for s in segs:
         meta = ls.SEGMENTS.get(s)
         if not meta:
             continue
-        per_seg.append([{"segment": s, "query": q, "area": a}
+        per_seg.append([{"segment": s, "query": q, "area": a,
+                         **({"for_service": svc} if svc else {})}
                         for q in list(meta["queries"])[:per_segment] for a in areas])
 
     out, i = [], 0
@@ -323,18 +396,23 @@ def critic_check(candidates, searched, errors):
 
 
 def run(agent="leads-hunter", segment=None, area=None, limit=20, per_segment=1,
-        max_searches=6, dry_run=False, enrich_sites=True):
+        max_searches=6, dry_run=False, enrich_sites=True, service=None):
     with board.agent_run(agent) as run_row:
         out = _hunt(agent, segment, area, limit, per_segment, max_searches,
-                    dry_run, enrich_sites, run_row)
+                    dry_run, enrich_sites, run_row, service)
         run_row.note(out.get("summary") or out.get("error") or "hunted")
         return out
 
 
 def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
-          enrich_sites, run_row):
+          enrich_sites, run_row, service=None):
     key, key_from = _places_key()
-    targets = plan_targets(segment, area, per_segment)[:max_searches]
+    targets = plan_targets(segment, area, per_segment, service)[:max_searches]
+    if service and not targets:
+        return {"ok": False, "error":
+                f"'{service}' is not a service this business sells, so there is "
+                f"nobody to go and look for. One of: "
+                + ", ".join(sorted(services.SERVICES))}
 
     if dry_run or not key:
         plan = {"ok": bool(targets), "dry_run": True, "searches_planned": len(targets),
@@ -367,6 +445,14 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
                 continue
             for p in places:
                 c = _place_to_candidate(p, t["segment"], t["area"])
+                # Hunting FOR a service beats guessing one back out of the
+                # listing: we already know what job we went looking for, and the
+                # listing only ever hinted at it.
+                if t.get("for_service"):
+                    c["service"] = t["for_service"]
+                    c["service_label"] = services.label(t["for_service"])
+                    c["service_reason"] = ("collected specifically for "
+                                           + services.label(t["for_service"]))
                 nm = c["company"].strip().lower()
                 if not nm or nm in seen_here:
                     continue
@@ -423,7 +509,9 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
 def main():
     ap = argparse.ArgumentParser(description="Collect real UAE business leads.")
     ap.add_argument("--segment", help="one segment (default: every segment)")
-    ap.add_argument("--area", help="one area (default: every area on the list)")
+    ap.add_argument("--service", help="hunt for the businesses that BUY this "
+                    "service, e.g. --service 'shower glass'")
+    ap.add_argument("--area", help="one area (default: nearest first)")
     ap.add_argument("--limit", type=int, default=20, help="places per search (max 20)")
     ap.add_argument("--max-searches", type=int, default=6)
     ap.add_argument("--per-segment", type=int, default=1, help="search terms per segment")
@@ -432,7 +520,8 @@ def main():
     a = ap.parse_args()
     print(json.dumps(run(segment=a.segment, area=a.area, limit=a.limit,
                          per_segment=a.per_segment, max_searches=a.max_searches,
-                         dry_run=a.dry_run, enrich_sites=not a.no_enrich), indent=2))
+                         dry_run=a.dry_run, enrich_sites=not a.no_enrich,
+                         service=a.service), indent=2))
 
 
 if __name__ == "__main__":

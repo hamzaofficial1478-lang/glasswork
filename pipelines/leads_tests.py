@@ -635,6 +635,83 @@ def test_outreach_is_capped_and_recorded():
 from providers import store as _store
 
 
+def test_hunting_for_one_service():
+    """
+    The owner's ask: "the agent must know which service related leads it's
+    collecting and target the accurate audience related to that service".
+
+    Aiming by SEGMENT answers "find me hotels". Aiming by SERVICE answers "get me
+    shower-glass work this week", which is the question that actually fills a
+    diary — and it must go to the businesses that BUY shower glass, not sweep the
+    market and sort it out afterwards.
+    """
+    print("Hunting for one service targets only its buyers:")
+    from . import leads_hunt as lh
+    from . import services as sv
+
+    targets = lh.plan_targets(service="shower glass", per_segment=1)
+    segs = {t["segment"] for t in targets}
+    check("it found some targets", bool(targets), True)
+    check("every segment targeted actually buys shower glass",
+          segs - set(sv.buyers_of("shower_glass")), set())
+    check("and a segment that does not buy it is left out",
+          "warehouse" in segs, False)
+    check("every target is stamped with the service it was collected for",
+          {t.get("for_service") for t in targets}, {"shower_glass"})
+
+    print("\nThe owner does not have to learn our spelling:")
+    for typed in ("shower glass", "Shower Glass", "shower_glass", "frameless shower"):
+        check(f"'{typed}' finds the job", sv.resolve_service(typed), "shower_glass")
+    check("a service we do not sell resolves to nothing",
+          sv.resolve_service("swimming pools"), "")
+
+    print("\nAsking for work we do not sell finds nobody, loudly:")
+    check("no targets are planned", lh.plan_targets(service="swimming pools"), [])
+    out = lh.run(service="swimming pools", dry_run=True)
+    check("the hunt refuses", out["ok"], False)
+    check("and says what we DO sell", "aluminium_doors" in out["error"], True)
+
+    print("\nThe two directions of the table cannot drift apart:")
+    # buyers_of and services_for_segment are the same fact read both ways
+    for svc in sv.SERVICES:
+        for seg in sv.buyers_of(svc):
+            if svc not in sv.services_for_segment(seg):
+                check(f"{seg} buys {svc} both ways", False, True)
+                break
+    check("every buyer link agrees in both directions", True, True)
+
+
+def test_locals_come_first():
+    """
+    "Main target is locals." Not a preference — a Business Bay enquiry is
+    surveyed tomorrow, a Ras Al Khaimah one is two hours each way. The search
+    budget always runs out, and it should run out at the far end.
+    """
+    print("\nNearest areas are searched first:")
+    from unittest import mock
+    from . import leads_hunt as lh
+    areas = ["Abu Dhabi", "Sharjah", "Business Bay", "Ras Al Khaimah", "Al Quoz"]
+
+    with mock.patch("coordination.site.status", return_value={"url": "https://glassworks-dubai.ae"}):
+        order = lh.local_first(areas)
+    check("a Dubai firm searches Dubai districts first",
+          order[:2], ["Business Bay", "Al Quoz"])
+    check("and the far emirates last", order[-1], "Ras Al Khaimah")
+
+    with mock.patch("coordination.site.status", return_value={"url": "https://sharjahglass.ae"}):
+        check("a Sharjah firm starts in Sharjah",
+              lh.local_first(areas)[0], "Sharjah")
+
+    with mock.patch("coordination.site.status", return_value={"url": ""}):
+        check("with no site saved nothing is invented — the list is untouched",
+              lh.local_first(areas), areas)
+
+    # and the plan itself must honour it
+    with mock.patch("coordination.site.status", return_value={"url": "https://glassworks-dubai.ae"}):
+        t = lh.plan_targets(segment="hotel", per_segment=1)
+    check("the search plan starts local", t[0]["area"], "Business Bay")
+
+
 def main():
     with _store.isolated():
         _main()
@@ -650,6 +727,8 @@ def _main():
     test_a_place_becomes_a_usable_lead()
     test_emails_are_read_not_guessed()
     test_the_hunt_spreads_across_the_market()
+    test_hunting_for_one_service()
+    test_locals_come_first()
     test_hunt_without_a_key_explains_itself()
     test_hunt_stores_screens_and_dedupes()
     test_never_collected_twice()
