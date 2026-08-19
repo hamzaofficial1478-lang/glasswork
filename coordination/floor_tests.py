@@ -174,39 +174,79 @@ def test_the_ui_does_not_open_on_a_lie():
     check("no desk ships as waiting", 's:"waiting"' in body, False)
     desks = re.findall(r'(?<![a-z])s:"(\w+)"', body)   # not cls:"dir"
     check("every desk starts idle", set(desks), {"idle"})
-    # 17 since the SEO room gained a Rival desk: pipelines/competitors.py runs
-    # as 'seo-rival' every day and had no chair, so its work lit the Auditor's
-    # lamp instead. Pinned so nobody silently drops a desk.
-    check("and all seventeen desks are still there", len(desks), 17)
+    # 18: the SEO room gained a Rival desk (pipelines/competitors.py runs as
+    # 'seo-rival' daily and had no chair, so its work lit the Auditor's lamp)
+    # and a Backlinks desk. Pinned so nobody silently drops one.
+    check("and all eighteen desks are still there", len(desks), 18)
+
+    # Every desk must be ADDRESSABLE, not just readable. The chat drawer used to
+    # send the label under the desk - 'Watcher', 'Hunter' - which carries no
+    # sector, so the server could not tell whose brain should answer and fell
+    # back to the Director's. Sixteen of seventeen desks were answering on the
+    # MD's model. The id is what gets sent, and every desk has one.
+    ids = re.findall(r'id:"([a-z-]+)"', body)
+    check("every desk carries a stable id", len(ids), len(desks))
+    check("and no two share one", len(set(ids)), len(ids))
 
 
-def test_lit_means_alive_and_dark_means_broken():
+def test_the_bulb_says_powered_working_or_broken():
     """
-    The rule the owner set, and the one I had backwards: lit = alive, blinking =
-    working, DARK = broken. Idle desks used to go dark and broken ones lit up
-    red, so a healthy quiet agency looked dead and you could not tell "nothing to
-    do" from "this one has fallen over".
+    The rule the owner set, revised by him after using it.
+
+    Version one was: lit = alive, blinking = working, dark = broken. That fixed a
+    real fault (idle desks went dark, so a quiet agency looked dead) but it tied
+    the bulb to ACTIVITY alone - which meant a sector with every key in place
+    looked identical to one with nothing configured, because neither happened to
+    be mid-run at that second.
+
+    Version two, which this pins:
+
+      dark      the sector has no working API; the agent has nothing to reach
+      steady    it HAS its sector's API. Powered, not busy. The resting state.
+      blinking  working right now
+      RED       this agent has fallen over
+
+    Capability and activity are different questions and both are on the lamp now.
     """
-    print("Lit is alive, dark is broken:")
+    print("The bulb says powered, working, or broken:")
     html = (ROOT / "ui" / "office.html").read_text()
 
-    # the default bulb — every desk that is not broken — must be lit
-    default = html.split(".antenna::after{")[1].split("}")[0]
-    check("an idle desk's bulb is LIT", "background:#8fa4ad" in default, True)
-    check("and it has a glow", "box-shadow:0 0 5px" in default, True)
-    check("it is not the faint/off colour", "var(--faint)" in default, False)
+    def seg(sel):
+        return html.split(sel + "{")[1].split("}")[0]
 
-    check("working blinks", "animation:pulse" in
-          html.split(".emp.working .antenna::after{")[1].split("}")[0], True)
+    # unpowered is the DEFAULT, and it is dark - a desk whose sector has no
+    # working API must not look ready for work
+    default = seg(".antenna::after")
+    check("with no API behind it the bulb is dark", "background:#2b3940" in default, True)
+    check("and carries no glow", "box-shadow:none" in default, True)
+
+    # powered is the resting state, and it must be visibly lit
+    powered = seg(".emp.pw .antenna::after")
+    check("a powered desk is LIT", "background:#8fa4ad" in powered, True)
+    check("with a glow", "box-shadow:0 0 6px" in powered, True)
+    check("and it does not blink when it is only powered",
+          "animation" in powered, False)
+
+    working = seg(".emp.pw.working .antenna::after")
+    check("working blinks", "animation:pulse" in working, True)
+
     for st in ("done", "waiting"):
-        seg = html.split(f".emp.{st} .antenna::after{{")[1].split("}")[0]
-        check(f"{st} is lit", "box-shadow:0 0 7px" in seg, True)
-        check(f"{st} does not blink", "animation" in seg, False)
+        x = seg(f".emp.pw.{st} .antenna::after")
+        check(f"{st} is lit", "box-shadow:0 0 7px" in x, True)
+        check(f"{st} does not blink", "animation" in x, False)
 
-    broken = html.split(".emp.blocked .antenna::after{")[1].split("}")[0]
-    check("ONLY a broken desk goes dark", "box-shadow:none" in broken, True)
-    check("and its status lamp goes red and blinks",
-          "animation:pulse" in html.split(".emp.blocked .status{")[1].split("}")[0], True)
+    # red is the loud one, and it is no longer the same as "no API"
+    broken = seg(".emp.blocked .antenna::after,\n.emp.pw.blocked .antenna::after")
+    check("a broken agent goes RED, not dark", "var(--danger)" in broken, True)
+    check("and it blinks for attention", "animation:pulse" in broken, True)
+    check("dark and broken are no longer the same signal",
+          "background:#2b3940" in broken, False)
+    check("its status lamp is red too",
+          "var(--danger)" in seg(".emp.blocked .status"), True)
+
+    # the room only hands down 'pw' when readiness says the sector can run
+    check("power comes from the sector's readiness, not from a guess",
+          "rd.state !== 'blocked'" in html, True)
 
 
 def test_a_dark_bulb_always_says_why():
@@ -288,8 +328,30 @@ def test_the_agent_chat_is_not_canned():
               agent_chat.whois("it-watcher")["brain_task"], "it")
         check("content-writer routes to the Content brain",
               agent_chat.whois("content-writer")["brain_task"], "content")
-        check("and an unknown name does not crash",
-              agent_chat.whois("")["sector"], "Director")
+        # THE ONE THAT WAS COSTING THE MOST. The office chat drawer sends the
+        # label under the desk - 'Watcher', 'Hunter', 'Strategist' - which has
+        # no sector prefix in it. whois() looked only at prefixes and defaulted
+        # everything else to the Director, so sixteen desks out of seventeen
+        # answered on the MD's model. That is the same override the owner had
+        # the LLM shelf emptied to prevent, arriving through another door.
+        for label, want in [("Watcher", "it"), ("Hunter", "leads"),
+                            ("Strategist", "seo"), ("Writer", "content"),
+                            ("Screener", "security"), ("Reporter", "report"),
+                            ("Director", "md")]:
+            check(f"the office label '{label}' finds its OWN brain",
+                  agent_chat.whois(label)["brain_task"], want)
+
+        # And a name we cannot place gets NO brain rather than the strongest one
+        # in the building. A wrong refusal costs one answer read off the record;
+        # a wrong guess puts the MD's voice behind a sector it never ran.
+        check("an unknown name does not crash",
+              agent_chat.whois("")["sector"], "unknown")
+        check("...and is given no brain at all",
+              agent_chat.whois("nonsense-desk")["brain_task"], None)
+        unknown = agent_chat.ask("nonsense-desk", "what have you done?")
+        check("...it still answers, from the record", unknown["ok"], True)
+        check("...and says why there is no model",
+              "not a desk I recognise" in unknown.get("unrouted", ""), True)
 
         # An unrouted sector is a setup step, not a crash, and the two must not
         # be dressed up the same. Nothing is configured in a fresh cabinet, so
@@ -305,7 +367,9 @@ def test_the_agent_chat_is_not_canned():
         con = sqlite3.connect(board.DB)
         n = con.execute("SELECT count(*) FROM requests WHERE from_sector='Owner'").fetchone()[0]
         con.close()
-        check("all three conversations are logged, not private", n, 3)
+        # four now: the three above plus the unrecognised desk. A conversation
+        # that produced no model answer is still a conversation and still logged.
+        check("every conversation is logged, not private", n, 4)
     finally:
         board.DB = agent_chat.DB = real_b
 
@@ -367,7 +431,7 @@ def _main():
     test_the_run_wins_over_a_stale_task_row()
     test_each_agent_reaches_its_own_desk()
     test_the_ui_does_not_open_on_a_lie()
-    test_lit_means_alive_and_dark_means_broken()
+    test_the_bulb_says_powered_working_or_broken()
     test_a_dark_bulb_always_says_why()
     test_the_agent_chat_is_not_canned()
     test_tracing_never_breaks_the_work()

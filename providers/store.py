@@ -44,11 +44,16 @@ _EMPTY = {"credentials": [], "routing": {}, "usage": {}, "tools": []}
 SHELF_KINDS = {
     "vision":          "reasoning",   # image understanding / reasoning over images
     "embedding":       "reasoning",   # vectors for similarity + dedupe
-    "image_gen":       "reasoning",   # generated graphics (decoration only)
     "speech":          "reasoning",   # transcription / voice
     "seo_data":        "data",
     "trends":          "data",        # Google Trends & co — what demand is rising
     "maps":            "data",        # Google Places — real UAE businesses, by area
+    # Every picture that is not one of the owner's own job photos. Pexels sits
+    # here as the primary, a second stock provider under it as the fallback.
+    # There is deliberately no image_gen shelf any more: a stock library that
+    # already holds tens of thousands of real glass, aluminium and construction
+    # shots beats a generated picture for this trade every time, and a generated
+    # one can never be a project photo — the thing that actually wins the job.
     "stock_images":    "data",
     "crawler":         "data",
     "email":           "delivery",

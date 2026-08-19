@@ -86,14 +86,14 @@ SHELF_MEANING = {
     "trends": ("see which services are rising or falling in search",
                "add a Google Trends source on the 'trends' shelf"),
     "email": ("send outreach and replies", "add SMTP or an email API on the 'email' shelf"),
-    "stock_images": ("decorative graphics for banners (never project photos)",
-                     "add a Pexels/Unsplash key"),
+    "stock_images": ("every picture that is not one of your own job photos — "
+                     "banners, backgrounds, stock shots (never a project shot)",
+                     "add your Pexels key here, and a second stock provider "
+                     "under it as the fallback"),
     "crawler": ("read competitor and prospect pages at scale", "add a crawler key"),
     "llm": ("the text brain every sector reasons and writes with",
             "add a model on the 'llm' shelf — without it agents can plan but not write"),
-    "llm_extra": ("a stronger or spare brain for hard jobs", "optional"),
     "vision": ("read and judge images", "optional"),
-    "image_gen": ("generate decorative graphics", "optional"),
     "embedding": ("similarity and de-duplication", "optional"),
     "speech": ("transcription", "optional"),
 }

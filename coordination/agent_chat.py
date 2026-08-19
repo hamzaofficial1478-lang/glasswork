@@ -42,10 +42,38 @@ DB = Path(__file__).parent / "agency.db"
 # key is the agent-name prefix the pipelines already use (it-watcher, and so on).
 SECTOR_OF = {
     "director": ("Director", "md"), "critic": ("Director", "md"),
+    "managing": ("Director", "md"),
     "it": ("IT", "it"), "content": ("Content", "content"),
     "seo": ("SEO", "seo"), "leads": ("Leads", "leads"),
-    "report": ("Report", "report"), "security": ("Security", "security"),
+    "report": ("Report", "report"), "reporter": ("Report", "report"),
+    "security": ("Security", "security"),
 }
+
+# THE SAME LOOKUP, BY BARE DESK NAME — and the reason this file had a bug that
+# sent every conversation in the building to the MD's model.
+#
+# The office chat drawer sends the name printed under the desk. That label is
+# 'Watcher', 'Hunter', 'Strategist' — no sector prefix, because a plaque does
+# not carry one. SECTOR_OF found nothing, and the lookup's default was
+# ("Director", "md"), so EVERY desk except the ones that happened to be showing
+# a live agent id answered on the MD's brain. Sixteen desks out of seventeen.
+#
+# That is precisely the override the owner was worried about when he asked for
+# the LLM shelf to be emptied — the strongest model in the building answering
+# for sectors it was never routed to — and it was coming in through a different
+# door. Two changes: desks resolve by their own name, and an unrecognised name
+# no longer silently inherits the MD (see whois).
+DESK_SECTOR = {
+    "director": "md", "critic": "md",
+    "watcher": "it", "fixer": "it", "releaser": "it",
+    "writer": "content", "illustrator": "content", "publisher": "content",
+    "auditor": "seo", "strategist": "seo", "rival": "seo", "backlinks": "seo",
+    "hunter": "leads", "scanner": "leads", "outreach": "leads", "responder": "leads",
+    "reporter": "report",
+    "screener": "security", "guard": "security",
+}
+SECTOR_NAME = {"md": "Director", "it": "IT", "content": "Content", "seo": "SEO",
+               "leads": "Leads", "report": "Report", "security": "Security"}
 
 # What each desk is for, in one line. Used when the agent introduces itself.
 DESK_JOB = {
@@ -101,12 +129,37 @@ def _ago(secs):
 
 
 def whois(agent: str) -> dict:
-    """Which desk is this, in which sector, answered by which brain."""
+    """
+    Which desk is this, in which sector, answered by which brain.
+
+    Resolved in three tries, then given up on:
+      1. the sector prefix   'it-watcher'  -> IT
+      2. the bare desk name  'Watcher'     -> IT   (what the office actually sends)
+      3. nothing             -> brain_task is None
+
+    Step 3 used to be "assume the Director", which quietly handed the MD's model
+    to every desk in the building. An unrecognised name now gets NO brain rather
+    than the strongest one: a wrong refusal costs one plainly-worded answer read
+    straight off the record, and a wrong guess puts the MD's voice behind a
+    sector it was never routed to.
+    """
     a = (agent or "").strip().lower()
     prefix = a.split("-")[0] if "-" in a else a
     desk = a.rsplit("-", 1)[-1] if "-" in a else a
-    sector, task = SECTOR_OF.get(prefix, SECTOR_OF.get(desk, ("Director", "md")))
-    return {"agent": a or "unknown", "desk": desk, "sector": sector, "brain_task": task,
+
+    task = None
+    if prefix in SECTOR_OF:
+        task = SECTOR_OF[prefix][1]
+    elif desk in SECTOR_OF:
+        task = SECTOR_OF[desk][1]
+    elif desk in DESK_SECTOR:
+        task = DESK_SECTOR[desk]
+    elif prefix in DESK_SECTOR:
+        task = DESK_SECTOR[prefix]
+
+    return {"agent": a or "unknown", "desk": desk,
+            "sector": SECTOR_NAME.get(task, "unknown"),
+            "brain_task": task,
             "job": DESK_JOB.get(desk, "no job description on file")}
 
 
@@ -290,6 +343,15 @@ def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
         _log(w, message, reply)          # a conversation is logged either way
         return {"ok": True, "agent": w["agent"], "sector": w["sector"],
                 "reply": reply, "offline": True, "record": record, **extra}
+
+    # A desk we cannot place gets no brain at all. Borrowing the MD's is how
+    # every conversation in the building ended up in the Director's voice.
+    if not w["brain_task"]:
+        return _from_record(unrouted=(
+            f"'{w['agent']}' is not a desk I recognise, so there is no sector "
+            "brain to answer for it. This is read straight off the record "
+            "instead — I will not borrow another sector's model to sound "
+            "fluent about work that is not theirs."))
 
     try:
         from providers import call_task, resolve_task

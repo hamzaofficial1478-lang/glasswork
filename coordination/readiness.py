@@ -39,8 +39,9 @@ Not invented — read off what the pipelines actually borrow and read:
            crawler    pipelines/competitors.py borrows it to read rival pages
   leads    maps       pipelines/leads_hunt.py needs a Places key or it finds nobody
            email      pipelines/mail.py borrows it to send
-  content  stock_images / image_gen — optional. A page without a picture still
-           publishes; the sector is not blocked by it.
+  content  stock_images — Pexels and its fallback, the only picture source now
+           that image generation is gone. Optional: a brief still writes without
+           a picture, so a missing key is a note, not a blackout.
   it       SITE_URL. There is nothing to check the health of without one.
   report   somewhere to send the digest, or the day's score is written to a
            table nobody opens.
@@ -86,7 +87,12 @@ WANTS_TWO = {"md", "security"}
 SHELVES = {
     "seo": {"seo_data": True, "crawler": True},
     "leads": {"maps": True, "email": True},
-    "content": {"stock_images": False, "image_gen": False},
+    # Pexels (and whatever second stock provider sits under it) is Content's
+    # only picture source now — image generation was dropped. Still optional at
+    # SECTOR level, and that is deliberate: content_briefs.py writes briefs and
+    # never touches an image, so a missing stock key must not black out a room
+    # that can still do its day's work. It shows as a note, not a blocker.
+    "content": {"stock_images": False},
 }
 
 # .env keys a sector cannot work without, with the plain reason

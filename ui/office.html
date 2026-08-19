@@ -79,32 +79,46 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 /* a broken desk is dimmed and outlined, so you see it before you read it */
 .emp.blocked .figure{opacity:.55}
 .emp.blocked .head{border-color:var(--danger)}
+/* An unpowered desk is greyed the way an unplugged machine is: it is not
+   broken, there is simply nothing behind it to reach. Distinct from the red
+   dimming above, which means something went wrong. */
+.emp:not(.pw):not(.blocked) .figure{opacity:.62}
+.emp.pw .head{border-color:#93a8b1}
 .head{width:26px;height:24px;border-radius:9px 9px 8px 8px;margin:0 auto;position:relative;background:linear-gradient(180deg,#c9d6dc,#9fb2ba);border:1px solid #7d929b}
 .emp.dir .head{background:linear-gradient(180deg,#8fe6ef,#54cbd9)}.emp.sec .head{background:linear-gradient(180deg,#f0a9ac,#e5565b)}
 .head::before,.head::after{content:"";position:absolute;top:9px;width:4px;height:4px;border-radius:50%;background:#1a2429;animation:blink 4.2s infinite}
 .head::before{left:6px}.head::after{right:6px}
 .antenna{position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:2px;height:6px;background:#7d929b}
-/* THE BULB ON THE HEAD — the one thing you should be able to read across the room.
+/* THE BULB ON THE HEAD — the one thing you should read across the room.
 
-   Lit means alive. Blinking means working. DARK MEANS BROKEN.
+   It answers "can this agent work, and is it working" in that order:
 
-   This was the wrong way round: idle desks went dark and broken ones lit up red,
-   so a healthy agency with nothing queued looked like a morgue and you could not
-   tell "nothing to do" from "this one has fallen over". Now:
+     dark       its sector has no working API. The agent has nothing to reach,
+                so it could not act even if you asked it to.
+     steady     it HAS its sector's API. Powered, not busy. This is the resting
+                state of a healthy agency and most desks sit here most of the day.
+     blinking   working right now.
+     RED        something is wrong with this agent — its last run raised, or it
+                started and never came back. The desk says which.
 
-     blinking   working right now
-     steady     alive and fine — recently finished (green), work queued (amber),
-                or simply nothing to do (pale)
-     dark       something is wrong; the desk says what
-
-   A bulb only goes out for a reason, and the reason is always on the desk. */
+   The previous rule tied the bulb to activity alone, so a sector with every key
+   in place looked identical to one with nothing configured: both dark, because
+   neither happened to be mid-run. Capability and activity are different
+   questions and the owner asked to see both, so the bulb now carries capability
+   and the blink carries activity. Nothing was lost — red is still the loud one. */
 .antenna::after{content:"";position:absolute;top:-3px;left:-1.5px;width:5px;height:5px;border-radius:50%;
-  background:#8fa4ad;box-shadow:0 0 5px rgba(143,164,173,.7)}
-.emp.working .antenna::after{background:var(--glass);box-shadow:0 0 8px var(--glass);animation:pulse 1.1s infinite}
-.emp.done .antenna::after{background:var(--ok);box-shadow:0 0 7px var(--ok)}
-.emp.waiting .antenna::after{background:var(--amber);box-shadow:0 0 7px var(--amber)}
-/* the only dark bulb in the building */
-.emp.blocked .antenna::after{background:#3a2326;box-shadow:none}
+  background:#2b3940;box-shadow:none;transition:background .3s ease}
+/* powered: this desk's sector has at least one API that answers */
+.emp.pw .antenna::after{background:#8fa4ad;box-shadow:0 0 6px rgba(143,164,173,.75)}
+.emp.pw.done .antenna::after{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+.emp.pw.waiting .antenna::after{background:var(--amber);box-shadow:0 0 7px var(--amber)}
+/* working: the same lamp, blinking */
+.emp.pw.working .antenna::after{background:var(--glass);box-shadow:0 0 9px var(--glass);animation:pulse 1.1s infinite}
+/* an agent can be mid-run before its sector has been proven — still blink */
+.emp.working .antenna::after{background:var(--glass);box-shadow:0 0 9px var(--glass);animation:pulse 1.1s infinite}
+/* red beats everything: this one has fallen over */
+.emp.blocked .antenna::after,
+.emp.pw.blocked .antenna::after{background:var(--danger);box-shadow:0 0 10px var(--danger);animation:pulse 1s infinite}
 .body{width:34px;height:20px;border-radius:10px 10px 5px 5px;margin:-2px auto 0;background:linear-gradient(180deg,#41565f,#2e3f47);border:1px solid #223038}
 .desk{width:54px;height:14px;border-radius:5px;margin:3px auto 0;position:relative;background:linear-gradient(180deg,#3a4c54,#293840);border:1px solid #1e2a30;box-shadow:0 4px 8px rgba(0,0,0,.3)}
 .monitor{position:absolute;top:-11px;left:50%;transform:translateX(-50%);width:22px;height:14px;border-radius:3px;background:#0e161a;border:1px solid #33484f;overflow:hidden}
@@ -351,17 +365,22 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
    dark: the first paint was a mock-up, and the truth arrived a beat later. A
    dashboard that shows work nobody did is worse than one that shows nothing,
    so the placeholder is gone. If a bulb is lit, an agent really ran. */
+/* Every desk carries an `id` as well as a label. The chat drawer used to send
+   the LABEL — 'Watcher', 'Hunter' — which has no sector in it, so the server
+   could not tell which sector's brain should answer and fell back to the
+   Director's. Sixteen desks out of seventeen were answering on the MD's model.
+   The label is for reading; the id is for addressing, and it never changes. */
 function sectors(){return [
-  {key:"Director",name:"Director's Office",cls:"dir",agents:[{n:"Director",role:"Plans the day",s:"idle",t:"—",av:"🔮"}]},
-  {key:"IT",name:"IT & Site Health",cls:"",agents:[{n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"}]},
-  {key:"Content",name:"Content & Social",cls:"",agents:[{n:"Writer",role:"Drafts in your voice",s:"idle",t:"—",av:"✍"},{n:"Illustrator",role:"AI images",s:"idle",t:"—",av:"🎨"},{n:"Publisher",role:"Publishes after Auditor",s:"idle",t:"—",av:"📤"}]},
+  {key:"Director",name:"Director's Office",cls:"dir",agents:[{id:"managing-director",n:"Director",role:"Plans the day",s:"idle",t:"—",av:"🔮"}]},
+  {key:"IT",name:"IT & Site Health",cls:"",agents:[{id:"it-watcher",n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{id:"it-fixer",n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{id:"it-releaser",n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"}]},
+  {key:"Content",name:"Content & Social",cls:"",agents:[{id:"content-writer",n:"Writer",role:"Drafts in your voice",s:"idle",t:"—",av:"✍"},{id:"content-illustrator",n:"Illustrator",role:"Real photos + stock",s:"idle",t:"—",av:"🎨"},{id:"content-publisher",n:"Publisher",role:"Publishes after Auditor",s:"idle",t:"—",av:"📤"}]},
   /* Rival has a desk of its own because pipelines/competitors.py runs as
      'seo-rival' every day. Without one it fell through to the first free desk
      and lit the Auditor's lamp instead — work credited to the wrong chair. */
-  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"},{n:"Rival",role:"Watches competitors",s:"idle",t:"—",av:"👁"}]},
-  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{n:"Hunter",role:"Finds UAE leads",s:"idle",t:"—",av:"🎯"},{n:"Scanner",role:"Blocks duplicates",s:"idle",t:"—",av:"♻"},{n:"Outreach",role:"Mail + DMs, under cap",s:"idle",t:"—",av:"✉"},{n:"Responder",role:"Handles replies",s:"idle",t:"—",av:"💬"}]},
-  {key:"Report",name:"Reports",cls:"",agents:[{n:"Reporter",role:"Scores the agency",s:"idle",t:"—",av:"📋"}]},
-  {key:"Security",name:"Security",cls:"sec",agents:[{n:"Screener",role:"Scam & fraud filter",s:"idle",t:"—",av:"🛡"},{n:"Guard",role:"Untrusts scraped text",s:"idle",t:"—",av:"⚠"}]}
+  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{id:"seo-auditor",n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{id:"seo-strategist",n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"},{id:"seo-rival",n:"Rival",role:"Watches competitors",s:"idle",t:"—",av:"👁"},{id:"seo-backlinks",n:"Backlinks",role:"Links & guest posts",s:"idle",t:"—",av:"🔗"}]},
+  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{id:"leads-hunter",n:"Hunter",role:"Finds UAE leads",s:"idle",t:"—",av:"🎯"},{id:"leads-scanner",n:"Scanner",role:"Blocks duplicates",s:"idle",t:"—",av:"♻"},{id:"leads-outreach",n:"Outreach",role:"Mail + DMs, under cap",s:"idle",t:"—",av:"✉"},{id:"leads-responder",n:"Responder",role:"Handles replies",s:"idle",t:"—",av:"💬"}]},
+  {key:"Report",name:"Reports",cls:"",agents:[{id:"reporter",n:"Reporter",role:"Scores the agency",s:"idle",t:"—",av:"📋"}]},
+  {key:"Security",name:"Security",cls:"sec",agents:[{id:"security-screener",n:"Screener",role:"Scam & fraud filter",s:"idle",t:"—",av:"🛡"},{id:"security-guard",n:"Guard",role:"Untrusts scraped text",s:"idle",t:"—",av:"⚠"}]}
 ];}
 /* Dashes, not numbers, until the server answers. The desks were fixed for this
    already — they used to ship lit and go dark a beat later — but the header
@@ -384,10 +403,14 @@ function renderFloor(){
     const L=LAYOUT[rm.key]; if(!L)return;
     const room=document.createElement('div');
     const rd=readyOf(rm.key);
+    // "Powered" = this sector has at least one API that answers, so its agents
+    // can actually reach something. Not the same as busy, and not the same as
+    // healthy — a thin or unproven sector still has a working key behind it.
+    const powered = !!rd && rd.state !== 'blocked';
     room.className='room '+rm.cls+(rd?' rd-'+rd.state:'');
     room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
     room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+`<div class="desks">`+
-      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls}" data-k="${rm.key}" data-i="${i}"><div class="status"></div><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role">${a.role.split(' ')[0]}</div></div>`).join('')
+      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls} ${powered?'pw':''}" data-k="${rm.key}" data-i="${i}"><div class="status"></div><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role">${a.role.split(' ')[0]}</div></div>`).join('')
       +`</div>`;
     floor.appendChild(room);
   });
@@ -694,7 +717,8 @@ async function askAgent(){
   bubble('a','<span class="dim" id="thinking">…</span>');
   const j=await (async()=>{ try{
     const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({agent:cur.n, message:v})});
+      // the id, never the label — see the note on sectors()
+      body:JSON.stringify({agent:cur.id||cur.n, message:v})});
     return await r.json();
   }catch(e){ return {ok:false, error:String(e)}; }})();
   const t=document.getElementById('thinking'); if(t) t.parentElement.remove();
