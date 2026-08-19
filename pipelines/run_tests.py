@@ -441,6 +441,61 @@ def _day_run_tests():
         day_run.preflight, day_run.STEPS = real_pre, real_steps
 
 
+def _backend_tests():
+    """
+    The back office: the password, and the promise that a status line never
+    prints a secret.
+    """
+    import backend
+
+    print("\nThe admin password is a real gate, not decoration:")
+    h = backend.hash_password("correct horse battery")
+    check("stored as pbkdf2 with a salt", h.split("$")[0], "pbkdf2")
+    check("and enough rounds to be worth something",
+          int(h.split("$")[1]) >= 200_000, True)
+    check("the right password opens it",
+          backend.check_password("correct horse battery", h), True)
+    check("a wrong one does not", backend.check_password("wrong", h), False)
+    check("nor does a tampered hash",
+          backend.check_password("correct horse battery", h[:-4] + "AAAA"), False)
+    check("nor does junk in the stored field",
+          backend.check_password("x", "not-a-hash"), False)
+    check("two hashes of the same password differ (the salt is random)",
+          backend.hash_password("x") == backend.hash_password("x"), False)
+    check("the plain password is nowhere in what gets stored",
+          "correct horse battery" in h, False)
+
+    print("\nWriting one key leaves the rest of .env alone:")
+    import tempfile
+    from pathlib import Path as _P
+    was = backend.ENV
+    backend.ENV = _P(tempfile.mkdtemp()) / ".env"
+    try:
+        backend.ENV.write_text("# my notes\nSMTP_PASS=hunter2\nNTFY_TOPIC=abc\n")
+        backend.write_env("ADMIN_PASSWORD_HASH", h)
+        text = backend.ENV.read_text()
+        check("the comment survives", "# my notes" in text, True)
+        check("the other secrets survive", "SMTP_PASS=hunter2" in text, True)
+        check("and the new key is there", "ADMIN_PASSWORD_HASH=" in text, True)
+
+        backend.write_env("ADMIN_PASSWORD_HASH", None)
+        text = backend.ENV.read_text()
+        check("removing it takes only that line", "ADMIN_PASSWORD_HASH" in text, False)
+        check("everything else is still there",
+              ("SMTP_PASS=hunter2" in text and "NTFY_TOPIC=abc" in text), True)
+    finally:
+        backend.ENV = was
+
+    print("\nThe status line never prints a secret:")
+    src = (Path(__file__).parents[1] / "backend.py").read_text()
+    body = src.split("def where(")[1].split("def main(")[0]
+    for leaky in ("e.get(\"SMTP_PASS\")", "e['SMTP_PASS']", "e.get(\"SITE_API_TOKEN\")",
+                  "e.get(\"DATAFORSEO_PASSWORD\")"):
+        check(f"it does not echo {leaky.split(chr(34))[1] if chr(34) in leaky else leaky}",
+              leaky in body, False)
+    check("it reports set/not-set instead", '"set" if' in body, True)
+
+
 def main():
     real_db, real_store = board.DB, store.STORE
     _fresh_db()
@@ -450,6 +505,7 @@ def main():
         _activity_tests()
         _approval_tests()
         _day_run_tests()
+        _backend_tests()
     finally:
         board.DB, store.STORE = real_db, real_store
 

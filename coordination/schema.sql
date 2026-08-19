@@ -329,3 +329,23 @@ CREATE TABLE IF NOT EXISTS day_steps (
   code       INTEGER,
   summary    TEXT                  -- one plain line: what the step actually did
 );
+
+-- ---- where a link to us could come from -----------------------------------
+-- One row per OPPORTUNITY, not per link acquired. That is deliberate: a place
+-- we pitched and were turned down by is the row worth reviewing, and a table of
+-- successes only would quietly hide every miss.
+CREATE TABLE IF NOT EXISTS backlinks (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  host       TEXT NOT NULL,
+  url        TEXT,
+  name       TEXT,
+  kind       TEXT,                  -- citation | supplier | association | guest_post | rival_gap
+  why        TEXT,                  -- why this one is worth having, in plain words
+  local      INTEGER DEFAULT 0,     -- 1 = a UAE source, which is the whole point
+  effort     TEXT,                  -- free | form | pitch | paid
+  status     TEXT DEFAULT 'idea',   -- idea | pitched | live | rejected | refused
+  note       TEXT,
+  found_at   INTEGER,
+  decided_at INTEGER,
+  UNIQUE(host, kind)
+);

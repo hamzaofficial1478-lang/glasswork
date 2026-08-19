@@ -164,6 +164,19 @@ _ADDED_TABLES = (
          id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, seq INTEGER,
          label TEXT, module TEXT, status TEXT, started_at INTEGER,
          ended_at INTEGER, code INTEGER, summary TEXT)""",
+    # Where a link to us could come from, and what happened to that idea. One
+    # row per opportunity, never one per link acquired — the difference matters,
+    # because a link we asked for and did not get is the thing worth reviewing.
+    """CREATE TABLE IF NOT EXISTS backlinks (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         host TEXT NOT NULL, url TEXT, name TEXT,
+         kind TEXT,            -- citation | supplier | association | guest_post | rival_gap
+         why TEXT,             -- why this one is worth having, in plain words
+         local INTEGER DEFAULT 0,   -- 1 = a UAE source, which is the point
+         effort TEXT,          -- free | form | pitch | paid
+         status TEXT DEFAULT 'idea',  -- idea | pitched | live | rejected | refused
+         note TEXT, found_at INTEGER, decided_at INTEGER,
+         UNIQUE(host, kind))""",
 )
 
 

@@ -40,11 +40,70 @@ def _fresh_db():
     return db
 
 
+def test_backlinks_and_guest_posts():
+    """
+    The owner asked for backlink building and guest posting. Both are worth
+    doing badly, so what this sector refuses is as pinned as what it does.
+    """
+    import sqlite3
+    from . import seo_backlinks as bl
+
+    print("\nThe link list refuses the tactics that cost you the domain:")
+    for tactic in ("paid links", "pbn", "link exchange", "comment spam",
+                   "article spinning"):
+        check(f"'{tactic}' is refused in writing", tactic in bl.REFUSED_TACTICS, True)
+    check("and nothing on the seed list is paid",
+          {e[3] for e in bl.SEEDS} & {"paid"}, set())
+
+    print("\nEvery stream moves, none is starved:")
+    con = sqlite3.connect(board.DB)
+    con.row_factory = sqlite3.Row
+    bl.build(con)
+    short = bl.shortlist(con)
+    kinds = {}
+    for r in short:
+        kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
+    # The first ranking sorted everything into one list and took the top eight.
+    # Citations won every tiebreak, so a guest post never surfaced and the
+    # sector would have filed them for ever without handing one over.
+    check("citations lead, because they are what moves the map pack",
+          kinds.get("citation"), 4)
+    check("but a guest post always reaches the list", kinds.get("guest_post"), 2)
+    check("and so do suppliers and trade bodies",
+          (kinds.get("supplier"), kinds.get("association")), (2, 2))
+    check("the easiest wins come first inside a kind",
+          short[0]["effort"], "free")
+
+    print("\nThe critic catches a starved stream:")
+    only_citations = [r for r in short if r["kind"] == "citation"]
+    ok, reasons = bl.critic_check({"added": 1, "already_known": 0}, only_citations,
+                                  {"possible": False},
+                                  waiting={"citation", "guest_post"})
+    check("a list with no guest post is rejected", ok, False)
+    check("and it says which stream would never move",
+          any("guest_post" in r for r in reasons), True)
+
+    print("\nRunning twice does not duplicate a single row:")
+    first = bl.build(con)
+    again = bl.build(con)
+    check("the second pass adds nothing", again["added"], 0)
+    check("and recognises them all", again["already_known"], len(bl.SEEDS))
+    n = con.execute("SELECT count(*) FROM backlinks").fetchone()[0]
+    check("one row per opportunity, not per run", n, len(bl.SEEDS))
+
+    print("\nA rival-gap claim needs an index behind it:")
+    gaps = bl.rival_gaps(con)
+    check("with no backlink API it does not pretend", gaps["possible"], False)
+    check("and names what would turn it on", "Ahrefs" in gaps["why_not"], True)
+    con.close()
+
+
 def main():
     _intent_and_area_tests()
     _scope_tests()
     _critic_tests()
     _full_cycle_tests()
+    test_backlinks_and_guest_posts()
 
     if _fail:
         print(f"\n{len(_fail)} FAILED: {_fail}")

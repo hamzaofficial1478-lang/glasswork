@@ -12,9 +12,129 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const app = express();
 app.use(express.json());
+// NOTE: express.static is mounted AFTER the front-door middleware below, not
+// here. Mounted first it serves ui/setup.html at /setup.html to anybody, gate
+// or no gate — the lock would be on the door and the window left open.
+
+/* ---------------------------------------------------------------------------
+   THE FRONT DOOR
+   ---------------------------------------------------------------------------
+   Two guards, and they defend against different things.
+
+   HOST CHECK. A page on the open web cannot read localhost directly, but it can
+   point a domain it controls at 127.0.0.1 and let your browser do the reading
+   for it — DNS rebinding, and same-origin policy does not stop it because to
+   the browser it is all one origin. Requests are answered only when the Host
+   header really is this machine. Costs nothing, closes the hole.
+
+   PASSWORD. Optional, and off until the owner sets one, deliberately: the
+   server already listens on this computer alone, so a forced login on a laptop
+   he is signed into is a nuisance that teaches him to click through prompts.
+   It earns its keep the moment he shares the machine or opens BIND_HOST — and
+   then it is the only thing between a passer-by and his API keys. Set it with
+   `python backend.py --password`.
+--------------------------------------------------------------------------- */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+function adminHash() {
+  return (readEnv().ADMIN_PASSWORD_HASH || "").trim();
+}
+
+// pbkdf2$<iterations>$<salt-b64>$<hash-b64> — written by backend.py, read here.
+// Same algorithm on both sides so either can set it and either can check it.
+function passwordOk(supplied) {
+  const stored = adminHash();
+  if (!stored) return true;
+  const bits = stored.split("$");
+  if (bits.length !== 4 || bits[0] !== "pbkdf2") return false;
+  const iter = parseInt(bits[1], 10);
+  if (!Number.isFinite(iter) || iter < 1000) return false;
+  let want, got;
+  try {
+    const salt = Buffer.from(bits[2], "base64");
+    want = Buffer.from(bits[3], "base64");
+    got = crypto.pbkdf2Sync(String(supplied || ""), salt, iter, want.length, "sha256");
+  } catch (_) { return false; }
+  // constant time: a length mismatch must not answer faster than a value one
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
+
+const SESSIONS = new Set();          // in memory: restarting the server logs you out
+const COOKIE = "glasswork_admin";
+
+function cookieToken(req) {
+  const raw = req.headers.cookie || "";
+  for (const part of raw.split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === COOKIE) return part.slice(i + 1).trim();
+  }
+  return "";
+}
+
+app.use((req, res, next) => {
+  const host = String(req.headers.host || "").split(":")[0].toLowerCase();
+  if (host && !LOCAL_HOSTS.has(host) && !process.env.BIND_HOST) {
+    return res.status(403).type("text/plain").send(
+      "Refused: this server answers to localhost only. If you meant to reach it " +
+      "over the network, start it with BIND_HOST set and put a password on it.");
+  }
+  if (!adminHash()) return next();                       // no password set
+  if (req.path === "/login" || req.path === "/api/login") return next();
+  if (SESSIONS.has(cookieToken(req))) return next();
+  if (req.path.startsWith("/api/")) {
+    return res.status(401).json({ ok: false, error: "Locked. Sign in at /login." });
+  }
+  return res.redirect("/login");
+});
+
+app.get("/login", (_q, res) => {
+  res.type("html").send(`<!doctype html><meta charset="utf-8">
+<title>Glassworks Agency</title>
+<style>
+ body{margin:0;height:100vh;display:grid;place-items:center;background:#0c1216;
+   color:#e7eff3;font-family:system-ui,sans-serif}
+ form{background:#131d23;border:1px solid #25343c;border-radius:14px;padding:28px;width:320px}
+ h1{font-size:16px;margin:0 0 6px} p{font-size:12.5px;color:#7d919c;margin:0 0 18px;line-height:1.5}
+ input{width:100%;padding:11px;border-radius:9px;border:1px solid #3a515b;background:#182530;
+   color:#e7eff3;font-size:14px;box-sizing:border-box}
+ button{width:100%;margin-top:12px;padding:11px;border-radius:9px;border:1px solid #54cbd9;
+   background:rgba(84,203,217,.15);color:#54cbd9;font-weight:600;font-size:14px;cursor:pointer}
+ .err{color:#e5565b;font-size:12.5px;margin-top:10px;min-height:16px}
+</style>
+<form method="POST" action="/api/login">
+  <h1>Glassworks Agency</h1>
+  <p>This machine's copy is locked. Enter the admin password you set with
+     <code>python backend.py --password</code>.</p>
+  <input type="password" name="password" placeholder="Password" autofocus required>
+  <button>Unlock</button>
+</form>`);
+});
+
+app.post("/api/login", express.urlencoded({ extended: false }), (req, res) => {
+  const supplied = (req.body && req.body.password) || "";
+  if (!passwordOk(supplied)) {
+    return res.status(401).type("html").send(
+      `<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;background:#0c1216;color:#e5565b;padding:40px">
+       Wrong password. <a href="/login" style="color:#54cbd9">Try again</a>.</body>`);
+  }
+  const tok = crypto.randomBytes(32).toString("hex");
+  SESSIONS.add(tok);
+  res.cookie
+    ? res.cookie(COOKIE, tok, { httpOnly: true, sameSite: "lax" })
+    : res.setHeader("Set-Cookie", `${COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/`);
+  res.redirect("/");
+});
+
+app.post("/api/logout", (req, res) => {
+  SESSIONS.delete(cookieToken(req));
+  res.json({ ok: true });
+});
+
+// Past the gate, and only past it.
 app.use(express.static(path.join(__dirname, "ui")));
 
 app.get("/", (_q, r) => r.sendFile(path.join(__dirname, "ui", "office.html")));
@@ -646,12 +766,33 @@ app.get("/api/status", (_q, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+
+// LISTEN ON THIS MACHINE ONLY.
+//
+// app.listen(PORT) with no host binds every interface, which on a laptop means
+// the setup screen is served to the whole network. On café, hotel, co-working
+// or office wifi, anyone who guessed the address could open /setup and read the
+// DataForSEO login, the ntfy topic, the site admin token and the sending
+// domain, then press Run. Nothing about the app said so.
+//
+// BIND_HOST=0.0.0.0 still works for anyone deliberately hosting this on a VPS
+// behind a proxy — but it has to be asked for, in writing, and it says loudly
+// what it just did.
+const HOST = process.env.BIND_HOST || "127.0.0.1";
+app.listen(PORT, HOST, () => {
   // Upgrade the cabinet on boot. schema.sql is CREATE TABLE IF NOT EXISTS
   // throughout, so this is safe to run every time and adds any table a newer
   // version introduced — an existing database is never left half-upgraded.
   const db = ensureDb();
   if (db.built) console.log("filing cabinet ready");
   else console.log("filing cabinet NOT ready:", db.error || "unknown");
-  console.log(`Agency running on :${PORT}`);
+  console.log(`Agency running on http://${HOST}:${PORT}`);
+  if (HOST === "127.0.0.1" || HOST === "localhost") {
+    console.log("Reachable from this computer only.");
+  } else {
+    console.log(`!! BIND_HOST=${HOST} — this is reachable from the network. ` +
+      "Anyone who can reach this port can read your keys on /setup. " +
+      "Set an admin password (python backend.py --password) or put it behind a proxy.");
+  }
+  if (adminHash()) console.log("Admin password is ON.");
 });

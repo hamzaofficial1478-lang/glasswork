@@ -72,6 +72,7 @@ STEPS = [
     ("Security screens what came in", "pipelines.security_screen", "Security"),
     ("SEO finds the gaps", "pipelines.seo_gap", "SEO"),
     ("SEO watches the rivals", "pipelines.competitors", "SEO"),
+    ("SEO works the link list", "pipelines.seo_backlinks", "SEO"),
     ("Content briefs the pages", "pipelines.content_briefs", "Content"),
     ("Report scores the day", "pipelines.report_daily", "Report"),
 ]
