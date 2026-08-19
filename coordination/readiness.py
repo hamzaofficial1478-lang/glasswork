@@ -36,7 +36,10 @@ WHAT EACH SECTOR NEEDS, AND WHY
 Not invented — read off what the pipelines actually borrow and read:
 
   seo      seo_data   pipelines/seo_gap.py borrows it for volumes
-           crawler    pipelines/competitors.py borrows it to read rival pages
+           crawler    OPTIONAL. competitors.py borrows the shelf for its lock and
+                      its spend line, then fetches rival sitemaps itself through
+                      a guarded opener — no code reads a key off this shelf yet.
+                      Required the day something actually calls one.
   leads    maps       pipelines/leads_hunt.py needs a Places key or it finds nobody
            email      pipelines/mail.py borrows it to send
   content  stock_images — Pexels and its fallback, the only picture source now
@@ -85,7 +88,14 @@ WANTS_TWO = {"md", "security"}
 
 # shelves each sector borrows, and whether it can work without them
 SHELVES = {
-    "seo": {"seo_data": True, "crawler": True},
+    # crawler is OPTIONAL, and that is a correction rather than a relaxation.
+    # It was marked required, so SEO showed "cannot run" without a crawler key —
+    # for a key nothing in the codebase reads. competitors.py borrows the shelf
+    # to take its LOCK and log the spend, then fetches rival sitemaps itself
+    # through its own SSRF-guarded opener. Demanding a key we never call would
+    # have had the owner paying for a crawler to clear a light that was wrong.
+    # It becomes required the day something actually calls it.
+    "seo": {"seo_data": True, "crawler": False},
     "leads": {"maps": True, "email": True},
     # Pexels (and whatever second stock provider sits under it) is Content's
     # only picture source now — image generation was dropped. Still optional at
