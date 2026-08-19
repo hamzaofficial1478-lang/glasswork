@@ -67,6 +67,7 @@ LOCK_HOLDER = "owner-run-button"
 STEPS = [
     ("The MD plans the day", "pipelines.md_cycle", "Director"),
     ("IT checks the site", "pipelines.it_health", "IT"),
+    ("IT reindexes site search", "pipelines.site_search", "IT"),
     ("Leads maps its sources", "pipelines.leads_sources", "Leads"),
     ("Leads collects", "pipelines.leads_hunt", "Leads"),
     ("Security screens what came in", "pipelines.security_screen", "Security"),

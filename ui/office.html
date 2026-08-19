@@ -399,7 +399,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
    The label is for reading; the id is for addressing, and it never changes. */
 function sectors(){return [
   {key:"Director",name:"Director's Office",cls:"dir",agents:[{id:"managing-director",n:"Director",role:"Plans the day",s:"idle",t:"—",av:"🔮"}]},
-  {key:"IT",name:"IT & Site Health",cls:"",agents:[{id:"it-watcher",n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{id:"it-fixer",n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{id:"it-releaser",n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"}]},
+  {key:"IT",name:"IT & Site Health",cls:"",agents:[{id:"it-watcher",n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{id:"it-fixer",n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{id:"it-releaser",n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"},{id:"it-search",n:"Search",role:"Indexes your site",s:"idle",t:"—",av:"🔎"}]},
   {key:"Content",name:"Content & Social",cls:"",agents:[{id:"content-writer",n:"Writer",role:"Drafts in your voice",s:"idle",t:"—",av:"✍"},{id:"content-illustrator",n:"Illustrator",role:"Real photos + stock",s:"idle",t:"—",av:"🎨"},{id:"content-publisher",n:"Publisher",role:"Publishes after Auditor",s:"idle",t:"—",av:"📤"}]},
   /* Rival has a desk of its own because pipelines/competitors.py runs as
      'seo-rival' every day. Without one it fell through to the first free desk

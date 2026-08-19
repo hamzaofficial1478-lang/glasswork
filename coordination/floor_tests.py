@@ -174,10 +174,10 @@ def test_the_ui_does_not_open_on_a_lie():
     check("no desk ships as waiting", 's:"waiting"' in body, False)
     desks = re.findall(r'(?<![a-z])s:"(\w+)"', body)   # not cls:"dir"
     check("every desk starts idle", set(desks), {"idle"})
-    # 18: the SEO room gained a Rival desk (pipelines/competitors.py runs as
+    # 19: the SEO room gained Rival and Backlinks desks, and IT gained Search (pipelines/competitors.py runs as
     # 'seo-rival' daily and had no chair, so its work lit the Auditor's lamp)
     # and a Backlinks desk. Pinned so nobody silently drops one.
-    check("and all eighteen desks are still there", len(desks), 18)
+    check("and all nineteen desks are still there", len(desks), 19)
 
     # Every desk must be ADDRESSABLE, not just readable. The chat drawer used to
     # send the label under the desk - 'Watcher', 'Hunter' - which carries no

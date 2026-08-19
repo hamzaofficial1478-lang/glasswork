@@ -65,7 +65,7 @@ SECTOR_OF = {
 # no longer silently inherits the MD (see whois).
 DESK_SECTOR = {
     "director": "md", "critic": "md",
-    "watcher": "it", "fixer": "it", "releaser": "it",
+    "watcher": "it", "fixer": "it", "releaser": "it", "search": "it",
     "writer": "content", "illustrator": "content", "publisher": "content",
     "auditor": "seo", "strategist": "seo", "rival": "seo", "backlinks": "seo",
     "hunter": "leads", "scanner": "leads", "outreach": "leads", "responder": "leads",
@@ -81,6 +81,8 @@ DESK_JOB = {
     "watcher": "check the site read-only, enquiry path first, and file what is wrong",
     "fixer": "write fixes in a branch, never on the live site",
     "releaser": "the only agent allowed near production, and only after tests pass",
+    "search": "index the owner's own site into Algolia so a visitor can search it; "
+              "the search box itself is queued for his approval, never applied",
     "writer": "turn keyword gaps into page briefs a human could write from",
     "illustrator": "images — real project photos for project shots, never generated ones",
     "publisher": "publish only what the Auditor has passed",

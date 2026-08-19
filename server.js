@@ -219,6 +219,7 @@ function updateEnv(partial) {
   const order = [
     "SITE_MODE", "SITE_URL", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
     "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
+    "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
     // Telegram keys are kept in the file if they're already there — an owner
     // mid-switch shouldn't lose his fallback — but nothing writes them now.
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
@@ -340,6 +341,9 @@ function readConnections() {
     ...(has("TELEGRAM_BOT_TOKEN")
         ? [{ ic: "✈", name: "Telegram (legacy)", sub: "still configured — ntfy is the route now", on: true }]
         : []),
+    { ic: "🔎", name: "Algolia site search",
+      sub: has("ALGOLIA_APP_ID") ? (e.ALGOLIA_INDEX || "glasswork_site") : "not set",
+      on: has("ALGOLIA_APP_ID") && has("ALGOLIA_SEARCH_KEY") },
     { ic: "✉", name: "Email (SMTP)", sub: e.SMTP_HOST || "not set", on: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS") },
     { ic: "⌗", name: "Search Console", sub: e.GSC_PROPERTY || "not set", on: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH) },
   ];
@@ -420,6 +424,15 @@ app.post("/api/optional", (req, res) => {
     set("NTFY_TOPIC", b.ntfyTopic);
     set("NTFY_SERVER", b.ntfyServer);
     set("OUTREACH_DOMAIN", b.outreachDomain);
+    // Algolia: search on the owner's OWN website. Three values with three very
+    // different rules — the app id and the search key are meant to be public
+    // (the search box queries from the visitor's browser), the write key is not
+    // and never leaves the server. Kept as separate fields so the two keys can
+    // never be confused for one "the Algolia key".
+    set("ALGOLIA_APP_ID", b.algoliaAppId);
+    set("ALGOLIA_SEARCH_KEY", b.algoliaSearchKey);
+    set("ALGOLIA_WRITE_KEY", b.algoliaWriteKey);
+    set("ALGOLIA_INDEX", b.algoliaIndex);
     partial.DAILY_SPEND_CAP_USD = one(b.spendCap) || cur.DAILY_SPEND_CAP_USD || "15";
     partial.OUTREACH_DAILY_CAP = one(b.outreachCap) || cur.OUTREACH_DAILY_CAP || "25";
     updateEnv(partial);
@@ -685,6 +698,9 @@ app.get("/api/settings", (_q, res) => {
     optional: {
       dfsLogin: v("DATAFORSEO_LOGIN"), dfsPasswordSet: set("DATAFORSEO_PASSWORD"),
       ntfyTopic: v("NTFY_TOPIC"), ntfyServer: v("NTFY_SERVER"),
+      algoliaAppId: v("ALGOLIA_APP_ID"), algoliaSearchKey: v("ALGOLIA_SEARCH_KEY"),
+      // the write key is reported as set / not set, never echoed back
+      algoliaWriteKeySet: set("ALGOLIA_WRITE_KEY"), algoliaIndex: v("ALGOLIA_INDEX"),
       outreachDomain: v("OUTREACH_DOMAIN"),
       spendCap: v("DAILY_SPEND_CAP_USD"), outreachCap: v("OUTREACH_DAILY_CAP"),
     },

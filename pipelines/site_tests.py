@@ -211,6 +211,100 @@ def test_the_site_address_survives_a_fresh_clone():
             os.environ["SITE_URL"] = keep
 
 
+def test_site_search_never_publishes_the_write_key():
+    """
+    Algolia gives you three values and exactly one of them may reach a browser.
+
+    The search key is public BY DESIGN — the widget queries from the visitor's
+    machine, so it has to be in the page. The write key can delete every record
+    in the index. Putting it in front-end JavaScript is the classic Algolia
+    mistake and it is one view-source away from someone wiping the site index.
+
+    So the check is not "the code looks careful". It reads the FINISHED widget
+    and refuses if the write key is anywhere in it.
+    """
+    from . import site_search as search
+
+    cfg = {"app_id": "APP123", "search_key": "SEARCHONLY111",
+           "write_key": "WRITEKEY999", "index": "glasswork_site"}
+
+    print("\nThe widget carries the search key and nothing else:")
+    html = search.widget_html(cfg)
+    check("the search key is in it", cfg["search_key"] in html, True)
+    check("THE WRITE KEY IS NOT", cfg["write_key"] in html, False)
+    check("the app id is in it", cfg["app_id"] in html, True)
+    check("and it says in the page why that key is safe to publish",
+          "SEARCH-ONLY" in html, True)
+
+    print("\nPasting the write key into the search-key box is caught:")
+    try:
+        search.widget_html({**cfg, "search_key": cfg["write_key"]})
+        check("refused", "no error raised", "WriteKeyLeak")
+    except search.WriteKeyLeak as e:
+        check("refused", True, True)
+        check("and it says what would have happened",
+              "wipe the index" in str(e), True)
+
+    print("\nA template that leaks is caught by the check, not by good intentions:")
+    real = search.WIDGET
+    search.WIDGET = real.replace('KEY="__SEARCH_KEY__"', 'KEY="' + cfg["write_key"] + '"')
+    try:
+        search.widget_html(cfg)
+        check("a leaking template is refused", "no error raised", "WriteKeyLeak")
+    except search.WriteKeyLeak:
+        check("a leaking template is refused", True, True)
+    finally:
+        search.WIDGET = real
+
+    print("\nThe same mistake is caught at the connector, before anything runs:")
+    from providers import integrations as ig
+    r = ig.test_algolia(env={"ALGOLIA_APP_ID": "A", "ALGOLIA_SEARCH_KEY": "K",
+                             "ALGOLIA_WRITE_KEY": "K"})
+    check("identical keys fail the connector test", r["ok"], False)
+    check("and it explains the consequence", "write access" in r["detail"], True)
+    r = ig.test_algolia(env={})
+    check("unconfigured is 'not set up', not 'broken'", r["ok"], None)
+
+    print("\nRecords are stable, so a re-index updates rather than duplicates:")
+    # base is rstrip("/")-ed inside build_records, so the home key has no slash
+    pages = [("https://x.ae", "<title>Home</title><h1>Glass</h1><p>" + "a" * 200 + "</p>"),
+             ("https://x.ae/pergolas", "<title>Pergolas</title><h1>Aluminium pergolas</h1>"
+              "<p>" + "b" * 200 + "</p>")]
+    real_fetch = search._fetch
+    search._fetch = lambda u, timeout=15: (dict(pages).get(u, ""), "")
+    real_links = ss._internal_links
+    ss._internal_links = lambda html, base: ["https://x.ae/pergolas"]
+    try:
+        recs, err = search.build_records("https://x.ae", max_pages=10)
+    finally:
+        search._fetch = real_fetch
+        ss._internal_links = real_links
+
+    check("both pages became records", len(recs), 2)
+    check("the objectID is the path, not a counter",
+          sorted(r["objectID"] for r in recs), ["/", "/pergolas"])
+    check("so no two records collide",
+          len({r["objectID"] for r in recs}), len(recs))
+    check("the title is read off the page",
+          sorted(r["title"] for r in recs), ["Home", "Pergolas"])
+    check("and the pergola page is tagged with the service it sells",
+          next(r["service"] for r in recs if r["objectID"] == "/pergolas"),
+          "pergola")
+
+    print("\nThe critic catches an index that would be useless:")
+    ok, why = search.critic_check([], cfg)
+    check("no pages is rejected", ok, False)
+    thin = [{"objectID": "/", "body": "hi", "service": ""}]
+    ok, why = search.critic_check(thin, cfg)
+    check("a JavaScript shell with no readable text is rejected", ok, False)
+    check("and it says what it thinks it saw",
+          any("JavaScript shell" in r for r in why), True)
+    dupe = [{"objectID": "/a", "body": "x" * 200, "service": ""},
+            {"objectID": "/a", "body": "y" * 200, "service": ""}]
+    ok, why = search.critic_check(dupe, cfg)
+    check("two records sharing an objectID is rejected", ok, False)
+
+
 def main():
     test_the_site_address_survives_a_fresh_clone()
     test_only_service_looking_text_is_taken()
@@ -220,6 +314,8 @@ def main():
     test_critic_will_not_certify_an_unread_site()
     test_no_site_configured()
     test_only_our_own_site_is_followed()
+    test_site_search_never_publishes_the_write_key()
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

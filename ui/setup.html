@@ -273,11 +273,22 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="field"><label>ntfy server <span class="dim">(optional)</span></label><input id="ntfyServer" placeholder="https://ntfy.sh"><div class="hint">Leave blank for the public server. Self-host if the digest will ever carry customer detail.</div></div>
       </div>
       <div class="field"><label>Outreach domain</label><input id="outreachDomain" placeholder="mail.glassworks.ae"><div class="hint">Only needed for cold outreach. Use a subdomain, not your main domain.</div></div>
+
+      <!-- Algolia: search on YOUR OWN site. Three values, two very different
+           rules, so they get their own block and their own warning. -->
+      <div class="gh etch" style="margin-top:18px">Site search (Algolia) — optional</div>
+      <p class="hint" style="margin:2px 0 10px">Lets a visitor type &ldquo;shower glass&rdquo; and land on that page instead of hunting your menu. Algolia searches <b>your</b> site — it is not a crawler and cannot read anyone else&rsquo;s.</p>
+      <div class="row">
+        <div class="field"><label>Application ID</label><input id="algoliaAppId" placeholder="0NXMST2VFN"><div class="hint">Public. Identifies your account.</div></div>
+        <div class="field"><label>Index name</label><input id="algoliaIndex" placeholder="glasswork_site"><div class="hint">Created on the first index run. Leave blank for the default.</div></div>
+      </div>
+      <div class="field"><label>Search-Only API Key</label><input id="algoliaSearchKey" placeholder="963ef0…"><div class="hint">Public <b>by design</b> — this one goes into the page so the search box can query from a visitor&rsquo;s browser. It can only read.</div></div>
+      <div class="field"><label>Write API Key</label><input id="algoliaWriteKey" type="password" placeholder="leave blank to keep saved"><div class="hint"><b>Secret.</b> It can add, change and delete every record in your index. It stays on the server and is never put in the page — the widget builder refuses to hand over a snippet containing it. If you have ever pasted this key anywhere public, regenerate it in the Algolia dashboard.</div></div>
       <div class="row">
         <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15.</div></div>
         <div class="field"><label>Daily outreach cap</label><input id="outreachCap" type="number" min="0" step="1" placeholder="25"><div class="hint">Defaults to 25.</div></div>
       </div>
-      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testNtfy">Test ntfy</button><button class="mini" id="ntfyPing">Notify me</button><span class="inl dim" id="optMsg"></span></div>
+      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testNtfy">Test ntfy</button><button class="mini" id="testAlgolia">Test search</button><button class="mini" id="ntfyPing">Notify me</button><span class="inl dim" id="optMsg"></span></div>
       <div class="hint"><b>Test ntfy</b> checks the topic is reachable and publishes nothing. <b>Notify me</b> sends a real notification so you can watch it arrive on your phone.</div>
     </div>
   </section>
@@ -693,6 +704,8 @@ $('#saveOptional').onclick=async()=>{
   const btn=$('#saveOptional');btn.disabled=true;inl($('#optMsg'),'dim','Saving…');
   const j=await api('POST','/api/optional',{dfsLogin:$('#dfsLogin').value.trim(),dfsPassword:$('#dfsPassword').value,
     ntfyTopic:$('#ntfyTopic').value.trim(),ntfyServer:$('#ntfyServer').value.trim(),
+    algoliaAppId:$('#algoliaAppId').value.trim(),algoliaSearchKey:$('#algoliaSearchKey').value.trim(),
+    algoliaWriteKey:$('#algoliaWriteKey').value.trim(),algoliaIndex:$('#algoliaIndex').value.trim(),
     outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim()});
   btn.disabled=false;
   if(j.ok){ inl($('#optMsg'),'ok','✓ Saved'); ['dfsPassword'].forEach(id=>$('#'+id).value=''); }
@@ -813,6 +826,7 @@ async function testChannel(which, btn, msg, notify){
 $('#testEmail').onclick=()=>testChannel('email',$('#testEmail'),$('#emailMsg'));
 $('#testNtfy').onclick =()=>testChannel('ntfy',$('#testNtfy'),$('#optMsg'));
 $('#ntfyPing').onclick =()=>testChannel('ntfy',$('#ntfyPing'),$('#optMsg'),true);
+$('#testAlgolia').onclick=()=>testChannel('algolia',$('#testAlgolia'),$('#optMsg'));
 
 /* ---- preflight ---- */
 const PF_TONE={COVERED:'ok',SINGLE:'warn',DOWN:'err',EMPTY:'dim',UNKNOWN:'dim'};
@@ -883,6 +897,12 @@ async function loadSettings(){
   $('#dfsLogin').value=o.dfsLogin||'';
   $('#ntfyTopic').value=o.ntfyTopic||'';
   $('#ntfyServer').value=o.ntfyServer||'';
+  $('#algoliaAppId').value=o.algoliaAppId||'';
+  $('#algoliaSearchKey').value=o.algoliaSearchKey||'';
+  $('#algoliaIndex').value=o.algoliaIndex||'';
+  // the write key is never sent back to the browser, only whether it is set
+  $('#algoliaWriteKey').placeholder = o.algoliaWriteKeySet
+    ? 'saved — leave blank to keep it' : 'paste your Write API Key';
   $('#outreachDomain').value=o.outreachDomain||'';
   $('#spendCap').value=o.spendCap||'';
   $('#outreachCap').value=o.outreachCap||'';

@@ -163,9 +163,11 @@ def test_integrations_unconfigured():
     print("Channel checks (no network):")
     from . import integrations as ig
     blank = ig.test_all(env={})
-    check("all report not-configured", [r["ok"] for r in blank], [None, None, None])
-    check("covers every channel",
-          sorted(r["integration"] for r in blank), ["email", "ntfy", "telegram"])
+    check("all report not-configured", [r["ok"] for r in blank], [None] * len(blank))
+    # Pinned by name, not by count, so adding a channel is a deliberate edit here
+    # rather than a number that silently drifts.
+    check("covers every channel", sorted(r["integration"] for r in blank),
+          ["algolia", "email", "ntfy", "telegram"])
 
     half = ig.test_email(env={"SMTP_HOST": "h", "SMTP_USER": "u"})
     check("half-filled SMTP is a failure, not 'unset'", half["ok"], False)

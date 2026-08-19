@@ -355,7 +355,75 @@ def test_email(env=None, timeout=20) -> dict:
                        host=host, port=port)
 
 
-ALL = {"ntfy": test_ntfy, "telegram": test_telegram, "email": test_email}
+# ---- Algolia (search on the owner's own website) ----------------------------
+
+def test_algolia(env=None, timeout=15) -> dict:
+    """
+    Prove the account and the index answer, WITHOUT writing anything.
+
+    The read is a query with the search key, which is the same call the widget
+    makes from a visitor's browser — so a pass here means the search box will
+    work, not merely that a key exists.
+
+    The write key is deliberately NOT exercised. The only way to test it is to
+    write to the index, and a connector test that quietly mutates the owner's
+    data is not a test. It is reported as saved or not saved, and the first real
+    index run is what proves it.
+    """
+    env = env if env is not None else read_env()
+    app = (env.get("ALGOLIA_APP_ID") or "").strip()
+    search = (env.get("ALGOLIA_SEARCH_KEY") or "").strip()
+    write = (env.get("ALGOLIA_WRITE_KEY") or "").strip()
+    index = (env.get("ALGOLIA_INDEX") or "glasswork_site").strip()
+
+    if not app and not search:
+        return _result("algolia", None, "Not configured — no ALGOLIA_APP_ID in .env.")
+    if not app or not search:
+        return _result("algolia", False,
+                       "Half configured — both the application ID and the search "
+                       "key are needed before the search box can query anything.")
+    if search == write and write:
+        return _result("algolia", False,
+                       "The search key and the write key are set to the same value. "
+                       "The search key goes into the page where anyone can read it, "
+                       "so that would publish write access to your whole index. "
+                       "Copy the SEARCH-ONLY key into ALGOLIA_SEARCH_KEY.")
+    try:
+        r = requests.post(
+            f"https://{app}-dsn.algolia.net/1/indexes/{index}/query",
+            headers={"X-Algolia-API-Key": search, "X-Algolia-Application-Id": app,
+                     "Content-Type": "application/json"},
+            json={"query": "", "hitsPerPage": 0}, timeout=timeout)
+    except Exception as e:
+        return _result("algolia", False, f"Could not reach Algolia: {e}", app=app, index=index)
+
+    if r.status_code == 403:
+        return _result("algolia", False,
+                       "403 — Algolia rejected the search key for this index. Check it "
+                       "is the Search-Only key and that the index name matches.",
+                       app=app, index=index)
+    if r.status_code == 404:
+        return _result("algolia", None,
+                       f"Reachable, but the index '{index}' does not exist yet. It is "
+                       "created the first time the site is indexed — run "
+                       "`python -m pipelines.site_search`.", app=app, index=index)
+    if r.status_code >= 400:
+        return _result("algolia", False, f"Algolia returned {r.status_code}.",
+                       app=app, index=index)
+
+    try:
+        n = int((r.json() or {}).get("nbHits", 0))
+    except Exception:
+        n = 0
+    detail = (f"Index '{index}' answers — {n} page(s) searchable. Nothing was written. "
+              + ("The write key is saved, and is only used server-side."
+                 if write else
+                 "No write key saved yet, so the site cannot be indexed."))
+    return _result("algolia", True, detail, app=app, index=index, pages=n)
+
+
+ALL = {"ntfy": test_ntfy, "telegram": test_telegram, "email": test_email,
+       "algolia": test_algolia}
 
 
 def test_all(env=None, notify=False) -> list:
