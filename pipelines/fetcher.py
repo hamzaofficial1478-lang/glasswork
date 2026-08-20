@@ -50,11 +50,91 @@ except ImportError:  # pragma: no cover
 
 UA = "Mozilla/5.0 (compatible; glasswork/1.0; +https://github.com/)"
 
-# Zyte bills per request. Published pricing moves, so this is only used to put a
-# number on the run's spend line and to let the cost ceiling bite — it is not a
-# quote. A render costs more than a plain fetch because it runs a browser.
-COST_PLAIN = 0.0002
-COST_RENDER = 0.0015
+# WHAT A FETCH COSTS — an estimate the owner calibrates, never a quote.
+#
+# There is no single Zyte price to hardcode, and pretending otherwise would put
+# a confident wrong number on his spend line. Their own docs: cost "depends on
+# the target website and selected features", with five tiers each for HTTP and
+# browser requests, plus a volume discount of 25–52%. A hard site costs several
+# times what an easy one does.
+#
+# So the split is: the REQUEST COUNT is a fact we know exactly, and the money is
+# an estimate he sets from his own invoice or Zyte's cost estimator:
+#
+#     ZYTE_COST_PER_FETCH=0.0001      # plain httpResponseBody
+#     ZYTE_COST_PER_RENDER=0.0015     # browserHtml
+#
+# The defaults below are the cheapest tier — deliberately, because an estimate
+# that flatters the bill is worse than none: it lets the spend cap sail past the
+# real spend. Every report says "N renders" as fact and the money as "about".
+DEFAULT_COST_PLAIN = 0.0001
+DEFAULT_COST_RENDER = 0.0015
+
+
+def _rate(name, fallback):
+    try:
+        from providers import integrations
+        env = integrations.read_env()
+    except Exception:
+        env = {}
+    import os as _os
+    raw = (_os.environ.get(name) or env.get(name) or "").strip()
+    try:
+        v = float(raw)
+        return v if v >= 0 else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def cost_per_fetch():
+    return _rate("ZYTE_COST_PER_FETCH", DEFAULT_COST_PLAIN)
+
+
+def cost_per_render():
+    return _rate("ZYTE_COST_PER_RENDER", DEFAULT_COST_RENDER)
+
+
+# Kept as module attributes so existing callers and tests still read a number.
+# Both are only ever used through the functions above at call time, so an owner
+# who edits .env does not have to restart anything.
+COST_PLAIN = DEFAULT_COST_PLAIN
+COST_RENDER = DEFAULT_COST_RENDER
+
+
+def _meter(kind, usd, note=""):
+    """
+    Log the request to the usage meter. Never let bookkeeping break a fetch —
+    if the cabinet is missing or locked, the page still gets read.
+    """
+    try:
+        from coordination import usage
+        usage.record("zyte", kind, n=1, usd=usd, note=note)
+    except Exception:
+        pass
+
+
+def _affordable(cost):
+    """
+    (ok, why_not) — is there room under the owner's daily spend cap?
+
+    Fails OPEN on a broken cabinet, deliberately. A crawler that stops working
+    because the bookkeeping database is locked is a worse failure than one that
+    spends a fraction of a cent it should not have; the cap is a budget, not a
+    security boundary, and the spend is logged either way.
+    """
+    try:
+        from coordination import cabinet
+        cap = cabinet.daily_spend_cap()
+        so_far = cabinet.spent_today()
+    except Exception:
+        return True, ""
+    if so_far + cost <= cap:
+        return True, ""
+    return False, (f"the daily spend cap is spent — about ${so_far:.2f} of "
+                   f"${cap:.2f} used today, and this render would add about "
+                   f"${cost:.4f}. Nothing was fetched. Raise DAILY_SPEND_CAP_USD "
+                   f"on /setup or let it reset at midnight.")
+
 
 _TAG = re.compile(r"<[^>]+>")
 _SCRIPT = re.compile(r"<(script|style|noscript)[^>]*>.*?</\1>", re.S | re.I)
@@ -220,10 +300,10 @@ def fetch(url, render=False, timeout=25, allow_paid=True, min_chars=400) -> dict
             # as the page.
             return {"ok": False, "html": html, "how": "plain", "cost": 0.0,
                     "status": status, "switched": "",
-                    "declined": {"reason": reason, "would_cost": COST_RENDER},
+                    "declined": {"reason": reason, "would_cost": cost_per_render()},
                     "error": (f"{reason}. Paid rendering is switched off for this, "
                               f"so it was skipped (a render would have cost about "
-                              f"${COST_RENDER:.4f}).")}
+                              f"${cost_per_render():.4f}).")}
         if not tool:
             return {"ok": bool(html) and not shell, "html": html, "how": "plain",
                     "cost": 0.0, "status": status, "switched": "",
@@ -247,14 +327,37 @@ def fetch(url, render=False, timeout=25, allow_paid=True, min_chars=400) -> dict
                           "base URL https://api.zyte.com/v1/extract, or ask for "
                           "another provider to be added.")}
 
+    # RED LINE: "No money is spent above the daily cost cap without owner
+    # approval." The cap lives in cabinet.borrow(), and a fetch does not borrow
+    # — so until now the one genuinely metered paid call in the whole agency was
+    # the one call that could sail straight past it. Checked here, at the door,
+    # before the request goes out.
+    afford, why_not = _affordable(cost_per_render())
+    if not afford:
+        return {"ok": False, "html": "", "how": "capped", "cost": 0.0,
+                "status": 0, "switched": switched,
+                "declined": {"reason": why_not, "would_cost": cost_per_render()},
+                "error": why_not}
+
     html, err, status = _zyte(url, tool, render=True, timeout=max(timeout, 40))
-    cost = COST_RENDER
+    # Zyte charges for SUCCESSFUL responses only, so a failed render must not
+    # land on the spend line. Billing ourselves for their failures would inflate
+    # every report and trip the daily cap on requests nobody was invoiced for.
+    # The REQUEST still gets counted — a hundred failing renders is a fact the
+    # owner needs to see even though it costs him nothing.
     if err:
-        return {"ok": False, "html": "", "how": "crawler-render", "cost": cost,
+        _meter("render", usd=0.0, note=f"failed: {err[:80]}")
+        return {"ok": False, "html": "", "how": "crawler-render", "cost": 0.0,
                 "status": status, "switched": switched, "error": err}
-    return {"ok": bool(html), "html": html, "how": "crawler-render", "cost": cost,
-            "status": status, "switched": switched,
-            "error": "" if html else "the renderer returned an empty page"}
+    if not html:
+        _meter("render", usd=0.0, note="empty page returned")
+        return {"ok": False, "html": "", "how": "crawler-render", "cost": 0.0,
+                "status": status, "switched": switched,
+                "error": "the renderer returned an empty page"}
+    _meter("render", usd=cost_per_render(), note=url[:120])
+    return {"ok": True, "html": html, "how": "crawler-render",
+            "cost": cost_per_render(), "status": status, "switched": switched,
+            "error": ""}
 
 
 def fetch_many(urls, render=False, timeout=25, pause=0.25, allow_paid=True):

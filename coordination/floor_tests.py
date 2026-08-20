@@ -161,6 +161,66 @@ def test_each_agent_reaches_its_own_desk():
         board.DB = real_b
 
 
+def test_every_desk_fits_in_its_room():
+    """
+    Rooms are absolutely positioned at fixed sizes, and .desks clips whatever
+    overflows. Adding the Answers desk to SEO pushed a fifth agent onto a third
+    row that fell outside the room wall, so the desk rendered with no name at
+    all — visible only by looking at the screen, which is exactly how it was
+    found. This makes the arithmetic a test instead.
+
+    A desk is 72px wide with a 4px gap inside 8px padding either side, so a
+    room fits floor((w-16)/76) per row; a row is 89px tall under a 24px plaque.
+    """
+    print("Every room is big enough for the agents in it:")
+    html = (ROOT / "ui" / "office.html").read_text()
+    src = html[html.index("const LAYOUT="):][:800]
+    layout = {k: (int(w), int(h)) for k, w, h in
+              re.findall(r"(\w+):\{x:\d+,y:\d+,w:(\d+),h:(\d+)\}", src)}
+    rooms = re.findall(r'\{key:"(\w+)",name:"[^"]*",cls:"[^"]*",agents:\[(.*?)\]\}', html)
+    check("every room in the roster has a box", len(rooms) > 0 and
+          all(k in layout for k, _ in rooms), True)
+    for key, blob in rooms:
+        n = len(re.findall(r'\{id:"', blob))
+        w, h = layout[key]
+        per_row = max(1, (w - 16) // 76)
+        rows = -(-n // per_row)                       # ceiling division
+        needed = 24 + rows * 89
+        check(f"{key}: {n} desk(s) at {per_row}/row need {needed}px of {h}px",
+              needed <= h, True)
+
+
+def test_a_room_label_and_its_chip_do_not_collide():
+    """
+    The readiness chip sits beside the room plaque and hides its word when the
+    room is too narrow. The width test for that was about 38px too generous, so
+    "not proven" printed straight through "CONTENT & SOCIAL". Pinned here with
+    the real numbers rather than trusting the constant.
+    """
+    print("A room's chip never prints over its name:")
+    html = (ROOT / "ui" / "office.html").read_text()
+    m = re.search(r"const fits = width >= String\(roomName\|\|''\)\.length\*([\d.]+)"
+                  r" \+ word\.length\*([\d.]+) \+ (\d+);", html)
+    check("the fit rule is still where the test can read it", bool(m), True)
+    if not m:
+        return
+    name_px, word_px, pad = float(m.group(1)), float(m.group(2)), float(m.group(3))
+    layout = {k: int(w) for k, w in
+              re.findall(r"(\w+):\{x:\d+,y:\d+,w:(\d+),h:\d+\}",
+                         html[html.index("const LAYOUT="):][:800])}
+    # measured in the browser: "Content & Social" + "not proven" in a 246px room
+    # overlapped by 15px, so that combination must NOT be judged to fit.
+    fits = lambda name, word, w: w >= len(name) * name_px + len(word) * word_px + pad
+    check("the case that overlapped is now refused",
+          fits("Content & Social", "not proven", 246), False)
+    check("and so is the SEO one beside it",
+          fits("SEO & Rankings", "no fallback", 246), False)
+    check("a room with real room to spare still shows its word",
+          fits("Leads & Outreach", "cannot run", layout["Leads"]), True)
+    check("and so does the widest room on the floor",
+          fits("IT & Site Health", "cannot run", layout["IT"]), True)
+
+
 def test_the_ui_does_not_open_on_a_lie():
     """
     The first paint happens before /api/state answers. Whatever the staff list
@@ -174,10 +234,12 @@ def test_the_ui_does_not_open_on_a_lie():
     check("no desk ships as waiting", 's:"waiting"' in body, False)
     desks = re.findall(r'(?<![a-z])s:"(\w+)"', body)   # not cls:"dir"
     check("every desk starts idle", set(desks), {"idle"})
-    # 19: the SEO room gained Rival and Backlinks desks, and IT gained Search (pipelines/competitors.py runs as
-    # 'seo-rival' daily and had no chair, so its work lit the Auditor's lamp)
-    # and a Backlinks desk. Pinned so nobody silently drops one.
-    check("and all nineteen desks are still there", len(desks), 19)
+    # 20: SEO gained Rival and Backlinks (pipelines/competitors.py runs as
+    # 'seo-rival' daily and had no chair, so its work lit the Auditor's lamp),
+    # IT gained Search, and SEO gained Answers when AEO/GEO arrived. Pinned so
+    # nobody silently drops one — and see test_every_desk_fits_in_its_room for
+    # why adding one is never only a roster change.
+    check("and all twenty desks are still there", len(desks), 20)
 
     # Every desk must be ADDRESSABLE, not just readable. The chat drawer used to
     # send the label under the desk - 'Watcher', 'Hunter' - which carries no
@@ -443,6 +505,8 @@ def _main():
     test_a_desk_that_did_nothing_stays_dark()
     test_the_run_wins_over_a_stale_task_row()
     test_each_agent_reaches_its_own_desk()
+    test_every_desk_fits_in_its_room()
+    test_a_room_label_and_its_chip_do_not_collide()
     test_the_ui_does_not_open_on_a_lie()
     test_the_bulb_says_powered_working_or_broken()
     test_a_dark_bulb_always_says_why()

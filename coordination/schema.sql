@@ -349,3 +349,54 @@ CREATE TABLE IF NOT EXISTS backlinks (
   decided_at INTEGER,
   UNIQUE(host, kind)
 );
+
+-- THIRD-PARTY API USAGE.
+-- Counts and money are deliberately different kinds of thing and are stored
+-- side by side so nobody confuses them. `n` is a fact: we know exactly how many
+-- requests we made. `usd` is an ESTIMATE from the owner's own rate in .env,
+-- because Zyte's price depends on the target site and the volume discount and
+-- there is no single number to hardcode. Only calls the provider actually bills
+-- carry money — Zyte invoices successful responses, so a failed render is one
+-- request and zero dollars.
+--
+-- Two shapes of row live here. A COUNTER (renders bought, write operations) is
+-- summed. A GAUGE (records currently in the index) is read as the latest row
+-- only — summing it would have a nightly re-index of forty pages read as
+-- twelve hundred records by month end. See coordination/usage.py.
+CREATE TABLE IF NOT EXISTS api_usage (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  at       INTEGER,
+  day      TEXT,                    -- local YYYY-MM-DD, for daily allowances
+  month    TEXT,                    -- local YYYY-MM, for monthly allowances
+  provider TEXT NOT NULL,           -- zyte | algolia | …
+  kind     TEXT NOT NULL,           -- render | fetch | write | record | search
+  n        INTEGER DEFAULT 0,
+  usd      REAL DEFAULT 0,
+  note     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_usage_day   ON api_usage(provider, kind, day);
+CREATE INDEX IF NOT EXISTS idx_api_usage_month ON api_usage(provider, kind, month);
+
+-- AEO AND GEO FINDINGS — one row per page per check.
+-- AEO is being picked as the answer (AI Overviews, snippets, voice). GEO is
+-- being cited as the source (ChatGPT, Perplexity, Gemini). Both are audits of
+-- OUR OWN pages, so every row names the sector that owns the fix: the writing
+-- is Content's, the markup is IT's, and SEO files but never edits.
+--
+-- A check with nothing to say about a page — FAQ visibility on a page with no
+-- FAQ — writes NO ROW at all. Storing it as a pass would pay a page for having
+-- nothing, and storing it as a fail would put a job on the board that does not
+-- exist.
+CREATE TABLE IF NOT EXISTS aeo_findings (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  url          TEXT NOT NULL,
+  family       TEXT,                -- aeo | geo
+  check_id     TEXT NOT NULL,
+  passed       INTEGER DEFAULT 0,
+  weight       INTEGER DEFAULT 1,   -- how much it matters for THIS business
+  detail       TEXT,                -- what was found, in plain words
+  fix          TEXT,                -- what to do about it
+  owner_sector TEXT,                -- Content | IT
+  found_at     INTEGER,
+  UNIQUE(url, check_id)
+);

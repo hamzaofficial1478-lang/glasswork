@@ -228,6 +228,14 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div id="shelfBoard"><p class="hint">Loading…</p></div>
       </div>
 
+      <div class="cred">
+        <div class="cred-h"><b>Usage and limits</b>
+          <button class="mini" id="usageRefresh" style="margin-left:auto">Refresh</button>
+        </div>
+        <p class="hint" style="margin-top:0">What you have used of each outside service. <b>Counts are facts</b> — the agency knows exactly how many requests it made. <b>Money is an estimate</b> from the rates you set below, not an invoice. Always confirm the bill on the provider's own dashboard.</p>
+        <div id="usageBoard"><p class="hint">Loading…</p></div>
+      </div>
+
       <div class="hint" style="margin:14px 0 8px"><b>Tool APIs on the shelf</b> — add the 3rd-party services here; each sits on a capability shelf.</div>
       <div id="toolList"><p class="hint">Loading…</p></div>
 
@@ -284,8 +292,21 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
       </div>
       <div class="field"><label>Search-Only API Key</label><input id="algoliaSearchKey" placeholder="963ef0…"><div class="hint">Public <b>by design</b> — this one goes into the page so the search box can query from a visitor&rsquo;s browser. It can only read.</div></div>
       <div class="field"><label>Write API Key</label><input id="algoliaWriteKey" type="password" placeholder="leave blank to keep saved"><div class="hint"><b>Secret.</b> It can add, change and delete every record in your index. It stays on the server and is never put in the page — the widget builder refuses to hand over a snippet containing it. If you have ever pasted this key anywhere public, regenerate it in the Algolia dashboard.</div></div>
+      <!-- Crawler rates. Not a price list — the owner's own numbers, because
+           there is no single Zyte price to hardcode and a confident wrong one
+           would quietly break his spend cap. -->
+      <div class="gh etch" style="margin-top:18px">What a crawler fetch costs you — optional</div>
+      <p class="hint" style="margin:2px 0 10px">Zyte bills <b>per successful request</b>, and the price depends on the site and your volume discount, so nobody can hardcode it. Put your own rates here and every report totals real money instead of guessing. Leave blank and the cheapest tier is assumed — deliberately, because an estimate that flatters the bill lets the spend cap sail past the real spend. Take the numbers from a Zyte invoice or their cost estimator.</p>
       <div class="row">
-        <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15.</div></div>
+        <div class="field"><label>Cost per plain fetch (USD)</label><input id="zyteCostFetch" type="number" min="0" step="0.0001" placeholder="0.0001"><div class="hint">A raw HTTP fetch through Zyte — no browser.</div></div>
+        <div class="field"><label>Cost per render (USD)</label><input id="zyteCostRender" type="number" min="0" step="0.0001" placeholder="0.0015"><div class="hint">A full browser render. This is the one that costs money — it is used only when a free fetch comes back empty.</div></div>
+      </div>
+      <div class="field"><label>Use the paid crawler on your own website?</label>
+        <select id="crawlerOwnSite"><option value="">No — free fetches only (recommended)</option><option value="1">Yes — render my own pages if they arrive empty</option></select>
+        <div class="hint">Your own site is the one site that never blocks you, so it is read for free. Switch this on only if some of your pages are built by JavaScript and turn up blank in the search index — the run will tell you if they do, and name the price before you decide.</div></div>
+
+      <div class="row">
+        <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15. Crawler renders now count against this — a render is refused, not billed, once the cap is spent.</div></div>
         <div class="field"><label>Daily outreach cap</label><input id="outreachCap" type="number" min="0" step="1" placeholder="25"><div class="hint">Defaults to 25.</div></div>
       </div>
       <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testNtfy">Test ntfy</button><button class="mini" id="testAlgolia">Test search</button><button class="mini" id="ntfyPing">Notify me</button><span class="inl dim" id="optMsg"></span></div>
@@ -697,6 +718,46 @@ async function loadShelves(){
   else { const host=$('#shelfBoard'); if(host) host.innerHTML='<p class="hint">Could not load the shelf board.</p>'; }
 }
 if($('#shelfRefresh')) $('#shelfRefresh').onclick=loadShelves;
+
+/* ---- usage and limits ----
+   An unmetered row is rendered as "not counted here", never as a bar sitting
+   at zero. A visitor searching from their own browser never touches this
+   machine, and a meter that implied otherwise would be the most expensive kind
+   of wrong: reassuring. */
+const USAGE_WHEN={day:'today',month:'this month',now:'right now'};
+function renderUsage(meters, spent){
+  const host=$('#usageBoard'); if(!host) return;
+  if(!meters||!meters.length){ host.innerHTML='<p class="hint">Nothing metered yet.</p>'; return; }
+  const rows=meters.map(m=>{
+    const when=USAGE_WHEN[m.period]||esc(m.period);
+    if(m.verdict==='unmetered'){
+      return `<div class="model"><div class="model-top"><span class="mid">${esc(m.label)}</span>
+        <span class="tagchip n">not counted here</span></div>
+        <div class="caps">${esc(m.why_unmetered)}. Plan allowance ${(m.allowance||0).toLocaleString()} per ${esc(m.period)} — the real number is at <b>${esc(m.where)}</b>.</div></div>`;
+    }
+    const cls={ok:'q',idle:'q',watch:'y',over:'n'}[m.verdict]||'q';
+    const dot={ok:'○',idle:'○',watch:'●',over:'●'}[m.verdict]||'○';
+    const bar=m.allowance?`<div style="height:6px;border-radius:4px;background:var(--panel2);overflow:hidden;margin-top:7px">
+        <div style="height:6px;width:${Math.min(100,m.pct||0)}%;background:${m.verdict==='over'?'var(--bad,#e05555)':m.verdict==='watch'?'var(--warn,#d9a441)':'var(--ok,#3fa96a)'}"></div></div>`:'';
+    const count=m.allowance
+      ? `${(m.used||0).toLocaleString()} of ${(m.allowance||0).toLocaleString()} ${when} (${m.pct}%)`
+      : `${(m.used||0).toLocaleString()} ${when}`;
+    return `<div class="model"><div class="model-top"><span class="mid">${esc(m.label)}</span>
+      <span class="${cls}">${dot} ${count}</span>
+      ${m.usd?`<span class="dim" style="margin-left:auto;font-size:12px">about $${Number(m.usd).toFixed(4)}</span>`:''}</div>
+      ${bar}
+      ${m.note?`<div class="caps">${esc(m.note)}</div>`:''}
+      ${(m.verdict==='watch'||m.verdict==='over')?`<div class="testout">then: ${esc(m.then)} · ${esc(m.where)}</div>`:''}
+    </div>`;
+  }).join('');
+  host.innerHTML=rows+`<p class="hint" style="margin-bottom:0">Estimated third-party API spend today: <b>about $${Number(spent||0).toFixed(4)}</b> — your rates, not their invoice.</p>`;
+}
+async function loadUsage(){
+  const j=await api('GET','/api/usage');
+  if(j&&j.ok) renderUsage(j.meters,j.spent_today);
+  else { const host=$('#usageBoard'); if(host) host.innerHTML='<p class="hint">Could not read the usage meter'+(j&&j.error?': '+esc(j.error):'')+'.</p>'; }
+}
+if($('#usageRefresh')) $('#usageRefresh').onclick=loadUsage;
 setInterval(()=>{ const a=$('#shelfAuto'); if(a&&a.checked) loadShelves(); },5000);
 
 /* ---- optional ---- */
@@ -706,7 +767,9 @@ $('#saveOptional').onclick=async()=>{
     ntfyTopic:$('#ntfyTopic').value.trim(),ntfyServer:$('#ntfyServer').value.trim(),
     algoliaAppId:$('#algoliaAppId').value.trim(),algoliaSearchKey:$('#algoliaSearchKey').value.trim(),
     algoliaWriteKey:$('#algoliaWriteKey').value.trim(),algoliaIndex:$('#algoliaIndex').value.trim(),
-    outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim()});
+    outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim(),
+    zyteCostFetch:$('#zyteCostFetch').value.trim(),zyteCostRender:$('#zyteCostRender').value.trim(),
+    crawlerOwnSite:$('#crawlerOwnSite').value});
   btn.disabled=false;
   if(j.ok){ inl($('#optMsg'),'ok','✓ Saved'); ['dfsPassword'].forEach(id=>$('#'+id).value=''); }
   else inl($('#optMsg'),'err','✕ '+(j.error||'failed'));
@@ -906,6 +969,9 @@ async function loadSettings(){
   $('#outreachDomain').value=o.outreachDomain||'';
   $('#spendCap').value=o.spendCap||'';
   $('#outreachCap').value=o.outreachCap||'';
+  $('#zyteCostFetch').value=o.zyteCostFetch||'';
+  $('#zyteCostRender').value=o.zyteCostRender||'';
+  $('#crawlerOwnSite').value=o.crawlerOwnSite?'1':'';
   if(o.dfsPasswordSet) $('#dfsPassword').placeholder='saved — leave blank to keep';
   const ig=j.integrations||{}, em=ig.email||{}, gsc=ig.gsc||{};
   $('#em_host').value=em.host||''; $('#em_port').value=em.port||''; $('#em_user').value=em.user||'';
@@ -925,6 +991,7 @@ async function loadProviders(){
   STORE.routing=(r&&r.routing)||{};
   renderCredentials(); renderRouting(); renderTools(); fillToolShelfSelect();
   loadShelves();
+  loadUsage();
 }
 loadSettings();
 loadProviders();

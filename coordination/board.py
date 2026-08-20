@@ -177,6 +177,31 @@ _ADDED_TABLES = (
          status TEXT DEFAULT 'idea',  -- idea | pitched | live | rejected | refused
          note TEXT, found_at INTEGER, decided_at INTEGER,
          UNIQUE(host, kind))""",
+    # Third-party API usage. Counts are facts, usd is the owner's own estimated
+    # rate — see coordination/usage.py for why the two are kept apart. day and
+    # month are stored as text so a quota that resets monthly can be summed
+    # without doing timezone arithmetic in SQL.
+    """CREATE TABLE IF NOT EXISTS api_usage (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         at INTEGER, day TEXT, month TEXT,
+         provider TEXT NOT NULL, kind TEXT NOT NULL,
+         n INTEGER DEFAULT 0, usd REAL DEFAULT 0, note TEXT)""",
+    """CREATE INDEX IF NOT EXISTS idx_api_usage_day
+         ON api_usage(provider, kind, day)""",
+    """CREATE INDEX IF NOT EXISTS idx_api_usage_month
+         ON api_usage(provider, kind, month)""",
+    # What the answer engines and the generative engines need from a page, and
+    # whether it is there. One row per page per check — AEO and GEO are audits
+    # of our OWN pages, so the fix always belongs to Content or IT, never here.
+    """CREATE TABLE IF NOT EXISTS aeo_findings (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         url TEXT NOT NULL, family TEXT,   -- aeo | geo
+         check_id TEXT NOT NULL,
+         passed INTEGER DEFAULT 0,
+         weight INTEGER DEFAULT 1,
+         detail TEXT, fix TEXT, owner_sector TEXT,
+         found_at INTEGER,
+         UNIQUE(url, check_id))""",
 )
 
 

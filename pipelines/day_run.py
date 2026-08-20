@@ -74,6 +74,9 @@ STEPS = [
     ("SEO finds the gaps", "pipelines.seo_gap", "SEO"),
     ("SEO watches the rivals", "pipelines.competitors", "SEO"),
     ("SEO works the link list", "pipelines.seo_backlinks", "SEO"),
+    # After the gaps and before the briefs, deliberately: AEO/GEO findings are
+    # what Content is briefed to fix, so they have to exist before the briefing.
+    ("SEO audits the answers (AEO/GEO)", "pipelines.seo_answers", "SEO"),
     ("Content briefs the pages", "pipelines.content_briefs", "Content"),
     ("Report scores the day", "pipelines.report_daily", "Report"),
 ]

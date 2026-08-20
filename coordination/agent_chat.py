@@ -68,6 +68,7 @@ DESK_SECTOR = {
     "watcher": "it", "fixer": "it", "releaser": "it", "search": "it",
     "writer": "content", "illustrator": "content", "publisher": "content",
     "auditor": "seo", "strategist": "seo", "rival": "seo", "backlinks": "seo",
+    "answers": "seo",
     "hunter": "leads", "scanner": "leads", "outreach": "leads", "responder": "leads",
     "reporter": "report",
     "screener": "security", "guard": "security",
@@ -87,6 +88,9 @@ DESK_JOB = {
     "illustrator": "images — real project photos for project shots, never generated ones",
     "publisher": "publish only what the Auditor has passed",
     "auditor": "on-page SEO and schema",
+    "backlinks": "find where a link to us could come from and file it; contact nobody — guest-post pitches go to Content and out through Leads",
+    "answers": "AEO and GEO — get our pages picked as the answer and cited as the "
+               "source; the fixes go to Content and IT, never applied here",
     "strategist": "find service+area keyword gaps worth writing for",
     "hunter": "find real UAE businesses and work out which service each one needs",
     "scanner": "stop the same lead being collected or mailed twice",

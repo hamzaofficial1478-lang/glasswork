@@ -404,7 +404,7 @@ function sectors(){return [
   /* Rival has a desk of its own because pipelines/competitors.py runs as
      'seo-rival' every day. Without one it fell through to the first free desk
      and lit the Auditor's lamp instead — work credited to the wrong chair. */
-  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{id:"seo-auditor",n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{id:"seo-strategist",n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"},{id:"seo-rival",n:"Rival",role:"Watches competitors",s:"idle",t:"—",av:"👁"},{id:"seo-backlinks",n:"Backlinks",role:"Links & guest posts",s:"idle",t:"—",av:"🔗"}]},
+  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{id:"seo-auditor",n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{id:"seo-strategist",n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"},{id:"seo-rival",n:"Rival",role:"Watches competitors",s:"idle",t:"—",av:"👁"},{id:"seo-backlinks",n:"Backlinks",role:"Links & guest posts",s:"idle",t:"—",av:"🔗"},{id:"seo-answers",n:"Answers",role:"AEO & GEO",s:"idle",t:"—",av:"💬"}]},
   {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{id:"leads-hunter",n:"Hunter",role:"Finds UAE leads",s:"idle",t:"—",av:"🎯"},{id:"leads-scanner",n:"Scanner",role:"Blocks duplicates",s:"idle",t:"—",av:"♻"},{id:"leads-outreach",n:"Outreach",role:"Mail + DMs, under cap",s:"idle",t:"—",av:"✉"},{id:"leads-responder",n:"Responder",role:"Handles replies",s:"idle",t:"—",av:"💬"}]},
   {key:"Report",name:"Reports",cls:"",agents:[{id:"reporter",n:"Reporter",role:"Scores the agency",s:"idle",t:"—",av:"📋"}]},
   {key:"Security",name:"Security",cls:"sec",agents:[{id:"security-screener",n:"Screener",role:"Scam & fraud filter",s:"idle",t:"—",av:"🛡"},{id:"security-guard",n:"Guard",role:"Untrusts scraped text",s:"idle",t:"—",av:"⚠"}]}
@@ -419,7 +419,13 @@ const BLANK_METRICS=[["—","Agency health","glass"],["—","Leads today",""],
 const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",
                  metrics:BLANK_METRICS.map(m=>m.slice()),rooms:sectors()}};
 let CURRENT="gd";
-const LAYOUT={Director:{x:24,y:22,w:320,h:150},Report:{x:372,y:22,w:230,h:150},Security:{x:630,y:22,w:266,h:150},Leads:{x:24,y:210,w:400,h:210},SEO:{x:454,y:210,w:210,h:210},Content:{x:694,y:210,w:202,h:210},IT:{x:24,y:452,w:872,h:242}};
+/* Room sizes are load-bearing, not decoration. A desk is 72px wide with a 4px
+   gap inside 8px padding, so a room fits floor((w-16)/76) desks per row and
+   .desks clips whatever will not fit. SEO grew to five agents when Answers
+   (AEO/GEO) joined, which pushed a third row past the room wall and hid that
+   desk's name entirely. The middle row is sized from the agent COUNT: Leads
+   four across, SEO three across (5 = 3+2), Content three across. */
+const LAYOUT={Director:{x:24,y:22,w:320,h:150},Report:{x:372,y:22,w:230,h:150},Security:{x:630,y:22,w:266,h:150},Leads:{x:24,y:210,w:320,h:210},SEO:{x:374,y:210,w:246,h:210},Content:{x:650,y:210,w:246,h:210},IT:{x:24,y:452,w:872,h:242}};
 const $=s=>document.querySelector(s);
 const SVGNS="http://www.w3.org/2000/svg";
 
@@ -469,7 +475,13 @@ function readyChip(rd, roomName, width){
     .filter((v,i,a)=>v&&a.indexOf(v)===i).join('\n');
   const st = oneOf(rd.state, RDY_STATES);
   const word = RDY_WORD[st];
-  const fits = width >= String(roomName||'').length*6.4 + word.length*5.6 + 74;
+  // Does the word fit beside the plaque without sitting on top of it? The
+  // constants are measured, not guessed: the old 74 was about 38px short, so
+  // "not proven" overlapped "CONTENT & SOCIAL" by fifteen pixels the moment a
+  // room was resized. When it does not fit the chip keeps its coloured dot and
+  // the word moves into the tooltip — a dot you can read beats a word you
+  // cannot.
+  const fits = width >= String(roomName||'').length*6.4 + word.length*5.6 + 112;
   return `<div class="rdy ${st}" title="${escA((fits?'':word+' — ')+tip)}">`
        + `<span class="b"></span>${fits?word:''}</div>`;
 }

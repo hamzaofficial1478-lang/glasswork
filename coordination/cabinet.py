@@ -115,16 +115,41 @@ def daily_spend_cap() -> float:
 
 
 def spent_today() -> float:
-    """What the agency has actually spent today, summed from the borrow trail."""
+    """
+    What the agency has spent today: the borrow trail PLUS the API usage meter.
+
+    Two sources because there are genuinely two kinds of paid work. A borrow is
+    a shelf held for a while and released with a cost attached. A crawler fetch
+    is a single request that borrows nothing — it happens inside fetcher.fetch()
+    and used to be invisible here, which meant the one paid call the agency
+    makes most often was the one the cap could not see.
+
+    Nothing is counted twice: crawler spend goes to the meter and is never also
+    passed to release(usd_cost=). If you add a paid capability, pick one door.
+    """
     lt = time.localtime()
     day0 = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+    total = 0.0
     try:
         with _conn() as c:
             r = c.execute("SELECT COALESCE(SUM(usd_cost),0) FROM borrows"
                           " WHERE granted_at>=?", (day0,)).fetchone()
-            return float(r[0] or 0)
+            total += float(r[0] or 0)
     except sqlite3.Error:
-        return 0.0
+        pass
+    try:
+        from . import usage
+    except ImportError:  # pragma: no cover - script/path fallback
+        try:
+            import usage
+        except ImportError:
+            usage = None
+    if usage is not None:
+        try:
+            total += usage.spent_today()
+        except Exception:
+            pass
+    return round(total, 4)
 
 
 # ---------------------------------------------------------------------------

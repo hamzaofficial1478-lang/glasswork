@@ -12,7 +12,7 @@ overriding each other, and report to you through one Telegram bridge.
 agency/
 ├── CLAUDE.md                  the company handbook + the MD's brain and red lines
 ├── .claude/
-│   ├── agents/                every agent's job description (16 of them)
+│   ├── agents/                every agent's job description (18 of them)
 │   ├── settings.json          wires the hooks in
 │   └── hooks/                 the automatic guardrails (block / log / enforce)
 ├── coordination/

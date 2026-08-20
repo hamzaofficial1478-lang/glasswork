@@ -219,6 +219,7 @@ def tests():
             "pipelines.content_tests",
             "pipelines.leads_tests", "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.site_tests", "pipelines.seo_tests",
+            "pipelines.answers_tests",
             "pipelines.report_tests", "pipelines.run_tests"]
     bad = []
     for m in mods:

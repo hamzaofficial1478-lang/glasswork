@@ -115,6 +115,10 @@ ENV_NEEDS = {
 ENV_WANTS = {
     "report": [("NTFY_TOPIC", "the daily digest is written to a table nobody opens")],
     "leads": [("OUTREACH_DOMAIN", "outreach stays off until a sending domain is set")],
+    # The AEO/GEO audit reads our OWN pages, so without an address it has
+    # nothing to audit. SEO still does keyword gaps, rivals and the link list
+    # without it, so this is a note on the light rather than a blackout.
+    "seo": [("SITE_URL", "the AEO/GEO audit has no pages of ours to read")],
 }
 
 

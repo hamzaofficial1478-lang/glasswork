@@ -223,6 +223,7 @@ function updateEnv(partial) {
     // Telegram keys are kept in the file if they're already there — an owner
     // mid-switch shouldn't lose his fallback — but nothing writes them now.
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
+    "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER", "CRAWLER_ON_OWN_SITE",
     "DAILY_SPEND_CAP_USD", "OUTREACH_DAILY_CAP", "SITE_API_BASE", "SITE_API_TOKEN", "PORT",
   ];
   const keys = [...order.filter((k) => k in merged),
@@ -433,6 +434,24 @@ app.post("/api/optional", (req, res) => {
     set("ALGOLIA_SEARCH_KEY", b.algoliaSearchKey);
     set("ALGOLIA_WRITE_KEY", b.algoliaWriteKey);
     set("ALGOLIA_INDEX", b.algoliaIndex);
+    // Crawler rates. Blank means "use the built-in cheapest-tier default", so a
+    // blank field must CLEAR the key rather than keep an old number the owner
+    // has just deleted on purpose — the one place in this handler where empty
+    // is an instruction, not an omission. A number that will not parse is
+    // dropped rather than saved, so a typo can never become his spend rate.
+    const rate = (k, v) => {
+      if (v === undefined) return;                       // field not sent at all
+      const x = one(v);
+      if (!x) { partial[k] = ""; return; }
+      const n = Number(x);
+      if (Number.isFinite(n) && n >= 0) partial[k] = String(n);
+    };
+    rate("ZYTE_COST_PER_FETCH", b.zyteCostFetch);
+    rate("ZYTE_COST_PER_RENDER", b.zyteCostRender);
+    // A select always has a definite value, so "off" is a real answer here.
+    if (b.crawlerOwnSite !== undefined) {
+      partial.CRAWLER_ON_OWN_SITE = one(b.crawlerOwnSite) ? "1" : "";
+    }
     partial.DAILY_SPEND_CAP_USD = one(b.spendCap) || cur.DAILY_SPEND_CAP_USD || "15";
     partial.OUTREACH_DAILY_CAP = one(b.outreachCap) || cur.OUTREACH_DAILY_CAP || "25";
     updateEnv(partial);
@@ -497,6 +516,10 @@ app.post("/api/providers/tool", (req, res) => res.json(pyProvider("save_tool", r
 app.post("/api/providers/tool/delete", (req, res) => res.json(pyProvider("delete_tool", req.body)));
 app.post("/api/providers/tool/test", (req, res) => res.json(pyProvider("test_tool", req.body)));
 app.get("/api/shelves", (_q, res) => res.json(pyProvider("shelves", {})));
+// How much of each third-party allowance is gone. Counts are facts; the money
+// column is the owner's own rate from .env, never a quote from the provider.
+app.get("/api/usage", (_q, res) =>
+  res.json(pyModule("coordination.usage", ["--json"], 20000)));
 app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
 
 // ---- channels + the whole-system sweep -------------------------------------
@@ -703,6 +726,9 @@ app.get("/api/settings", (_q, res) => {
       algoliaWriteKeySet: set("ALGOLIA_WRITE_KEY"), algoliaIndex: v("ALGOLIA_INDEX"),
       outreachDomain: v("OUTREACH_DOMAIN"),
       spendCap: v("DAILY_SPEND_CAP_USD"), outreachCap: v("OUTREACH_DAILY_CAP"),
+      zyteCostFetch: v("ZYTE_COST_PER_FETCH"), zyteCostRender: v("ZYTE_COST_PER_RENDER"),
+      crawlerOwnSite: ["1", "true", "yes", "on"].includes(
+        String(e.CRAWLER_ON_OWN_SITE || "").trim().toLowerCase()),
     },
     integrations: {
       email: { host: v("SMTP_HOST"), port: v("SMTP_PORT"), user: v("SMTP_USER"),

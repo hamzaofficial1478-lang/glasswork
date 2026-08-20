@@ -265,6 +265,24 @@ def where():
     say(f"    {'Admin password':24} "
         + ("ON" if e.get("ADMIN_PASSWORD_HASH") else "off — anyone at this computer"))
 
+    # These three ARE printed in full, and that is the point. A rate is not a
+    # secret, it is the number every cost line in every report is multiplied by
+    # — the owner needs to see it to know whether to believe the total.
+    say()
+    say("  Crawler rates (your own estimates, not a quote from anyone)")
+    try:
+        from pipelines import fetcher
+        say(f"    {'Per plain fetch':24} ${fetcher.cost_per_fetch():.4f}"
+            + ("" if (e.get("ZYTE_COST_PER_FETCH") or "").strip() else "   (built-in default)"))
+        say(f"    {'Per render':24} ${fetcher.cost_per_render():.4f}"
+            + ("" if (e.get("ZYTE_COST_PER_RENDER") or "").strip() else "   (built-in default)"))
+    except Exception as ex:
+        say(f"    could not be read: {ex}")
+    own = (e.get("CRAWLER_ON_OWN_SITE") or "").strip().lower() in ("1", "true", "yes", "on")
+    say(f"    {'Paid on your own site':24} "
+        + ("ON — your pages may be rendered and billed" if own
+           else "off — your own site is read for free"))
+
     store = ROOT / "config" / "providers.local.json"
     say()
     say("  config/providers.local.json   (git-ignored)")
@@ -296,6 +314,8 @@ def main():
     ap.add_argument("--lock-down", action="store_true",
                     help="start bound to this machine only (the default anyway)")
     ap.add_argument("--where", action="store_true", help="what is configured, no secrets shown")
+    ap.add_argument("--usage", action="store_true",
+                    help="how much of each paid API you have used, and what is left")
     ap.add_argument("--stop", action="store_true", help="stop a server this file started")
     ap.add_argument("--no-open", action="store_true", help="do not open a browser")
     a = ap.parse_args()
@@ -306,6 +326,11 @@ def main():
         return stop_server()
     if a.where:
         return where()
+    if a.usage:
+        from coordination import usage
+        print()
+        print(usage.as_text())
+        return None
     if a.no_password:
         return None if clear_password() else sys.exit(1)
     if a.password:

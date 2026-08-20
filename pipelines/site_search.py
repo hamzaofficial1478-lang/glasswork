@@ -243,17 +243,47 @@ INDEX_SETTINGS = {
 }
 
 
+def _meter(kind, n=1, note="", gauge=False):
+    """
+    Tell the usage meter. Never let bookkeeping break an index run.
+
+    gauge=True records a LEVEL (how many records the index holds now) rather
+    than an addition — readers take the latest, not the sum.
+    """
+    try:
+        from coordination import usage
+        if gauge:
+            usage.set_gauge("algolia", kind, n, note=note)
+        else:
+            usage.record("algolia", kind, n=n, usd=0.0, note=note)
+    except Exception:
+        pass
+
+
 def configure(cfg):
-    return _algolia("PUT", f"/1/indexes/{urllib.parse.quote(cfg['index'])}/settings",
-                    cfg, INDEX_SETTINGS)
+    out, err = _algolia("PUT", f"/1/indexes/{urllib.parse.quote(cfg['index'])}/settings",
+                        cfg, INDEX_SETTINGS)
+    if not err:
+        _meter("write", n=1, note="index settings")
+    return out, err
 
 
 def push(records, cfg):
     if not records:
         return {}, "nothing to push"
     body = {"requests": [{"action": "updateObject", "body": r} for r in records]}
-    return _algolia("POST", f"/1/indexes/{urllib.parse.quote(cfg['index'])}/batch",
-                    cfg, body)
+    out, err = _algolia("POST", f"/1/indexes/{urllib.parse.quote(cfg['index'])}/batch",
+                        cfg, body)
+    if not err:
+        # Two different numbers, deliberately. The WRITE count is how many
+        # operations we sent this month; the RECORD count is how big the index
+        # is right now. objectID is the page path, so re-indexing the same
+        # forty pages updates forty records rather than adding forty more —
+        # summing the pushes would have the owner "over" 50,000 records inside
+        # a month while his index still held forty.
+        _meter("write", n=len(records), note=cfg.get("index") or "")
+        _meter("record", n=len(records), gauge=True, note=cfg.get("index") or "")
+    return out, err
 
 
 # ---------------------------------------------------------------------------

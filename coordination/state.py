@@ -294,6 +294,10 @@ def build():
     leads_today = _one(c, "SELECT count(*) FROM leads WHERE found_at>=?", (day0,))
     spend = _one(c, "SELECT COALESCE(SUM(usd_cost),0) FROM agent_runs WHERE started_at>=?", (day0,), 0.0)
     spend += _one(c, "SELECT COALESCE(SUM(usd_cost),0) FROM borrows WHERE granted_at>=?", (day0,), 0.0)
+    # Crawler requests are billed per call and borrow nothing, so they land in
+    # the usage meter rather than the borrow trail. Left out, the headline spend
+    # figure would read $0.00 on a day the agency rendered two hundred pages.
+    spend += _one(c, "SELECT COALESCE(SUM(usd),0) FROM api_usage WHERE at>=?", (day0,), 0.0)
     health = round(sum(r["score"] for r in rooms) / len(rooms)) if rooms else 0
     open_all = _one(c, "SELECT count(*) FROM tasks WHERE status IN ('open','in_progress')")
     md_state = f"{open_all} tasks on the board" if open_all else "idle — board clear"

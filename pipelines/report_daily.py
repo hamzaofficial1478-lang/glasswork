@@ -380,6 +380,30 @@ def _competitor_moves(con):
         "`python -m pipelines.competitors`")
 
 
+def quota_warnings():
+    """
+    Third-party allowances that are nearly gone or already gone.
+
+    Only the metered ones. Algolia's search allowance is spent in visitors'
+    browsers and cannot be seen from here, so it is never claimed as safe —
+    see coordination/usage.py.
+    """
+    try:
+        from coordination import usage
+        out = []
+        for m in usage.status():
+            if m["verdict"] == "over":
+                out.append(f"{m['label']} is past the plan allowance "
+                           f"({m['used']:,} of {m['allowance']:,}) - from here it is "
+                           f"{m['then']}.")
+            elif m["verdict"] == "watch":
+                out.append(f"{m['label']} is at {m['pct']}% of the plan allowance "
+                           f"({m['used']:,} of {m['allowance']:,}).")
+        return out
+    except Exception:
+        return []
+
+
 def _prioritised_actions(site_sev, leads_today, approvals_pending):
     """Three real things to do today, ranked by what actually costs the business money."""
     actions = []
@@ -393,6 +417,11 @@ def _prioritised_actions(site_sev, leads_today, approvals_pending):
     if leads_today:
         actions.append(f"{leads_today} new lead(s) came in today - check they're "
                         "being verified and cleared before outreach.")
+    # A plan allowance running out is not urgent until the day it is, and then
+    # it is a surprise invoice. It ranks below a broken enquiry form and above
+    # nothing to do.
+    for line in quota_warnings():
+        actions.append(line)
     if not actions:
         actions.append("Nothing urgent today - the board is clear.")
     return actions[:3]
