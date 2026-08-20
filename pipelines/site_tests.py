@@ -211,6 +211,21 @@ def test_the_site_address_survives_a_fresh_clone():
             os.environ["SITE_URL"] = keep
 
 
+def _make401():
+    import http.server, socketserver
+    class Q(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            body = b'{"title":"Authentication Info Invalid"}'
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *a):
+            pass
+    return socketserver.TCPServer(("127.0.0.1", 0), Q)
+
+
 def test_site_search_never_publishes_the_write_key():
     """
     Algolia gives you three values and exactly one of them may reach a browser.
@@ -379,6 +394,62 @@ def test_the_fetcher_pays_only_when_it_has_to():
               calls[0][1], True)
     finally:
         fx._zyte, fx._plain, fx.crawler_tool = real_zyte, real_plain, real_tool
+
+    print("\nThe Test button probes Zyte correctly, whatever style was saved:")
+    from providers import client as _client
+    check("a crawler-shelf tool is recognised as an extract API",
+          _client._is_extract_api({"shelf": "crawler", "base_url": "", "name": "x"}), True)
+    check("...and one recognised by its address",
+          _client._is_extract_api({"base_url": "https://api.zyte.com/v1/extract"}), True)
+    check("a plain search API is NOT",
+          _client._is_extract_api({"shelf": "seo_data", "base_url": "https://api.dataforseo.com"}), False)
+
+    import base64 as _b, json as _j, threading as _t, http.server as _h, socketserver as _sk
+    got = {}
+
+    class P(_h.BaseHTTPRequestHandler):
+        def do_GET(self):        # the generic probe would land here and mislead
+            got["GET"] = True
+            self.send_response(405); self.end_headers()
+        def do_POST(self):
+            got["auth"] = self.headers.get("Authorization")
+            self.send_response(200); self.send_header("Content-Type", "application/json")
+            out = _j.dumps({"httpResponseBody": _b.b64encode(b"<html>ok</html>").decode()}).encode()
+            self.send_header("Content-Length", str(len(out))); self.end_headers()
+            self.wfile.write(out)
+        def log_message(self, *a): pass
+
+    srv2 = _sk.TCPServer(("127.0.0.1", 0), P)
+    _t.Thread(target=srv2.serve_forever, daemon=True).start()
+    try:
+        ep = f"http://127.0.0.1:{srv2.server_address[1]}/v1/extract"
+        # saved as bearer — the exact state that produced the owner's 401
+        r = _client.probe_tool({"name": "Zyte API", "shelf": "crawler",
+                                "base_url": ep, "api_key": "GOODKEY",
+                                "auth_style": "bearer"}, timeout=10)
+        check("it passes even though the tool was saved as bearer", r["ok"], True)
+        check("because it used POST, not a GET", got.get("GET"), None)
+        check("and HTTP Basic, not Bearer", got["auth"].startswith("Basic "), True)
+        check("with the key as the Basic username",
+              _b.b64decode(got["auth"].split()[1]).decode(), "GOODKEY:")
+    finally:
+        srv2.shutdown()
+
+    print("\nA bad crawler key is honest, and never advises 'raw':")
+    srv3 = _make401()
+    _t.Thread(target=srv3.serve_forever, daemon=True).start()
+    try:
+        ep = f"http://127.0.0.1:{srv3.server_address[1]}/v1/extract"
+        r = _client.probe_tool({"name": "Zyte API", "shelf": "crawler",
+                                "base_url": ep, "api_key": "BADKEY"}, timeout=10)
+        check("a rejected key fails", r["ok"], False)
+        check("it is reported as 401", r["status"], 401)
+        check("the advice never says 'raw' (the old wrong hint)",
+              "raw" in r["cause"].lower(), False)
+        check("and it names the Proxy-vs-API confusion instead",
+              "Proxy" in r["cause"], True)
+    finally:
+        srv3.shutdown()
 
     print("\nZyte is called the way Zyte documents:")
     import base64 as _b64, json as _json, threading, http.server, socketserver

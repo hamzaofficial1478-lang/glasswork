@@ -163,6 +163,77 @@ def probe_model(cred, model, timeout=120):
                      "cause": f"No live probe for {category}; leaving it as unknown.", "raw": diag}}
 
 
+def _is_extract_api(tool) -> bool:
+    """
+    A crawler/fetch API — Zyte today, the same shape for the others. Recognised
+    by the shelf it sits on or by its own address, so it works whether the owner
+    added it through the crawler dropdown or typed the URL by hand.
+    """
+    blob = ((tool.get("base_url") or "") + " " + (tool.get("name") or "")).lower()
+    return ((tool.get("shelf") or "").strip().lower() == "crawler"
+            or "zyte" in blob or "/v1/extract" in blob)
+
+
+def _probe_extract_api(tool, timeout):
+    """
+    Test a Zyte-style extract API for real: Basic auth, a POST, a body naming a
+    stable public URL. httpResponseBody (not browserHtml) because a plain fetch
+    is the cheaper of the two and proving the KEY does not need a browser render.
+
+    The verdicts are Zyte's, not a search API's:
+      200  the key works.
+      401  the key is wrong — and the hint says Basic, never 'raw'.
+      429  the key WORKS; it is only rate-limited or out of quota.
+    """
+    from . import auth
+    url = (tool.get("base_url") or "https://api.zyte.com/v1/extract").strip()
+    key = (tool.get("api_key") or "").strip()
+    if not key:
+        return {"ok": False, "status": 0, "cause": "No API key saved for this tool."}
+    # The key is the Basic USERNAME with an empty password. Owner pastes it bare;
+    # the colon is ours. Same rule as pipelines/fetcher.py — kept in step by both
+    # going through auth.auth_header('basic', ...).
+    probe_key = key if key.endswith(":") else key + ":"
+    headers = {"Content-Type": "application/json", "Accept": "application/json",
+               **auth.auth_header("basic", probe_key)}
+    # Zyte's own starter snippet points at this sandbox, so it is guaranteed an
+    # allowed target — a target-side problem cannot masquerade as a bad key.
+    body = json.dumps({"url": "https://books.toscrape.com/", "httpResponseBody": True})
+    raw = {"url": url, "headers": redact_headers(tool, headers), "method": "POST",
+           "status": None, "response_body": None}
+    try:
+        r = requests.post(url, headers=headers, data=body, timeout=timeout)
+    except requests.exceptions.Timeout:
+        raw["status"] = 0
+        return {"ok": False, "status": 0, "cause": f"Timed out after {timeout}s.", "raw": raw}
+    except Exception as e:
+        raw["status"] = 0
+        raw["response_body"] = str(e)[:300]
+        return {"ok": False, "status": 0,
+                "cause": "Could not connect — check the base URL is reachable.", "raw": raw}
+
+    raw["status"] = r.status_code
+    raw["response_body"] = r.text[:600]
+    if 200 <= r.status_code < 300:
+        return {"ok": True, "status": r.status_code,
+                "cause": "Reachable, the key was accepted, and a test page came back. "
+                         "This crawler is working.", "raw": raw}
+    if r.status_code in (401, 403):
+        return {"ok": False, "status": r.status_code,
+                "cause": (f"{r.status_code} — Zyte rejected the key. Check it is the "
+                          "Zyte API key (not the Zyte Proxy password), copied whole. "
+                          "The auth style does not matter here — the code always uses "
+                          "HTTP Basic for Zyte, so there is no prefix to switch."),
+                "raw": raw}
+    if r.status_code == 429:
+        return {"ok": True, "status": 429,
+                "cause": "The key WORKS — this is a rate-limit or an empty quota, not a "
+                         "bad key. It will fetch once the limit resets or the plan has "
+                         "credit.", "raw": raw}
+    return {"ok": False, "status": r.status_code,
+            "cause": _likely_cause(r.status_code, r.text), "raw": raw}
+
+
 def probe_tool(tool, timeout=90):
     """
     Test a SHELF tool (DataForSEO, Pexels, a crawler…). These aren't chat APIs, so
@@ -182,6 +253,15 @@ def probe_tool(tool, timeout=90):
     url = (tool.get("base_url") or "").strip()
     if not url:
         return {"ok": False, "status": 0, "cause": "No base URL saved for this tool."}
+
+    # A fetch/extract API cannot be tested like a search API. It answers a POST
+    # whose JSON body names a URL, with HTTP Basic auth (the key as username).
+    # A GET, or a Bearer header, comes back 401 that looks exactly like a bad
+    # key — which is what had the generic probe telling Zyte owners to "switch
+    # to raw", the one style that is also wrong. So these get their own probe.
+    if _is_extract_api(tool):
+        return _probe_extract_api(tool, timeout)
+
     headers = {"Accept": "application/json"}
     headers.update(auth.auth_header(tool.get("auth_style"), tool.get("api_key", ""),
                                     tool.get("auth_header_name", "")))

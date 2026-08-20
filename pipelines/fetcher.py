@@ -140,12 +140,15 @@ def _zyte(url, tool, render, timeout):
     body = {"url": url, "followRedirect": True}
     body["browserHtml" if render else "httpResponseBody"] = True
 
+    # Basic, ALWAYS — never the tool's saved auth_style. Zyte accepts nothing
+    # else, so an owner who left the shelf form on its 'bearer' default sent
+    # "Bearer <key>" and got a 401 that read like a bad key. The style field is
+    # irrelevant for Zyte; the code knows what Zyte needs and does not ask.
     endpoint = (tool.get("base_url") or "https://api.zyte.com/v1/extract").strip()
     req = urllib.request.Request(
         endpoint, data=json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json",
-                 **auth.auth_header(tool.get("auth_style") or "basic", key,
-                                    tool.get("auth_header_name") or "")})
+                 **auth.auth_header("basic", key)})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
