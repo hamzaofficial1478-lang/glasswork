@@ -91,31 +91,61 @@ def _text(html):
 # 1. READ THE SITE
 # ---------------------------------------------------------------------------
 
-def _fetch(url, timeout=15):
-    """
-    One page of the owner's own site. Free HTTP first; the renderer only if the
-    page turns out to be built by JavaScript.
+# THE OWNER'S OWN SITE IS READ FOR FREE, BY DEFAULT.
+#
+# His point, and he is right: Algolia is free and Zyte is billed per request.
+# Indexing forty of his own pages every day through a paid renderer is a
+# standing charge for something plain HTTP does for nothing — and the pages are
+# HIS, on a server he controls, so there is no blocking to get past. Zyte earns
+# its money on RIVAL sites, which is where the blocking actually is.
+#
+# So the money switch is OFF here unless he turns it on. If some of his pages
+# turn out to be JavaScript-built, they are reported and skipped with the price
+# named, rather than quietly billed. One line in .env changes his mind:
+#
+#     CRAWLER_ON_OWN_SITE=1
+#
+# The default is the cheap one because a default nobody chose should never be
+# the one that spends money.
+def paid_allowed_on_own_site(env=None) -> bool:
+    if env is None:
+        try:
+            from providers import integrations
+            env = integrations.read_env()
+        except Exception:
+            env = {}
+    v = (os.environ.get("CRAWLER_ON_OWN_SITE")
+         or env.get("CRAWLER_ON_OWN_SITE") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
 
-    This used to be plain urllib and nothing else, which meant a React or Next
-    site indexed as forty copies of `<div id="root"></div>`. The critic caught
-    that and said so, which was honest but not much use — the owner still had no
-    search. pipelines/fetcher.py decides: it reads free, notices a shell, and
-    pays for a render only for the pages that need one.
 
-    Returns (html, error) as before; the cost and the route are reported
-    separately through _LAST so build_records can total them without every
-    caller having to thread a third value through.
+def _fetch(url, timeout=15, allow_paid=None):
     """
-    r = fetcher.fetch(url, timeout=timeout)
+    One page of the owner's own site. Free HTTP, and paid rendering only if he
+    has switched it on.
+
+    Returns (html, error). Cost, route and anything skipped are totalled in
+    _LAST so build_records can report them without threading extra values
+    through every caller.
+    """
+    if allow_paid is None:
+        allow_paid = paid_allowed_on_own_site()
+    r = fetcher.fetch(url, timeout=timeout, allow_paid=allow_paid)
     _LAST["cost"] += r["cost"]
     if r["how"] == "crawler-render":
         _LAST["rendered"] += 1
+        if r.get("switched"):
+            _LAST["switched"].append(r["switched"])
+    if r.get("declined"):
+        _LAST["skipped"].append(url)
+        _LAST["would_cost"] += r["declined"]["would_cost"]
     return r["html"], r["error"]
 
 
 # Running totals for one build_records pass. Reset at the top of it, never read
 # across passes — a module-level counter that nobody resets is a slow lie.
-_LAST = {"cost": 0.0, "rendered": 0}
+_LAST = {"cost": 0.0, "rendered": 0, "skipped": [], "would_cost": 0.0,
+         "switched": []}
 
 
 def build_records(url, max_pages=40, timeout=15):
@@ -126,7 +156,8 @@ def build_records(url, max_pages=40, timeout=15):
     UPDATE rather than a second copy of the whole site: run this daily and the
     index tracks the site instead of growing by 40 records a day.
     """
-    _LAST["cost"], _LAST["rendered"] = 0.0, 0
+    _LAST.update({"cost": 0.0, "rendered": 0, "skipped": [], "would_cost": 0.0,
+                  "switched": []})
     if not url:
         return [], "no website saved — put it on /setup first"
     if "://" not in url:
@@ -318,9 +349,11 @@ def critic_check(records, cfg):
     if not records:
         reasons.append("no pages were read, so there is nothing to search")
     if records and all(len(r["body"]) < 80 for r in records):
-        reasons.append("every page came back nearly empty — the site is built by "
-                       "JavaScript and there is no crawler API on the 'crawler' "
-                       "shelf to render it. Add Zyte on /setup and run this again")
+        reasons.append(
+            "every page came back nearly empty — the site is built by JavaScript, "
+            "so there is nothing to search. Either it needs rendering "
+            "(CRAWLER_ON_OWN_SITE=1, billed per page) or the site should serve "
+            "its content in the HTML, which is free and better for Google too")
     if len({r["objectID"] for r in records}) != len(records):
         reasons.append("two records share an objectID; a re-index would silently "
                        "overwrite one page with another")
@@ -353,12 +386,27 @@ def _work(agent, dry_run, max_pages) -> dict:
         return {"ok": False, "error": err}
 
     ok, reasons = critic_check(records, cfg)
+    skipped = list(_LAST["skipped"])
     result = {"ok": True, "agent": agent, "site": url,
               "pages_indexed": len(records),
               "pages_rendered": _LAST["rendered"],
               "crawler_cost": round(_LAST["cost"], 4),
+              "paid_rendering": paid_allowed_on_own_site(),
               "services_matched": len({r["service"] for r in records if r["service"]}),
               "dry_run": bool(dry_run)}
+    if _LAST["switched"]:
+        # The owner asked to be told when one provider takes over from another.
+        # This is the only place in the system where that genuinely happens.
+        result["switched_to_crawler"] = _LAST["switched"][:5]
+    if skipped:
+        result["pages_skipped"] = skipped[:20]
+        result["skipped_would_cost"] = round(_LAST["would_cost"], 4)
+        result["skipped_note"] = (
+            f"{len(skipped)} page(s) on your own site are built by JavaScript and "
+            f"were NOT indexed, because paid rendering is off for your own site "
+            f"(Algolia is free, Zyte is billed per page). Rendering them would "
+            f"cost about ${_LAST['would_cost']:.4f} per run. To allow it, put "
+            f"CRAWLER_ON_OWN_SITE=1 in .env. Zyte stays on for rival sites either way.")
     if not ok:
         result.update({"critic": "rejected", "critic_reasons": reasons,
                        "pushed": 0,

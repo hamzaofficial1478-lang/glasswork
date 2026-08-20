@@ -211,6 +211,111 @@ def test_the_site_address_survives_a_fresh_clone():
             os.environ["SITE_URL"] = keep
 
 
+def test_the_owners_own_site_is_read_for_free():
+    """
+    Algolia costs nothing; Zyte is billed per page. Indexing forty of the owner's
+    own pages every day through a paid renderer is a standing charge for
+    something plain HTTP does for nothing — and they are HIS pages, on HIS
+    server, so there is no blocking to get past. Zyte earns its keep on RIVALS.
+
+    So the money switch is OFF for his own site by default, and the default has
+    to be the cheap one: a default nobody chose must never be the one that spends.
+    """
+    from . import fetcher as fx
+    from . import site_search as search
+
+    print("\nPaid rendering on his own site is OFF unless he says otherwise:")
+    check("default is the cheap path", search.paid_allowed_on_own_site(env={}), False)
+    check("and stays cheap on junk input",
+          search.paid_allowed_on_own_site(env={"CRAWLER_ON_OWN_SITE": "maybe"}), False)
+    for on in ("1", "true", "yes", "on", "ON"):
+        check(f"'{on}' turns it on",
+              search.paid_allowed_on_own_site(env={"CRAWLER_ON_OWN_SITE": on}), True)
+
+    shell = ('<html><head><title>x</title></head><body><div id="root"></div>'
+             '<script>__NEXT_DATA__={}</script></body></html>')
+    paid_calls = []
+    real_plain, real_zyte, real_tool = fx._plain, fx._zyte, fx.crawler_tool
+    # The address guard is tested on its own above. Stub it here so these
+    # assertions measure the MONEY policy and not DNS — invented domains do not
+    # resolve, and a refusal before the policy runs would test nothing.
+    real_safe = fx.competitors.safe_url
+    fx.competitors.safe_url = lambda u: (True, "")
+    fx._plain = lambda u, t: (shell, "", 200)
+    fx.crawler_tool = lambda: {"name": "Zyte API", "api_key": "K", "enabled": True,
+                               "base_url": "https://api.zyte.com/v1/extract"}
+    fx._zyte = lambda *a, **k: (paid_calls.append(1) or ("<html>rendered</html>", "", 200))
+    try:
+        print("\nA JavaScript page on HIS site is skipped, not billed:")
+        r = fx.fetch("https://his-site.ae/p", allow_paid=False)
+        check("nothing was charged", r["cost"], 0.0)
+        check("and Zyte was never called", paid_calls, [])
+        check("it is not passed off as a good page", r["ok"], False)
+        check("the price of the alternative is named",
+              r["declined"]["would_cost"], fx.COST_RENDER)
+        # fetcher.py is generic and deliberately does NOT know about a
+        # site-search-specific env switch; naming it is site_search's job, and
+        # asserted below where the run reports it.
+        check("and it says paid rendering was switched off, not that it failed",
+              "switched off" in r["error"], True)
+
+        print("\nThe SAME page on a rival's site IS rendered — that is the point:")
+        r = fx.fetch("https://a-rival.ae/p", allow_paid=True)
+        check("Zyte was used", r["how"], "crawler-render")
+        check("it cost the render price", r["cost"], fx.COST_RENDER)
+        check("and the owner is TOLD one provider took over from the other",
+              "Switching to Zyte API" in r["switched"], True)
+        check("with the reason in plain words",
+              "built by JavaScript" in r["switched"], True)
+    finally:
+        fx._plain, fx._zyte, fx.crawler_tool = real_plain, real_zyte, real_tool
+
+    print("\nA plain fetch that simply works never claims a provider switch:")
+    fx.competitors.safe_url = lambda u: (True, "")
+    good = "<html><body><h1>Pergolas</h1><p>" + ("real copy " * 60) + "</p></body></html>"
+    fx._plain = lambda u, t: (good, "", 200)
+    try:
+        r = fx.fetch("https://his-site.ae/pergolas", allow_paid=True)
+        check("read on the plain path", r["how"], "plain")
+        check("no switch line", r["switched"], "")
+        check("and it cost nothing", r["cost"], 0.0)
+    finally:
+        fx._plain = real_plain
+        fx.competitors.safe_url = real_safe
+
+    print("\nThe run says what it skipped and what that would have cost:")
+    real_fetch = search.fetcher.fetch
+    search.fetcher.fetch = lambda url, timeout=15, allow_paid=True, **k: {
+        "ok": False, "html": shell, "how": "plain", "cost": 0.0, "status": 200,
+        "switched": "", "error": "skipped",
+        "declined": {"reason": "JavaScript", "would_cost": fx.COST_RENDER}}
+    try:
+        recs, err = search.build_records("https://his-site.ae", max_pages=3)
+        check("nothing was billed", search._LAST["cost"], 0.0)
+        check("and the skipped pages were counted",
+              len(search._LAST["skipped"]) >= 1, True)
+        check("with a running total of what rendering would cost",
+              search._LAST["would_cost"] > 0, True)
+
+        # and the RUN is where the owner is told which switch to flip
+        real_cfg, real_site = search._cfg, search.site.site_url
+        search._cfg = lambda env=None: {"app_id": "A", "search_key": "S",
+                                        "write_key": "W", "index": "i"}
+        search.site.site_url = lambda *a, **k: "https://his-site.ae"
+        try:
+            out = search._work("it-search", dry_run=True, max_pages=3)
+            check("the run reports the skipped pages", bool(out.get("pages_skipped")), True)
+            check("names the price per run", out["skipped_would_cost"] > 0, True)
+            check("names the switch to flip",
+                  "CRAWLER_ON_OWN_SITE=1" in out["skipped_note"], True)
+            check("and says Zyte still works on rivals either way",
+                  "rival sites either way" in out["skipped_note"], True)
+        finally:
+            search._cfg, search.site.site_url = real_cfg, real_site
+    finally:
+        search.fetcher.fetch = real_fetch
+
+
 def _make401():
     import http.server, socketserver
     class Q(http.server.BaseHTTPRequestHandler):
@@ -312,8 +417,9 @@ def test_site_search_never_publishes_the_write_key():
     thin = [{"objectID": "/", "body": "hi", "service": ""}]
     ok, why = search.critic_check(thin, cfg)
     check("a JavaScript shell with no readable text is rejected", ok, False)
-    check("and it points at the fix rather than just naming the fault",
-          any("crawler" in r and "Zyte" in r for r in why), True)
+    check("and it points at both fixes, the paid one and the free one",
+          any("CRAWLER_ON_OWN_SITE" in r and "serve its content" in r for r in why),
+          True)
     dupe = [{"objectID": "/a", "body": "x" * 200, "service": ""},
             {"objectID": "/a", "body": "y" * 200, "service": ""}]
     ok, why = search.critic_check(dupe, cfg)
@@ -502,6 +608,7 @@ def main():
     test_only_our_own_site_is_followed()
     test_site_search_never_publishes_the_write_key()
     test_the_fetcher_pays_only_when_it_has_to()
+    test_the_owners_own_site_is_read_for_free()
 
     print()
     if _fail:

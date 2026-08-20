@@ -175,47 +175,73 @@ def _zyte(url, tool, render, timeout):
 
 def fetch(url, render=False, timeout=25, allow_paid=True, min_chars=400) -> dict:
     """
-    Read a page. Free first, paid only when free is not enough.
+    Read a page. Free first, paid only when free is not enough AND permitted.
 
-    render=False  try plain HTTP; if it fails or looks like a shell, and a
-                  crawler key is on the shelf, render it properly
-    render=True   go straight to the renderer (still refuses without a key,
-                  rather than silently returning the shell)
+    render=False   try plain HTTP; if it fails or comes back a shell, and paid
+                   fetching is permitted, render it properly
+    render=True    go straight to the renderer
+    allow_paid     the money switch. False means the free path is the ONLY path:
+                   a shell is reported as a shell and nothing is billed. This is
+                   how the owner's own site is read — see site_search.
 
-    Returns {ok, html, how, cost, status, error}. `how` is one of 'plain',
-    'crawler', 'crawler-render' — so a caller can say in its run note which
-    pages cost money and why.
+    Returns {ok, html, how, cost, status, error, switched}.
+
+      how        'plain' | 'crawler-render' | 'refused' | 'none'
+      switched   a plain-English line when the free path FAILED and the paid one
+                 took over: which one, and why. The owner asked to be told when
+                 that happens rather than discovering it on an invoice, and this
+                 is the only place in the system where one provider genuinely
+                 substitutes for another.
+      declined   set when a render WOULD have helped and money was not permitted,
+                 so the caller can total up what was skipped and what it would
+                 have cost instead of silently indexing empty pages.
     """
     ok, why = competitors.safe_url(url)
     if not ok:
         return {"ok": False, "html": "", "how": "refused", "cost": 0.0,
-                "status": 0, "error": f"refused: {why}"}
+                "status": 0, "error": f"refused: {why}", "switched": ""}
 
     tool = crawler_tool() if allow_paid else None
+    switched = ""
 
     if not render:
         html, err, status = _plain(url, timeout)
         if html and not looks_unrendered(html, min_chars):
             return {"ok": True, "html": html, "how": "plain", "cost": 0.0,
-                    "status": status, "error": ""}
+                    "status": status, "error": "", "switched": ""}
+
+        shell = bool(html) and looks_unrendered(html, min_chars)
+        reason = ("the page is built by JavaScript and arrived empty" if shell
+                  else f"the free fetch failed ({err or 'no response'})")
+
+        if not allow_paid:
+            # Money is off for this caller. Say what was skipped and what it
+            # would have cost — never bill quietly, and never pass a shell off
+            # as the page.
+            return {"ok": False, "html": html, "how": "plain", "cost": 0.0,
+                    "status": status, "switched": "",
+                    "declined": {"reason": reason, "would_cost": COST_RENDER},
+                    "error": (f"{reason}. Paid rendering is switched off for this, "
+                              f"so it was skipped (a render would have cost about "
+                              f"${COST_RENDER:.4f}).")}
         if not tool:
-            # No crawler configured. Hand back whatever the free path got and
-            # say plainly what a key would have bought — never pretend a shell
-            # is the page.
-            shell = bool(html) and looks_unrendered(html, min_chars)
             return {"ok": bool(html) and not shell, "html": html, "how": "plain",
-                    "cost": 0.0, "status": status,
+                    "cost": 0.0, "status": status, "switched": "",
                     "error": (err or ("the page arrived empty — it is built by "
                                       "JavaScript. Put a crawler key on the "
                                       "'crawler' shelf and this renders properly."))}
+        switched = (f"free fetch gave up on {url} — {reason}. Switching to "
+                    f"{tool.get('name') or 'the crawler'}.")
         render = True                      # fall through and render it
 
     if not tool:
+        why = ("paid fetching is switched off for this caller" if not allow_paid
+               else "there is no crawler API on the 'crawler' shelf — add Zyte on /setup")
         return {"ok": False, "html": "", "how": "none", "cost": 0.0, "status": 0,
-                "error": ("a render was asked for and there is no crawler API on "
-                          "the 'crawler' shelf. Add Zyte (or similar) on /setup.")}
+                "switched": "", "error": f"a render was asked for and {why}."}
     if not _is_zyte(tool):
         return {"ok": False, "html": "", "how": "none", "cost": 0.0, "status": 0,
+                "switched": switched,
                 "error": (f"'{tool.get('name')}' is on the crawler shelf but only "
                           "Zyte is wired up so far. Name the tool 'Zyte API' with "
                           "base URL https://api.zyte.com/v1/extract, or ask for "
@@ -225,9 +251,9 @@ def fetch(url, render=False, timeout=25, allow_paid=True, min_chars=400) -> dict
     cost = COST_RENDER
     if err:
         return {"ok": False, "html": "", "how": "crawler-render", "cost": cost,
-                "status": status, "error": err}
+                "status": status, "switched": switched, "error": err}
     return {"ok": bool(html), "html": html, "how": "crawler-render", "cost": cost,
-            "status": status,
+            "status": status, "switched": switched,
             "error": "" if html else "the renderer returned an empty page"}
 
 
