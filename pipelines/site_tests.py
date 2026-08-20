@@ -179,19 +179,36 @@ def test_the_site_address_survives_a_fresh_clone():
     """
     print("The website address travels with the repo:")
     from coordination import site as _site
-    real_cfg = _site.CONFIG
+    real_cfg, real_envf = _site.CONFIG, _site.from_env_file
     keep = os.environ.pop("SITE_URL", None)
     d = Path(tempfile.mkdtemp())
     _site.CONFIG = d / "site.json"
+    # Never read the real .env here. This test asserts "nothing saved yet ->
+    # empty", and on the owner's own machine .env genuinely holds his address —
+    # so without this the suite would fail on his laptop and pass on mine.
+    _site.from_env_file = lambda: ""
     try:
         check("nothing saved yet -> empty, never a guess", _site.site_url(), "")
         check("and it says how to set it", "setup" in _site.status()["hint"], True)
+        check("and it lists every drawer it opened",
+              len(_site.status()["looked_in"]), 3)
 
         _site.save("glassworks.ae")
         check("a saved address is found", _site.site_url(), "https://glassworks.ae")
         check("a bare domain gets a scheme", _site.site_url().startswith("https://"), True)
-        check("and it came from the tracked file",
-              _site.status()["source"], "config/site.json")
+        check("and it came from the file", _site.status()["source"], "config/site.json")
+
+        # THE BUG THE OWNER HIT. config/site.json used to be tracked, so a pull
+        # reset it to {"url": ""} and the health check told him to set a website
+        # he had already set. .env is gitignored and is what actually survives.
+        _site.from_env_file = lambda: "https://glassworks.ae"
+        _site.CONFIG.write_text('{"url": ""}\n')
+        check("a pull that empties the file does not lose the address",
+              _site.site_url(), "https://glassworks.ae")
+        check("and the owner is told which copy answered",
+              _site.status()["source"], ".env")
+        _site.from_env_file = lambda: ""
+        _site.save("glassworks.ae")
 
         os.environ["SITE_URL"] = "https://staging.example.ae"
         check("an explicit env var still wins for one run",
@@ -206,7 +223,7 @@ def test_the_site_address_survives_a_fresh_clone():
         check("only public facts are stored",
               set(saved) <= {"url", "mode", "areas"}, True)
     finally:
-        _site.CONFIG = real_cfg
+        _site.CONFIG, _site.from_env_file = real_cfg, real_envf
         if keep is not None:
             os.environ["SITE_URL"] = keep
 

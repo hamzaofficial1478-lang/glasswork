@@ -190,6 +190,25 @@ _ADDED_TABLES = (
          ON api_usage(provider, kind, day)""",
     """CREATE INDEX IF NOT EXISTS idx_api_usage_month
          ON api_usage(provider, kind, month)""",
+    # Keyword intelligence built from FREE sources — Search Console,
+    # autocomplete, the owner's own enquiries, rival sitemaps. Deliberately has
+    # no "volume" column: nothing free can supply one, and a column named volume
+    # would be filled with a guess within a week. See pipelines/seo_intel.py.
+    """CREATE TABLE IF NOT EXISTS keyword_intel (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         phrase TEXT NOT NULL UNIQUE, area TEXT, intent TEXT,
+         impressions INTEGER DEFAULT 0, clicks INTEGER DEFAULT 0,
+         position REAL DEFAULT 0, striking INTEGER DEFAULT 0,
+         suggest_breadth INTEGER DEFAULT 0, rival_pages INTEGER DEFAULT 0,
+         in_enquiries INTEGER DEFAULT 0, we_have_page INTEGER DEFAULT 0,
+         score REAL DEFAULT 0, evidence TEXT, sources TEXT, seen_at INTEGER)""",
+    # What has already been put on the owner's phone. The unique key is what
+    # stops the same pending approval buzzing him hourly until he answers it —
+    # see coordination/notify.py on why that matters more than sending.
+    """CREATE TABLE IF NOT EXISTS notifications (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         key TEXT NOT NULL UNIQUE, urgency TEXT, title TEXT, body TEXT,
+         first_seen INTEGER, sent_at INTEGER, route TEXT, detail TEXT)""",
     # What the answer engines and the generative engines need from a page, and
     # whether it is there. One row per page per check — AEO and GEO are audits
     # of our OWN pages, so the fix always belongs to Content or IT, never here.

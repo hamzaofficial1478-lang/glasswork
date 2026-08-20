@@ -80,9 +80,12 @@ SECTORS = {
 SHELF_MEANING = {
     "maps": ("collect real UAE businesses by area — the Hunter's main source",
              "add a Google Places key on the 'maps' shelf, or set GOOGLE_PLACES_API_KEY"),
-    "seo_data": ("keyword volumes and rank tracking",
-                 "add a DataForSEO or similar key; without it SEO falls back to Google "
-                 "Suggest, which is real but has no volume figures"),
+    "seo_data": ("monthly search volumes and automated rank tracking — the two "
+                 "things the free sources genuinely cannot give you",
+                 "entirely optional. SEO works without it: seo_intel.py ranks "
+                 "keywords on Search Console impressions, autocomplete breadth, "
+                 "rival pages and your own enquiries. Add DataForSEO only if you "
+                 "want volume numbers and daily rank checks on top"),
     "trends": ("see which services are rising or falling in search",
                "add a Google Trends source on the 'trends' shelf"),
     "email": ("send outreach and replies", "add SMTP or an email API on the 'email' shelf"),

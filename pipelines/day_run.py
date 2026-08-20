@@ -71,6 +71,7 @@ STEPS = [
     ("Leads maps its sources", "pipelines.leads_sources", "Leads"),
     ("Leads collects", "pipelines.leads_hunt", "Leads"),
     ("Security screens what came in", "pipelines.security_screen", "Security"),
+    ("SEO builds the keyword picture (free sources)", "pipelines.seo_intel", "SEO"),
     ("SEO finds the gaps", "pipelines.seo_gap", "SEO"),
     ("SEO watches the rivals", "pipelines.competitors", "SEO"),
     ("SEO works the link list", "pipelines.seo_backlinks", "SEO"),
@@ -361,14 +362,28 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
     finally:
         board.release_lock(LOCK, LOCK_HOLDER)
 
+    # Anything the day turned up that the owner has to answer goes to his phone
+    # now, not into a table he has to remember to open. Only things that stop
+    # the agency or involve a customer — see coordination/notify.py for the rule
+    # about not sending progress. Best-effort: a notification that fails must
+    # never turn a finished day into a failed one.
+    pushed = {}
+    try:
+        from coordination import notify
+        pushed = notify.send()
+    except Exception as e:
+        pushed = {"ok": False, "error": str(e)}
+
     why = ("The day ran clean." if not failed
            else f"The day ran; {failed} of {len(STEPS)} steps failed.")
     if rejected:
         why += (" Your order for " + ", ".join(rejected)
                 + " went nowhere — " + list(rejected.values())[0])
+    if pushed.get("sent"):
+        why += f" {pushed['sent']} thing(s) sent to your phone."
     return {"ok": True, "ran": True, "run_id": rid, "orders": written,
             "rejected_orders": rejected, "failed_steps": failed,
-            "preflight": pre, "why": why}
+            "notified": pushed.get("sent", 0), "preflight": pre, "why": why}
 
 
 # ---------------------------------------------------------------------------

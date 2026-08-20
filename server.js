@@ -520,6 +520,10 @@ app.get("/api/shelves", (_q, res) => res.json(pyProvider("shelves", {})));
 // column is the owner's own rate from .env, never a quote from the provider.
 app.get("/api/usage", (_q, res) =>
   res.json(pyModule("coordination.usage", ["--json"], 20000)));
+// What would reach the owner's phone right now, and what would not. Reads only
+// — the whole point is that he can see the list WITHOUT being sent it.
+app.get("/api/notify/preview", (_q, res) =>
+  res.json(pyModule("coordination.notify", ["--json"], 25000)));
 app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
 
 // ---- channels + the whole-system sweep -------------------------------------

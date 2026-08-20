@@ -400,3 +400,44 @@ CREATE TABLE IF NOT EXISTS aeo_findings (
   found_at     INTEGER,
   UNIQUE(url, check_id)
 );
+
+-- KEYWORD INTELLIGENCE, BUILT FROM FREE SOURCES.
+-- Search Console impressions (the owner's own real data), autocomplete breadth
+-- from Google and Bing, the wording his own customers used when they wrote in,
+-- and which phrases rivals keep a page for. See pipelines/seo_intel.py.
+--
+-- Note what is NOT here: a volume column. DataForSEO, Ahrefs and Semrush sell
+-- monthly search volume and nothing free supplies it — so rather than leave a
+-- column that would be filled with a guess inside a week, the score is built
+-- from evidence that can be pointed at, and every row carries the evidence in
+-- words. impressions is real because Search Console measured it; everything
+-- else is labelled for what it is.
+CREATE TABLE IF NOT EXISTS keyword_intel (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  phrase          TEXT NOT NULL UNIQUE,
+  area            TEXT, intent TEXT,
+  impressions     INTEGER DEFAULT 0,   -- REAL, from Search Console
+  clicks          INTEGER DEFAULT 0,
+  position        REAL DEFAULT 0,
+  striking        INTEGER DEFAULT 0,   -- ranked 5-20 with real impressions
+  suggest_breadth INTEGER DEFAULT 0,   -- autocomplete completions, NOT volume
+  rival_pages     INTEGER DEFAULT 0,
+  in_enquiries    INTEGER DEFAULT 0,   -- his own customers used this wording
+  we_have_page    INTEGER DEFAULT 0,
+  score           REAL DEFAULT 0,
+  evidence        TEXT, sources TEXT, seen_at INTEGER
+);
+
+-- WHAT HAS ALREADY BEEN PUT ON THE OWNER'S PHONE.
+-- The unique key is the whole table. Without it a pending approval buzzes him
+-- every hour until he answers, he mutes the app, and the next alert — the one
+-- about the dead contact form — goes unread too. Sending is easy; not sending
+-- is the part that keeps the channel worth having. See coordination/notify.py.
+CREATE TABLE IF NOT EXISTS notifications (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  key        TEXT NOT NULL UNIQUE,
+  urgency    TEXT,                    -- now | today | digest
+  title      TEXT, body TEXT,
+  first_seen INTEGER, sent_at INTEGER,
+  route      TEXT, detail TEXT
+);

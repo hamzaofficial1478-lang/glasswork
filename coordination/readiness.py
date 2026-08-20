@@ -35,7 +35,14 @@ WHAT EACH SECTOR NEEDS, AND WHY
 
 Not invented — read off what the pipelines actually borrow and read:
 
-  seo      seo_data   pipelines/seo_gap.py borrows it for volumes
+  seo      seo_data   OPTIONAL now, and that is a deliberate change. It used to
+                      be required because seo_gap.py wanted volumes, and it made
+                      the whole SEO room go dark for an owner who could not
+                      justify a DataForSEO subscription. pipelines/seo_intel.py
+                      does the same job from Search Console, autocomplete, his
+                      own enquiries and rival sitemaps — all free — so a paid key
+                      now buys volume figures and rank tracking on top of a
+                      sector that already works. A note, not a blackout.
            crawler    OPTIONAL, and now actually used: pipelines/fetcher.py reads
                       a key off it to render JavaScript pages and to reach rivals
                       that block plain Python. Both callers work without it, so a
@@ -95,7 +102,7 @@ SHELVES = {
     # sitemaps fine. A key buys the pages they currently cannot see, which is a
     # real gain and not a precondition — so this is a note on the sector light,
     # never a blackout.
-    "seo": {"seo_data": True, "crawler": False},
+    "seo": {"seo_data": False, "crawler": False},
     "leads": {"maps": True, "email": True},
     # Pexels (and whatever second stock provider sits under it) is Content's
     # only picture source now — image generation was dropped. Still optional at

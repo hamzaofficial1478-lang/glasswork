@@ -25,7 +25,8 @@ WHERE YOUR KEYS ACTUALLY LIVE, AND WHY IT MATTERS
 
   .env                            SMTP password, ntfy topic, site token, caps
   config/providers.local.json     model credentials and shelf API keys
-  config/site.json                the website address (public, so it is tracked)
+  config/site.json                the website address (public, and git-ignored so
+                                  an update can never wipe what you saved)
 
 The first two are git-ignored and never leave the machine. That is why this file
 never prints a key back at you and never sends one anywhere: it opens the screen
@@ -301,7 +302,7 @@ def where():
 
     site = ROOT / "config" / "site.json"
     say()
-    say("  config/site.json              (tracked — a web address is not a secret)")
+    say("  config/site.json              (git-ignored — an update cannot wipe it)")
     say(f"    {site.read_text().strip() if site.exists() else 'not written yet'}")
     say()
     say("  No key is printed by this command, on purpose. Open the screen to change one.")

@@ -122,9 +122,14 @@ def check():
     try:
         from coordination import site
         s = site.status()
-        (ready if s["url"] else missing).append(
-            f"Website: {s['url']} (from {s['source']})" if s["url"]
-            else "Website: not set — save it on /setup")
+        if s["url"]:
+            ready.append(f"Website: {s['url']} (from {s['source']})")
+        else:
+            # Naming the drawers matters here. The owner HAD saved his website;
+            # a tracked config file was being reset by every pull and nothing
+            # read the copy in .env, so "not set" was both true and useless.
+            missing.append("Website: not set. Looked in "
+                           + ", ".join(s.get("looked_in", [])) + ". " + s.get("hint", ""))
     except Exception as e:
         missing.append(f"Website: could not read ({e})")
 
@@ -219,7 +224,7 @@ def tests():
             "pipelines.content_tests",
             "pipelines.leads_tests", "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.site_tests", "pipelines.seo_tests",
-            "pipelines.answers_tests",
+            "pipelines.answers_tests", "pipelines.intel_tests",
             "pipelines.report_tests", "pipelines.run_tests"]
     bad = []
     for m in mods:
