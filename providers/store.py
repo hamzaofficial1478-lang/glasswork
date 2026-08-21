@@ -359,6 +359,39 @@ def resolve_shelf(shelf: str) -> dict:
     }
 
 
+def smtp_configured() -> bool:
+    """Is there a real mail route? It lives in .env, not on a shelf."""
+    try:
+        from . import integrations
+        env = integrations.read_env()
+    except Exception:
+        return False
+    import os
+    def _g(k):
+        return (os.environ.get(k) or env.get(k) or "").strip()
+    return all(_g(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS"))
+
+
+def shelf_items(shelf: str) -> list:
+    """
+    What is ON a shelf, INCLUDING routes that live outside the tools list.
+
+    One function, because there were two. The setup screen asked
+    providers.api.cmd_shelves (which knew about SMTP) and the control room
+    asked coordination.state (which did not), so the same email shelf read
+    "SMTP (Integrations)" on one screen and "no APIs on this shelf yet" on the
+    other, on the same machine, at the same moment. Two readings of one fact is
+    a bug even when one of them is right.
+    """
+    shelf = (shelf or "").strip().lower()
+    items = list(shelf_catalogue().get(shelf, []))
+    if shelf == "email" and smtp_configured():
+        items.append({"kind": "route", "id": "smtp", "name": "SMTP (Integrations)",
+                      "cost_tier": "free", "enabled": True, "priority": 1,
+                      "note": "configured in .env, not on the shelf"})
+    return items
+
+
 def routed_model_ids() -> set:
     """
     Every model id any sector is routed to — primary, secondary and fallbacks.

@@ -48,7 +48,12 @@ Not invented — read off what the pipelines actually borrow and read:
                       that block plain Python. Both callers work without it, so a
                       missing key is a note rather than a blackout.
   leads    maps       pipelines/leads_hunt.py needs a Places key or it finds nobody
-           email      pipelines/mail.py borrows it to send
+           email      OPTIONAL. pipelines/mail.py borrows this shelf for its LOCK
+                      — that is what serialises outreach and makes the daily cap
+                      enforceable — but the mail ROUTE is SMTP, in .env. Marking
+                      the shelf required meant an owner who had configured SMTP,
+                      tested it and seen it log in was still told outreach had no
+                      way to send. The route is checked below, in ENV_NEEDS.
   content  stock_images — Pexels and its fallback, the only picture source now
            that image generation is gone. Optional: a brief still writes without
            a picture, so a missing key is a note, not a blackout.
@@ -103,7 +108,13 @@ SHELVES = {
     # real gain and not a precondition — so this is a note on the sector light,
     # never a blackout.
     "seo": {"seo_data": False, "crawler": False},
-    "leads": {"maps": True, "email": True},
+    # The email SHELF is not required, and demanding it was wrong. SMTP is the
+    # mail route and it lives in .env — the owner set it up, tested it, saw
+    # "logged in successfully", and Leads still told him outreach had no way to
+    # send because a shelf he does not need was empty. The shelf exists for its
+    # LOCK (turn-taking and the outreach cap) and for an optional second
+    # provider, and readiness reads .env for the route it actually uses.
+    "leads": {"maps": True, "email": False},
     # Pexels (and whatever second stock provider sits under it) is Content's
     # only picture source now — image generation was dropped. Still optional at
     # SECTOR level, and that is deliberate: content_briefs.py writes briefs and
@@ -170,13 +181,20 @@ def _shelf_state(names):
     out = {}
     try:
         from providers import store
-        cat = store.shelf_catalogue()
+        items_for = store.shelf_items          # the ONE reader — includes SMTP
     except Exception:
-        cat = {}
+        items_for = lambda _n: []
     for n in names:
-        items = cat.get(n, [])
+        # shelf_items, not shelf_catalogue: SMTP is the mail route and lives in
+        # .env. Counting only the catalogue made this report "no email API" on a
+        # machine with working, tested mail.
+        try:
+            items = items_for(n)
+        except Exception:
+            items = []
         working = sum(1 for i in items
-                      if ((i.get("last_test_result") or {}).get("ok") is True))
+                      if i.get("kind") == "route"
+                      or ((i.get("last_test_result") or {}).get("ok") is True))
         out[n] = {"items": len(items),
                   "names": [i.get("name", "") for i in items],
                   "working": working}

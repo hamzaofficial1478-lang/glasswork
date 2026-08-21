@@ -204,6 +204,13 @@
   .made tr:hover td{background:var(--panel2)}
   .gh2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--etch);
     margin:20px 0 8px}
+  .band{padding:6px 14px 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--etch);text-align:right;cursor:help}
+  .pwbox{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel)}
+  .pwbox label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--etch);margin:10px 0 4px}
+  .pwbox input{width:100%;box-sizing:border-box;padding:9px 11px;border-radius:8px;
+    border:1px solid var(--line2);background:var(--panel2);color:var(--text);font-size:13px}
 </style>
 </head>
 <body>
@@ -325,6 +332,7 @@ async function fetchState(){
 
 /* ---- render ---- */
 const $=(s)=>document.querySelector(s);
+const escA=(s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 /* A score of null means "no evidence yet" and MUST NOT render as 0. Untested
@@ -376,6 +384,9 @@ function renderRooms(st){
           </div>`).join('') : '<div class="empty">No tasks on the board for this room.</div>'}
       </div>
       <div class="room-foot"><span>${rm.foot[0]}</span><b>${rm.foot[1]}</b></div>
+      <!-- The number alone told nobody anything. 30 out of 100 reads like a
+           failing grade and usually means "ran fine, had nothing to produce". -->
+      <div class="band" title="${escA(rm.band_means||'')}">${esc(rm.band||'')}</div>
     </div>`).join('');
   // Clicking a room opens what it actually made. The owner asked to be able to
   // read the results, not just count them.
@@ -617,7 +628,9 @@ async function openSector(key){
   $('#sheetTitle').textContent=j.name;
   $('#sheetSub').textContent = (j.score===null?'no evidence yet':'health '+j.score+'/100');
 
-  const why = `<div class="gh2">Why it scores what it does</div>`
+  const why = `<div class="gh2">What ${j.score===null?'&mdash;':j.score+'/100'} means</div>`
+    + `<p style="line-height:1.7;margin:0 0 14px"><b>${esc(j.band||'')}</b> &mdash; ${esc(j.band_means||'')}</p>`
+    + `<div class="gh2">Why it scores what it does</div>`
     + j.why.map(w=>`<div class="why"><div class="pts ${w.points>0?'up':w.points<0?'down':''}">`
         +`${w.points>0?'+':''}${w.points}</div>`
         +`<div><b style="font-size:13px">${esc(w.label)}</b>`
@@ -631,7 +644,12 @@ async function openSector(key){
     : `<p class="empty">Nothing yet. This is the real table — when this sector produces something it appears here.</p>`;
 
   const list=(rows,f)=> rows.length? rows.map(f).join('') : '<p class="empty">None.</p>';
-  $('#sheetBody').innerHTML = why
+  const raise_ = (j.how_to_raise||[]).length
+    ? `<div class="gh2">How this number goes up</div><ol style="line-height:1.75;`
+      + `padding-left:20px;margin:0;color:var(--muted);font-size:12.5px">`
+      + j.how_to_raise.map(t=>`<li style="margin-bottom:6px">${esc(t)}</li>`).join('')
+      + `</ol>` : '';
+  $('#sheetBody').innerHTML = why + raise_
     + `<div class="gh2">What it made · ${esc(j.output_label)} (${j.made.length})</div>` + made
     + `<div class="gh2">Its board (${j.tasks.length})</div>`
     + list(j.tasks, t=>`<div class="ev"><div class="vb">${esc(t.status)}</div>`
@@ -656,26 +674,66 @@ async function openSector(key){
    password is set the server itself refuses without it — this is the prompt,
    not the lock. */
 $('#setupBtn').onclick=async()=>{
-  let locked=false;
-  try{ const j=await (await fetch('/api/status')).json(); locked=!!(j&&j.locked); }catch(e){}
+  let locked=false, who='';
+  try{ const j=await (await fetch('/api/status')).json(); locked=!!(j&&j.locked); who=(j&&j.adminName)||''; }catch(e){}
   openSheet('Setup','keys, models, caps',
-    `<div style="max-width:620px">
+    `<div style="max-width:640px">
       <p style="line-height:1.7">This screen holds <b>every API key in the agency</b>, your
       model routing and your daily spend cap. Anyone who opens it can read what is
       configured and change what the agency is allowed to spend.</p>
-      <p style="line-height:1.7;color:var(--muted)">
-      ${locked
-        ? 'An admin password is set, so the server will ask for it. Good.'
-        : '<b style="color:var(--amber)">No admin password is set.</b> On a machine only you '
-          +'use that is a fair trade. The moment this box is shared — or reachable over '
-          +'the network — it is the only thing between a passer-by and your keys. '
-          +'Set one with <span class="mono">python backend.py --password</span>.'}</p>
-      <div style="display:flex;gap:10px;margin-top:18px">
+
+      <div class="gh2">Who may open it</div>
+      <p style="line-height:1.7;color:var(--muted);margin-top:0">
+        ${locked
+          ? `Locked${who?' for <b>'+esc(who)+'</b>':''}. You will be asked for the password.`
+          : '<b style="color:var(--amber)">Nobody is stopping them.</b> On a machine only you '
+            +'use that is a fair trade. The moment this box is shared &mdash; or reachable over '
+            +'the network &mdash; a password is the only thing between a passer-by and your keys.'}
+      </p>
+
+      <div class="pwbox">
+        ${locked?`<label>Current password</label><input id="pwCur" type="password" autocomplete="current-password">`:''}
+        <label>Your name</label>
+        <input id="pwName" type="text" placeholder="e.g. Hamza" value="${escA(who)}">
+        <label>${locked?'New password':'Password'}</label>
+        <input id="pwNew" type="password" autocomplete="new-password" placeholder="at least 8 characters">
+        <label>Again</label>
+        <input id="pwAgain" type="password" autocomplete="new-password">
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="navbtn" id="pwSave" style="border-color:var(--ok);color:var(--ok)">
+            ${locked?'Change it':'Lock this screen'}</button>
+          ${locked?`<button class="navbtn" id="pwClear">Remove the password</button>`:''}
+          <span id="pwMsg" style="font-size:12.5px"></span>
+        </div>
+        <p style="font-size:11.5px;color:var(--etch);line-height:1.6;margin:12px 0 0">
+          Only a salted hash is kept &mdash; PBKDF2-SHA256, 240,000 rounds. The password
+          itself is never stored and never leaves this machine. Changing it signs
+          every open session out, including this one.</p>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:22px">
         <a class="navbtn" href="/setup" style="border-color:var(--glass);color:var(--glass)">
-          I understand — open Setup</a>
+          Open Setup</a>
         <button class="navbtn" onclick="closeSheet()">Cancel</button>
       </div>
     </div>`);
+
+  const msg=(t,c)=>{ const m=$('#pwMsg'); m.textContent=t; m.style.color=c; };
+  const post=async(body,okText)=>{
+    msg('Saving…','var(--muted)');
+    try{
+      const r=await fetch('/api/password',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json();
+      if(j.ok){ msg(j.note||okText,'var(--ok)'); }
+      else msg(j.error||'Could not save.','var(--danger)');
+    }catch(e){ msg('Could not reach the server.','var(--danger)'); }
+  };
+  if($('#pwSave')) $('#pwSave').onclick=()=>post({
+    current: ($('#pwCur')||{}).value||'', name: $('#pwName').value,
+    password: $('#pwNew').value, confirm: $('#pwAgain').value }, 'Set.');
+  if($('#pwClear')) $('#pwClear').onclick=()=>post({
+    current: ($('#pwCur')||{}).value||'', clear:true }, 'Removed.');
 };
 
 </script>

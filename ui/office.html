@@ -260,6 +260,11 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
    100px of an invisible panel sitting over the right of the header, swallowing
    clicks on the Run button and on whichever panel was actually open. */
 .panel.wide{width:560px;right:-560px}
+/* FULL WINDOW. The activity list was a 560px drawer showing six lines of a
+   sixty-line day, with the rest behind a scroll nobody found. */
+.panel.full{width:100vw;max-width:100vw;right:-100vw;border-left:none}
+.panel.full.open{right:0}
+.panel.full .pgroup{max-width:1100px;margin:0 auto}
 /* .panel.open is declared earlier and has the same specificity, so without this
    the wide panels would never slide in — they'd open off-screen. */
 .panel.wide.open{right:0}
@@ -371,7 +376,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
      Derived from the rows the work itself wrote — a claimed task, a granted
      borrow, a finished run — never from a log an agent had to remember to
      write. See coordination/activity.py for why. -->
-<div class="panel wide" id="actPanel">
+<div class="panel wide full" id="actPanel">
   <h2><span>Activity <small id="actHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
       <button class="x" onclick="closeAll()">×</button></h2>
   <div class="pgroup" id="actBody"></div>
@@ -885,11 +890,23 @@ function shelfSummary(j){
    Every line here came out of a row the work itself wrote. Nothing is
    summarised into existence by the browser: if it is on this list it happened,
    and the verb is the server's word for it. -------------------------------- */
-function openActivity(){ openPanel('actPanel'); renderActivity(); }
+async function openActivity(){
+  openPanel('actPanel');
+  renderActivity();                       // paint what we have, instantly
+  if(!ACT) await paintActBadge();         // then make sure it is current
+  renderActivity();
+  // Opening IS reading. The owner asked for the count to clear when the tab is
+  // opened rather than needing a separate button, which is how every unread
+  // badge he already uses behaves.
+  if(ACT){ actMarkSeen(ACT.at); const b=$('#actBadge'); if(b) b.innerHTML=''; }
+}
 
 function renderActivity(){
-  const a = (LIVE&&LIVE.activity)||{};
+  // ACT (the unread-aware read) wins over the copy bundled in /api/state — the
+  // bundle has no idea what he has already seen.
+  const a = ACT || (LIVE&&LIVE.activity) || {};
   const ev = a.events||[];
+  const cut = a.seen_to||0;
   $('#actHead').textContent = a.head ? '· '+a.head : '';
   if(!ev.length){
     $('#actBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
@@ -898,7 +915,7 @@ function renderActivity(){
     return;
   }
   const VERBS=['pushed','got','grabbed','delivered','errored'];
-  $('#actBody').innerHTML = ev.map(e=>
+  const row = e =>
     `<div class="act ${oneOf(e.verb,VERBS)} ${e.level==='live'?'live':''}">`
     + `<span class="tm">${esc(e.hhmm)}</span>`
     + `<span class="vb">${esc(e.verb)}</span>`
@@ -907,15 +924,42 @@ function renderActivity(){
     // just the room's own name repeated back
     + `<small>${esc(e.room||'—')}${e.who && e.who.toLowerCase()!==String(e.room||'').toLowerCase() ? ' · '+esc(e.who) : ''}</small>`
     + (e.detail?` <em>${esc(e.detail)}</em>`:'')
-    + `</span></div>`).join('');
+    + `</span></div>`;
+  const fresh = cut ? ev.filter(e=>e.at>cut) : ev;
+  const older = cut ? ev.filter(e=>e.at<=cut) : [];
+  $('#actBody').innerHTML =
+      (fresh.length && cut ? `<div class="gh">New since you last looked (${fresh.length})</div>` : '')
+    + fresh.map(row).join('')
+    + (older.length ? `<div class="gh" style="margin-top:18px">Earlier</div>`+older.map(row).join('') : '');
 }
 
 function renderActBadge(){
   const a=(LIVE&&LIVE.activity)||{};
-  const b=$('#actBadge');
-  if(a.live)       b.innerHTML = `<span style="color:var(--glass)">${a.live}</span>`;
-  else if(a.errors)b.innerHTML = `<span style="color:var(--danger)">${a.errors}</span>`;
-  else             b.innerHTML = '';
+  // The badge used to show a.live or a.errors — how many things are happening
+  // or broken. That is not an unread count and it does not go down when you
+  // read it, so it sat at 23 no matter how many times the panel was opened.
+  // It is a genuine unread count now: it climbs while you are away and clears
+  // the moment you look, like every other unread badge you have ever used.
+  paintActBadge();
+}
+
+const ACT_SEEN='wdta_activity_seen';
+function actSeen(){ try{ return parseInt(localStorage.getItem(ACT_SEEN)||'0',10)||0; }catch(e){ return 0; } }
+function actMarkSeen(ts){ try{ localStorage.setItem(ACT_SEEN,String(ts)); }catch(e){} }
+
+let ACT=null;   // the last full read, so the panel and the badge cannot disagree
+
+async function paintActBadge(){
+  const b=$('#actBadge'); if(!b) return;
+  try{
+    const j=await (await fetch('/api/activity?since='+actSeen())).json();
+    if(!j||!j.ok) return;
+    ACT=j;
+    b.innerHTML = j.unread>0
+      ? `<span style="background:var(--danger);color:#fff;border-radius:999px;
+          padding:1px 6px;font-size:10.5px;font-weight:700">${j.unread>99?'99+':j.unread}</span>`
+      : '';
+  }catch(e){}
 }
 
 /* The bottom strip: one line, only while something is actually happening. A

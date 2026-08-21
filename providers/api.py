@@ -150,17 +150,9 @@ def cmd_shelves(_):
     # a model is filed under it, and it is labelled a brain, not a shelf.
     names = sorted(set(cat) | set(store.known_shelves()))
     state = cabinet.shelf_state(names) if cabinet else {}
-    smtp_on = _smtp_configured()
     shelves = []
     for name in names:
-        items = list(cat.get(name, []))
-        # SMTP lives in .env, not on a shelf, so a working mail setup showed as
-        # "no APIs on this shelf yet" next to a shelf that sends mail every day.
-        # The lock is what this shelf is for; the route is SMTP, and it is named.
-        if name == "email" and smtp_on:
-            items.append({"kind": "route", "id": "smtp", "name": "SMTP (Integrations)",
-                          "cost_tier": "free", "enabled": True, "priority": 1,
-                          "note": "configured in .env, not on the shelf"})
+        items = store.shelf_items(name)
         # items are already priority-sorted, so item 1 is the primary and the rest
         # are its fallbacks — the same shape the routing screen uses for brains.
         shelves.append({

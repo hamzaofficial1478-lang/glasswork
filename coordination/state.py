@@ -337,6 +337,54 @@ def _health(c, key, match, day0, now):
     return _clamp(score, 0, 100), why
 
 
+# WHAT THE NUMBER MEANS, in words, because a bare 30 tells nobody anything.
+#
+# The scale is deliberately NOT a school grade. It is out of 100 because that
+# reads naturally, but 100 means "ran clean, produced plenty, nothing stuck and
+# its calls came off" — a sector firing on every cylinder — and a real working
+# day for a small agency sits in the 50s and 60s. A 30 is not a failure; it
+# usually means "ran fine, produced nothing today", which is exactly what a
+# sector with nothing to do looks like.
+BANDS = [
+    (80, "strong", "Running, producing, nothing stuck, and its past calls came off."),
+    (60, "healthy", "Doing its job. Anything above 60 is a good working day."),
+    (40, "working", "It runs, but something is holding it back — usually nothing "
+                    "produced today, or a task nobody picked up."),
+    (20, "idling", "Alive but not delivering. Look at the breakdown: most often it "
+                   "ran cleanly and wrote nothing, which means it had no work."),
+    (0,  "stalled", "Barely functioning. Something is stuck or failing every run."),
+]
+
+
+def band(score):
+    """(word, meaning) for a score, or the unknown case."""
+    if score is None:
+        return ("not run yet", "No evidence to score. This is not a bad mark — the "
+                               "sector simply has not run, produced anything, or been "
+                               "given anything to do. Press Run the day.")
+    for floor, word, meaning in BANDS:
+        if score >= floor:
+            return word, meaning
+    return BANDS[-1][1], BANDS[-1][2]
+
+
+# HOW A SCORE GOES UP. Written here so the dashboard can say it, rather than
+# leaving the owner to reverse-engineer it from a number.
+HOW_TO_RAISE = [
+    "Run the day. A sector that has not run scores nothing for the biggest "
+    "component — 30 of the 100 is simply 'did it run, and did the runs finish "
+    "without crashing'.",
+    "Give it something to produce. 30 more is output: rows it actually wrote "
+    "today. Effort is not output — a clean run that writes nothing scores zero "
+    "here, on purpose.",
+    "Clear what is stuck. Abandoned task claims cost 10 each and block everyone "
+    "else from picking them up; unanswered requests from other sectors cost 5 "
+    "each; a board over three items starts costing 3 an item.",
+    "Let its decisions be scored. Up to 20 for calls that came off. Until "
+    "Report has scored anything this sits at a neutral 10 — not a verdict.",
+]
+
+
 def _room_stats(c, key, day0, open_tasks):
     """Return (foot[2], score) for a room, from real counts."""
     base = _clamp(92 - open_tasks * 4, 60, 96)
@@ -423,8 +471,10 @@ def build():
         open_tasks = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=? AND status IN ('open','in_progress')", (match,))
         foot, _old = _room_stats(c, key, day0, open_tasks)
         score, why = _health(c, key, match, day0, now)
+        word, meaning = band(score)
         rooms.append({"key": key, "name": name, "score": score, "foot": foot,
-                      "why": why, "sec": sec, "agents": agents})
+                      "why": why, "band": word, "band_means": meaning,
+                      "sec": sec, "agents": agents})
 
     # ---- header metrics ----
     leads_today = _one(c, "SELECT count(*) FROM leads WHERE found_at>=?", (day0,))
@@ -503,8 +553,13 @@ def build():
                 "queue": len(v.get("queue", [])),
                 "queued_by": [q.get("agent") for q in v.get("queue", [])],
                 "spend": v.get("today_spend", 0),
-                "items": len(cat.get(k, [])),
-                "names": [i.get("name", "") for i in cat.get(k, [])],
+                # store.shelf_items, not the raw catalogue: SMTP is a real mail
+                # route that lives in .env, and reading the catalogue alone made
+                # this screen say "no API" about a shelf that sends mail daily —
+                # while the setup screen, reading a different function, said it
+                # was configured. Same fact, two answers, one of them wrong.
+                "items": len(_store.shelf_items(k)),
+                "names": [i.get("name", "") for i in _store.shelf_items(k)],
                 "purpose": kind_of(k),
             })
     except Exception:
@@ -628,7 +683,9 @@ def sector_detail(key):
     outbox = _rows("SELECT id,to_sector,subject,status,created_at FROM requests"
                    " WHERE lower(from_sector)=? ORDER BY created_at DESC LIMIT 15", (match,))
     c.close()
+    word, meaning = band(score)
     return {"ok": True, "key": key, "name": name, "score": score, "why": why,
+            "band": word, "band_means": meaning, "how_to_raise": HOW_TO_RAISE,
             "output_label": label, "columns": list(cols), "made": made,
             "tasks": tasks, "runs": runs, "inbox": inbox, "outbox": outbox}
 

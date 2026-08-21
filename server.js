@@ -107,8 +107,7 @@ app.get("/login", (_q, res) => {
 </style>
 <form method="POST" action="/api/login">
   <h1>World Deal Technical Agency</h1>
-  <p>This machine's copy is locked. Enter the admin password you set with
-     <code>python backend.py --password</code>.</p>
+  <p>This machine's copy is locked. Enter your admin password.</p>
   <input type="password" name="password" placeholder="Password" autofocus required>
   <button>Unlock</button>
 </form>`);
@@ -127,6 +126,49 @@ app.post("/api/login", express.urlencoded({ extended: false }), (req, res) => {
     ? res.cookie(COOKIE, tok, { httpOnly: true, sameSite: "lax" })
     : res.setHeader("Set-Cookie", `${COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/`);
   res.redirect("/");
+});
+
+// SET OR CHANGE THE ADMIN PASSWORD, from the screen.
+//
+// It used to say "run python backend.py --password", which is two problems in
+// one sentence: it asks a person who came to a settings screen to go and use a
+// terminal, and it names the file the credential lives in, to anyone reading
+// over their shoulder. Neither is necessary — the same PBKDF2 hash can be
+// written from here.
+//
+// Only the HASH is ever stored (PBKDF2-SHA256, 240k rounds, random salt), and
+// changing an existing password requires the current one, so the fact that the
+// gate is open right now is not by itself permission to move the lock.
+app.post("/api/password", express.json(), (req, res) => {
+  const b = req.body || {};
+  const current = adminHash();
+  if (current && !passwordOk(b.current || "")) {
+    return res.status(401).json({ ok: false, error: "That is not the current password." });
+  }
+  const next = String(b.password || "");
+  if (b.clear) {
+    if (!current) return res.json({ ok: true, locked: false, note: "There was no password set." });
+    updateEnv({ ADMIN_PASSWORD_HASH: "" });
+    SESSIONS.clear();
+    return res.json({ ok: true, locked: false, note: "Removed. This machine is open again." });
+  }
+  if (next.trim().length < 8) {
+    return res.status(400).json({ ok: false, error: "Use at least 8 characters." });
+  }
+  if (next !== String(b.confirm || "")) {
+    return res.status(400).json({ ok: false, error: "The two passwords do not match." });
+  }
+  const iter = 240000;
+  const salt = crypto.randomBytes(16);
+  const dk = crypto.pbkdf2Sync(next, salt, iter, 32, "sha256");
+  const stored = `pbkdf2$${iter}$${salt.toString("base64")}$${dk.toString("base64")}`;
+  const partial = { ADMIN_PASSWORD_HASH: stored };
+  if (String(b.name || "").trim()) partial.ADMIN_NAME = String(b.name).trim().slice(0, 60);
+  updateEnv(partial);
+  // Every existing session dies with the old password, including this one.
+  SESSIONS.clear();
+  return res.json({ ok: true, locked: true,
+    note: "Set. You will be asked for it the next time this is opened." });
 });
 
 app.post("/api/logout", (req, res) => {
@@ -224,6 +266,7 @@ function updateEnv(partial) {
     // mid-switch shouldn't lose his fallback — but nothing writes them now.
     "AGENCY_NAME", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
     "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER", "CRAWLER_ON_OWN_SITE",
+    "ADMIN_NAME", "ADMIN_PASSWORD_HASH",
     "DAILY_SPEND_CAP_USD", "OUTREACH_DAILY_CAP", "SITE_API_BASE", "SITE_API_TOKEN", "PORT",
   ];
   const keys = [...order.filter((k) => k in merged),
@@ -768,6 +811,7 @@ app.get("/api/status", (_q, res) => {
   // than warning about a password that is already set. Boolean only — the hash
   // never leaves here.
   const locked = has("ADMIN_PASSWORD_HASH");
+  const adminName = (e.ADMIN_NAME || "").trim();
   const mode = String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly";
   const fullReady = has("SITE_API_BASE") && has("SITE_API_TOKEN");
 
@@ -828,7 +872,7 @@ app.get("/api/status", (_q, res) => {
   ];
 
   res.json({
-    locked,
+    locked, adminName,
     ok: true, mode,
     providers: { credentials: (ps && ps.credentials) || 0, models: (ps && ps.models) || 0 },
     brains, brainsReady, brainsTotal, checks,
