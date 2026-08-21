@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Glassworks Agency — Setup</title>
+<title>World Deal Technical Agency — Setup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -104,7 +104,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 <body>
 
 <header>
-  <div class="brand"><b>Glassworks Agency</b><span class="etch">Setup</span></div>
+  <div class="brand"><b id="brandName">World Deal Technical Agency</b><span class="etch">Setup</span></div>
   <div class="badge"><span class="fav">GD</span><span>First-time setup</span></div>
   <div class="spacer"></div>
   <a class="htab" href="/">Office</a>
@@ -272,14 +272,22 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
   <section class="card optional">
     <div class="card-h"><div class="ic">➕</div><div><b>6 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
     <div class="card-b">
+      <!-- DataForSEO is a LEAVE-IT-BLANK field now, and says so. The keyword
+           work moved to pipelines/seo_intel.py, which ranks on Search Console
+           impressions, autocomplete breadth, the owner's own enquiries and
+           rival pages — all at no cost. This box sitting under a bare label
+           read as another thing left undone. -->
+      <div class="gh etch" style="margin-top:4px">Paid keyword tool — you almost certainly do not need this</div>
+      <p class="hint" style="margin:2px 0 10px">SEO already works without it. It ranks keywords on <b>Search Console</b> impressions, autocomplete breadth, the words your own customers used, and which phrases rivals keep a page for — none of which costs anything. A DataForSEO login adds only two things on top: <b>monthly search volumes</b> and <b>unattended daily rank tracking</b>. Leave both boxes empty unless you are already paying for it.</p>
       <div class="row">
-        <div class="field"><label>DataForSEO login</label><input id="dfsLogin" placeholder="you@email.com"><div class="hint">For rank tracking. Skip to run without it.</div></div>
+        <div class="field"><label>DataForSEO login <span class="dim">(optional)</span></label><input id="dfsLogin" placeholder="leave blank — not needed"><div class="hint">Only if you already have an account.</div></div>
         <div class="field"><label>DataForSEO password</label><input id="dfsPassword" type="password" placeholder="leave blank to keep saved"><div class="hint">API password from the DataForSEO dashboard.</div></div>
       </div>
       <div class="row">
         <div class="field"><label>ntfy topic</label><input id="ntfyTopic" placeholder="glasswork-a7f3k9x2q"><div class="hint">How the agency reaches you. Install the ntfy app, subscribe to this exact name. <b>Make it long and random</b> — anyone who guesses the name reads your notifications.</div></div>
         <div class="field"><label>ntfy server <span class="dim">(optional)</span></label><input id="ntfyServer" placeholder="https://ntfy.sh"><div class="hint">Leave blank for the public server. Self-host if the digest will ever carry customer detail.</div></div>
       </div>
+      <div class="field"><label>Your agency's name</label><input id="agencyName" placeholder="World Deal Technical Agency"><div class="hint">Shown on every screen and on the notifications you receive. This is <b>your</b> firm, not the client site you work on.</div></div>
       <div class="field"><label>Outreach domain</label><input id="outreachDomain" placeholder="mail.glassworks.ae"><div class="hint">Only needed for cold outreach. Use a subdomain, not your main domain.</div></div>
 
       <!-- Algolia: search on YOUR OWN site. Three values, two very different
@@ -362,6 +370,20 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 <script>
 const $ = (s)=>document.querySelector(s);
 const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Attribute-safe: quotes escaped too, for anything going inside title="...".
+const escA = (s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+/* One brand, one place. The agency name lives in .env (AGENCY_NAME) and is
+   served with the settings, so renaming the firm is a field on this screen and
+   not a hunt through eleven files — which is how it came to say the wrong name
+   in eleven places at once. */
+function setBrand(name){
+  if(!name) return;
+  const el=document.getElementById('brandName');
+  if(el) el.textContent = (el.textContent||'').toUpperCase()===(el.textContent||'')
+    ? name.toUpperCase() : name;
+  document.title = name + document.title.replace(/^[^\u2014]*/, '');
+}
 async function api(method, url, body){
   const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store'});
   let j={}; try{ j=await r.json(); }catch(_){}
@@ -689,17 +711,53 @@ $('#addTool').onclick=async()=>{
 };
 
 function fmtDur(s){ s=Math.max(0,s|0); if(s<60)return s+'s'; const m=Math.floor(s/60); return m+'m '+(s%60)+'s'; }
+/* Brains and shelves are rendered apart, and that is not cosmetic.
+   The board used to list 'llm' as a shelf holding every model the owner had
+   configured, which reads as "any agent can take the MD's model off the shelf".
+   None of them can — a sector's brain is ROUTED to it (providers/routing.py)
+   and never borrowed, so there is nothing to race for and nothing to override.
+   Showing routed brains under a heading that says 'shelf' invited exactly the
+   worry it should have prevented. */
+/* What an empty shelf actually MEANS, one message per shelf. A blanket
+   "no APIs on this shelf yet" beside five shelves that nothing would ever open
+   sent the owner hunting for keys he did not need. */
+const SHELF_EMPTY={
+  seo_data:'empty, and that is fine \u2014 SEO runs on Search Console, autocomplete and your own enquiries at no cost. A key here adds search volumes and rank tracking on top.',
+  maps:'empty \u2014 the Hunter needs a Google Places key to find UAE businesses by area.',
+  stock_images:'empty \u2014 add Pexels, with Pixabay under it as the fallback, so Content has pictures.',
+  crawler:'empty \u2014 Zyte reads rival sites and JavaScript pages. Optional: plain fetches still work without it.',
+  email:'no route configured \u2014 set SMTP up under Integrations, or outreach has no way to send.',
+  other:'nothing filed here \u2014 this is where a tool saved without a shelf lands.',
+};
 function renderShelfBoard(shelves){
   const host=$('#shelfBoard'); if(!host) return;
   if(!shelves||!shelves.length){ host.innerHTML='<p class="hint">No shelves configured yet.</p>'; return; }
-  host.innerHTML=shelves.map(s=>{
+  const brains=shelves.filter(s=>s.kind==='model'), tools=shelves.filter(s=>s.kind!=='model');
+  host.innerHTML =
+    (brains.length
+      ? '<div class="gh etch">Brains — routed to a sector, never shared</div>'
+      + '<p class="hint" style="margin:2px 0 10px">Each sector uses the model <b>you</b> assigned it in <b>Who runs what</b>. '
+      + 'These are not lent out: no agent can reach another sector&rsquo;s brain, so nothing here can override the MD. '
+      + 'Grouped by category just so you can see them.</p>'
+      + shelfRows(brains) : '')
+    + (tools.length
+      ? '<div class="gh etch" style="margin-top:16px">Shelves — borrowed, one agent at a time</div>'
+      + '<p class="hint" style="margin:2px 0 10px">Shared capability APIs. An agent takes the lock, uses it, hands it back; everyone else queues.</p>'
+      + shelfRows(tools) : '');
+}
+function shelfRows(shelves){
+  return shelves.map(s=>{
     const st=s.state||{}, h=st.holder;
     const holderTxt=h
       ? `<span class="y">● in use</span> by <b>${esc(h.agent)}</b> · held ${fmtDur(h.held_for_s)} · ${fmtDur(h.expires_in_s)} left`
       : `<span class="q">○ idle</span>`;
+    // "optional" is the honest word for a shelf with nothing on it. Every
+    // remaining shelf has a pipeline that works without it, so an empty one is
+    // a choice rather than a chore. The shelves that could never be filled at
+    // all have been removed.
     const items=(s.items||[]).length
-      ? (s.items||[]).map((it,i)=>`<span class="tagchip${it.enabled?'':' n'}">${i?'↳ ':''}${esc(it.name)}</span>`).join(' ')
-      : '<span class="hint">no APIs on this shelf yet</span>';
+      ? (s.items||[]).map((it,i)=>`<span class="tagchip${it.enabled?'':' n'}" title="${escA(it.note||it.name)}">${i?'↳ ':''}${esc(it.name)}</span>`).join(' ')
+      : `<span class="hint">${esc(SHELF_EMPTY[s.shelf]||'nothing here yet — optional')}</span>`;
     const queue=(st.queue||[]).length
       ? `<div class="caps"><b>Queue:</b> ${st.queue.map((q,i)=>`${i+1}. ${esc(q.agent)} <span class="mono">(${esc(q.reason||'')}${q.data_class==='external'?' · ⚑external':''})</span> waiting ${fmtDur(q.waited_s)}`).join(' &nbsp; ')}</div>`
       : '';
@@ -767,7 +825,7 @@ $('#saveOptional').onclick=async()=>{
     ntfyTopic:$('#ntfyTopic').value.trim(),ntfyServer:$('#ntfyServer').value.trim(),
     algoliaAppId:$('#algoliaAppId').value.trim(),algoliaSearchKey:$('#algoliaSearchKey').value.trim(),
     algoliaWriteKey:$('#algoliaWriteKey').value.trim(),algoliaIndex:$('#algoliaIndex').value.trim(),
-    outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim(),
+    agencyName:$('#agencyName').value.trim(),outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim(),
     zyteCostFetch:$('#zyteCostFetch').value.trim(),zyteCostRender:$('#zyteCostRender').value.trim(),
     crawlerOwnSite:$('#crawlerOwnSite').value});
   btn.disabled=false;
@@ -998,6 +1056,8 @@ async function loadSettings(){
   $('#algoliaWriteKey').placeholder = o.algoliaWriteKeySet
     ? 'saved — leave blank to keep it' : 'paste your Write API Key';
   $('#outreachDomain').value=o.outreachDomain||'';
+  $('#agencyName').value=o.agencyName||'';
+  if(o.agencyName) setBrand(o.agencyName);
   $('#spendCap').value=o.spendCap||'';
   $('#outreachCap').value=o.outreachCap||'';
   $('#zyteCostFetch').value=o.zyteCostFetch||'';

@@ -183,6 +183,15 @@ def send_telegram(text, env=None, timeout=20) -> dict:
 _NTFY_DEFAULT = "https://ntfy.sh"
 
 
+def _agency_title() -> str:
+    """Whose notification this is. Set AGENCY_NAME in .env to change it."""
+    try:
+        from coordination import site
+        return site.agency_name()
+    except Exception:
+        return "World Deal Technical Agency"
+
+
 def _ntfy_conf(env):
     server = (env.get("NTFY_SERVER") or _NTFY_DEFAULT).strip().rstrip("/")
     topic = (env.get("NTFY_TOPIC") or "").strip().lstrip("/")
@@ -244,7 +253,7 @@ def test_ntfy(env=None, notify=False, timeout=20) -> dict:
               "Subscribe on your phone: install ntfy, add this topic.")
     if notify:
         s = send_ntfy("Agency check: this is the channel you'll be asked to approve on.",
-                      title="Glassworks agency", tags=["white_check_mark"], env=env,
+                      title=_agency_title(), tags=["white_check_mark"], env=env,
                       timeout=timeout)
         if not s["ok"]:
             return _result("ntfy", False,

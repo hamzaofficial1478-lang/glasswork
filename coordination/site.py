@@ -53,6 +53,26 @@ from pathlib import Path
 CONFIG = Path(__file__).parents[1] / "config" / "site.json"
 
 
+# The agency's own name. Not the client's — this is the firm running the work.
+# Set AGENCY_NAME in .env to change it; the default is here so a fresh clone is
+# not nameless. Hardcoding it in eleven files was how it came to say the wrong
+# thing in eleven places at once.
+DEFAULT_AGENCY = "World Deal Technical Agency"
+
+
+def agency_name() -> str:
+    import os as _os
+    v = (_os.environ.get("AGENCY_NAME") or "").strip()
+    if v:
+        return v
+    try:
+        from providers import integrations
+        v = (integrations.read_env().get("AGENCY_NAME") or "").strip()
+    except Exception:
+        v = ""
+    return v or DEFAULT_AGENCY
+
+
 def load() -> dict:
     """The public site config, or an empty dict if it has not been saved yet."""
     try:

@@ -47,6 +47,16 @@ def say(line=""):
     print(line, flush=True)
 
 
+def agency_banner() -> str:
+    """The agency's own name, from .env if he has set one."""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from coordination import site
+        return site.agency_name().upper()
+    except Exception:
+        return "WORLD DEAL TECHNICAL AGENCY"
+
+
 def head(title):
     say()
     say("=" * 62)
@@ -271,7 +281,7 @@ def office():
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Run the Glassworks agency.")
+    ap = argparse.ArgumentParser(description="Run the agency.")
     ap.add_argument("--day", action="store_true", help="run a full day's cycle")
     ap.add_argument("--check", action="store_true", help="what is configured")
     ap.add_argument("--site", action="store_true",
@@ -288,7 +298,7 @@ def main():
                     help="with --day: skip the live API calls in the check")
     a = ap.parse_args()
 
-    say("GLASSWORKS AGENCY")
+    say(agency_banner())
     if not a.no_update:
         update()
     ensure_cabinet()

@@ -285,6 +285,30 @@ def _day_start():
     return int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
 
 
+# A queue row is set to 'cancelled' by the waiter itself when it times out —
+# which only happens if that process is still alive to do it. Kill a day-run
+# step, close the terminal, lose power, and the row stays 'waiting' for ever.
+# The shelf board then shows somebody queued for four days for a shelf nobody
+# is holding, which reads as a deadlock in the coordination layer and is really
+# just a corpse. The longest legitimate wait is a borrow timeout (120s default)
+# inside a run step (420s), so anything past this is not waiting, it is dead.
+ABANDONED_AFTER = 1800
+
+
+def reap_abandoned(now=None):
+    """Close queue rows whose waiter is long gone. Returns how many."""
+    now = now or _now()
+    try:
+        with _conn() as c:
+            cur = c.execute(
+                "UPDATE shelf_queue SET status='abandoned'"
+                " WHERE status='waiting' AND enqueued_at < ?",
+                (now - ABANDONED_AFTER,))
+            return cur.rowcount or 0
+    except sqlite3.Error:
+        return 0
+
+
 def shelf_state(shelf_names=None, recent=5):
     """
     A live snapshot per shelf for the dashboard:
@@ -317,6 +341,7 @@ def shelf_state(shelf_names=None, recent=5):
             names.add(r["resource"].split("shelf:", 1)[1])
 
         out = {}
+        reap_abandoned(now)
         for shelf in sorted(names):
             _lk = _rows("SELECT holder,acquired_at,expires_at FROM locks WHERE resource=?",
                         (_resource(shelf),))

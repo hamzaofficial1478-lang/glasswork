@@ -59,6 +59,14 @@ _RANK = {NOW: 0, TODAY: 1, DIGEST: 2}
 REPEAT_AFTER = 20 * 3600
 
 
+def _agency() -> str:
+    try:
+        from . import site
+        return site.agency_name()
+    except Exception:
+        return "The agency"
+
+
 def _conn():
     return board._conn()
 
@@ -284,7 +292,7 @@ def test() -> dict:
     except Exception as e:
         return {"ok": False, "error": str(e)}
     return integrations.send_message(
-        "Glassworks agency — test.\nIf you can read this, your notifications work. "
+        _agency() + " — test.\nIf you can read this, your notifications work. "
         "You will get: site problems, lead replies, approvals, and the spend cap. "
         "Nothing else.")
 

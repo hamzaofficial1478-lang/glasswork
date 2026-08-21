@@ -1,0 +1,30 @@
+# Python packages this agency needs.
+#
+#     pip install -r requirements.txt
+#
+# run.py already tried to install from this file after an update — and the file
+# did not exist, so the install quietly did nothing and the first thing to need
+# a package failed later with an import error instead. Short list on purpose:
+# everything else here is the standard library, which is why a fresh clone runs
+# with almost nothing installed.
+
+# HTTP with sane defaults. Used by the provider client, the channel tests and
+# the site connector. Everything else fetches with urllib.
+requests>=2.31
+
+# GOOGLE SEARCH CONSOLE — optional, and the best free thing on the list.
+#
+# Only pipelines/seo_intel.py imports these, only when GSC_PROPERTY is set, and
+# it degrades with a plain message telling you to run this install rather than
+# raising. Service-account auth signs a JWT with RS256, which needs a real
+# crypto library — there is no stdlib way round it.
+#
+# Without these: SEO still works. It ranks keywords on autocomplete breadth,
+# your own enquiries and rival pages. What you lose is the one source that
+# knows which searches ALREADY reach your site, and the striking-distance list
+# that comes with it.
+google-auth>=2.29
+
+# The always-on crew in runner/service.py. Not needed for run.py, the office,
+# the setup screen, or any pipeline — install it only if you run that.
+# claude-agent-sdk

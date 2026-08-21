@@ -13,6 +13,8 @@ from pathlib import Path
 
 from . import board, cabinet
 
+ROOT = Path(__file__).parents[1]
+
 _fail = []
 
 
@@ -128,11 +130,94 @@ def test_the_daily_spend_cap_actually_bites():
         board.DB = real_db
 
 
+def test_only_shelves_something_borrows():
+    """
+    Twelve shelves, five of which no code ever opened. Each showed "no APIs on
+    this shelf yet", which reads as a job left undone, so the owner went looking
+    for keys to fill shelves that would never be used.
+
+    The rule: a shelf exists only if a pipeline borrows it. This test greps for
+    the borrow, so adding a decorative shelf back fails here.
+    """
+    print("Every shelf is one something actually borrows:")
+    from providers import store
+    src = ""
+    for f in (ROOT / "pipelines").glob("*.py"):
+        if not f.name.endswith("_tests.py"):
+            src += f.read_text()
+    for shelf in store.SHELF_KINDS:
+        if shelf == "other":
+            continue          # the landing place for a tool saved with no shelf
+        check(f"something borrows '{shelf}'", f'"{shelf}"' in src, True)
+
+    gone = ("vision", "speech", "trends", "embedding", "image")
+    for dead in gone:
+        check(f"'{dead}' is not offered as a shelf any more",
+              dead in store.SHELF_KINDS, False)
+    check("and 'image' is not a model category either",
+          "image" in store.MODEL_SHELF_KINDS, False)
+
+
+def test_brains_are_not_a_shelf():
+    """
+    The owner asked whether agents would end up using the MD's model. They
+    cannot: a brain is ROUTED per sector, never borrowed. The board used to
+    render them under a heading that said 'shelf', which invited exactly that
+    worry, so the answer is pinned in both places.
+    """
+    print("A brain is routed, never lent:")
+    from providers import store, api
+    check("there is no llm TOOL shelf", "llm" in store.SHELF_KINDS, False)
+    out = api.cmd_shelves(None)
+    kinds = {s["shelf"]: s["kind"] for s in out["shelves"]}
+    if "llm" in kinds:
+        check("llm is reported as a brain, not a shelf", kinds["llm"], "model")
+    check("no empty model categories are injected any more",
+          [n for n in ("image", "embedding") if n in kinds], [])
+    html = (ROOT / "ui" / "setup.html").read_text()
+    check("and the board says so where he reads it",
+          "never shared" in html, True)
+
+
+def test_an_abandoned_waiter_is_reaped():
+    """
+    A queue row is cancelled by the waiter itself on timeout — which needs that
+    process to still be alive. Kill a run step and the row sits 'waiting' for
+    ever; the board then showed somebody queued for four days for a shelf
+    nobody was holding, which reads as a deadlock and is really a corpse.
+    """
+    print("A waiter whose process died does not queue for ever:")
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        import sqlite3 as _sq
+        now = cabinet._now()
+        con = _sq.connect(board.DB)
+        con.execute("INSERT INTO shelf_queue(shelf,agent,sector,reason,data_class,"
+                    "status,enqueued_at) VALUES('seo_data','ghost','SEO','x',"
+                    "'internal','waiting',?)", (now - 4 * 86400,))
+        con.execute("INSERT INTO shelf_queue(shelf,agent,sector,reason,data_class,"
+                    "status,enqueued_at) VALUES('seo_data','live','SEO','x',"
+                    "'internal','waiting',?)", (now - 5,))
+        con.commit(); con.close()
+
+        st = cabinet.shelf_state(["seo_data"])
+        waiting = [q["agent"] for q in st["seo_data"]["queue"]]
+        check("the four-day-old waiter is gone", "ghost" in waiting, False)
+        check("the one that started five seconds ago is left alone",
+              "live" in waiting, True)
+    finally:
+        board.DB = real
+
+
 def main():
     test_classify()
     test_borrow_rules()
     test_live_state()
     test_the_daily_spend_cap_actually_bites()
+    test_only_shelves_something_borrows()
+    test_brains_are_not_a_shelf()
+    test_an_abandoned_waiter_is_reaped()
     print("\n" + ("all cabinet tests passed" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0
 

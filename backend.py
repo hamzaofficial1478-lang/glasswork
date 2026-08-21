@@ -71,6 +71,15 @@ def say(line=""):
     print(line, flush=True)
 
 
+def agency_banner() -> str:
+    try:
+        sys.path.insert(0, str(ROOT))
+        from coordination import site
+        return site.agency_name().upper() + " — BACK OFFICE"
+    except Exception:
+        return "WORLD DEAL TECHNICAL AGENCY — BACK OFFICE"
+
+
 def head(title):
     say()
     say("=" * 62)
@@ -321,7 +330,7 @@ def main():
     ap.add_argument("--no-open", action="store_true", help="do not open a browser")
     a = ap.parse_args()
 
-    say("GLASSWORKS — BACK OFFICE")
+    say(agency_banner())
 
     if a.stop:
         return stop_server()

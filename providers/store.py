@@ -23,41 +23,51 @@ STORE = Path(__file__).parents[1] / "config" / "providers.local.json"
 
 _EMPTY = {"credentials": [], "routing": {}, "usage": {}, "tools": []}
 
-# The shelves the cabinet lends out. These are only STARTING POINTS — a tool can
-# name any shelf it likes and the cabinet will create it, so you are never boxed
-# into this list. Grouped by what the shelf is actually for:
+# The shelves the cabinet lends out. A tool can name any shelf it likes and the
+# cabinet will create it, so this list is a starting point, not a cage.
 #
-#   reasoning — the extra brains a sector borrows beyond its own: a heavier or
-#               multimodal LLM, an image-understanding model, embeddings, speech.
-#               This is the heart of the shelf.
-#   data      — read-the-world APIs: SEO/keyword data, stock graphics, crawling.
-#   delivery  — the outward channels. Email is configured on the Integrations
-#               screen as the PRIMARY route; it sits here too so a second
-#               provider can act as a FALLBACK, and so delivery takes the shelf
-#               lock (which is what enforces turn-taking and the daily cap).
-# NOTE: there is deliberately NO llm shelf here. A sector's text brain is ROUTED
-# per task (providers/routing.py: md, it, content, seo, leads, security, report),
-# never borrowed off a shelf. The difference matters: a shelf is shared, so an
-# llm shelf would let any sector borrow whichever model sat on it — including the
-# strong one meant for the MD — and quietly out-reason or override the sector it
-# was routed for. Routing keeps each sector on the brain the owner chose for it.
+#   data      — read-the-world APIs: keyword data, stock graphics, crawling.
+#   delivery  — the outward channels.
+#
+# THERE IS DELIBERATELY NO llm SHELF. A sector's text brain is ROUTED per task
+# (providers/routing.py: md, it, content, seo, leads, security, report), never
+# borrowed. That distinction is the answer to "will an agent end up using the
+# MD's model": it cannot. A shelf is shared and first-come-first-served, so an
+# llm shelf would let any sector take whichever model sat on it — including the
+# heavy one bought for the MD — and quietly out-reason or override the sector it
+# was routed for. Routing gives each sector the brain the owner picked for it and
+# no way to reach another's. Models still get GROUPED by category on the board
+# so you can see them at a glance; grouping is not lending.
+#
+# ONLY SHELVES SOMETHING ACTUALLY BORROWS.
+#
+# There used to be twelve. Five were read by no code at all — vision, speech,
+# trends, embedding and a generated-image shelf — and they did real harm by
+# sitting there: the setup screen showed "no APIs on this shelf yet" beside each
+# one, which reads as a job left undone. The owner went looking for keys to fill
+# shelves that nothing would ever open. An empty slot that can never be used is
+# not a feature, it is a chore you invented for somebody else.
+#
+# The rule for adding one back: a pipeline must borrow it. Grep before you add.
 SHELF_KINDS = {
-    "vision":          "reasoning",   # image understanding / reasoning over images
-    "embedding":       "reasoning",   # vectors for similarity + dedupe
-    "speech":          "reasoning",   # transcription / voice
-    "seo_data":        "data",
-    "trends":          "data",        # Google Trends & co — what demand is rising
+    "seo_data":        "data",        # OPTIONAL — pipelines/seo_intel.py does the
+                                      # job free; a paid key adds volumes and rank
     "maps":            "data",        # Google Places — real UAE businesses, by area
     # Every picture that is not one of the owner's own job photos. Pexels sits
-    # here as the primary, a second stock provider under it as the fallback.
-    # There is deliberately no image_gen shelf any more: a stock library that
-    # already holds tens of thousands of real glass, aluminium and construction
-    # shots beats a generated picture for this trade every time, and a generated
-    # one can never be a project photo — the thing that actually wins the job.
+    # here as the primary, Pixabay under it as the fallback. There is deliberately
+    # no image-generation shelf: a stock library holding tens of thousands of real
+    # glass, aluminium and construction shots beats a generated picture for this
+    # trade every time, and a generated one can never be a project photo — the
+    # thing that actually wins the job.
     "stock_images":    "data",
-    "crawler":         "data",
+    "crawler":         "data",        # Zyte — rival sites, and JS pages of ours
+    # SMTP is the delivery route and it lives in .env, not here. This shelf still
+    # exists because sending takes its LOCK: that is what serialises outreach and
+    # makes the daily cap enforceable. It is not empty when SMTP is configured,
+    # and the board says so rather than showing "no APIs yet" beside a working
+    # mail setup — see cmd_shelves.
     "email":           "delivery",
-    "other":           "other",
+    "other":           "other",       # a tool saved without a shelf lands here
 }
 DEFAULT_SHELVES = list(SHELF_KINDS)
 # kept as an alias so older callers/tests keep working
@@ -67,10 +77,11 @@ TOOL_SHELVES = DEFAULT_SHELVES
 # a model rather than a tool — they must not appear in the tool-shelf dropdown,
 # but the dashboard still has to group them under a purpose instead of dumping
 # them in "custom". Kept separate from SHELF_KINDS for exactly that reason.
+# Model CATEGORIES, not shelves. A model is filed under its category so the
+# dashboard can group it; it is never borrowed. 'image' is gone with image
+# generation, and 'embedding' with it — nothing embedded anything.
 MODEL_SHELF_KINDS = {
     "llm":       "reasoning",   # the text brain each sector routes to
-    "image":     "reasoning",   # generated graphics
-    "embedding": "reasoning",   # vectors for similarity + dedupe
 }
 
 

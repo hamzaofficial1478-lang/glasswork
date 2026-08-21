@@ -124,6 +124,17 @@ def cmd_resolve_shelf(a):
     return {"ok": True, "resolved": store.resolve_shelf(a.get("shelf", ""))}
 
 
+def _smtp_configured() -> bool:
+    """Is there a real mail route, even though it does not live on the shelf?"""
+    try:
+        from . import integrations
+        env = integrations.read_env()
+        return all((env.get(k) or "").strip()
+                   for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS"))
+    except Exception:
+        return False
+
+
 def cmd_shelves(_):
     """
     The shelf board: every shelf, what's on it (catalogue), and its live state
@@ -131,16 +142,32 @@ def cmd_shelves(_):
     model categories; tool shelves from the tools list.
     """
     cat = store.shelf_catalogue()
-    names = sorted(set(cat) | set(store.known_shelves()) | {"llm", "image", "embedding"})
+    # Model categories are no longer forced onto this list. 'image' and
+    # 'embedding' were injected here and appeared as permanently-empty shelves
+    # nobody could fill, and 'llm' appeared as a SHELF full of the owner's
+    # routed brains — which reads as "any agent can take the MD's model". None
+    # of them can: brains are routed, never borrowed. A category still shows if
+    # a model is filed under it, and it is labelled a brain, not a shelf.
+    names = sorted(set(cat) | set(store.known_shelves()))
     state = cabinet.shelf_state(names) if cabinet else {}
+    smtp_on = _smtp_configured()
     shelves = []
     for name in names:
-        items = cat.get(name, [])
+        items = list(cat.get(name, []))
+        # SMTP lives in .env, not on a shelf, so a working mail setup showed as
+        # "no APIs on this shelf yet" next to a shelf that sends mail every day.
+        # The lock is what this shelf is for; the route is SMTP, and it is named.
+        if name == "email" and smtp_on:
+            items.append({"kind": "route", "id": "smtp", "name": "SMTP (Integrations)",
+                          "cost_tier": "free", "enabled": True, "priority": 1,
+                          "note": "configured in .env, not on the shelf"})
         # items are already priority-sorted, so item 1 is the primary and the rest
         # are its fallbacks — the same shape the routing screen uses for brains.
         shelves.append({
             "shelf": name,
-            "kind": "model" if name in ("llm", "image", "embedding") else "tool",
+            "kind": "model" if name in store.MODEL_SHELF_KINDS
+                    or all(i.get("kind") == "model" for i in items) and items
+                    else "tool",
             "purpose": store.shelf_kind(name),
             "items": items,
             "primary": (items[0]["name"] if items else None),

@@ -93,7 +93,7 @@ app.use((req, res, next) => {
 
 app.get("/login", (_q, res) => {
   res.type("html").send(`<!doctype html><meta charset="utf-8">
-<title>Glassworks Agency</title>
+<title>World Deal Technical Agency</title>
 <style>
  body{margin:0;height:100vh;display:grid;place-items:center;background:#0c1216;
    color:#e7eff3;font-family:system-ui,sans-serif}
@@ -106,7 +106,7 @@ app.get("/login", (_q, res) => {
  .err{color:#e5565b;font-size:12.5px;margin-top:10px;min-height:16px}
 </style>
 <form method="POST" action="/api/login">
-  <h1>Glassworks Agency</h1>
+  <h1>World Deal Technical Agency</h1>
   <p>This machine's copy is locked. Enter the admin password you set with
      <code>python backend.py --password</code>.</p>
   <input type="password" name="password" placeholder="Password" autofocus required>
@@ -222,7 +222,7 @@ function updateEnv(partial) {
     "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
     // Telegram keys are kept in the file if they're already there — an owner
     // mid-switch shouldn't lose his fallback — but nothing writes them now.
-    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
+    "AGENCY_NAME", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
     "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER", "CRAWLER_ON_OWN_SITE",
     "DAILY_SPEND_CAP_USD", "OUTREACH_DAILY_CAP", "SITE_API_BASE", "SITE_API_TOKEN", "PORT",
   ];
@@ -337,7 +337,7 @@ function readConnections() {
   const has = (k) => !!(e[k] && e[k].trim());
   return [
     { ic: "◧", name: "Website", sub: e.SITE_URL || "not set", on: has("SITE_URL") },
-    { ic: "⌕", name: "DataForSEO", sub: "rank tracking", on: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD") },
+    { ic: "⌕", name: "Paid keyword tool", sub: has("DATAFORSEO_LOGIN") ? "DataForSEO" : "not needed — SEO runs without one", on: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD") },
     { ic: "🔔", name: "ntfy", sub: has("NTFY_TOPIC") ? "topic set" : "not set", on: has("NTFY_TOPIC") },
     ...(has("TELEGRAM_BOT_TOKEN")
         ? [{ ic: "✈", name: "Telegram (legacy)", sub: "still configured — ntfy is the route now", on: true }]
@@ -424,6 +424,7 @@ app.post("/api/optional", (req, res) => {
     // .env, so an older setup keeps working, but they are no longer offered.
     set("NTFY_TOPIC", b.ntfyTopic);
     set("NTFY_SERVER", b.ntfyServer);
+    set("AGENCY_NAME", b.agencyName);
     set("OUTREACH_DOMAIN", b.outreachDomain);
     // Algolia: search on the owner's OWN website. Three values with three very
     // different rules — the app id and the search key are meant to be public
@@ -728,6 +729,7 @@ app.get("/api/settings", (_q, res) => {
       algoliaAppId: v("ALGOLIA_APP_ID"), algoliaSearchKey: v("ALGOLIA_SEARCH_KEY"),
       // the write key is reported as set / not set, never echoed back
       algoliaWriteKeySet: set("ALGOLIA_WRITE_KEY"), algoliaIndex: v("ALGOLIA_INDEX"),
+      agencyName: v("AGENCY_NAME"),
       outreachDomain: v("OUTREACH_DOMAIN"),
       spendCap: v("DAILY_SPEND_CAP_USD"), outreachCap: v("OUTREACH_DAILY_CAP"),
       zyteCostFetch: v("ZYTE_COST_PER_FETCH"), zyteCostRender: v("ZYTE_COST_PER_RENDER"),
@@ -777,9 +779,14 @@ app.get("/api/status", (_q, res) => {
     { label: "Filing cabinet (database)", optional: false, ok: dbBuilt(),
       detail: dbBuilt() ? "Built and ready" : "Not built yet — it builds itself when you save the website form",
       hint: "No action needed — created for you on first save." },
-    { label: "DataForSEO (rank tracking)", optional: true, ok: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD"),
-      detail: (has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD")) ? "Login and password saved" : "Not set — rankings aren't tracked",
-      hint: "Login + API password from your DataForSEO dashboard." },
+    // "Not set — rankings aren't tracked" read as a gap. It is not one any more:
+    // SEO does the keyword work free, and a paid key adds volumes and unattended
+    // rank tracking on top of a sector that already works.
+    { label: "Paid keyword tool (optional)", optional: true, ok: true,
+      detail: (has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD"))
+        ? "DataForSEO saved — adds search volumes and daily rank tracking"
+        : "Not set, and not needed. SEO ranks keywords from Search Console, autocomplete, your own enquiries and rival pages at no cost.",
+      hint: "Only add a login if you want monthly search volumes or unattended rank tracking." },
     { label: "ntfy (your approvals)", optional: true, ok: has("NTFY_TOPIC"),
       detail: has("NTFY_TOPIC")
         ? `Sending to ${e.NTFY_TOPIC} on ${e.NTFY_SERVER || "https://ntfy.sh"}`

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Glassworks Agency — Live Office</title>
+<title>World Deal Technical Agency — Live Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -328,7 +328,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 <body>
 
 <header>
-  <div class="brand"><b>Glassworks Agency</b><span class="etch">Live office</span></div>
+  <div class="brand"><b id="brandName">World Deal Technical Agency</b><span class="etch">Live office</span></div>
   <div class="site-switch">
     <button class="site-btn" onclick="toggleSites(event)"><span class="fav" id="curFav">GD</span><span id="curSite">Glassworks Dubai</span><span style="color:var(--muted)">▾</span></button>
     <div class="site-menu" id="siteMenu"></div>
@@ -715,6 +715,18 @@ let cur;
    holds — and has the sector's brain explain it. The opening line is built from
    live state too, so a broken agent leads with what broke. ------------------ */
 const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* One brand, one place. The agency name lives in .env (AGENCY_NAME) and is
+   served with the settings, so renaming the firm is a field on this screen and
+   not a hunt through eleven files — which is how it came to say the wrong name
+   in eleven places at once. */
+function setBrand(name){
+  if(!name) return;
+  const el=document.getElementById('brandName');
+  if(el) el.textContent = (el.textContent||'').toUpperCase()===(el.textContent||'')
+    ? name.toUpperCase() : name;
+  document.title = name + document.title.replace(/^[^\u2014]*/, '');
+}
 /* Attribute context needs the quotes too. esc() alone inside title="…" lets a
    sector name or an error message containing a double quote close the attribute
    and start writing markup. */
@@ -1168,6 +1180,23 @@ renderSiteMenu();renderConns();boot();
 setInterval(fireComm,2200);
 setInterval(()=>{const d=new Date();$('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');},1000);
 document.addEventListener('click',e=>{if(!e.target.closest('.site-switch'))$('#siteMenu').classList.remove('open');});
+
+/* The agency name comes from .env (AGENCY_NAME) via /api/settings, so renaming
+   the firm is one field on the setup screen rather than an edit in every file.
+   The name in the markup is the default, so the page is right before this
+   lands and simply corrects itself if he has chosen another. */
+(async function brand(){
+  try{
+    const r = await fetch('/api/settings'); if(!r.ok) return;
+    const j = await r.json();
+    const n = (j && j.optional && j.optional.agencyName || '').trim();
+    if(!n) return;
+    const el = document.getElementById('brandName');
+    if(el){ const wasUpper = el.textContent === el.textContent.toUpperCase();
+            el.textContent = wasUpper ? n.toUpperCase() : n; }
+    document.title = n + document.title.replace(/^[^\u2014]*/, '');
+  }catch(e){}
+})();
 </script>
 </body>
 </html>
