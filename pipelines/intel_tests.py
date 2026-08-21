@@ -515,8 +515,118 @@ def test_no_wins_says_which_link_is_missing():
         seo_intel.gsc_queries = real_q
 
 
+def test_nothing_is_hardcoded():
+    """
+    The owner's instruction: this is the main part of his SEO, so its work, its
+    limits, its conditions and its reasoning must not be literals in a file only
+    I can edit. Every one of them was.
+    """
+    print("\nWhat it researches comes from the business, not from this file:")
+    import os
+    keys = ["SEO_AREAS", "SEO_SEEDS", "SEO_BUY_WORDS", "SEO_ASK_WORDS",
+            "SEO_STRIKING_FROM", "SEO_STRIKING_TO", "SEO_W_ENQUIRIES",
+            "SEO_TIME_BUDGET"]
+    for k in keys:
+        os.environ.pop(k, None)
+    import providers.integrations as integ
+    real_read = integ.read_env
+    integ.read_env = lambda: {}
+    try:
+        seeds = seo_intel.seeds_from_catalogue()
+        check("seeds come from the live service catalogue, not a fixed list",
+              len(seeds) >= 8, True)
+        from . import services
+        check("and they are the catalogue's own names",
+              seeds[0] in [n for s in services.SERVICES.values()
+                           for n in (s.get("names") or ())], True)
+
+        os.environ["SEO_SEEDS"] = "frameless shower screen, curtain wall"
+        check("he can force the list without touching Python",
+              seo_intel.seeds_from_catalogue(),
+              ["frameless shower screen", "curtain wall"])
+        os.environ.pop("SEO_SEEDS")
+
+        check("areas default to the emirates", seo_intel.areas_list()[0], "Dubai")
+        os.environ["SEO_AREAS"] = "Al Ain, Fujairah"
+        check("and move when the business moves",
+              seo_intel.areas_list(), ["Al Ain", "Fujairah"])
+        os.environ.pop("SEO_AREAS")
+
+        check("the striking band is a judgement he can change",
+              seo_intel.striking_band(), (4.5, 20.5))
+        os.environ["SEO_STRIKING_TO"] = "30"
+        check("chase to 30 if he wants", seo_intel.striking_band()[1], 30.0)
+        os.environ.pop("SEO_STRIKING_TO")
+
+        base = seo_intel.score({"in_enquiries": 1})
+        os.environ["SEO_W_ENQUIRIES"] = "80"
+        raised = seo_intel.score({"in_enquiries": 1})
+        check("and the scoring weights are his too", raised > base, True)
+        os.environ.pop("SEO_W_ENQUIRIES")
+
+        check("a junk override falls back rather than breaking the ranking",
+              (os.environ.__setitem__("SEO_W_AREA", "banana"),
+               seo_intel.weights()["area"])[1], 12.0)
+        os.environ.pop("SEO_W_AREA")
+    finally:
+        integ.read_env = real_read
+        for k in keys + ["SEO_W_AREA"]:
+            os.environ.pop(k, None)
+
+
+def test_it_asks_instead_of_shrugging():
+    """
+    The handbook: a sector that needs something outside its expertise asks the
+    sector that owns it. SEO kept hitting exactly those walls and swallowing
+    them — Search Console refused and the pass just reported zero.
+    """
+    print("\nWhen it cannot do the job alone, it asks the sector that can:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        con.execute("INSERT INTO keywords(phrase,intent) VALUES('Folding Door','site')")
+        con.commit()
+        seo_intel.ask_for_help(
+            con, {"gsc_why": "Search Console refused (403) for x", "gsc_rows": 0,
+                  "from_enquiries": 0}, [{"phrase": "x"}])
+        rows = {r["to_sector"]: r["subject"] for r in
+                con.execute("SELECT to_sector, subject FROM requests")}
+        check("Search Console is IT's door, so IT is asked", "IT" in rows, True)
+        check("uncatalogued services go to Content, who own the list",
+              "Content" in rows, True)
+        check("a missing rival signal is raised", "SEO" in rows, True)
+        check("and Leads is told its replies would sharpen the ranking",
+              "Leads" in rows, True)
+        # The body lives in request_msgs — a request is append-only, so the
+        # subject is on the request and every message hangs off it.
+        body = con.execute(
+            "SELECT m.body FROM request_msgs m JOIN requests r ON r.id=m.request_id"
+            " WHERE r.to_sector='IT'").fetchone()[0]
+        check("the request carries Google's actual words, not a paraphrase",
+              "403" in body, True)
+        con.close()
+
+        print("It does not invent problems it does not have:")
+        board.DB = _fresh_db()
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        con.execute("INSERT INTO competitors(name,domain) VALUES('R','r.ae')")
+        con.commit()
+        seo_intel.ask_for_help(con, {"gsc_why": "", "gsc_rows": 40,
+                                     "from_enquiries": 5}, [{"phrase": "x"}])
+        n = con.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+        check("everything working -> nobody is bothered", n, 0)
+        con.close()
+    finally:
+        board.DB = real_db
+
+
 def main():
     test_it_works_with_no_paid_api()
+    test_nothing_is_hardcoded()
+    test_it_asks_instead_of_shrugging()
     test_search_console_talks_to_the_right_endpoint()
     test_no_wins_says_which_link_is_missing()
     test_it_never_claims_to_know_volume()

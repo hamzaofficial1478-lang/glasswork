@@ -128,17 +128,143 @@ except ImportError:  # pragma: no cover
 AGENT = "seo-strategist"
 UA = "Mozilla/5.0 (compatible; glasswork-seo/1.0)"
 
-AREAS = ["Dubai", "Abu Dhabi", "Sharjah", "Al Quoz", "Business Bay",
-         "Jumeirah", "Deira", "Ajman", "Dubai Marina"]
+# ---------------------------------------------------------------------------
+# NOTHING BELOW IS A DECISION THIS FILE GETS TO MAKE ON ITS OWN
+# ---------------------------------------------------------------------------
+#
+# The owner's point: this is the main part of his SEO, so it must not be
+# hardcoded — not the work it does, not its limits, not its conditions, not the
+# reasoning behind its scores. Every one of those was a literal in this file.
+#
+# So they are DEFAULTS now, in three layers, and the layer nearest him wins:
+#
+#   1. .env             one line, no code, survives an update
+#   2. the live cabinet what his site actually sells, what his customers wrote
+#   3. these defaults   a sensible start for a UAE trade, and nothing more
+#
+# The seeds are the sharpest example. They used to be a fixed list of twelve
+# phrases written into seo_gap. They are now read from the service catalogue
+# the rest of the agency already uses, PLUS whatever his own website turns out
+# to sell that the catalogue has not got yet — so adding a service to the site
+# changes what SEO researches, without anybody editing Python.
+
+DEFAULT_AREAS = ["Dubai", "Abu Dhabi", "Sharjah", "Al Quoz", "Business Bay",
+                 "Jumeirah", "Deira", "Ajman", "Dubai Marina"]
 
 # How a person finishes a search when they are close to paying somebody.
-BUY_WORDS = ["price", "cost", "near me", "company", "supplier", "installation",
-             "repair", "contractor", "fixing", "quotation"]
+DEFAULT_BUY_WORDS = ["price", "cost", "near me", "company", "supplier",
+                     "installation", "repair", "contractor", "fixing", "quotation"]
 
 # How a person searches when they are still working out what they want. Worth
 # less as a lead, worth more for AEO — these are the ones an answer engine
 # intercepts, so they feed straight into seo_answers.
-ASK_WORDS = ["how much", "what is", "how to", "can you", "best", "which"]
+DEFAULT_ASK_WORDS = ["how much", "what is", "how to", "can you", "best", "which"]
+
+
+def _env(name, default=""):
+    import os as _os
+    v = (_os.environ.get(name) or "").strip()
+    if v:
+        return v
+    try:
+        from providers import integrations
+        return (integrations.read_env().get(name) or "").strip() or default
+    except Exception:
+        return default
+
+
+def _list(name, default):
+    """A comma-separated .env override, or the built-in list."""
+    raw = _env(name)
+    if not raw:
+        return list(default)
+    got = [x.strip() for x in raw.split(",") if x.strip()]
+    return got or list(default)
+
+
+def _num(name, default):
+    try:
+        return float(_env(name) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def areas_list():
+    """
+    Where he actually works. From SEO_AREAS in .env, else the areas saved with
+    his website, else the emirates. A firm that moves into Al Ain changes one
+    line and the research follows it.
+    """
+    override = _list("SEO_AREAS", [])
+    if override:
+        return override
+    try:
+        from coordination import site
+        saved = site.load().get("areas") or []
+        if saved:
+            return list(saved)
+    except Exception:
+        pass
+    return list(DEFAULT_AREAS)
+
+
+def buy_words():
+    return _list("SEO_BUY_WORDS", DEFAULT_BUY_WORDS)
+
+
+def ask_words():
+    return _list("SEO_ASK_WORDS", DEFAULT_ASK_WORDS)
+
+
+def seeds_from_catalogue(con=None):
+    """
+    What to research, taken from what the business actually sells.
+
+    Three sources, in order of authority: the service catalogue every other
+    sector already uses; anything his own WEBSITE says he sells that the
+    catalogue has not caught up with (site_services files those as
+    'uncatalogued', and they are real words real customers read); and finally
+    SEO_SEEDS in .env if he wants to force the list.
+    """
+    forced = _list("SEO_SEEDS", [])
+    if forced:
+        return forced
+    out = []
+    try:
+        for key, svc in services.SERVICES.items():
+            names = list(svc.get("names") or ())
+            if names:
+                out.append(names[0])            # the plainest name for the thing
+    except Exception:
+        pass
+    # Whatever the site sells that the catalogue does not know about yet.
+    if con is not None:
+        try:
+            for (phrase,) in con.execute(
+                    "SELECT DISTINCT phrase FROM keywords WHERE intent='site'"
+                    " ORDER BY id DESC LIMIT 12"):
+                if phrase and phrase.lower() not in [o.lower() for o in out]:
+                    out.append(phrase)
+        except sqlite3.Error:
+            pass
+    return out or list(seo_gap.SERVICES)
+
+
+# The scoring weights. They are a JUDGEMENT, not a law, and a judgement the
+# owner is entitled to disagree with — so each one is a line in .env. Raise
+# SEO_W_ENQUIRIES if the words his own customers use should outrank everything;
+# drop SEO_W_RIVALS if he thinks his competitors are guessing too.
+def weights():
+    return {
+        "impressions": _num("SEO_W_IMPRESSIONS", 0.20),   # per impression, capped
+        "striking":    _num("SEO_W_STRIKING", 40),
+        "breadth":     _num("SEO_W_BREADTH", 1.5),        # per completion, capped
+        "rivals":      _num("SEO_W_RIVALS", 6),           # per rival page, capped
+        "intent":      _num("SEO_W_INTENT", 18),
+        "area":        _num("SEO_W_AREA", 12),
+        "enquiries":   _num("SEO_W_ENQUIRIES", 25),
+        "covered":     _num("SEO_W_ALREADY_COVERED", -20),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +419,11 @@ def _suggest(q):
 # phrase it gathered. So the pass works to a clock: when the budget is spent it
 # stops, keeps what it has, and says how far it got. Partial and honest beats
 # complete and killed.
-TIME_BUDGET = 300
+TIME_BUDGET = 300      # the daily runner's ceiling; --budget and .env override
+
+
+def time_budget(explicit=None):
+    return int(explicit or _num("SEO_TIME_BUDGET", TIME_BUDGET))
 
 
 def expand(seed, areas=None, deep=False, pause=0.2, deadline=None):
@@ -306,9 +436,9 @@ def expand(seed, areas=None, deep=False, pause=0.2, deadline=None):
     with the price question, with the letter they are part-way through — is what
     turns one seed into forty real phrases for nothing.
     """
-    areas = list(areas or AREAS[:3])
-    prefixes = [seed] + [f"{w} {seed}" for w in ASK_WORDS]
-    suffixes = [f"{seed} {a}" for a in areas] + [f"{seed} {w}" for w in BUY_WORDS]
+    areas = list(areas or areas_list()[:3])
+    prefixes = [seed] + [f"{w} {seed}" for w in ask_words()]
+    suffixes = [f"{seed} {a}" for a in areas] + [f"{seed} {w}" for w in buy_words()]
     probes = prefixes + suffixes
     if deep:
         probes += [f"{seed} {c}" for c in "abcdefghijklmnopqrstuvwxyz"]
@@ -408,7 +538,19 @@ def from_rivals(con, limit=600):
 # SCORING — evidence only, never a volume estimate
 # ---------------------------------------------------------------------------
 
-STRIKING_LOW, STRIKING_HIGH = 4.5, 20.5
+# WHERE "STRIKING DISTANCE" STARTS AND STOPS.
+# 5th to 20th is the usual rule of thumb, not a law of nature — a site with
+# very little traffic may want to chase to 30, one with plenty may only care
+# about 5 to 10. Both ends move from .env.
+def striking_band():
+    return _num("SEO_STRIKING_FROM", 4.5), _num("SEO_STRIKING_TO", 20.5)
+
+
+def striking_min_impressions():
+    return int(_num("SEO_STRIKING_MIN_IMPRESSIONS", 10))
+
+
+STRIKING_LOW, STRIKING_HIGH = 4.5, 20.5      # read via striking_band() at call time
 
 
 def score(row):
@@ -422,20 +564,21 @@ def score(row):
       buying intent         moderate — a quote request beats a curiosity
       names a UAE area      required, effectively; this business is local
     """
+    w = weights()
     s = 0.0
-    s += min(row.get("impressions", 0), 500) * 0.20
+    s += min(row.get("impressions", 0), 500) * w["impressions"]
     if row.get("striking"):
-        s += 40
-    s += min(row.get("suggest_breadth", 0), 30) * 1.5
-    s += min(row.get("rival_pages", 0), 5) * 6
+        s += w["striking"]
+    s += min(row.get("suggest_breadth", 0), 30) * w["breadth"]
+    s += min(row.get("rival_pages", 0), 5) * w["rivals"]
     if row.get("intent") == "buy":
-        s += 18
+        s += w["intent"]
     if row.get("area"):
-        s += 12
+        s += w["area"]
     if row.get("in_enquiries"):
-        s += 25
+        s += w["enquiries"]
     if row.get("we_have_page"):
-        s -= 20                # already covered; the gap is elsewhere
+        s += w["covered"]      # already covered; the gap is elsewhere
     return round(s, 1)
 
 
@@ -500,8 +643,10 @@ def _cursor(con, value=None):
 
 
 def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
-    seeds = list(seeds or seo_gap.SERVICES)
+    seeds = list(seeds or seeds_from_catalogue(con))
     gsc, gsc_why = gsc_queries()
+    _lo, _hi = striking_band()
+    _minimp = striking_min_impressions()
     rows = {}
 
     def touch(phrase):
@@ -518,8 +663,8 @@ def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
             continue
         r.update({"impressions": g["impressions"], "clicks": g["clicks"],
                   "position": g["position"],
-                  "striking": int(STRIKING_LOW <= g["position"] <= STRIKING_HIGH
-                                  and g["impressions"] >= 10)})
+                  "striking": int(_lo <= g["position"] <= _hi
+                                  and g["impressions"] >= _minimp)})
         r["sources"].add("search-console")
 
     # WHERE TODAY STARTS.
@@ -534,7 +679,7 @@ def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
     # whole list gets covered over as many passes as it takes.
     start = _cursor(con)
     seeds = seeds[start:] + seeds[:start]
-    deadline = time.time() + (budget or TIME_BUDGET)
+    deadline = time.time() + time_budget(budget)
     seeds_done, ran_out = 0, False
     for seed in seeds:
         if time.time() > deadline:
@@ -602,6 +747,82 @@ def striking_distance(con, limit=15):
     return [dict(r) for r in con.execute(
         "SELECT * FROM keyword_intel WHERE striking=1"
         " ORDER BY impressions DESC LIMIT ?", (limit,))]
+
+
+def ask_for_help(con, built, top) -> list:
+    """
+    When this sector cannot do its job alone, it asks — it does not shrug.
+
+    The handbook is explicit: a sector that needs something outside its own
+    expertise posts a request and waits, rather than guessing. SEO kept hitting
+    exactly those walls and swallowing them: Search Console refused and the pass
+    just reported zero, the site sold things the catalogue had never heard of
+    and they were silently dropped from the research, rivals were never read and
+    nobody was told the signal was missing.
+
+    Each one below is a real dependency on another sector, addressed to the
+    sector that owns it, with the evidence attached. Nothing is invented: it
+    only asks when the cabinet shows it actually needs the answer.
+    """
+    asked = []
+
+    # 1. Search Console is IT's door — it is a property and a service account,
+    #    not a keyword question, and SEO cannot fix either.
+    why = built.get("gsc_why") or ""
+    if why and not built.get("gsc_rows"):
+        asked.append(board.post_request(
+            "SEO", "IT", "Search Console is not answering, and it is our best source",
+            "The keyword pass ran without the one source that knows which searches "
+            "already reach us. Google said, verbatim:\n\n    " + why + "\n\n"
+            "Until this works there is no striking-distance list — the queries we "
+            "rank 5th to 20th for, which are the cheapest traffic available. "
+            "Everything else in the pass carried on and is on file."))
+
+    # 2. Things the SITE sells that the catalogue has never heard of. Content
+    #    owns the service list; SEO must not quietly widen it on its own.
+    try:
+        unknown = [r[0] for r in con.execute(
+            "SELECT DISTINCT phrase FROM keywords WHERE intent='site' LIMIT 20")]
+    except sqlite3.Error:
+        unknown = []
+    if unknown:
+        asked.append(board.post_request(
+            "SEO", "Content", f"{len(unknown)} thing(s) on our site are not in the "
+            f"service catalogue",
+            "These appear on our own website but the agency has no service entry "
+            "for them, so nothing targets them and nothing writes about them:\n- "
+            + "\n- ".join(unknown[:20])
+            + "\n\nIf they are real services, catalogue them and they join the "
+              "research automatically. If they are not, say so and I will stop "
+              "reading them off the site."))
+
+    # 3. No rival signal at all. Knowing what competitors keep a page for is one
+    #    of the four things this ranks on, and it comes from the rival watch.
+    try:
+        rivals = con.execute("SELECT COUNT(*) FROM competitors").fetchone()[0]
+    except sqlite3.Error:
+        rivals = 0
+    if not rivals:
+        asked.append(board.post_request(
+            "SEO", "SEO", "No competitors on file, so one of four signals is blank",
+            "The keyword ranking uses 'how many rivals keep a page for this' as a "
+            "market signal — nobody maintains a page for two years about something "
+            "that never sold. There are no competitors in the cabinet, so that "
+            "signal is contributing nothing and the ranking is running on three "
+            "legs instead of four. Add rivals and run the watch."))
+
+    # 4. Nothing from his own enquiries. That is the one source no competitor
+    #    has, and it is empty until Leads has replies on file.
+    if top and not built.get("from_enquiries"):
+        asked.append(board.post_request(
+            "SEO", "Leads", "No customer wording on file yet",
+            "The strongest signal we have that nobody else can copy is the words "
+            "customers use when they write in. There are no replies in the cabinet "
+            "to read, so that part of the ranking is idle. Once outreach starts "
+            "getting answers this sharpens on its own — no action needed if that "
+            "is simply where we are."))
+
+    return [a for a in asked if a]
 
 
 def critic_check(built, top):
@@ -683,6 +904,11 @@ def _work(agent, deep, budget=None) -> dict:
                 "your own customers used. None of these is a search-volume "
                 "estimate and none of them cost anything:\n\n"
                 + "\n".join(f"- {t['phrase']}\n    {t['evidence']}" for t in writeable))
+
+        # Ask for what it cannot get itself, before logging the decision — so
+        # the decision can honestly say the ranking ran short and who was asked.
+        helped = ask_for_help(con, built, top)
+        result["asked_for_help"] = helped
 
         did = board.log_decision(
             "seo-intel",
