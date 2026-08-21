@@ -153,7 +153,14 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .emp.working .monitor{border-color:var(--glass)}.emp.working .monitor .scan{background:var(--glass);animation:type 1.3s steps(4) infinite}
 .emp.done .monitor{border-color:var(--ok)}.emp.done .monitor .scan{background:var(--ok);opacity:.6}
 .name{margin-top:5px;font-size:9.5px;font-weight:500;text-align:center;line-height:1.05}
-.role{font-size:8px;color:var(--muted);text-align:center}
+/* One line, cut with an ellipsis, full text on hover. It used to render
+   role.split(' ')[0] — the FIRST WORD ONLY — which turned 'Only agent on
+   production' into 'Only', 'Scam & fraud filter' into 'Scam', and 'AEO &
+   GEO' into 'AEO', so the owner reasonably asked why GEO was missing from
+   his SEO sector. It never was. Kept to ONE line on purpose: two lines add
+   ~10px per desk row and the SEO room, at five desks, has 8px of slack. */
+.role{font-size:8px;color:var(--muted);text-align:center;max-width:72px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ---- THE SHELF: a real cabinet standing against the right wall ---- */
 .room.shelf{border-color:#5b7a86}
@@ -443,7 +450,7 @@ function renderFloor(){
     room.className='room '+rm.cls+(rd?' rd-'+rd.state:'');
     room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
     room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+`<div class="desks">`+
-      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls} ${powered?'pw':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role">${a.role.split(' ')[0]}</div></div>`).join('')
+      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls} ${powered?'pw':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role" title="${escA(a.role)}">${esc(a.role)}</div></div>`).join('')
       +`</div>`;
     floor.appendChild(room);
   });

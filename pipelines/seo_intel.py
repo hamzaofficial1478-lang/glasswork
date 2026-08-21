@@ -60,6 +60,54 @@ Console gives a real impression count it says so and names the source. Where the
 signal is autocomplete breadth or rival coverage it says that instead. A ranked
 list built from four honest signals beats a precise-looking number that is a
 model's guess.
+
+HOW ACCURATE IS THIS, HONESTLY
+
+The owner asked, and he is right to. The answer depends entirely on which
+question you mean, so here are both.
+
+"HOW MANY PEOPLE SEARCH THIS PER MONTH?" — we do not answer it at all. A paid
+tool does, and its answer is worth less than it looks. DataForSEO's own docs say
+the search_volume field comes from the Google Ads API and is a "monthly average
+search volume rate", and that "Google Ads provides combined search volume values
+for groups of similar keywords". Google's own Keyword Planner help says plainly:
+"Your search volume statistics are rounded." So the number a subscription buys
+is a rounded, twelve-month-averaged figure for a GROUP of keywords, produced for
+advertisers deciding bids. Nobody is measuring your market. It is a real number
+about a real thing, but it is not the precise instrument the price implies.
+
+"WHICH PAGE SHOULD I WRITE NEXT?" — this is the decision volume is bought to
+make, and here the accuracy is good, because three of the four sources are
+measurements rather than models:
+
+  Search Console impressions   EXACT. It is Google reporting on your own
+                               property. Not an estimate at any point. The one
+                               caveat is Google's own: very rare queries are
+                               omitted for privacy, so the list is complete for
+                               anything with real traffic and silent on the tail.
+  Autocomplete completions     EXACT as an observation — these are genuinely the
+                               completions Google and Bing offer, today, for the
+                               UAE. They tell you WHAT people type. They do not
+                               tell you HOW MANY, and nothing here pretends they
+                               do. Ordering by breadth is an inference, and it is
+                               the weakest link in the file.
+  Your own enquiries           EXACT. They are your emails.
+  Rival pages                  EXACT as an observation, inferred as a signal.
+                               That a competitor keeps a page live is a fact;
+                               that it therefore earns money is a reasonable
+                               guess, and it is weighted as one.
+
+So: the inputs are facts, and the ranking built on them is a judgement — stated
+as such, with the evidence printed beside every row so it can be argued with. A
+paid tool inverts that: the input is a model and the output looks like a fact.
+
+WHERE A PAID KEY STILL EARNS ITS MONEY
+
+Two things this cannot do, and they are worth naming rather than papering over:
+tracking your daily rank for a fixed keyword list without you looking, and
+telling you a phrase is worth chasing BEFORE anybody has ever searched it on
+your site. If either becomes worth the subscription, put the key on the seo_data
+shelf and both start working alongside this, not instead of it.
 """
 import argparse
 import json

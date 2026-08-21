@@ -221,6 +221,31 @@ def test_a_room_label_and_its_chip_do_not_collide():
           fits("IT & Site Health", "cannot run", layout["IT"]), True)
 
 
+def test_a_desk_label_says_the_whole_job():
+    """
+    The floor rendered role.split(' ')[0] — the FIRST WORD ONLY. So the
+    Releaser's job read "Only", the Screener's read "Scam", and the Answers
+    desk read "AEO", which is why the owner asked why GEO was missing from his
+    SEO sector. It never was; the label ate it. Every desk was affected.
+    """
+    print("A desk label says the whole job, not its first word:")
+    html = (ROOT / "ui" / "office.html").read_text()
+    # Match the RENDERING expression, not the prose: the CSS comment above it
+    # explains the old bug and names the old call, which failed this check the
+    # first time it ran.
+    check("the first-word chop is gone", "${a.role.split(' ')[0]}" in html, False)
+    check("the full role is rendered", "${esc(a.role)}" in html, True)
+    check("with the whole thing on hover", 'title="${escA(a.role)}"' in html, True)
+    # Kept to ONE line deliberately: a second line adds ~10px per desk row and
+    # the SEO room, at five desks, has 8px of slack. See the room-capacity test.
+    css = html[html.index(".role{"):html.index(".role{") + 200]
+    check("it stays on one line, cut with an ellipsis",
+          "nowrap" in css and "ellipsis" in css, True)
+    roles = re.findall(r'role:"([^"]+)"', html)
+    check("and the Answers desk names both halves of its job",
+          "AEO & GEO" in roles, True)
+
+
 def test_the_ui_does_not_open_on_a_lie():
     """
     The first paint happens before /api/state answers. Whatever the staff list
@@ -507,6 +532,7 @@ def _main():
     test_each_agent_reaches_its_own_desk()
     test_every_desk_fits_in_its_room()
     test_a_room_label_and_its_chip_do_not_collide()
+    test_a_desk_label_says_the_whole_job()
     test_the_ui_does_not_open_on_a_lie()
     test_the_bulb_says_powered_working_or_broken()
     test_a_dark_bulb_always_says_why()
