@@ -569,6 +569,97 @@ def test_a_bot_check_is_never_indexed_as_a_page():
         fetcher._plain = real_plain
 
 
+def test_an_answer_stops_at_the_next_question():
+    """
+    Found on the owner's own FAQ page. Answers not wrapped in <p> made
+    answer_after run past its heading and swallow the next three questions, so
+    the generated FAQ markup had every answer containing the rest of the page.
+    It was quietly wrong in the AUDIT too — aeo.answer_first counts the words in
+    whatever this returns, so a tidy 30-word answer measured as 300.
+    """
+    print("\nAn answer ends where the next question begins:")
+    faq = ("<html><body><h1>FAQ</h1>"
+           "<h2>Do you provide free quotations?</h2>"
+           "Yes. Free site visits across Dubai and the UAE."
+           "<h2>Do you install office glass partitions?</h2>"
+           "Yes. Frameless and framed, for offices and fit-outs."
+           "<h2>Can you make glass stairs?</h2>"
+           "Yes. Stairs and railings for homes and offices."
+           "</body></html>")
+    page = seo_answers.read_page("https://x.ae/faq", faq)
+    a1 = seo_answers.answer_after(page, "Do you provide free quotations?")
+    check("the first answer is its own", a1, "Yes. Free site visits across Dubai and the UAE.")
+    check("it does not swallow the next question",
+          "office glass partitions" in a1, False)
+    a2 = seo_answers.answer_after(page, "Can you make glass stairs?")
+    check("the last answer works too",
+          a2, "Yes. Stairs and railings for homes and offices.")
+
+    print("And the markup builder gets one answer per question:")
+    pairs, err = seo_answers.faq_pairs_on("https://x.ae/faq", html=faq)
+    check("no error", err, "")
+    check("three pairs", len(pairs), 3)
+    check("each answer is short and its own",
+          max(len(a.split()) for _q, a in pairs) < 15, True)
+
+    print("A page with no questions gets nothing invented for it:")
+    pairs, err = seo_answers.faq_pairs_on(
+        "https://x.ae/p", html="<html><body><h1>Doors</h1><p>We fit doors.</p></body></html>")
+    check("nothing is marked up", pairs, [])
+    check("and it says what to write first", "question as an H2" in err, True)
+
+    print("Answers still work when they ARE wrapped in <p>:")
+    page2 = seo_answers.read_page("https://x.ae/f2", (
+        "<html><body><h2>How much is a pergola?</h2>"
+        "<p>From AED 4,500 for a 3 by 4 metre aluminium pergola.</p>"
+        "<h2>Next thing</h2><p>Other.</p></body></html>"))
+    check("the paragraph is the answer",
+          seo_answers.answer_after(page2, "How much is a pergola?"),
+          "From AED 4,500 for a 3 by 4 metre aluminium pergola.")
+
+
+def test_localbusiness_draft_never_invents_an_address():
+    """
+    The heaviest AEO check and the one most often missing. Drafting it is only
+    safe if it refuses to guess: Google cross-checks structured data against the
+    Business Profile, so a wrong address costs the map-pack ranking the markup
+    was meant to win. Wrong is worse than absent here.
+    """
+    print("\nLocalBusiness: lifted from the site, never guessed:")
+    home = ('<html><head><title>World Deal Technical Services | Glass</title></head>'
+            '<body><a href="tel:+971565100471">call</a>'
+            '<a href="mailto:info@example.ae">mail</a></body></html>')
+    snip, missing = seo_answers.localbusiness_jsonld(
+        "https://x.ae", [("https://x.ae", home)])
+    d = json.loads(snip.split(">", 1)[1].rsplit("<", 2)[0])
+    check("the real phone is used", d["telephone"], "+971565100471")
+    check("the real email is used", d["email"], "info@example.ae")
+    check("the name is taken from the title, before the pipe",
+          d["name"], "World Deal Technical Services")
+    check("the address is NEVER scraped", "address" in missing, True)
+    check("and is left as a visible placeholder",
+          d["address"]["streetAddress"].isupper() or "YOUR" in d["address"]["streetAddress"],
+          True)
+    check("the emirates it serves are named", "Dubai" in d["areaServed"], True)
+    check("and the type is a trade, not a generic org",
+          d["@type"], "HomeAndConstructionBusiness")
+
+    print("A site with no contact details says which ones are missing:")
+    bare = "<html><head><title>Doors</title></head><body>nothing</body></html>"
+    snip2, missing2 = seo_answers.localbusiness_jsonld(
+        "https://x.ae", [("https://x.ae", bare)])
+    check("telephone is flagged", "telephone" in missing2, True)
+    check("email is flagged", "email" in missing2, True)
+    check("and no fake number is emitted", "+9715XXXXXXXX" in snip2, True)
+
+    print("WhatsApp counts as a phone when there is no tel: link:")
+    wa = ('<html><head><title>Glass</title></head><body>'
+          '<a href="https://wa.me/971501234567">WhatsApp</a></body></html>')
+    d3 = json.loads(seo_answers.localbusiness_jsonld(
+        "https://x.ae", [("https://x.ae", wa)])[0].split(">", 1)[1].rsplit("<", 2)[0])
+    check("the wa.me number is used", d3["telephone"], "+971501234567")
+
+
 def test_robots():
     print("\nBlocking the assistants is a choice — an accidental one is worth catching:")
     real = fetcher.fetch
@@ -727,6 +818,8 @@ def main():
     test_a_failure_is_never_cached()
     test_a_hiccup_is_not_diagnosed_as_javascript()
     test_a_bot_check_is_never_indexed_as_a_page()
+    test_an_answer_stops_at_the_next_question()
+    test_localbusiness_draft_never_invents_an_address()
     test_robots()
     test_visibility_refuses_to_guess()
     test_llms_txt()

@@ -195,20 +195,42 @@ def read_page(url, html) -> dict:
     }
 
 
+# The answer to a question ends where the next question starts. Obvious, and it
+# was missing: on a FAQ page whose answers are not wrapped in <p>, this ran on
+# past the heading and swallowed the next three questions and their answers. It
+# showed up as FAQ markup where every answer contained the rest of the page —
+# and it was quietly wrong in the audit too, because aeo.answer_first counts the
+# words in whatever this returns.
+_ANY_HEADING = re.compile(r"<h[1-6][\s>]", re.I)
+
+
 def answer_after(page, heading_text):
     """
-    The prose immediately under a heading — which is where an answer engine
-    looks, and where most sites put a paragraph of throat-clearing instead.
+    The prose under a heading and BEFORE the next one — which is where an
+    answer engine looks, and where most sites put throat-clearing instead.
+
+    The heading is located as an ELEMENT, not as a string. Searching the raw
+    HTML for the text finds it in the <title> first on any page whose title
+    repeats its question, and everything after that is the wrong block.
     """
-    idx = page["html"].lower().find(heading_text.lower()[:60])
-    if idx < 0:
+    want = " ".join(heading_text.lower().split())[:60]
+    end = None
+    for m in _HEAD.finditer(page["html"]):
+        if " ".join(_text(m.group(2)).lower().split())[:60] == want:
+            end = m.end()
+            break
+    if end is None:
         return ""
-    after = page["html"][idx:idx + 4000]
-    m = _PARA.search(after)
+    body = page["html"][end:]
+
+    # An answer stops where the next question starts.
+    stop = _ANY_HEADING.search(body)
+    block = body[:stop.start()] if stop else body[:4000]
+
+    m = _PARA.search(block)
     if m:
         return _text(m.group(1))
-    nxt = _text(after)
-    return nxt[len(heading_text):].strip()[:600]
+    return _text(block)[:600]
 
 
 # ---------------------------------------------------------------------------
@@ -672,6 +694,42 @@ def llms_txt(base="", svc_keys=None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def faq_pairs_on(url, html=None):
+    """
+    Question headings and the answer written under each, lifted off a real page.
+
+    Only what is ALREADY THERE. Nothing is invented and nothing is rephrased —
+    marking up an answer the visitor cannot read is against Google's own rules
+    and is the thing aeo.faq_visible exists to catch. If the page has no
+    question headings this returns nothing, which is the honest outcome.
+    """
+    if html is None:
+        try:
+            from . import fetcher
+        except ImportError:  # pragma: no cover
+            import fetcher
+        r = fetcher.fetch(url, allow_paid=False)
+        if not r["html"]:
+            return [], (r["error"] or "could not read the page")
+        html = r["html"]
+    p = read_page(url, html)
+    pairs = []
+    for _lvl, h in p["headings"]:
+        if not _ASKS.search(h) or _BOILERPLATE_HEADING.search(h):
+            continue
+        a = answer_after(p, h).strip()
+        # Google wants a real answer, not a stub, and a 900-word essay is not an
+        # answer either. Both ends are trimmed rather than silently accepted.
+        if len(_words(a)) < 5:
+            continue
+        pairs.append((h.strip(), a[:1200].strip()))
+    if not pairs:
+        return [], ("no question-shaped headings on that page. Write the question "
+                    "as an H2 first — 'How much does a glass partition cost in "
+                    "Dubai?' — with the answer underneath, then run this again.")
+    return pairs, ""
+
+
 def faq_jsonld(pairs) -> str:
     """
     FAQPage markup from question/answer pairs.
@@ -686,6 +744,79 @@ def faq_jsonld(pairs) -> str:
                           for q, a in pairs if q and a]}
     return ('<script type="application/ld+json">\n'
             + json.dumps(doc, indent=2, ensure_ascii=False) + "\n</script>")
+
+
+_TEL = re.compile(r'href=["\']tel:([^"\']+)', re.I)
+_MAILTO = re.compile(r'href=["\']mailto:([^"\'?]+)', re.I)
+_WA = re.compile(r'wa\.me/(\d{6,})', re.I)
+
+
+def localbusiness_jsonld(base, pages) -> tuple:
+    """
+    Draft LocalBusiness markup from the details ALREADY on the site.
+
+    This is the single heaviest AEO check and the one most often missing: for a
+    trade with one address it is what puts you in the map pack. It is also a
+    one-time paste, which is why drafting it is worth doing properly.
+
+    Nothing is invented. The phone, email and name are lifted from the pages;
+    anything not found is left as a NAMED PLACEHOLDER in capitals rather than
+    guessed, because a wrong address in structured data is worse than none —
+    Google cross-checks it against your Business Profile and a mismatch costs
+    you the ranking the markup was meant to win.
+
+    Returns (snippet, missing_fields).
+    """
+    tel = email = name = ""
+    for url, html in pages:
+        if not tel:
+            m = _TEL.search(html) or None
+            if m:
+                tel = re.sub(r"[^\d+]", "", m.group(1))
+            else:
+                w = _WA.search(html)
+                if w:
+                    tel = "+" + w.group(1)
+        if not email:
+            m = _MAILTO.search(html)
+            if m:
+                email = m.group(1).strip()
+        if not name:
+            t = _TITLE.search(html)
+            if t:
+                name = re.split(r"[|\u2013\u2014-]", _text(t.group(1)))[0].strip()
+
+    missing = []
+    if not tel:
+        tel = "YOUR PHONE, IN FULL INTERNATIONAL FORM e.g. +9715XXXXXXXX"
+        missing.append("telephone")
+    if not name:
+        name = "YOUR REGISTERED BUSINESS NAME"
+        missing.append("name")
+    if not email:
+        email = "YOUR EMAIL"
+        missing.append("email")
+    missing.append("address")          # never scraped: too easy to get wrong
+
+    doc = {
+        "@context": "https://schema.org",
+        "@type": "HomeAndConstructionBusiness",
+        "name": name,
+        "url": base.rstrip("/") + "/",
+        "telephone": tel,
+        "email": email,
+        "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "YOUR STREET / UNIT",
+            "addressLocality": "YOUR EMIRATE e.g. Dubai",
+            "addressCountry": "AE",
+        },
+        "areaServed": ["Dubai", "Abu Dhabi", "Sharjah"],
+        "openingHours": "Mo-Sa 08:00-18:00",
+    }
+    snippet = ('<script type="application/ld+json">\n'
+               + json.dumps(doc, indent=2, ensure_ascii=False) + "\n</script>")
+    return snippet, missing
 
 
 def visibility():
@@ -940,6 +1071,11 @@ def main():
     ap.add_argument("--llms-txt", action="store_true", help="draft /llms.txt")
     ap.add_argument("--url", default="", help="audit this address instead of the saved one")
     ap.add_argument("--pages", type=int, default=12, help="how many pages to read")
+    ap.add_argument("--localbusiness", action="store_true",
+                    help="draft LocalBusiness markup from what is already on your site")
+    ap.add_argument("--faq", default="",
+                    help="draft FAQPage markup from the questions ALREADY on this "
+                         "page (give a full URL or a path like /faq.php)")
     a = ap.parse_args()
 
     if a.report:
@@ -948,6 +1084,61 @@ def main():
     if a.llms_txt:
         from coordination import site as site_cfg
         print(llms_txt(a.url or site_cfg.site_url()))
+        return
+    if a.localbusiness:
+        from coordination import site as site_cfg
+        base = (a.url or site_cfg.site_url() or "").strip()
+        if not base:
+            print("No website saved. Give --url, or save your site on /setup.")
+            return
+        if "://" not in base:
+            base = "https://" + base
+        base = base.rstrip("/")
+        got = []
+        for path in ("", "/contact.php", "/contact", "/contact-us", "/about.php", "/about"):
+            r = fetcher.fetch(base + path, allow_paid=False)
+            if r["html"]:
+                got.append((base + path, r["html"]))
+            if len(got) >= 3:
+                break
+        if not got:
+            print(f"Could not read {base}.")
+            return
+        snippet, missing = localbusiness_jsonld(base, got)
+        print(f"<!-- LocalBusiness markup for {base}")
+        print( "     Paste into the <head> of EVERY page, not just the home page.")
+        print( "     For a trade with one address this is the heaviest single item")
+        print( "     on the AEO list: it is what puts you in the map pack.")
+        if missing:
+            print( "")
+            print(f"     CHECK BEFORE YOU PASTE: {', '.join(missing)}")
+            print( "     Anything in CAPITALS below was not found on your site and")
+            print( "     has NOT been guessed. A wrong address here is worse than")
+            print( "     none — Google cross-checks it against your Business")
+            print( "     Profile and a mismatch costs you the map-pack ranking.")
+        print( "-->")
+        print(snippet)
+        return
+
+    if a.faq:
+        from coordination import site as site_cfg
+        target = a.faq
+        if "://" not in target:
+            base = (a.url or site_cfg.site_url() or "").rstrip("/")
+            if not base:
+                print("No website saved. Give a full URL, or save your site on /setup.")
+                return
+            target = base + ("/" + target.lstrip("/"))
+        pairs, err = faq_pairs_on(target)
+        if err:
+            print(f"Nothing to mark up on {target}:\n  {err}")
+            return
+        print(f"<!-- FAQPage markup for {target}")
+        print(f"     {len(pairs)} question(s), taken word-for-word off the page.")
+        print( "     Paste it into that page's <head>. Change the wording on the")
+        print( "     page and change it here too: marked-up text that a visitor")
+        print( "     cannot read breaks Google's rules. -->")
+        print(faq_jsonld(pairs))
         return
     out = run(url=a.url, max_pages=a.pages)
     print(json.dumps(out, indent=2, ensure_ascii=False))

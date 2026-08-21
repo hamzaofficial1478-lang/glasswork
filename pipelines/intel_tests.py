@@ -464,7 +464,12 @@ def test_no_wins_says_which_link_is_missing():
     """
     print("\nAn empty answer must still say what to do:")
     real_db, real_ready = board.DB, seo_intel.gsc_ready
+    real_q = seo_intel.gsc_queries
     board.DB = _fresh_db()
+    # The diagnosis now PROBES Search Console rather than inferring from config,
+    # so the probe has to be stubbed too — that is the point of the change and
+    # the reason these four assertions had to be rewritten.
+    seo_intel.gsc_queries = lambda **k: ([], "")
     try:
         con = sqlite3.connect(board.DB)
         con.row_factory = sqlite3.Row
@@ -495,8 +500,19 @@ def test_no_wins_says_which_link_is_missing():
               "real answer, not a fault" in t, True)
         check("and it shows where he actually ranks", "glass fix dubai" in t, True)
         con.close()
+        print("  and when Google itself refuses, that is what it says:")
+        seo_intel.gsc_queries = lambda **k: (
+            [], "Search Console refused (403) for https://x.ae. Two causes...")
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("the real 403 is quoted, not guessed at",
+              "Google refused the call" in t and "403" in t, True)
+        check("and both causes of a 403 are given",
+              "not a user on the property" in t and "TRAILING" in t, True)
+        check("it does not fall through to 'the pass never ran'",
+              "never run" in t, False)
     finally:
         board.DB, seo_intel.gsc_ready = real_db, real_ready
+        seo_intel.gsc_queries = real_q
 
 
 def main():

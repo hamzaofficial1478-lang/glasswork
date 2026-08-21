@@ -225,9 +225,20 @@ def gsc_queries(days=90, limit=500):
         # 403 and 404 mean different things and the fix is different for each,
         # so neither is reported as a bare status code.
         if r.status_code == 403:
-            return [], (f"Search Console refused (403). The service account is "
-                        f"almost certainly not a user on {prop}. Add its email in "
-                        f"Search Console under Settings, Users and permissions.")
+            # Google returns 403 for BOTH "you are not a user here" and "that
+            # property does not exist as you typed it", because a property you
+            # cannot see is indistinguishable from one that is not there. Naming
+            # only the first sent the owner to the permissions screen for a
+            # property string that was missing its trailing slash.
+            slash = "" if prop.startswith("sc-domain:") or prop.endswith("/") else (
+                f" Note: {prop!r} has no trailing slash. A URL-prefix property "
+                f"must be given exactly as Search Console shows it, "
+                f"'{prop}/' — without it Google does not recognise the property.")
+            return [], (f"Search Console refused (403) for {prop}. Two causes, and "
+                        f"Google uses the same code for both: (1) the service "
+                        f"account is not a user on the property — add its "
+                        f"client_email under Settings, Users and permissions; "
+                        f"(2) the property string does not match exactly." + slash)
         if r.status_code == 404 and host is hosts[-1]:
             return [], (f"Search Console has no property called {prop!r} (404). It "
                         f"must match exactly: 'sc-domain:yoursite.ae' for a domain "
@@ -465,6 +476,29 @@ def _table(con):
     con.commit()
 
 
+def _cursor(con, value=None):
+    """
+    Which seed the next pass should start on. Read with no value, write with one.
+
+    Kept in the cabinet rather than in memory because the point is to survive
+    between runs — the whole bug was a pass that forgot where it got to.
+    """
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS seo_cursor ("
+                    "id INTEGER PRIMARY KEY CHECK (id = 1), seed_index INTEGER,"
+                    " updated_at INTEGER)")
+        if value is None:
+            r = con.execute("SELECT seed_index FROM seo_cursor WHERE id=1").fetchone()
+            return int(r[0]) if r and r[0] is not None else 0
+        con.execute("INSERT INTO seo_cursor(id, seed_index, updated_at) VALUES(1,?,?)"
+                    " ON CONFLICT(id) DO UPDATE SET seed_index=excluded.seed_index,"
+                    " updated_at=excluded.updated_at", (int(value), int(time.time())))
+        con.commit()
+    except sqlite3.Error:
+        return 0
+    return value
+
+
 def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
     seeds = list(seeds or seo_gap.SERVICES)
     gsc, gsc_why = gsc_queries()
@@ -488,6 +522,18 @@ def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
                                   and g["impressions"] >= 10)})
         r["sources"].add("search-console")
 
+    # WHERE TODAY STARTS.
+    #
+    # The pass stops when the clock runs out and the summary said "the rest go
+    # on tomorrow's pass". It did not: the loop began at seeds[0] every time, so
+    # a run that reached six of twelve seeds would reach the same six tomorrow
+    # and the other six would never be gathered at all. Six services invisible
+    # for ever, and the summary reassuring him about it.
+    #
+    # A cursor fixes it. Tomorrow genuinely begins where today gave up, and the
+    # whole list gets covered over as many passes as it takes.
+    start = _cursor(con)
+    seeds = seeds[start:] + seeds[:start]
     deadline = time.time() + (budget or TIME_BUDGET)
     seeds_done, ran_out = 0, False
     for seed in seeds:
@@ -542,11 +588,12 @@ def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
              r.get("in_enquiries", 0), r.get("we_have_page", 0), r.get("score", 0.0),
              r.get("evidence", ""), ",".join(sorted(r["sources"])), now))
     con.commit()
+    _cursor(con, (start + seeds_done) % max(len(seeds), 1))
     return {"phrases": len(rows), "gsc_rows": len(gsc), "gsc_why": gsc_why,
             "striking": sum(1 for r in rows.values() if r.get("striking")),
             "from_enquiries": sum(1 for r in rows.values() if r.get("in_enquiries")),
             "seeds_done": seeds_done, "seeds_total": len(seeds),
-            "ran_out_of_time": ran_out}
+            "started_at_seed": start, "ran_out_of_time": ran_out}
 
 
 def striking_distance(con, limit=15):
@@ -573,14 +620,14 @@ def critic_check(built, top):
     return (len(reasons) == 0, reasons)
 
 
-def run(agent=AGENT, deep=False) -> dict:
+def run(agent=AGENT, deep=False, budget=None) -> dict:
     with board.agent_run(agent) as run_row:
-        out = _work(agent, deep)
+        out = _work(agent, deep, budget)
         run_row.note(out.get("summary") or out.get("error") or "keyword intel pass")
         return out
 
 
-def _work(agent, deep) -> dict:
+def _work(agent, deep, budget=None) -> dict:
     board.ensure_schema()
     b = cabinet.borrow("seo_data", agent, "SEO",
                        reason="free keyword intelligence pass (no paid API)",
@@ -597,7 +644,7 @@ def _work(agent, deep) -> dict:
         except sqlite3.Error:
             pass
 
-        built = build(con, deep=deep, our_paths=our_paths)
+        built = build(con, deep=deep, our_paths=our_paths, budget=budget)
         top = [dict(r) for r in con.execute(
             "SELECT * FROM keyword_intel ORDER BY score DESC LIMIT 20")]
         ok, reasons = critic_check(built, top)
@@ -695,6 +742,36 @@ def _why_no_wins(near) -> str:
     L = ["NOTHING IN STRIKING DISTANCE YET", "=" * 60, ""]
     ok, why = gsc_ready()
 
+    # gsc_ready() only checks CONFIGURATION — property set, file on disk,
+    # library importable. All three can be true while Google still refuses the
+    # call. That happened: the pass got a clean 403 and said so, and then this
+    # function skipped straight past it and offered two guesses, one of them
+    # wrong. So when the config looks fine, ASK GOOGLE. It is one free call and
+    # it replaces a guess with what actually came back.
+    if ok:
+        _rows, live = gsc_queries(days=30, limit=1)
+        if live:
+            L += ["  Search Console is configured, but Google refused the call.",
+                  "  This is what it said, verbatim:", "",
+                  "    " + live, ""]
+            if "403" in live:
+                L += ["  A 403 has two causes and BOTH are worth checking, because",
+                      "  Google returns the same code for each:", "",
+                      "    1. The service account is not a user on the property.",
+                      "       Open the service-account JSON, copy client_email",
+                      "       (it ends @...gserviceaccount.com), and add it in",
+                      "       Search Console under Settings, Users and",
+                      "       permissions. Uploading the file here does NOT grant",
+                      "       access — Google has to be told separately.",
+                      "",
+                      "    2. GSC_PROPERTY is not character-for-character what",
+                      "       Search Console shows. A property you do not own",
+                      "       reads as one you may not see, so it 403s rather",
+                      "       than 404s. A URL-prefix property needs the TRAILING",
+                      "       SLASH: 'https://www.example.com/' — without it,",
+                      "       Google does not recognise the property at all.", ""]
+            return "\n".join(L)
+
     if not ok:
         L += ["  Search Console is not usable yet, and it is the ONLY source for",
               "  this list — striking distance means 'Google already ranks you",
@@ -788,6 +865,9 @@ def main():
                     help="striking distance — already ranking 5th to 20th")
     ap.add_argument("--deep", action="store_true",
                     help="also run the a-z expansion (slower, many more phrases)")
+    ap.add_argument("--budget", type=int, default=0,
+                    help="seconds to spend gathering (default: 900 by hand, 300 "
+                         "inside the daily run, which has a step timeout)")
     a = ap.parse_args()
     if a.wins:
         print(as_text(wins_only=True))
@@ -795,7 +875,10 @@ def main():
     if a.report:
         print(as_text())
         return
-    print(json.dumps(run(deep=a.deep), indent=2, ensure_ascii=False))
+    # Run by hand there is no 420-second step timeout to duck under, so
+    # the budget is three times the one the daily runner uses.
+    print(json.dumps(run(deep=a.deep, budget=a.budget or 900),
+                     indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
