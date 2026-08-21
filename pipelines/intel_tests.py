@@ -358,8 +358,151 @@ def test_no_channel_is_reported_not_swallowed():
         board.DB = real_db
 
 
+
+# ---------------------------------------------------------------------------
+# SEARCH CONSOLE — the path that cannot be tested against a real property
+# ---------------------------------------------------------------------------
+#
+# google-auth is stood in for, so the real request-building code runs. This
+# caught a genuine bug: the endpoint host was searchconsole.googleapis.com,
+# which serves the URL-inspection API and not webmasters/v3, so the owner's
+# very first call would have 404'd and read like a permissions problem.
+
+import types
+
+
+def _stub_google():
+    class _Creds:
+        token = "fake-token"
+        def refresh(self, req):
+            pass
+    sa = types.ModuleType("google.oauth2.service_account")
+    sa.Credentials = type("C", (), {
+        "from_service_account_file": staticmethod(lambda p, scopes=None: _Creds())})
+    oauth2 = types.ModuleType("google.oauth2"); oauth2.service_account = sa
+    tr = types.ModuleType("google.auth.transport")
+    tr.requests = types.ModuleType("google.auth.transport.requests")
+    tr.requests.Request = lambda: None
+    gauth = types.ModuleType("google.auth"); gauth.transport = tr
+    g = types.ModuleType("google"); g.oauth2 = oauth2; g.auth = gauth
+    for n, m in [("google", g), ("google.oauth2", oauth2),
+                 ("google.oauth2.service_account", sa), ("google.auth", gauth),
+                 ("google.auth.transport", tr),
+                 ("google.auth.transport.requests", tr.requests)]:
+        sys.modules.setdefault(n, m)
+
+
+class _Resp:
+    def __init__(self, code, payload=None, text=""):
+        self.status_code, self._p, self.text = code, payload or {}, text
+
+    def json(self):
+        return self._p
+
+
+def test_search_console_talks_to_the_right_endpoint():
+    print("\nSearch Console: the documented host, and failures that name the fix:")
+    _stub_google()
+    import requests
+    from providers import integrations
+    root = Path(__file__).parents[1]
+    sa_path = root / seo_intel.GSC_SA
+    made = not sa_path.exists()
+    if made:
+        sa_path.parent.mkdir(parents=True, exist_ok=True)
+        sa_path.write_text("{}")
+    real_env, real_post = integrations.read_env, requests.post
+    integrations.read_env = lambda: {"GSC_PROPERTY": "sc-domain:example.ae"}
+    try:
+        seen = []
+
+        def responder(fn):
+            def post(url, **kw):
+                seen.append(url)
+                return fn(url, len(seen))
+            requests.post = post
+
+        responder(lambda u, n: _Resp(200, {"rows": [
+            {"keys": ["glass partition dubai"], "impressions": 240,
+             "clicks": 3, "position": 8.4}]}))
+        rows, err = seo_intel.gsc_queries(days=30, limit=10)
+        check("it calls the DOCUMENTED host", seen[0].startswith(
+            "https://www.googleapis.com/webmasters/v3/"), True)
+        check("the property is url-encoded into the path",
+              "sc-domain%3Aexample.ae" in seen[0], True)
+        check("a real query comes back", len(rows), 1)
+        check("with its position", rows[0]["position"], 8.4)
+        check("and no error", err, "")
+
+        seen.clear()
+        responder(lambda u, n: _Resp(403, text="forbidden"))
+        rows, err = seo_intel.gsc_queries()
+        check("403 is not retried on the other host", len(seen), 1)
+        check("and it names the actual fix", "not a user on" in err, True)
+
+        seen.clear()
+        responder(lambda u, n: _Resp(404, text="nf"))
+        rows, err = seo_intel.gsc_queries()
+        check("404 tries the alternative host once", len(seen), 2)
+        check("then explains the property format", "sc-domain:" in err, True)
+
+        seen.clear()
+        responder(lambda u, n: _Resp(404) if n == 1 else _Resp(200, {"rows": []}))
+        rows, err = seo_intel.gsc_queries()
+        check("a 404 on the first host falls through to the second", err, "")
+    finally:
+        integrations.read_env, requests.post = real_env, real_post
+        if made:
+            sa_path.unlink()
+
+
+def test_no_wins_says_which_link_is_missing():
+    """
+    "Either the pass has not run, or Search Console is not connected" was true
+    and useless — it handed the diagnosis back as homework. Every step is
+    checkable from here, so every step gets checked.
+    """
+    print("\nAn empty answer must still say what to do:")
+    real_db, real_ready = board.DB, seo_intel.gsc_ready
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        seo_intel._table(con)
+
+        seo_intel.gsc_ready = lambda: (False, "no GSC_PROPERTY set")
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("not connected -> says so, and does not blame the pass",
+              "not usable yet" in t and "never run" not in t, True)
+
+        seo_intel.gsc_ready = lambda: (True, "")
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("connected but nothing on file -> run the pass",
+              "never run" in t and "python -m pipelines.seo_intel" in t, True)
+
+        con.execute("INSERT INTO keyword_intel(phrase,position,impressions)"
+                    " VALUES('glass dubai',0,0)")
+        con.commit()
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("pass ran but GSC gave nothing -> property or permissions",
+              "does not match" in t and "Users and" in t, True)
+
+        con.execute("INSERT INTO keyword_intel(phrase,position,impressions)"
+                    " VALUES('glass fix dubai',1.4,900)")
+        con.commit()
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("everything works, just nothing in the band -> a real answer",
+              "real answer, not a fault" in t, True)
+        check("and it shows where he actually ranks", "glass fix dubai" in t, True)
+        con.close()
+    finally:
+        board.DB, seo_intel.gsc_ready = real_db, real_ready
+
+
 def main():
     test_it_works_with_no_paid_api()
+    test_search_console_talks_to_the_right_endpoint()
+    test_no_wins_says_which_link_is_missing()
     test_it_never_claims_to_know_volume()
     test_striking_distance_is_the_free_win()
     test_the_critic_rejects_evidence_free_output()

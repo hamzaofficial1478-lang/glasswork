@@ -199,18 +199,43 @@ def gsc_queries(days=90, limit=500):
 
     end = time.strftime("%Y-%m-%d", time.localtime())
     start = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
-    url = ("https://searchconsole.googleapis.com/webmasters/v3/sites/"
-           + urllib.parse.quote(prop, safe="") + "/searchAnalytics/query")
-    try:
-        r = requests.post(url, timeout=45,
-                          headers={"Authorization": "Bearer " + creds.token},
-                          json={"startDate": start, "endDate": end,
-                                "dimensions": ["query"], "rowLimit": limit})
-        if r.status_code != 200:
-            return [], f"Search Console said {r.status_code}: {r.text[:160]}"
-        rows = r.json().get("rows") or []
-    except Exception as e:
-        return [], f"Search Console call failed: {e}"
+    # The documented host is www.googleapis.com. An earlier version of this used
+    # searchconsole.googleapis.com — that host serves the newer URL-inspection
+    # API, not webmasters/v3, so the very first real call would have come back
+    # 404 and read like a permissions problem. Both are tried, documented one
+    # first, because this path cannot be tested without a live property.
+    hosts = ("https://www.googleapis.com", "https://searchconsole.googleapis.com")
+    path = ("/webmasters/v3/sites/" + urllib.parse.quote(prop, safe="")
+            + "/searchAnalytics/query")
+    body = {"startDate": start, "endDate": end,
+            "dimensions": ["query"], "rowLimit": limit}
+    last = ""
+    rows = None
+    for host in hosts:
+        try:
+            r = requests.post(host + path, timeout=45,
+                              headers={"Authorization": "Bearer " + creds.token},
+                              json=body)
+        except Exception as e:
+            last = f"Search Console call failed: {e}"
+            continue
+        if r.status_code == 200:
+            rows = r.json().get("rows") or []
+            break
+        # 403 and 404 mean different things and the fix is different for each,
+        # so neither is reported as a bare status code.
+        if r.status_code == 403:
+            return [], (f"Search Console refused (403). The service account is "
+                        f"almost certainly not a user on {prop}. Add its email in "
+                        f"Search Console under Settings, Users and permissions.")
+        if r.status_code == 404 and host is hosts[-1]:
+            return [], (f"Search Console has no property called {prop!r} (404). It "
+                        f"must match exactly: 'sc-domain:yoursite.ae' for a domain "
+                        f"property, or 'https://yoursite.ae/' with the trailing "
+                        f"slash for a URL-prefix one.")
+        last = f"Search Console said {r.status_code}: {r.text[:160]}"
+    if rows is None:
+        return [], last or "Search Console did not answer"
 
     return [{"phrase": (row.get("keys") or [""])[0].strip().lower(),
              "impressions": int(row.get("impressions") or 0),
@@ -640,6 +665,81 @@ def _work(agent, deep) -> dict:
             cabinet.release("seo_data", agent, borrow_id=borrow_id, usd_cost=0.0)
 
 
+def _nearly(con):
+    """
+    Rows that were close but did not qualify, so an empty answer still says
+    something useful about where you actually are.
+    """
+    out = {"rows": 0, "with_impressions": 0, "best": []}
+    try:
+        out["rows"] = con.execute("SELECT COUNT(*) FROM keyword_intel").fetchone()[0]
+        out["with_impressions"] = con.execute(
+            "SELECT COUNT(*) FROM keyword_intel WHERE impressions > 0").fetchone()[0]
+        out["best"] = [dict(r) for r in con.execute(
+            "SELECT phrase, position, impressions FROM keyword_intel"
+            " WHERE impressions > 0 AND position > 0"
+            " ORDER BY position ASC LIMIT 8")]
+    except sqlite3.Error:
+        pass
+    return out
+
+
+def _why_no_wins(near) -> str:
+    """
+    Which link in the chain is missing — not a list of things it might be.
+
+    "Either the pass has not run, or Search Console is not connected" was true
+    and useless: it handed back the diagnosis as homework. Every step below is
+    checkable from here, so it gets checked.
+    """
+    L = ["NOTHING IN STRIKING DISTANCE YET", "=" * 60, ""]
+    ok, why = gsc_ready()
+
+    if not ok:
+        L += ["  Search Console is not usable yet, and it is the ONLY source for",
+              "  this list — striking distance means 'Google already ranks you",
+              "  5th to 20th', and nothing but Google can tell you that.", "",
+              "  What is missing:", "    " + why, ""]
+        try:
+            import google.oauth2.service_account  # noqa: F401
+        except Exception:
+            L += ["  Start here:", "    pip install -r requirements.txt", ""]
+        return "\n".join(L)
+
+    if not near["rows"]:
+        L += ["  Search Console is connected, but the keyword pass has never run,",
+              "  so there is nothing on file to read.", "",
+              "  Run it once (a few minutes, no cost):",
+              "    python -m pipelines.seo_intel", ""]
+        return "\n".join(L)
+
+    if not near["with_impressions"]:
+        L += [f"  The pass has run — {near['rows']:,} phrases on file — but not one",
+              "  carries a Search Console impression. Search Console answered and",
+              "  gave back nothing for your property. Two usual causes:", "",
+              "    1. The property does not match. GSC_PROPERTY must be exactly",
+              "       what Search Console shows: 'sc-domain:yoursite.ae' for a",
+              "       domain property, or 'https://yoursite.ae/' WITH the slash",
+              "       for a URL-prefix one. They are not interchangeable.",
+              "    2. The service account is not a user on that property. Add its",
+              "       email in Search Console under Settings -> Users and",
+              "       permissions, then run the pass again.", "",
+              "  A third, less likely: the site is too new and genuinely has no",
+              "  impressions in the last 90 days yet.", ""]
+        return "\n".join(L)
+
+    L += [f"  The pass has run and Search Console is answering: "
+          f"{near['with_impressions']:,} of {near['rows']:,} phrases carry real",
+          "  impressions. None of them sit between position 5 and 20 with enough",
+          "  impressions to count, which is a real answer, not a fault.", "",
+          "  Your best positions right now:"]
+    for r in near["best"]:
+        L.append(f"    {r['position']:>5}  {r['impressions']:>6} impressions  {r['phrase']}")
+    L += ["", "  Anything above position 5 is already winning. Anything past 20 needs",
+          "  a better page, not a nudge — see `--report` for what to write.", ""]
+    return "\n".join(L)
+
+
 def as_text(wins_only=False) -> str:
     board.ensure_schema()
     con = sqlite3.connect(board.DB, timeout=30)
@@ -647,12 +747,10 @@ def as_text(wins_only=False) -> str:
     _table(con)
     if wins_only:
         rows = striking_distance(con, 25)
-        con.close()
         if not rows:
-            return ("No striking-distance queries on file. Either the intel pass has "
-                    "not run, or Search Console is not connected — that is the source "
-                    "for this one, and it is free.\n"
-                    "  python -m pipelines.seo_intel")
+            near = _nearly(con)
+            con.close()
+            return _why_no_wins(near)
         L = ["ALREADY RANKING, JUST BELOW THE CLICKS", "=" * 60,
              "Google puts you 5th to 20th for these and people are seeing you.",
              "Improving an existing page is cheaper than writing a new one.", ""]
