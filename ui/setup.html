@@ -272,16 +272,14 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
   <section class="card optional">
     <div class="card-h"><div class="ic">➕</div><div><b>6 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
     <div class="card-b">
-      <!-- DataForSEO is a LEAVE-IT-BLANK field now, and says so. The keyword
-           work moved to pipelines/seo_intel.py, which ranks on Search Console
-           impressions, autocomplete breadth, the owner's own enquiries and
-           rival pages — all at no cost. This box sitting under a bare label
-           read as another thing left undone. -->
-      <div class="gh etch" style="margin-top:4px">Paid keyword tool — you almost certainly do not need this</div>
-      <p class="hint" style="margin:2px 0 10px">SEO already works without it. It ranks keywords on <b>Search Console</b> impressions, autocomplete breadth, the words your own customers used, and which phrases rivals keep a page for — none of which costs anything. A DataForSEO login adds only two things on top: <b>monthly search volumes</b> and <b>unattended daily rank tracking</b>. Leave both boxes empty unless you are already paying for it.</p>
-      <div class="row">
-        <div class="field"><label>DataForSEO login <span class="dim">(optional)</span></label><input id="dfsLogin" placeholder="leave blank — not needed"><div class="hint">Only if you already have an account.</div></div>
-        <div class="field"><label>DataForSEO password</label><input id="dfsPassword" type="password" placeholder="leave blank to keep saved"><div class="hint">API password from the DataForSEO dashboard.</div></div>
+      <!-- DataForSEO used to have its own two fields here, under "Optional
+           extras", which is a place that reads as "things still to do". It is
+           not optional-extra shaped: it is a paid keyword API, and a paid API
+           belongs on the seo_data SHELF with the others if he ever wants one.
+           Removed rather than reworded, because the owner asked twice and a
+           smaller label on a box he does not need is not the same as not
+           having the box. Any login already saved in .env keeps working. -->
+
       </div>
       <div class="row">
         <div class="field"><label>ntfy topic</label><input id="ntfyTopic" placeholder="glasswork-a7f3k9x2q"><div class="hint">How the agency reaches you. Install the ntfy app, subscribe to this exact name. <b>Make it long and random</b> — anyone who guesses the name reads your notifications.</div></div>
@@ -821,7 +819,7 @@ setInterval(()=>{ const a=$('#shelfAuto'); if(a&&a.checked) loadShelves(); },500
 /* ---- optional ---- */
 $('#saveOptional').onclick=async()=>{
   const btn=$('#saveOptional');btn.disabled=true;inl($('#optMsg'),'dim','Saving…');
-  const j=await api('POST','/api/optional',{dfsLogin:$('#dfsLogin').value.trim(),dfsPassword:$('#dfsPassword').value,
+  const j=await api('POST','/api/optional',{
     ntfyTopic:$('#ntfyTopic').value.trim(),ntfyServer:$('#ntfyServer').value.trim(),
     algoliaAppId:$('#algoliaAppId').value.trim(),algoliaSearchKey:$('#algoliaSearchKey').value.trim(),
     algoliaWriteKey:$('#algoliaWriteKey').value.trim(),algoliaIndex:$('#algoliaIndex').value.trim(),
@@ -829,7 +827,7 @@ $('#saveOptional').onclick=async()=>{
     zyteCostFetch:$('#zyteCostFetch').value.trim(),zyteCostRender:$('#zyteCostRender').value.trim(),
     crawlerOwnSite:$('#crawlerOwnSite').value});
   btn.disabled=false;
-  if(j.ok){ inl($('#optMsg'),'ok','✓ Saved'); ['dfsPassword'].forEach(id=>$('#'+id).value=''); }
+  if(j.ok){ inl($('#optMsg'),'ok','✓ Saved');  }
   else inl($('#optMsg'),'err','✕ '+(j.error||'failed'));
 };
 
@@ -1046,7 +1044,6 @@ async function loadSettings(){
   $('#apiBase').value=w.apiBase||'';
   if(w.apiTokenSet) $('#siteApiToken').placeholder='saved — leave blank to keep';
   if(j.configured) inl($('#siteMsg'),'ok','✓ Saved ('+(w.mode==='full'?'Full access':'Read-only')+') — edit and re-save to change');
-  $('#dfsLogin').value=o.dfsLogin||'';
   $('#ntfyTopic').value=o.ntfyTopic||'';
   $('#ntfyServer').value=o.ntfyServer||'';
   $('#algoliaAppId').value=o.algoliaAppId||'';
@@ -1063,7 +1060,6 @@ async function loadSettings(){
   $('#zyteCostFetch').value=o.zyteCostFetch||'';
   $('#zyteCostRender').value=o.zyteCostRender||'';
   $('#crawlerOwnSite').value=o.crawlerOwnSite?'1':'';
-  if(o.dfsPasswordSet) $('#dfsPassword').placeholder='saved — leave blank to keep';
   const ig=j.integrations||{}, em=ig.email||{}, gsc=ig.gsc||{};
   $('#em_host').value=em.host||''; $('#em_port').value=em.port||''; $('#em_user').value=em.user||'';
   $('#em_from').value=em.from||''; $('#em_fromname').value=em.fromName||'';

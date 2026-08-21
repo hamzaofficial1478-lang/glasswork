@@ -273,13 +273,25 @@ def since(ts=None, limit=60) -> list:
 
 
 def feed(ts=None, limit=60) -> dict:
-    ev = since(ts, limit)
+    """
+    The window's events, plus how many of them the owner has not seen.
+
+    `ts` is when he last OPENED the panel, not a window cutoff — the badge has
+    to keep counting while he is away, the way an unread count does, and the
+    panel still shows the whole day when he opens it. Two different questions,
+    one call, because a badge that disagrees with the list it opens is worse
+    than no badge.
+    """
+    ev = since(None, limit)                       # the full window, always
+    seen_to = int(ts or 0)
+    unread = sum(1 for e in ev if e["at"] > seen_to) if seen_to else len(ev)
     counts = {}
     for e in ev:
         counts[e["verb"]] = counts.get(e["verb"], 0) + 1
     live = sum(1 for e in ev if e["level"] == "live")
     bad = sum(1 for e in ev if e["level"] == "bad")
     return {"ok": True, "at": int(time.time()), "events": ev,
+            "unread": unread, "seen_to": seen_to,
             "counts": counts, "live": live, "errors": bad,
             "head": (f"{live} happening now" if live else
                      f"{bad} problem{'s' if bad != 1 else ''}" if bad else

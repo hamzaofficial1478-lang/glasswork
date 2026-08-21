@@ -169,6 +169,41 @@
   @keyframes scan{0%{top:-24px}100%{top:100%}}
   @media(prefers-reduced-motion:reduce){*{animation:none!important}}
   footer{padding:26px;text-align:center;color:var(--faint);font-size:11.5px}
+  .navbits{display:flex;align-items:center;gap:8px;margin-left:18px}
+  .navbtn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:9px;
+    border:1px solid var(--line2);background:var(--panel2);color:var(--text);
+    font-size:12.5px;cursor:pointer;text-decoration:none;font-family:inherit}
+  .navbtn:hover{border-color:var(--glass);color:var(--glass)}
+  .navbtn.lock{border-color:rgba(234,165,67,.45);color:var(--amber)}
+  .badge-n{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--danger);
+    color:#fff;font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;
+    justify-content:center;font-family:'IBM Plex Mono',monospace}
+  .sheet{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;flex-direction:column}
+  /* [hidden] is display:none in the UA stylesheet, and ANY author display rule
+     beats it. Without this line the closed sheet stays laid out at z-index 60
+     across the whole viewport — invisible, and swallowing every click on the
+     floor behind it. The rooms looked dead and nothing explained why. */
+  .sheet[hidden]{display:none}
+  .sheet-head{display:flex;align-items:center;gap:12px;padding:16px 22px;
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  .sheet-body{flex:1;overflow:auto;padding:20px 22px 60px}
+  .ev{display:grid;grid-template-columns:58px 92px 1fr;gap:12px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:10px;margin-bottom:7px;background:var(--panel)}
+  .ev.bad{border-color:rgba(229,86,91,.5)} .ev.live{border-color:var(--glass)}
+  .ev .vb{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--etch);
+    text-transform:uppercase;letter-spacing:.06em;align-self:center}
+  .ev .tx b{display:block;font-size:13px} .ev .tx span{font-size:12px;color:var(--muted)}
+  .why{display:grid;grid-template-columns:56px 1fr;gap:10px;padding:9px 12px;
+    border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--panel)}
+  .why .pts{font-family:'IBM Plex Mono',monospace;font-weight:700;text-align:right}
+  .why .pts.up{color:var(--ok)} .why .pts.down{color:var(--danger)}
+  .made{width:100%;border-collapse:collapse;font-size:12.5px}
+  .made th{text-align:left;padding:7px 10px;color:var(--etch);font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line)}
+  .made td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .made tr:hover td{background:var(--panel2)}
+  .gh2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--etch);
+    margin:20px 0 8px}
 </style>
 </head>
 <body>
@@ -188,8 +223,31 @@
     <div class="metric"><span class="etch">Awaiting you</span><span class="v amber" id="mPend">—</span></div>
     <div class="metric"><span class="etch">Spend today</span><span class="v mono" id="mSpend">—</span></div>
   </div>
+  <div class="navbits">
+    <!-- There was no way back. The control room is a dead end you reach from
+         the office and then have to edit the address bar to leave. -->
+    <a class="navbtn" href="/" title="Back to the office floor">&larr; Office</a>
+    <button class="navbtn" id="actBtn" title="Everything the agency has done">
+      Activity <span class="badge-n" id="actBadge" hidden>0</span>
+    </button>
+    <!-- Setup holds every API key in the agency. It is not a nav link. -->
+    <button class="navbtn lock" id="setupBtn" title="Keys, models, caps — protected">
+      &#128274; Setup
+    </button>
+  </div>
   <div class="clock mono" id="clock">--:--</div>
 </header>
+
+<!-- FULL-WINDOW panels. The activity list used to open in a half-height strip
+     that showed six lines of a sixty-line day. -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-head">
+    <b id="sheetTitle">—</b>
+    <span class="etch" id="sheetSub"></span>
+    <button class="navbtn" id="sheetClose" style="margin-left:auto">Close &times;</button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
 
 <div class="wrap">
   <main>
@@ -267,8 +325,18 @@ async function fetchState(){
 
 /* ---- render ---- */
 const $=(s)=>document.querySelector(s);
+const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+/* A score of null means "no evidence yet" and MUST NOT render as 0. Untested
+   is not unhealthy, and a red ring on a sector that simply has not run is the
+   dashboard lying in the other direction. */
 function ring(score){
+  if(score===null||score===undefined){
+    return `<div class="ring" title="No evidence yet — this sector has not run">
+      <svg width="44" height="44"><circle cx="22" cy="22" r="18" fill="none"
+        stroke="var(--line)" stroke-width="4" stroke-dasharray="4 5"/></svg>
+      <div class="num" style="color:var(--muted);font-size:15px">—</div></div>`;
+  }
   const r=18, c=2*Math.PI*r, off=c*(1-score/100);
   const col = score>=85?'var(--ok)':score>=70?'var(--glass)':'var(--amber)';
   return `<div class="ring"><svg width="44" height="44">
@@ -292,7 +360,8 @@ function renderRooms(st){
     return;
   }
   $('#rooms').innerHTML = st.rooms.map(rm=>`
-    <div class="room ${rm.sec?'sec':''}">
+    <div class="room ${rm.sec?'sec':''}" data-key="${rm.key}" style="cursor:pointer"
+         title="Open ${rm.name} — what it made, why it scores what it does">
       ${rm.sec?'<div class="scanline"></div>':''}
       <div class="room-head">
         <div class="room-title"><b>${rm.name}</b><span class="etch">${rm.key} room</span></div>
@@ -308,6 +377,11 @@ function renderRooms(st){
       </div>
       <div class="room-foot"><span>${rm.foot[0]}</span><b>${rm.foot[1]}</b></div>
     </div>`).join('');
+  // Clicking a room opens what it actually made. The owner asked to be able to
+  // read the results, not just count them.
+  document.querySelectorAll('.room[data-key]').forEach(el=>{
+    el.onclick = ()=>openSector(el.dataset.key);
+  });
 }
 
 function renderApprovals(st){
@@ -359,7 +433,12 @@ function renderConns(st){
     </div>`).join('')
     : `<div class="empty">${st.offline ? 'Unknown — the server is not answering.'
                                        : 'Nothing connected yet.'}</div>`) + `
-    <div class="add-row"><a class="btn" href="/setup" style="text-align:center;text-decoration:none;padding:8px 0">Add or change a connection on /setup</a></div>`;
+    <!-- The link to /setup used to live here, which meant every route into the
+         keys was an ordinary blue link in a list. There is one door now, in the
+         header, and it explains what is behind it before it opens. -->
+    <div class="add-row" style="justify-content:center">
+      <span class="etch" style="font-size:11px">Connections are changed in Setup &mdash; the locked button, top right</span>
+    </div>`;
   const on=st.connections.filter(c=>c.on).length;
   $('#connCount').textContent = st.offline ? '—' : on+'/'+st.connections.length+' on';
 }
@@ -421,7 +500,19 @@ async function resolve(i, ok){
   refresh();   // read it back rather than guessing what the cabinet now says
 }
 /* ---- boot ---- */
+/* Do not rebuild the floor while he is reading it.
+   refresh() replaces the whole room list every 15 seconds. Harmless when you
+   are glancing at it; not harmless when you are half-way through clicking a
+   room, or have a sector open behind the sheet — the element you aimed at is
+   destroyed and rebuilt under the cursor. It showed up as a click that would
+   not land. */
 async function refresh(){
+  // getElementById, not the `sheet` const: refresh() is called before that
+  // const is declared, and a const read from its temporal dead zone THROWS —
+  // which meant refresh() died on its first call and the floor never rendered
+  // at all. A guard that breaks the thing it guards is worse than no guard.
+  const sh = document.getElementById('sheet');
+  if(sh && !sh.hidden) return;   // he is reading something; leave the page alone
   STATE=await fetchState();
   $('#mHealth').textContent=STATE.metrics.health;
   $('#mLeads').textContent=STATE.metrics.leads;
@@ -431,6 +522,11 @@ async function refresh(){
 }
 refresh();
 setInterval(refresh, 15000);   // keep the room live without a page reload
+
+// The badge has to climb while he is on another tab, so it polls on its own
+// rather than waiting for him to open the panel.
+pollActivity();
+setInterval(pollActivity, 20000);
 
 setInterval(()=>{
   const d=new Date();
@@ -453,6 +549,135 @@ setInterval(()=>{
     document.title = n + document.title.replace(/^[^\u2014]*/, '');
   }catch(e){}
 })();
+
+/* ---------------------------------------------------------------------------
+   THE SHEET — a full window, not a strip
+--------------------------------------------------------------------------- */
+const sheet=$('#sheet');
+function openSheet(title, sub, html){
+  $('#sheetTitle').textContent=title; $('#sheetSub').textContent=sub||'';
+  $('#sheetBody').innerHTML=html; sheet.hidden=false;
+  document.body.style.overflow='hidden';
+}
+function closeSheet(){ sheet.hidden=true; document.body.style.overflow=''; }
+$('#sheetClose').onclick=closeSheet;
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !sheet.hidden) closeSheet(); });
+
+/* ---- ACTIVITY -------------------------------------------------------------
+   An unread count that behaves like an unread count: it climbs while you are
+   away and clears when you read it. The last-seen mark is kept in this browser
+   because it is a per-person thing — the agency does not need to know when he
+   looked. */
+const SEEN_KEY='wdta_activity_seen';
+function lastSeen(){ try{ return parseInt(localStorage.getItem(SEEN_KEY)||'0',10)||0; }catch(e){ return 0; } }
+function markSeen(ts){ try{ localStorage.setItem(SEEN_KEY, String(ts)); }catch(e){} }
+
+async function pollActivity(){
+  try{
+    const r=await fetch('/api/activity?since='+lastSeen());
+    const j=await r.json(); if(!j||!j.ok) return null;
+    const b=$('#actBadge');
+    if(j.unread>0){ b.hidden=false; b.textContent=j.unread>99?'99+':j.unread; }
+    else b.hidden=true;
+    return j;
+  }catch(e){ return null; }
+}
+
+function evRow(e){
+  const cls=e.level==='bad'?'bad':e.level==='live'?'live':'';
+  return `<div class="ev ${cls}"><div class="mono" style="color:var(--muted);font-size:11.5px">${esc(e.hhmm||'')}</div>`
+    +`<div class="vb">${esc(e.verb||'')}</div>`
+    +`<div class="tx"><b>${esc(e.who||'—')}${e.room?' · '+esc(e.room):''}</b>`
+    +`<span>${esc(e.what||'')}</span>`
+    +(e.detail?`<span style="display:block;margin-top:4px;color:var(--etch)">${esc(e.detail)}</span>`:'')
+    +`</div></div>`;
+}
+
+$('#actBtn').onclick=async()=>{
+  openSheet('Activity','reading…','<p class="empty">Loading…</p>');
+  const j=await pollActivity();
+  if(!j){ $('#sheetBody').innerHTML='<p class="empty">Could not read the activity log.</p>'; return; }
+  const unread=j.unread||0;
+  $('#sheetSub').textContent=j.head+(unread?` · ${unread} new`:'');
+  $('#sheetBody').innerHTML =
+     (unread?`<div class="gh2">New since you last looked (${unread})</div>`
+            +j.events.filter(e=>e.at>j.seen_to).map(evRow).join(''):'')
+    +`<div class="gh2">${unread?'Earlier today':'Today'}</div>`
+    +(j.events.filter(e=>!unread||e.at<=j.seen_to).map(evRow).join('')
+      || '<p class="empty">Nothing else today.</p>');
+  markSeen(j.at); $('#actBadge').hidden=true;   // reading it clears the count
+};
+
+/* ---- ONE SECTOR, IN FULL -------------------------------------------------- */
+async function openSector(key){
+  openSheet(key,'reading…','<p class="empty">Loading…</p>');
+  let j=null;
+  try{ j=await (await fetch('/api/sector/'+encodeURIComponent(key))).json(); }catch(e){}
+  if(!j||!j.ok){ $('#sheetBody').innerHTML='<p class="empty">Could not read this sector.</p>'; return; }
+  $('#sheetTitle').textContent=j.name;
+  $('#sheetSub').textContent = (j.score===null?'no evidence yet':'health '+j.score+'/100');
+
+  const why = `<div class="gh2">Why it scores what it does</div>`
+    + j.why.map(w=>`<div class="why"><div class="pts ${w.points>0?'up':w.points<0?'down':''}">`
+        +`${w.points>0?'+':''}${w.points}</div>`
+        +`<div><b style="font-size:13px">${esc(w.label)}</b>`
+        +`<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(w.detail)}</div></div></div>`).join('');
+
+  const made = j.made.length
+    ? `<table class="made"><thead><tr>${j.columns.map(c=>`<th>${esc(c)}</th>`).join('')}<th>at</th></tr></thead><tbody>`
+      + j.made.map(m=>`<tr>${m.cols.map(v=>`<td>${esc(String(v==null?'':v)).slice(0,300)}</td>`).join('')}`
+      + `<td class="mono" style="color:var(--muted)">${esc(m.at)}</td></tr>`).join('')
+      + `</tbody></table>`
+    : `<p class="empty">Nothing yet. This is the real table — when this sector produces something it appears here.</p>`;
+
+  const list=(rows,f)=> rows.length? rows.map(f).join('') : '<p class="empty">None.</p>';
+  $('#sheetBody').innerHTML = why
+    + `<div class="gh2">What it made · ${esc(j.output_label)} (${j.made.length})</div>` + made
+    + `<div class="gh2">Its board (${j.tasks.length})</div>`
+    + list(j.tasks, t=>`<div class="ev"><div class="vb">${esc(t.status)}</div>`
+        +`<div class="vb">${esc(t.risk||'')}</div><div class="tx"><b>${esc(t.title)}</b>`
+        +`<span>${esc(t.detail||'')}</span></div></div>`)
+    + `<div class="gh2">Recent runs (${j.runs.length})</div>`
+    + list(j.runs, r=>`<div class="ev ${r.status==='error'?'bad':''}"><div class="vb">${esc(r.status)}</div>`
+        +`<div class="vb">${esc((r.agent||'').split('-').pop())}</div>`
+        +`<div class="tx"><b>${esc(r.agent)}</b><span>${esc(r.note||'no note')}</span></div></div>`)
+    + `<div class="gh2">Asked of it (${j.inbox.length})</div>`
+    + list(j.inbox, r=>`<div class="ev"><div class="vb">${esc(r.status)}</div>`
+        +`<div class="vb">${esc(r.from_sector)}</div><div class="tx"><b>${esc(r.subject)}</b></div></div>`)
+    + `<div class="gh2">Asked of others (${j.outbox.length})</div>`
+    + list(j.outbox, r=>`<div class="ev"><div class="vb">${esc(r.status)}</div>`
+        +`<div class="vb">&rarr; ${esc(r.to_sector)}</div><div class="tx"><b>${esc(r.subject)}</b></div></div>`);
+}
+
+/* ---- SETUP, BEHIND A DOOR --------------------------------------------------
+   Setup holds every API key, the spend cap and the model routing. It used to be
+   an ordinary link in the Connections card: anyone who reached this screen was
+   one click from the keys. It is a deliberate step now, and when an admin
+   password is set the server itself refuses without it — this is the prompt,
+   not the lock. */
+$('#setupBtn').onclick=async()=>{
+  let locked=false;
+  try{ const j=await (await fetch('/api/status')).json(); locked=!!(j&&j.locked); }catch(e){}
+  openSheet('Setup','keys, models, caps',
+    `<div style="max-width:620px">
+      <p style="line-height:1.7">This screen holds <b>every API key in the agency</b>, your
+      model routing and your daily spend cap. Anyone who opens it can read what is
+      configured and change what the agency is allowed to spend.</p>
+      <p style="line-height:1.7;color:var(--muted)">
+      ${locked
+        ? 'An admin password is set, so the server will ask for it. Good.'
+        : '<b style="color:var(--amber)">No admin password is set.</b> On a machine only you '
+          +'use that is a fair trade. The moment this box is shared — or reachable over '
+          +'the network — it is the only thing between a passer-by and your keys. '
+          +'Set one with <span class="mono">python backend.py --password</span>.'}</p>
+      <div style="display:flex;gap:10px;margin-top:18px">
+        <a class="navbtn" href="/setup" style="border-color:var(--glass);color:var(--glass)">
+          I understand — open Setup</a>
+        <button class="navbtn" onclick="closeSheet()">Cancel</button>
+      </div>
+    </div>`);
+};
+
 </script>
 </body>
 </html>

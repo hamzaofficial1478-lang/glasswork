@@ -337,7 +337,6 @@ function readConnections() {
   const has = (k) => !!(e[k] && e[k].trim());
   return [
     { ic: "◧", name: "Website", sub: e.SITE_URL || "not set", on: has("SITE_URL") },
-    { ic: "⌕", name: "Paid keyword tool", sub: has("DATAFORSEO_LOGIN") ? "DataForSEO" : "not needed — SEO runs without one", on: has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD") },
     { ic: "🔔", name: "ntfy", sub: has("NTFY_TOPIC") ? "topic set" : "not set", on: has("NTFY_TOPIC") },
     ...(has("TELEGRAM_BOT_TOKEN")
         ? [{ ic: "✈", name: "Telegram (legacy)", sub: "still configured — ntfy is the route now", on: true }]
@@ -418,8 +417,9 @@ app.post("/api/optional", (req, res) => {
     const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
     const partial = {};
     const set = (k, v) => { const x = one(v); if (x) partial[k] = x; };  // only overwrite when given
-    set("DATAFORSEO_LOGIN", b.dfsLogin);
-    set("DATAFORSEO_PASSWORD", b.dfsPassword);
+    // DataForSEO no longer has fields on the setup screen. A login already in
+    // .env is left alone — updateEnv merges over what is there — so nobody who
+    // was using it loses it; there is simply no longer a box implying he should.
     // ntfy is the owner's route. Telegram keys are still READ if they exist in
     // .env, so an older setup keeps working, but they are no longer offered.
     set("NTFY_TOPIC", b.ntfyTopic);
@@ -525,6 +525,23 @@ app.get("/api/usage", (_q, res) =>
 // — the whole point is that he can see the list WITHOUT being sent it.
 app.get("/api/notify/preview", (_q, res) =>
   res.json(pyModule("coordination.notify", ["--json"], 25000)));
+
+// One sector in full: its score with the reasoning behind it, what it actually
+// produced, its tasks, its runs, and the requests either way. This is what a
+// room opens into when it is clicked — the owner asked to be able to read what
+// a sector made, not just how many rows it made.
+app.get("/api/sector/:key", (req, res) => {
+  const key = String(req.params.key || "").replace(/[^A-Za-z]/g, "").slice(0, 20);
+  res.json(pyModule("coordination.state", ["--sector", key], 25000));
+});
+
+// ACTIVITY, with an unread count. `since` is the timestamp the browser last
+// opened the panel; everything newer is unread. The count lives here rather
+// than in the page so it survives a refresh and agrees across tabs.
+app.get("/api/activity", (req, res) => {
+  const since = String(parseInt(req.query.since, 10) || 0);
+  res.json(pyModule("coordination.activity", ["--json", "--since", since], 25000));
+});
 app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
 
 // ---- channels + the whole-system sweep -------------------------------------
@@ -724,7 +741,6 @@ app.get("/api/settings", (_q, res) => {
       apiTokenSet: set("SITE_API_TOKEN"),
     },
     optional: {
-      dfsLogin: v("DATAFORSEO_LOGIN"), dfsPasswordSet: set("DATAFORSEO_PASSWORD"),
       ntfyTopic: v("NTFY_TOPIC"), ntfyServer: v("NTFY_SERVER"),
       algoliaAppId: v("ALGOLIA_APP_ID"), algoliaSearchKey: v("ALGOLIA_SEARCH_KEY"),
       // the write key is reported as set / not set, never echoed back
@@ -748,6 +764,10 @@ app.get("/api/settings", (_q, res) => {
 app.get("/api/status", (_q, res) => {
   const e = readEnv();
   const has = (k) => !!(e[k] && e[k].trim());
+  // Whether the machine is locked, so the Setup gate can tell the truth rather
+  // than warning about a password that is already set. Boolean only — the hash
+  // never leaves here.
+  const locked = has("ADMIN_PASSWORD_HASH");
   const mode = String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly";
   const fullReady = has("SITE_API_BASE") && has("SITE_API_TOKEN");
 
@@ -779,14 +799,10 @@ app.get("/api/status", (_q, res) => {
     { label: "Filing cabinet (database)", optional: false, ok: dbBuilt(),
       detail: dbBuilt() ? "Built and ready" : "Not built yet — it builds itself when you save the website form",
       hint: "No action needed — created for you on first save." },
-    // "Not set — rankings aren't tracked" read as a gap. It is not one any more:
-    // SEO does the keyword work free, and a paid key adds volumes and unattended
-    // rank tracking on top of a sector that already works.
-    { label: "Paid keyword tool (optional)", optional: true, ok: true,
-      detail: (has("DATAFORSEO_LOGIN") && has("DATAFORSEO_PASSWORD"))
-        ? "DataForSEO saved — adds search volumes and daily rank tracking"
-        : "Not set, and not needed. SEO ranks keywords from Search Console, autocomplete, your own enquiries and rival pages at no cost.",
-      hint: "Only add a login if you want monthly search volumes or unattended rank tracking." },
+    // The DataForSEO row is gone. A paid keyword API is not a setup step for
+    // this agency any more — SEO runs on Search Console, autocomplete, his own
+    // enquiries and rival pages. If he ever wants volumes or rank tracking it
+    // goes on the seo_data shelf like any other API, and shows up there.
     { label: "ntfy (your approvals)", optional: true, ok: has("NTFY_TOPIC"),
       detail: has("NTFY_TOPIC")
         ? `Sending to ${e.NTFY_TOPIC} on ${e.NTFY_SERVER || "https://ntfy.sh"}`
@@ -812,6 +828,7 @@ app.get("/api/status", (_q, res) => {
   ];
 
   res.json({
+    locked,
     ok: true, mode,
     providers: { credentials: (ps && ps.credentials) || 0, models: (ps && ps.models) || 0 },
     brains, brainsReady, brainsTotal, checks,

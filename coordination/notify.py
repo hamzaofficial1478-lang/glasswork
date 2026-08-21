@@ -253,6 +253,84 @@ def send(alerts=None, dry_run=False, include_digest=False) -> dict:
     return {"ok": True, "sent": sent, "alerts": results}
 
 
+def push_activity(limit=40, dry_run=False) -> dict:
+    """
+    Send what the agency has DONE since the last time this ran.
+
+    The owner asked for activity on his phone, and this file argues elsewhere
+    that progress is not news. Both are honoured by BATCHING: one message
+    summarising everything new, at most once per run, instead of a buzz per
+    event. Forty things that happened is one notification, and it is readable.
+
+    Problems are named individually inside it; routine work is counted. A
+    message you can skim in three seconds is one you keep reading; forty
+    separate ones is a muted app by Tuesday.
+    """
+    try:
+        from . import activity
+    except ImportError:  # pragma: no cover
+        import activity
+
+    last = 0
+    try:
+        with _conn() as c:
+            board._migrate(c)
+            _table(c)
+            r = c.execute("SELECT sent_at FROM notifications WHERE key='activity:last'"
+                          ).fetchone()
+            last = int(r[0]) if r and r[0] else 0
+    except sqlite3.Error:
+        pass
+
+    f = activity.feed(ts=last, limit=limit)
+    fresh = [e for e in f["events"] if e["at"] > last] if last else f["events"]
+    if not fresh:
+        return {"ok": True, "sent": 0, "note": "nothing new since the last push"}
+
+    bad = [e for e in fresh if e["level"] == "bad"]
+    rooms = {}
+    for e in fresh:
+        rooms[e["room"] or "—"] = rooms.get(e["room"] or "—", 0) + 1
+    lines = [f"{len(fresh)} things happened."]
+    if bad:
+        lines.append("")
+        lines.append(f"{len(bad)} went wrong:")
+        for e in bad[:5]:
+            lines.append(f"  • {e['who']}: {e['what']}"[:160])
+    lines.append("")
+    lines.append("By room: " + ", ".join(f"{k} {v}" for k, v in sorted(
+        rooms.items(), key=lambda kv: -kv[1])))
+    lines.append("Open the office to read any of it.")
+    text = "\n".join(lines)
+
+    if dry_run:
+        return {"ok": True, "sent": 0, "dry_run": True, "events": len(fresh),
+                "text": text}
+
+    try:
+        from providers import integrations
+        r = integrations.send_message(text)
+    except Exception as e:
+        return {"ok": False, "sent": 0, "error": str(e)}
+
+    now = int(time.time())
+    try:
+        with _conn() as c:
+            board._migrate(c)
+            _table(c)
+            c.execute(
+                "INSERT INTO notifications(key,urgency,title,body,first_seen,sent_at,"
+                " route,detail) VALUES('activity:last',?,?,?,?,?,?,?)"
+                " ON CONFLICT(key) DO UPDATE SET sent_at=excluded.sent_at,"
+                " body=excluded.body, detail=excluded.detail",
+                (DIGEST, "Activity", text[:400], now, now if r.get("ok") else last,
+                 r.get("integration") or "", (r.get("detail") or r.get("error") or "")[:200]))
+    except sqlite3.Error:
+        pass
+    return {"ok": bool(r.get("ok")), "sent": 1 if r.get("ok") else 0,
+            "events": len(fresh), "detail": r.get("detail") or r.get("error") or ""}
+
+
 def preview_text() -> str:
     alerts = collect()
     waiting = unsent(alerts)
@@ -302,11 +380,16 @@ def main():
     ap.add_argument("--preview", action="store_true", help="show it, send nothing")
     ap.add_argument("--send", action="store_true", help="actually send")
     ap.add_argument("--test", action="store_true", help="one real message, to prove the pipe")
+    ap.add_argument("--activity", action="store_true",
+                    help="push a batched summary of what has happened since last time")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     board.ensure_schema()
     if a.test:
         print(json.dumps(test(), indent=2))
+        return
+    if a.activity:
+        print(json.dumps(push_activity(dry_run=not a.send), indent=2, ensure_ascii=False))
         return
     if a.send:
         print(json.dumps(send(), indent=2, ensure_ascii=False))

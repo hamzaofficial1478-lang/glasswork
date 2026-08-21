@@ -67,6 +67,20 @@ SHELF_KINDS = {
     # and the board says so rather than showing "no APIs yet" beside a working
     # mail setup — see cmd_shelves.
     "email":           "delivery",
+    # SPARE BRAINS, and only spare ones.
+    #
+    # A model ROUTED to a sector never appears on a shelf — see
+    # routed_model_ids() and shelf_catalogue(). The owner's reasoning, and he is
+    # right: a shelf is a single-holder lock, so an agent that borrowed the MD's
+    # model would BLOCK the MD from using its own brain until it handed it back.
+    # Worse, it would be spending the expensive model he bought for planning on
+    # whatever the agent felt like.
+    #
+    # So this shelf is the pool of models he has set aside for exactly that:
+    # anything an agent wants beyond its sector's own brain, it takes from here,
+    # queues for it like any other shared thing, and hands it back. Put a model
+    # in the 'llm_extra' category to add it to the pool.
+    "llm_extra":       "reasoning",
     "other":           "other",       # a tool saved without a shelf lands here
 }
 DEFAULT_SHELVES = list(SHELF_KINDS)
@@ -345,6 +359,28 @@ def resolve_shelf(shelf: str) -> dict:
     }
 
 
+def routed_model_ids() -> set:
+    """
+    Every model id any sector is routed to — primary, secondary and fallbacks.
+
+    These are spoken for. They belong to a sector and must not turn up on a
+    shelf where another agent could take a lock on them.
+    """
+    ids = set()
+    for route in (_load().get("routing") or {}).values():
+        if not isinstance(route, dict):
+            continue
+        for key in ("primary", "secondary"):
+            v = (route.get(key) or "").strip()
+            if v:
+                ids.add(v)
+        for v in (route.get("fallback") or []):
+            v = (v or "").strip()
+            if v:
+                ids.add(v)
+    return ids
+
+
 def shelf_catalogue() -> dict:
     """
     What sits on every shelf, for the dashboard and for the cabinet's fallback
@@ -352,9 +388,16 @@ def shelf_catalogue() -> dict:
     embedding); tool shelves come from the tools list. Nothing secret here.
     """
     data = _load()
+    spoken_for = routed_model_ids()
     cat = {}
     for c in data["credentials"]:
         for m in c.get("models", []):
+            # A brain that belongs to a sector is not shelf stock. Listing it
+            # here is what made the board look like any agent could take the
+            # MD's model, and a borrow really would have locked the MD out of
+            # its own brain.
+            if m["id"] in spoken_for:
+                continue
             shelf = (m.get("category") or "LLM").strip().lower()
             cat.setdefault(shelf, []).append({
                 "kind": "model", "id": m["id"],

@@ -141,10 +141,13 @@ def test_only_shelves_something_borrows():
     """
     print("Every shelf is one something actually borrows:")
     from providers import store
+    # providers/ counts too: llm_extra is borrowed by routing.call_spare, not by
+    # a pipeline. The rule is "something borrows it", not "a pipeline does".
     src = ""
-    for f in (ROOT / "pipelines").glob("*.py"):
-        if not f.name.endswith("_tests.py"):
-            src += f.read_text()
+    for folder in ("pipelines", "providers", "coordination"):
+        for f in (ROOT / folder).glob("*.py"):
+            if not f.name.endswith("_tests.py"):
+                src += f.read_text()
     for shelf in store.SHELF_KINDS:
         if shelf == "other":
             continue          # the landing place for a tool saved with no shelf
@@ -177,6 +180,62 @@ def test_brains_are_not_a_shelf():
     html = (ROOT / "ui" / "setup.html").read_text()
     check("and the board says so where he reads it",
           "never shared" in html, True)
+
+
+def test_a_sectors_brain_is_never_on_a_shelf():
+    """
+    The owner's point, and he was right: a shelf is a single-holder lock, so an
+    agent that borrowed the MD's model would BLOCK the MD from its own brain
+    until it handed it back — and would be spending the expensive model bought
+    for planning on whatever the agent felt like.
+
+    So a routed model is invisible to the shelf, and agents take spares from
+    'llm_extra' instead.
+    """
+    print("A brain routed to a sector cannot be borrowed by anyone:")
+    from providers import store, routing, client
+    with store.isolated():
+        cid = store.upsert_credential({"name": "N", "api_key": "k",
+                                       "base_url": "https://x.test/v1"})["id"]
+        boss = store.upsert_model(cid, {"api_model_id": "big-one",
+                                        "category": "LLM"})["id"]
+        store.upsert_model(cid, {"api_model_id": "spare-one",
+                                 "category": "llm_extra"})
+        d = store._load(); d["routing"]["md"] = {"primary": boss, "enabled": True}
+        store._save(d)
+
+        check("the routed model is known to be spoken for",
+              boss in store.routed_model_ids(), True)
+        cat = store.shelf_catalogue()
+        check("and it is on NO shelf at all",
+              any(i["id"] == boss for items in cat.values() for i in items), False)
+        check("while the spare is on llm_extra",
+              [i["name"] for i in cat.get("llm_extra", [])], ["N · spare-one"])
+
+        real_db = board.DB
+        board.DB = _fresh_db()
+        real_chat = client.chat
+        client.chat = lambda cred, m, msgs, **k: {"ok": True, "output": "ok", "status": 200}
+        try:
+            r = routing.call_spare("content-writer", [{"role": "user", "content": "hi"}],
+                                   sector="Content", reason="second opinion")
+            check("an agent gets a spare", r["ok"], True)
+            check("and it is NOT the MD's brain", r["used"]["model"], "spare-one")
+            held = cabinet.borrow("llm_extra", "x", "X", reason="prove released", wait=False)
+            check("the shelf was handed back", held["ok"], True)
+            if held["ok"]:
+                cabinet.release("llm_extra", "x", borrow_id=held["borrow_id"])
+        finally:
+            client.chat = real_chat
+            board.DB = real_db
+
+    print("With no spare configured it refuses rather than reaching for a sector's:")
+    with store.isolated():
+        r = routing.call_spare("seo-strategist", [], reason="x")
+        check("it refuses", r["ok"], False)
+        check("and says how to stock the pool", "category 'llm_extra'" in r["error"], True)
+        check("and why routed models are not offered",
+              "lock that sector out" in r["error"], True)
 
 
 def test_an_abandoned_waiter_is_reaped():
@@ -217,6 +276,7 @@ def main():
     test_the_daily_spend_cap_actually_bites()
     test_only_shelves_something_borrows()
     test_brains_are_not_a_shelf()
+    test_a_sectors_brain_is_never_on_a_shelf()
     test_an_abandoned_waiter_is_reaped()
     print("\n" + ("all cabinet tests passed" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0

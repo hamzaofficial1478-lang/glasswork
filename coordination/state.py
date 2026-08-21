@@ -202,6 +202,141 @@ def _run_feed(c, match, now):
     return feed
 
 
+# ---------------------------------------------------------------------------
+# WHAT A SECTOR'S HEALTH ACTUALLY MEANS
+# ---------------------------------------------------------------------------
+#
+# It used to be `92 - open_tasks * 4`, clamped. Content, SEO and Leads all
+# returned exactly that, so three rooms showed a confident number that had
+# nothing to do with whether the work was any good — a sector that ran, failed
+# every run and produced nothing scored 92 as long as its board was clear. The
+# owner called them dummy numbers, which is what they were.
+#
+# Health is now built from four things the cabinet can actually answer, each
+# carrying its own reasoning so the room can say WHY it scores what it does:
+#
+#   DID IT RUN      work in the last day, and did the runs end clean or error
+#   DID IT PRODUCE  rows its own pipelines create — the output, not the effort
+#   IS IT STUCK     stale claims, unanswered requests, a growing backlog
+#   WAS IT RIGHT    decisions this sector logged that were later scored
+#
+# And when there is no evidence at all, the score is None and the room says
+# "has not run yet" instead of inventing a number. A dashboard that cannot tell
+# the difference between healthy and untested is worse than a blank.
+
+# What counts as OUTPUT for each sector: the table its work lands in. Effort is
+# not output — a run that finished cleanly and wrote nothing produced nothing.
+_OUTPUT = {
+    "Director": ("decisions", "created_at"),
+    "IT":       ("site_issues", "found_at"),
+    "Content":  ("content_queue", "created_at"),
+    "SEO":      ("keyword_intel", "seen_at"),
+    "Leads":    ("leads", "found_at"),
+    "Report":   ("daily_reports", "created_at"),
+    "Security": ("security_events", "at"),
+}
+
+
+def _health(c, key, match, day0, now):
+    """
+    (score or None, reasons[]) — an honest read of one sector.
+
+    Every reason is {label, points, detail}: what was measured, what it was
+    worth, and the plain-words why. The room shows the number; clicking it
+    shows this.
+    """
+    why = []
+    # AGENT_ALIASES, not a bare LIKE. The MD runs as 'managing-director' and
+    # Report as 'reporter', so a `lower(agent) LIKE 'md-%'` test can never match
+    # either of them — the same trap _run_feed already had to climb out of, and
+    # this landed straight back in it: the Director showed "did not run today"
+    # on a day it had planned the whole thing.
+    where, args = _match_sql(match)
+    where = where.replace("r.agent", "agent")
+    ran = _one(c, "SELECT count(*) FROM agent_runs WHERE started_at>=? AND " + where,
+               (day0, *args))
+    bad = _one(c, "SELECT count(*) FROM agent_runs WHERE started_at>=?"
+                  " AND status='error' AND " + where, (day0, *args))
+    table, when = _OUTPUT.get(key, (None, None))
+    made = _one(c, f"SELECT count(*) FROM {table} WHERE {when}>=?", (day0,)) if table else 0
+    backlog = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=?"
+                      " AND status IN ('open','in_progress')", (match,))
+    stale = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=?"
+                    " AND status='in_progress' AND claimed_at < ?",
+                 (match, now - STALL_SECS))
+    unanswered = _one(c, "SELECT count(*) FROM requests WHERE lower(to_sector)=?"
+                         " AND status IN ('open','claimed')", (match,))
+
+    if not ran and not made and not backlog:
+        return None, [{"label": "No evidence yet", "points": 0,
+                       "detail": "This sector has not run today, has produced "
+                                 "nothing, and has nothing on the board. There is "
+                                 "no honest score to give — press Run the day."}]
+
+    score = 0
+
+    # DID IT RUN — and did the running work.
+    if ran:
+        clean = ran - bad
+        pts = round(30 * (clean / ran))
+        score += pts
+        why.append({"label": "Ran and finished cleanly", "points": pts,
+                    "detail": f"{clean} of {ran} run(s) today ended without error."
+                              + (f" {bad} crashed." if bad else "")})
+    else:
+        why.append({"label": "Did not run today", "points": 0,
+                    "detail": "No agent in this sector recorded a run today. "
+                              "Whatever else is true, nothing moved."})
+
+    # DID IT PRODUCE — output, not effort.
+    if table:
+        pts = 30 if made >= 5 else (20 if made >= 2 else (10 if made else 0))
+        score += pts
+        why.append({"label": "Produced something", "points": pts,
+                    "detail": (f"{made} new row(s) in {table} today."
+                               if made else
+                               f"Nothing new in {table} today. A clean run that "
+                               f"writes nothing has produced nothing.")})
+
+    # IS IT STUCK — the things that quietly stop a sector.
+    penalty = min(stale * 10, 20) + min(unanswered * 5, 15) + min(max(backlog - 3, 0) * 3, 15)
+    if penalty:
+        score -= penalty
+        bits = []
+        if stale:
+            bits.append(f"{stale} task(s) claimed and abandoned — nobody else can "
+                        f"take them while they are held")
+        if unanswered:
+            bits.append(f"{unanswered} request(s) from other sectors unanswered")
+        if backlog > 3:
+            bits.append(f"{backlog} items on the board")
+        why.append({"label": "Stuck or overloaded", "points": -penalty,
+                    "detail": "; ".join(bits) + "."})
+    else:
+        why.append({"label": "Nothing stuck", "points": 0,
+                    "detail": f"{backlog} item(s) on the board, none abandoned, "
+                              f"no unanswered requests."})
+
+    # WAS IT RIGHT — only where decisions have actually been scored.
+    scored = _one(c, "SELECT count(*) FROM decisions WHERE outcome IS NOT NULL"
+                     " AND lower(cycle) LIKE ?", (match + "%",))
+    if scored:
+        good = _one(c, "SELECT count(*) FROM decisions WHERE outcome='worked'"
+                       " AND lower(cycle) LIKE ?", (match + "%",))
+        pts = round(20 * good / scored)
+        score += pts
+        why.append({"label": "Its calls came off", "points": pts,
+                    "detail": f"{good} of {scored} scored decision(s) worked."})
+    else:
+        score += 10          # neutral: not yet judged, and not punished for it
+        why.append({"label": "Not yet judged", "points": 10,
+                    "detail": "No decision from this sector has been scored yet, "
+                              "so this is a neutral half-mark rather than a "
+                              "verdict either way."})
+
+    return _clamp(score, 0, 100), why
+
+
 def _room_stats(c, key, day0, open_tasks):
     """Return (foot[2], score) for a room, from real counts."""
     base = _clamp(92 - open_tasks * 4, 60, 96)
@@ -286,9 +421,10 @@ def build():
                             "agent can take it. Finish it or release it.")}
                    if held > STALL_SECS else {})})
         open_tasks = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=? AND status IN ('open','in_progress')", (match,))
-        foot, score = _room_stats(c, key, day0, open_tasks)
+        foot, _old = _room_stats(c, key, day0, open_tasks)
+        score, why = _health(c, key, match, day0, now)
         rooms.append({"key": key, "name": name, "score": score, "foot": foot,
-                      "sec": sec, "agents": agents})
+                      "why": why, "sec": sec, "agents": agents})
 
     # ---- header metrics ----
     leads_today = _one(c, "SELECT count(*) FROM leads WHERE found_at>=?", (day0,))
@@ -298,7 +434,12 @@ def build():
     # the usage meter rather than the borrow trail. Left out, the headline spend
     # figure would read $0.00 on a day the agency rendered two hundred pages.
     spend += _one(c, "SELECT COALESCE(SUM(usd),0) FROM api_usage WHERE at>=?", (day0,), 0.0)
-    health = round(sum(r["score"] for r in rooms) / len(rooms)) if rooms else 0
+    # Only sectors that HAVE a score count towards the headline. A sector with
+    # no evidence yet returns None, and averaging it in as a zero would report
+    # the agency as unhealthy on the morning of its first run — untested is not
+    # unhealthy, and the header says "—" rather than pretending otherwise.
+    scored_rooms = [r["score"] for r in rooms if r["score"] is not None]
+    health = round(sum(scored_rooms) / len(scored_rooms)) if scored_rooms else None
     open_all = _one(c, "SELECT count(*) FROM tasks WHERE status IN ('open','in_progress')")
     md_state = f"{open_all} tasks on the board" if open_all else "idle — board clear"
 
@@ -406,5 +547,98 @@ def build():
             "orders": todays_orders}
 
 
+# ---------------------------------------------------------------------------
+# ONE SECTOR, IN FULL — what it actually made
+# ---------------------------------------------------------------------------
+
+# The rows worth showing a person, per sector, and how to say each one in a
+# line. Not "12 rows in keyword_intel" — the actual phrases, the actual tickets,
+# the actual leads. A dashboard that only counts is a dashboard you cannot act
+# on, and the owner asked to be able to click a sector and read what it made.
+_DETAIL = {
+    "Director": ("decisions",
+                 "SELECT id, cycle AS a, reasoning AS b, confidence AS c,"
+                 " COALESCE(outcome,'not scored yet') AS d, created_at AS at"
+                 " FROM decisions ORDER BY created_at DESC LIMIT 40",
+                 ("cycle", "reasoning", "confidence", "outcome")),
+    "IT": ("site issues",
+           "SELECT id, kind AS a, detail AS b, severity AS c, status AS d,"
+           " found_at AS at FROM site_issues ORDER BY found_at DESC LIMIT 40",
+           ("kind", "what is wrong", "severity", "status")),
+    "Content": ("content queue",
+                "SELECT id, title AS a, COALESCE(brief,'') AS b, status AS c,"
+                " COALESCE(service,'') AS d, created_at AS at"
+                " FROM content_queue ORDER BY created_at DESC LIMIT 40",
+                ("title", "brief", "status", "service")),
+    "SEO": ("keyword intelligence",
+            "SELECT id, phrase AS a, evidence AS b, score AS c, sources AS d,"
+            " seen_at AS at FROM keyword_intel ORDER BY score DESC LIMIT 40",
+            ("phrase", "evidence", "score", "sources")),
+    "Leads": ("leads",
+              "SELECT id, COALESCE(company,'') AS a, COALESCE(email,'') AS b,"
+              " COALESCE(area,'') AS c, stage AS d, found_at AS at"
+              " FROM leads ORDER BY found_at DESC LIMIT 40",
+              ("company", "email", "area", "stage")),
+    "Report": ("daily reports",
+               "SELECT id, day AS a, summary AS b, COALESCE(health,'') AS c,"
+               " COALESCE(spend_usd,'') AS d, created_at AS at"
+               " FROM daily_reports ORDER BY created_at DESC LIMIT 40",
+               ("day", "summary", "health", "spend")),
+    "Security": ("security events",
+                 "SELECT id, kind AS a, COALESCE(detail,'') AS b,"
+                 " COALESCE(verdict,'') AS c, COALESCE(source,'') AS d, at"
+                 " FROM security_events ORDER BY at DESC LIMIT 40",
+                 ("kind", "detail", "verdict", "source")),
+}
+
+
+def sector_detail(key):
+    """Everything one sector has to show for itself. Read-only."""
+    row = next((r for r in SECTORS if r[0].lower() == (key or "").lower()), None)
+    if not row:
+        return {"ok": False, "error": f"no sector called {key!r}"}
+    key, name, match, _sec = row
+    c = _conn()
+    day0, now = _day_start(), int(time.time())
+
+    score, why = _health(c, key, match, day0, now)
+    label, sql, cols = _DETAIL.get(key, ("output", "", ()))
+    made = []
+    if sql:
+        try:
+            for r in c.execute(sql):
+                made.append({"id": r["id"], "cols": [r["a"], r["b"], r["c"], r["d"]],
+                             "at": _hhmm(r["at"]), "ts": r["at"]})
+        except Exception:
+            made = []
+
+    def _rows(q, args=()):
+        try:
+            return [dict(x) for x in c.execute(q, args)]
+        except Exception:
+            return []
+
+    tasks = _rows("SELECT id,title,detail,status,risk,owner,created_at FROM tasks"
+                  " WHERE lower(sector)=? ORDER BY created_at DESC LIMIT 25", (match,))
+    where, args = _match_sql(match)
+    runs = _rows("SELECT r.agent,r.status,r.note,r.started_at,r.ended_at FROM agent_runs r"
+                 " WHERE " + where + " ORDER BY r.started_at DESC LIMIT 25", tuple(args))
+    inbox = _rows("SELECT id,from_sector,subject,status,created_at FROM requests"
+                  " WHERE lower(to_sector)=? ORDER BY created_at DESC LIMIT 15", (match,))
+    outbox = _rows("SELECT id,to_sector,subject,status,created_at FROM requests"
+                   " WHERE lower(from_sector)=? ORDER BY created_at DESC LIMIT 15", (match,))
+    c.close()
+    return {"ok": True, "key": key, "name": name, "score": score, "why": why,
+            "output_label": label, "columns": list(cols), "made": made,
+            "tasks": tasks, "runs": runs, "inbox": inbox, "outbox": outbox}
+
+
 if __name__ == "__main__":
-    print(json.dumps(build()))
+    import sys
+    # `-m coordination.state` prints the whole board; `--sector SEO` prints one
+    # sector in full, which is what the control room asks for when a room is
+    # clicked. Same module either way, so the numbers can never disagree.
+    if "--sector" in sys.argv:
+        print(json.dumps(sector_detail(sys.argv[sys.argv.index("--sector") + 1])))
+    else:
+        print(json.dumps(build()))

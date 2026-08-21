@@ -120,6 +120,72 @@ def call_task(task: str, messages, max_tokens: int = 512) -> dict:
 # Cost: two calls instead of one, on a small number of decisions. The daily
 # spend cap in coordination/cabinet.py is the backstop.
 
+def call_spare(agent, messages, sector=None, reason="", max_tokens=512,
+               timeout=120, wait=True) -> dict:
+    """
+    Borrow a SPARE brain off the llm_extra shelf, use it, hand it back.
+
+    For when an agent needs reasoning beyond its own sector's brain. It never
+    touches a routed model: those belong to their sector, and taking a shelf
+    lock on one would block that sector from its own brain — which is exactly
+    why routed models are not on any shelf (see store.routed_model_ids).
+
+    Turn-taking is the cabinet's, like every other shared thing: one holder,
+    the rest queue. If the pool is empty it says so and spends nothing, rather
+    than quietly reaching for a sector's model instead.
+    """
+    if not (reason or "").strip():
+        return {"ok": False, "error": "a borrow needs a reason"}
+    # Models live in the CATALOGUE (filed by category), not in the tools list,
+    # so resolve_shelf — which reads tools — finds nothing here. The catalogue
+    # already drops anything routed to a sector, so whatever comes back is
+    # genuinely spare, and it comes back priority-ordered like any other chain.
+    spare = (store.shelf_catalogue().get("llm_extra") or [])
+    usable = [m for m in spare
+              if m.get("kind") == "model" and m.get("enabled", True)]
+    if not usable:
+        return {"ok": False, "error":
+                "no spare brain on the 'llm_extra' shelf. Add a model with "
+                "category 'llm_extra' on /setup and agents can borrow it. "
+                "Models routed to a sector are deliberately not offered here — "
+                "borrowing one would lock that sector out of its own brain."}
+
+    try:
+        from coordination import cabinet
+    except Exception as e:
+        return {"ok": False, "error": f"cabinet unavailable: {e}"}
+
+    b = cabinet.borrow("llm_extra", agent, sector, reason=reason,
+                       data_class="internal", wait=wait)
+    if not b.get("ok"):
+        return {"ok": False, "error": b.get("error", "could not borrow a spare brain")}
+
+    failovers, used, out = [], None, None
+    try:
+        for item in usable:
+            cred, model = store.find_model(item["id"])
+            if not model:
+                continue
+            res = client.chat(cred, model, messages, max_tokens=max_tokens,
+                              timeout=timeout)
+            if res["ok"]:
+                used = {"credential": cred["name"], "model": model["api_model_id"]}
+                out = res["output"]
+                store.record_usage("llm_extra", cred["id"], model["id"], calls=1, spend=0.0)
+                break
+            failovers.append({"model": model["api_model_id"], "status": res["status"],
+                              "cause": res.get("cause")})
+    finally:
+        cabinet.release("llm_extra", agent, borrow_id=b.get("borrow_id"),
+                        item=(used or {}).get("model", ""), usd_cost=0.0)
+
+    if out is None:
+        return {"ok": False, "error": "every spare brain failed",
+                "failovers": failovers}
+    return {"ok": True, "used": used, "output": out, "failovers": failovers,
+            "shelf": "llm_extra"}
+
+
 def deliberate(task: str, messages, max_tokens: int = 512, verdict_of=None) -> dict:
     """
     Put one question to two different models. Returns both answers and whether
