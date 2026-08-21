@@ -63,15 +63,29 @@ _WS = re.compile(r"\s+")
 
 
 def _get(url, timeout=15):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    """
+    One page, through the shared reader.
+
+    This used to open its own urllib connection. Three things came free by
+    routing it through fetcher instead, and the third is why it changed:
+
+      - the address gets checked (no private or loopback hosts), which this
+        had no protection against at all;
+      - a JavaScript shell is reported as a shell rather than filed as a page
+        with no services on it;
+      - and it joins fetcher.cache(), so a full site_check reads each page ONCE
+        instead of once per pipeline. That mattered: a single test made forty-
+        odd requests in a burst, the owner's server started returning a
+        73-character page for about one in ten of them, and the run reported
+        "0 services found" on a site that lists nine.
+
+    Still returns "" on failure — every caller expects a string.
+    """
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            if "html" not in ctype and "text" not in ctype:
-                return ""
-            return r.read(800_000).decode("utf-8", "replace")
-    except Exception:
-        return ""
+        from . import fetcher
+    except ImportError:  # pragma: no cover
+        import fetcher
+    return fetcher.fetch(url, timeout=timeout, allow_paid=False)["html"] or ""
 
 
 def phrases_from(html):

@@ -423,6 +423,152 @@ def test_duplicate_pages_counted_once():
         board.DB, fetcher.fetch = real_db, real_fetch
 
 
+
+# The address check does a real DNS lookup, which is right in production and
+# wrong in a test: "x.ae is not a public address" is the resolver talking, not
+# the code under test. These three exercise caching and retry, so the gate is
+# stubbed and the suite stays offline.
+from contextlib import contextmanager as _ctxm
+
+
+@_ctxm
+def _any_url_allowed():
+    from . import competitors
+    real = competitors.safe_url
+    competitors.safe_url = lambda u: (True, "")
+    try:
+        yield
+    finally:
+        competitors.safe_url = real
+
+
+def test_one_pass_reads_each_page_once():
+    """
+    site_check runs five checks over one website. Each used to crawl
+    independently — forty-odd requests to test one site — and the owner's
+    shared host started answering about one in ten with a 73-character stub.
+    """
+    print("\nOne pass, one fetch per page:")
+    real_plain = fetcher._plain
+    calls = []
+    fetcher._plain = lambda url, t: (calls.append(url),
+                                     ("<html><body>" + "word " * 200 + "</body></html>",
+                                      "", 200))[1]
+    try:
+        with _any_url_allowed(), fetcher.cache() as c:
+            for _ in range(5):
+                fetcher.fetch("https://x.ae/page", allow_paid=False)
+            check("the server was asked once", len(calls), 1)
+            check("and the other four were served from memory", c.hits, 4)
+        calls.clear()
+        with _any_url_allowed():
+            fetcher.fetch("https://x.ae/page", allow_paid=False)
+        check("outside the pass it fetches again — no stale page", len(calls), 1)
+    finally:
+        fetcher._plain = real_plain
+
+
+def test_a_failure_is_never_cached():
+    """
+    The cache pinning a bad response is worse than the duplicate requests it
+    saves: one flaky read becomes a wrong verdict about the whole website. It
+    happened — the first read of a live run came back a stub and every step
+    after it saw a broken site.
+    """
+    print("\nA bad read must not be remembered as the truth:")
+    real_plain = fetcher._plain
+    seq = [("<html><body>tiny</body></html>", "", 200),
+           ("<html><body>tiny</body></html>", "", 200),
+           ("<html><body>" + "word " * 200 + "</body></html>", "", 200)]
+    fetcher._plain = lambda url, t: seq.pop(0) if seq else ("", "gone", 0)
+    try:
+        with _any_url_allowed(), fetcher.cache() as c:
+            first = fetcher.fetch("https://x.ae/p", allow_paid=False)
+            check("the stub is reported as a failure", first["ok"], False)
+            check("and it was NOT stored", len(c.store), 0)
+            second = fetcher.fetch("https://x.ae/p", allow_paid=False)
+            check("so the next caller gets the real page", second["ok"], True)
+            check("which IS stored", len(c.store), 1)
+    finally:
+        fetcher._plain = real_plain
+
+
+def test_a_hiccup_is_not_diagnosed_as_javascript():
+    """
+    Wrongly calling a server hiccup 'your site is built by JavaScript' has a
+    price: the fix it points at is CRAWLER_ON_OWN_SITE=1, which switches on
+    paid per-page rendering. One free retry costs nothing and is right far
+    more often.
+    """
+    print("\nOne free retry before telling him to switch on the paid renderer:")
+    real_plain = fetcher._plain
+    good = "<html><body>" + "word " * 200 + "</body></html>"
+    seq = [("<html><body>x</body></html>", "", 200), (good, "", 200)]
+    fetcher._plain = lambda url, t: seq.pop(0) if seq else (good, "", 200)
+    try:
+        with _any_url_allowed():
+            r = fetcher.fetch("https://x.ae/flaky", allow_paid=False)
+        check("the second attempt got the real page", r["ok"], True)
+        check("and it says it retried", r.get("retried"), True)
+        check("nothing was billed for the retry", r["cost"], 0.0)
+    finally:
+        fetcher._plain = real_plain
+
+    print("A genuine JavaScript site still gets diagnosed as one:")
+    shell = '<html><body><div id="root"></div></body></html>'
+    fetcher._plain = lambda url, t: (shell, "", 200)
+    try:
+        with _any_url_allowed():
+            r = fetcher.fetch("https://x.ae/spa", allow_paid=False)
+        check("the same shell twice is a real shell", r["ok"], False)
+        check("and it is named as one",
+              "JavaScript" in (r.get("declined", {}).get("reason", "") + r["error"]), True)
+    finally:
+        fetcher._plain = real_plain
+
+
+def test_a_bot_check_is_never_indexed_as_a_page():
+    """
+    A dry run against a real site turned up two records titled "One moment,
+    please..." — Cloudflare's interstitial, filed as if it were content. Search
+    for "glass" on that site and you would find the bot check.
+    """
+    print("\nA Cloudflare interstitial is not a page:")
+    cf = ("<html><head><title>One moment, please...</title></head><body>"
+          "<p>Please wait while we verify your browser.</p></body></html>")
+    real = "<html><body>" + "glass partition dubai " * 90 + "</body></html>"
+    check("the interstitial is spotted", fetcher.looks_like_challenge(cf), True)
+    check("a long real page that happens to say 'just a moment' is not",
+          fetcher.looks_like_challenge(
+              "<html><body>" + "just a moment glass dubai " * 90 + "</body></html>"),
+          False)
+    check("and an empty page is not a challenge either",
+          fetcher.looks_like_challenge(""), False)
+
+    real_plain = fetcher._plain
+    seq = [(cf, "", 200), (cf, "", 200)]
+    fetcher._plain = lambda url, t: seq.pop(0) if seq else (cf, "", 200)
+    try:
+        with _any_url_allowed():
+            r = fetcher.fetch("https://x.ae/blocked", allow_paid=False)
+        check("a challenged page is not reported ok", r["ok"], False)
+        check("its html is withheld so nothing can index it", r["html"], "")
+        check("and the reason names the bot check", "bot check" in r["error"], True)
+    finally:
+        fetcher._plain = real_plain
+
+    print("But a challenge that clears on the retry gives the real page:")
+    seq2 = [(cf, "", 200), (real, "", 200)]
+    fetcher._plain = lambda url, t: seq2.pop(0) if seq2 else (real, "", 200)
+    try:
+        with _any_url_allowed():
+            r = fetcher.fetch("https://x.ae/flaky-cf", allow_paid=False)
+        check("the second attempt is used", r["ok"], True)
+        check("and it is the real content", "glass partition" in r["html"], True)
+    finally:
+        fetcher._plain = real_plain
+
+
 def test_robots():
     print("\nBlocking the assistants is a choice — an accidental one is worth catching:")
     real = fetcher.fetch
@@ -577,6 +723,10 @@ def main():
     test_duplicate_pages_counted_once()
     test_graph_nesting()
     test_statistics_are_not_just_any_number()
+    test_one_pass_reads_each_page_once()
+    test_a_failure_is_never_cached()
+    test_a_hiccup_is_not_diagnosed_as_javascript()
+    test_a_bot_check_is_never_indexed_as_a_page()
     test_robots()
     test_visibility_refuses_to_guess()
     test_llms_txt()

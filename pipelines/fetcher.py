@@ -42,6 +42,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager as _ctx
 
 try:
     from . import competitors
@@ -101,6 +102,48 @@ COST_PLAIN = DEFAULT_COST_PLAIN
 COST_RENDER = DEFAULT_COST_RENDER
 
 
+# ---------------------------------------------------------------------------
+# ONE PASS, ONE FETCH
+# ---------------------------------------------------------------------------
+#
+# site_check runs five things over the same website: can we read it, is it
+# healthy, what does it sell, what would we index, how does it score for AEO.
+# Each one used to crawl independently, so a single "test my website" made the
+# owner's server serve the same home page five times and every service page
+# three or four times — thirty-odd requests to prove one thing, and one flaky
+# response anywhere in that pile turns into a step that fails for no reason.
+# It happened on the first live run.
+#
+# So a caller can declare "this is one pass" and every repeat of the same URL
+# inside it is served from memory. Deliberately opt-in and deliberately
+# scoped: a long-lived cache would eventually hand somebody a stale page and
+# call it live, which is a worse failure than a duplicate request.
+#
+#     with fetcher.cache():
+#         ...                      # the same URL is fetched at most once
+_CACHE = None
+
+
+class _Pass:
+    def __init__(self):
+        self.hits = 0
+        self.store = {}
+
+
+@_ctx
+def cache():
+    """One fetch per URL for the duration of the block. Nested blocks share."""
+    global _CACHE
+    if _CACHE is not None:
+        yield _CACHE                       # already inside one; do not nest a second
+        return
+    _CACHE = _Pass()
+    try:
+        yield _CACHE
+    finally:
+        _CACHE = None
+
+
 def _meter(kind, usd, note=""):
     """
     Log the request to the usage meter. Never let bookkeeping break a fetch —
@@ -148,6 +191,30 @@ _SHELL_MARKS = ("__next_data__", "id=\"root\"", "id='root'", "id=\"app\"",
 
 def visible_text(html: str) -> str:
     return _WS.sub(" ", _TAG.sub(" ", _SCRIPT.sub(" ", html or ""))).strip()
+
+
+# A bot-check interstitial is not the page. Cloudflare and friends answer 200
+# with "One moment, please..." or "Just a moment...", and a naive reader files
+# that as a real page — the owner's search index ends up holding two records
+# titled "One moment, please...", which is exactly what a dry run turned up on
+# his own site. Short AND carrying one of these is the test; a real page about
+# glass can mention "just a moment" in a sentence without being a challenge.
+_CHALLENGE_MARKS = (
+    "one moment, please", "just a moment", "checking your browser",
+    "cf-browser-verification", "attention required! | cloudflare",
+    "enable javascript and cookies to continue", "ddos protection by",
+    "verifying you are human", "please wait while we verify",
+)
+
+
+def looks_like_challenge(html: str) -> bool:
+    """Is this a bot check rather than the page we asked for?"""
+    if not html:
+        return False
+    low = html.lower()
+    if not any(m in low for m in _CHALLENGE_MARKS):
+        return False
+    return len(visible_text(html)) < 1500
 
 
 def looks_unrendered(html: str, min_chars: int = 400) -> bool:
@@ -254,6 +321,19 @@ def _zyte(url, tool, render, timeout):
 # ---------------------------------------------------------------------------
 
 def fetch(url, render=False, timeout=25, allow_paid=True, min_chars=400) -> dict:
+    r = _fetch_uncached(url, render, timeout, allow_paid, min_chars)
+
+    # A FAILURE IS NEVER CACHED. This was found the hard way: the first read of
+    # a run came back as a 73-character stub, the cache pinned it, and every
+    # step afterwards saw a broken site. A cache that remembers failures turns
+    # one flaky response into a wrong verdict about the whole website — worse
+    # than the duplicate requests it exists to prevent.
+    if _CACHE is not None and r.get("ok") and r.get("html"):
+        _CACHE.store.setdefault((url, bool(render), bool(allow_paid)), r)
+    return r
+
+
+def _fetch_uncached(url, render, timeout, allow_paid, min_chars) -> dict:
     """
     Read a page. Free first, paid only when free is not enough AND permitted.
 
@@ -281,6 +361,20 @@ def fetch(url, render=False, timeout=25, allow_paid=True, min_chars=400) -> dict
         return {"ok": False, "html": "", "how": "refused", "cost": 0.0,
                 "status": 0, "error": f"refused: {why}", "switched": ""}
 
+    # Inside a declared pass, the same URL is read once. The key includes
+    # render and allow_paid: "the free version of this page" and "the rendered
+    # version" are different answers and must not be confused for each other.
+    key = (url, bool(render), bool(allow_paid))
+    if _CACHE is not None and key in _CACHE.store:
+        _CACHE.hits += 1
+        hit = dict(_CACHE.store[key])
+        # The cost was already counted when it was really fetched. Billing the
+        # cap again for a page we did not request would be the cache inventing
+        # spend, which is worse than the duplicate request it saved.
+        hit["cost"] = 0.0
+        hit["from_cache"] = True
+        return hit
+
     tool = crawler_tool() if allow_paid else None
     switched = ""
 
@@ -290,22 +384,56 @@ def fetch(url, render=False, timeout=25, allow_paid=True, min_chars=400) -> dict
             return {"ok": True, "html": html, "how": "plain", "cost": 0.0,
                     "status": status, "error": "", "switched": ""}
 
+        # ONE RETRY BEFORE BLAMING JAVASCRIPT.
+        #
+        # A busy shared host will occasionally answer 200 with a near-empty
+        # body. Measured on a real UAE site: about one request in ten during a
+        # burst. Reported as-is, that becomes "your site is built by JavaScript"
+        # — a wrong diagnosis whose fix is CRAWLER_ON_OWN_SITE=1, so the owner
+        # switches on paid rendering and pays per page for a server hiccup.
+        #
+        # A genuine JavaScript site returns the same shell every time and the
+        # retry costs one free request. A hiccup comes back with the real page.
+        # Worth a second look before spending his money on the wrong answer.
+        if err or looks_unrendered(html, min_chars) or looks_like_challenge(html):
+            time.sleep(0.6)
+            html2, err2, status2 = _plain(url, timeout)
+            if (html2 and not looks_unrendered(html2, min_chars)
+                    and not looks_like_challenge(html2)):
+                return {"ok": True, "html": html2, "how": "plain", "cost": 0.0,
+                        "status": status2, "error": "", "switched": "",
+                        "retried": True}
+            html, err, status = (html2 or html), (err2 or err), (status2 or status)
+
+        challenged = bool(html) and looks_like_challenge(html)
         shell = bool(html) and looks_unrendered(html, min_chars)
-        reason = ("the page is built by JavaScript and arrived empty" if shell
-                  else f"the free fetch failed ({err or 'no response'})")
+        if challenged:
+            reason = ("a bot check answered instead of the page (Cloudflare or "
+                      "similar). Whatever came back is an interstitial, not your "
+                      "content, and must not be indexed as one")
+        elif shell:
+            reason = "the page is built by JavaScript and arrived empty"
+        else:
+            reason = f"the free fetch failed ({err or 'no response'})"
 
         if not allow_paid:
             # Money is off for this caller. Say what was skipped and what it
             # would have cost — never bill quietly, and never pass a shell off
             # as the page.
-            return {"ok": False, "html": html, "how": "plain", "cost": 0.0,
+            return {"ok": False,
+                    # A shell is handed back so the caller can see how thin it
+                    # was. A bot check is NOT: it is somebody else's page, and
+                    # every caller that receives html indexes or audits it.
+                    "html": "" if challenged else html,
+                    "how": "plain", "cost": 0.0,
                     "status": status, "switched": "",
                     "declined": {"reason": reason, "would_cost": cost_per_render()},
                     "error": (f"{reason}. Paid rendering is switched off for this, "
                               f"so it was skipped (a render would have cost about "
                               f"${cost_per_render():.4f}).")}
         if not tool:
-            return {"ok": bool(html) and not shell, "html": html, "how": "plain",
+            return {"ok": bool(html) and not shell and not challenged,
+                    "html": "" if challenged else html, "how": "plain",
                     "cost": 0.0, "status": status, "switched": "",
                     "error": (err or ("the page arrived empty — it is built by "
                                       "JavaScript. Put a crawler key on the "

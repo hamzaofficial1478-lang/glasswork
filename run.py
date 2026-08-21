@@ -5,6 +5,8 @@ run.py — the one file you start the agency from.
     python run.py --day           run a full day's cycle in the terminal
     python run.py --day --force   run it even though the check found problems
     python run.py --check         health check: what is configured, what is not
+    python run.py --site          test your real website end to end (changes nothing)
+    python run.py --site --index  the same, and build the Algolia search index
     python run.py --tests         run every test suite
     python run.py --no-update     skip the git pull
 
@@ -272,6 +274,12 @@ def main():
     ap = argparse.ArgumentParser(description="Run the Glassworks agency.")
     ap.add_argument("--day", action="store_true", help="run a full day's cycle")
     ap.add_argument("--check", action="store_true", help="what is configured")
+    ap.add_argument("--site", action="store_true",
+                    help="test your real website end to end (read-only)")
+    ap.add_argument("--index", action="store_true",
+                    help="with --site: also build the Algolia index for real")
+    ap.add_argument("--url", default="",
+                    help="with --site: test this address instead of the saved one")
     ap.add_argument("--tests", action="store_true", help="run every test suite")
     ap.add_argument("--no-update", action="store_true", help="skip the git pull")
     ap.add_argument("--force", action="store_true",
@@ -287,6 +295,16 @@ def main():
 
     if a.tests:
         sys.exit(0 if tests() else 1)
+    if a.site:
+        # One command, the whole website: can we read it, is it healthy, what
+        # does it say you sell, what would the search index hold, how does it
+        # score for AEO and GEO, is Search Console connected. Read-only unless
+        # --index is given.
+        sys.path.insert(0, str(ROOT))
+        from pipelines import site_check
+        out = site_check.run(url=a.url or None, do_index=a.index)
+        say(site_check.as_text(out))
+        sys.exit(0 if out.get("ok") else 1)
     if a.check:
         check()
         return

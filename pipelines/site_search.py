@@ -393,16 +393,18 @@ def critic_check(records, cfg):
     return (len(reasons) == 0, reasons)
 
 
-def run(agent=AGENT, dry_run=False, max_pages=40) -> dict:
+def run(agent=AGENT, dry_run=False, max_pages=40, url=None) -> dict:
     with board.agent_run(agent) as run_row:
-        out = _work(agent, dry_run, max_pages)
+        out = _work(agent, dry_run, max_pages, url)
         run_row.note(out.get("summary") or out.get("error") or "site search pass")
         return out
 
 
-def _work(agent, dry_run, max_pages) -> dict:
+def _work(agent, dry_run, max_pages, url=None) -> dict:
     cfg = _cfg()
-    url = site.site_url()
+    # An explicit address wins, so a one-off test of a staging site or
+    # somebody else's does not need the saved one changed and changed back.
+    url = site.site_url(url or "")
     missing = [k for k in ("app_id", "search_key", "write_key") if not cfg[k]]
     if missing and not dry_run:
         return {"ok": False, "error":
