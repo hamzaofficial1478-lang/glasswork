@@ -435,7 +435,11 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   <span class="more" onclick="openActivity()">see everything →</span>
 </div>
 
+<script src="/stale.js"></script>
 <script>
+/* Say so, on screen, when the running server is older than this page. */
+try{ Stale.check(['activity-seen','sectors','site-name','brand']); }catch(e){}
+
 /* The staff list: who sits where. NOT what they are doing — every desk starts
    dark and stays dark until the server says otherwise.
 
@@ -1460,11 +1464,29 @@ document.addEventListener('click',e=>{if(!e.target.closest('.site-switch'))$('#s
    the firm is one field on the setup screen rather than an edit in every file.
    The name in the markup is the default, so the page is right before this
    lands and simply corrects itself if he has chosen another. */
+/* /api/brand, not /api/settings. Settings also carries the ntfy topic, the SMTP
+   user and the model routing, and it sits behind the Setup password now — a
+   front-of-house screen should not be reaching into the key cupboard to learn
+   what the firm is called. /api/brand returns the name and the website label
+   and nothing else. Falls back to the old route so an older server still
+   renders the name rather than showing the placeholder for ever. */
+async function brandPayload(){
+  try{
+    const r = await fetch('/api/brand');
+    if(r.ok){ const j = await r.json();
+      if(j && j.ok) return {agencyName:j.agencyName, website:j.website}; }
+  }catch(e){}
+  try{
+    const r = await fetch('/api/settings'); if(!r.ok) return null;
+    const j = await r.json();
+    return {agencyName:(j.optional||{}).agencyName, website:j.website};
+  }catch(e){ return null; }
+}
+
 (async function brand(){
   try{
-    const r = await fetch('/api/settings'); if(!r.ok) return;
-    const j = await r.json();
-    const n = (j && j.optional && j.optional.agencyName || '').trim();
+    const j = await brandPayload(); if(!j) return;
+    const n = (j.agencyName || '').trim();
     if(n){
       const el = document.getElementById('brandName');
       if(el){ const wasUpper = el.textContent === el.textContent.toUpperCase();

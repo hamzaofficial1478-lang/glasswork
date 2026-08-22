@@ -153,7 +153,7 @@ app.post("/api/password", express.json(), (req, res) => {
       return res.status(500).json({ ok: false,
         error: "Could not write the settings file: " + String(err.message || err) });
     }
-    SESSIONS.clear();
+    SESSIONS.clear(); SETUP_TICKETS.clear();
     return res.json({ ok: true, locked: false, note: "Removed. This machine is open again." });
   }
   if (next.trim().length < 8) {
@@ -177,14 +177,127 @@ app.post("/api/password", express.json(), (req, res) => {
       error: "Could not write the settings file: " + String(err.message || err) });
   }
   // Every existing session dies with the old password, including this one.
-  SESSIONS.clear();
+  SESSIONS.clear(); SETUP_TICKETS.clear();
   return res.json({ ok: true, locked: true, signedOut: true,
     note: "Set. You have been signed out — sign in with it now." });
 });
 
 app.post("/api/logout", (req, res) => {
   SESSIONS.delete(cookieToken(req));
+  SETUP_TICKETS.delete(setupToken(req));
   res.json({ ok: true });
+});
+
+/* ---------------------------------------------------------------------------
+   THE SECOND DOOR — SETUP ASKS EVERY TIME
+   ---------------------------------------------------------------------------
+   Signing in gets you into the agency. It does not get you into the room with
+   every API key in it.
+
+   The owner set a password, signed in, clicked Setup and walked straight
+   through — because the front door had already been satisfied and nothing else
+   was asking. That is the wrong shape for this screen: the session is hours
+   long and follows him around the building, while Setup holds the mail
+   password, the site admin token, the Algolia write key and the spend cap. A
+   session is "this is my machine". Opening the key cupboard should be "this is
+   me, now".
+
+   So Setup has its own ticket, and NAVIGATING to Setup consumes it. Unlock,
+   read, change what you came for, leave — come back and it asks again. The
+   ticket lives a few minutes only so the page's own API calls work while you
+   are on it, and it dies with the session and with any password change.
+
+   The API routes below are gated too, not just the page. A lock on the door
+   with the window open is not a lock: /api/settings hands back the ntfy topic
+   and the SMTP user, and /api/providers hands back the model routing. --------- */
+const SETUP_COOKIE = "glasswork_setup";
+const SETUP_TICKETS = new Map();      // token -> { expires, navUsed }
+const SETUP_TTL_MS = 10 * 60 * 1000;  // long enough to finish, short enough to matter
+
+// Everything the Setup screen reads or writes. Prefix match, so
+// /api/providers/credential is covered by /api/providers.
+const SETUP_API = [
+  "/api/settings", "/api/website", "/api/optional", "/api/integration",
+  "/api/providers", "/api/routing", "/api/preflight", "/api/shelves",
+];
+
+function setupToken(req) {
+  const raw = req.headers.cookie || "";
+  for (const part of raw.split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === SETUP_COOKIE) return part.slice(i + 1).trim();
+  }
+  return "";
+}
+
+function setupTicket(req) {
+  const t = SETUP_TICKETS.get(setupToken(req));
+  if (!t) return null;
+  if (Date.now() > t.expires) { SETUP_TICKETS.delete(setupToken(req)); return null; }
+  return t;
+}
+
+function unlockPage(err) {
+  return `<!doctype html><meta charset="utf-8">
+<title>Setup — password required</title>
+<style>
+ body{margin:0;height:100vh;display:grid;place-items:center;background:#0c1216;
+   color:#e7eff3;font-family:system-ui,sans-serif}
+ form{background:#131d23;border:1px solid #25343c;border-radius:14px;padding:28px;width:360px}
+ h1{font-size:16px;margin:0 0 6px} p{font-size:12.5px;color:#7d919c;margin:0 0 18px;line-height:1.6}
+ input{width:100%;padding:11px;border-radius:9px;border:1px solid #3a515b;background:#182530;
+   color:#e7eff3;font-size:14px;box-sizing:border-box}
+ button{width:100%;margin-top:12px;padding:11px;border-radius:9px;border:1px solid #54cbd9;
+   background:rgba(84,203,217,.15);color:#54cbd9;font-weight:600;font-size:14px;cursor:pointer}
+ a{color:#7d919c;font-size:12px;display:block;margin-top:14px;text-align:center}
+ .err{color:#e5565b;font-size:12.5px;margin-top:10px;min-height:16px}
+</style>
+<form method="POST" action="/api/setup/unlock">
+  <h1>&#128274; Setup</h1>
+  <p>This screen holds every API key in the agency, your model routing and your
+     spend cap. Being signed in is not enough &mdash; it asks each time you open it.</p>
+  <input type="password" name="password" placeholder="Your admin password" autofocus required>
+  <button>Open Setup</button>
+  ${err ? `<div class="err">${err}</div>` : ""}
+  <a href="/">&larr; Back to the office</a>
+</form>`;
+}
+
+app.use((req, res, next) => {
+  if (!adminHash()) return next();               // no password set: nothing to ask
+  const isPage = req.method === "GET" &&
+    (req.path === "/setup" || req.path === "/setup.html");
+  const isApi = SETUP_API.some((p) => req.path === p || req.path.startsWith(p + "/"));
+  if (!isPage && !isApi) return next();
+  if (req.path === "/api/setup/unlock") return next();
+
+  const t = setupTicket(req);
+  if (isPage) {
+    // Navigating here CONSUMES the ticket. That is what makes it ask every
+    // time rather than once an hour.
+    if (t && !t.navUsed) { t.navUsed = true; return next(); }
+    // Showing the unlock page means THIS visit is not authorised — so the old
+    // ticket dies here. Without this the page re-locked correctly while the
+    // ticket quietly kept /api/settings open for the rest of its ten minutes,
+    // which is the lock on the door and the window left open again.
+    SETUP_TICKETS.delete(setupToken(req));
+    return res.type("html").send(unlockPage(""));
+  }
+  if (t) return next();
+  return res.status(401).json({ ok: false, needsSetupUnlock: true,
+    error: "Setup is locked. Open the Setup screen and enter your password." });
+});
+
+app.post("/api/setup/unlock", express.urlencoded({ extended: false }), (req, res) => {
+  const supplied = (req.body && req.body.password) || "";
+  if (!passwordOk(supplied)) {
+    return res.status(401).type("html").send(unlockPage("That is not the password."));
+  }
+  const tok = crypto.randomBytes(32).toString("hex");
+  SETUP_TICKETS.set(tok, { expires: Date.now() + SETUP_TTL_MS, navUsed: false });
+  res.setHeader("Set-Cookie",
+    `${SETUP_COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SETUP_TTL_MS / 1000}`);
+  res.redirect("/setup");
 });
 
 // Past the gate, and only past it.
@@ -194,6 +307,43 @@ app.get("/", (_q, r) => r.sendFile(path.join(__dirname, "ui", "office.html")));
 app.get("/control", (_q, r) => r.sendFile(path.join(__dirname, "ui", "agency.html")));
 app.get("/setup", (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
 app.get("/status", (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
+
+/* IS THE RUNNING PROGRAM OLDER THAN THE PAGE READING IT?
+   The screens are files on disk, re-read on every refresh. This file is read
+   ONCE, when the process starts. Pull an update, refresh the browser, and you
+   are looking at a new screen driven by an old server — a form whose route does
+   not exist, a switch whose endpoint 404s. That has now cost the owner three
+   separate afternoons: the password screen said "could not reach the server"
+   about a server that was up, then the sector switches silently did nothing,
+   then the website name he typed never appeared.
+
+   Telling him to restart in a chat message is not a fix; the software has to
+   say it. Every screen calls this on load and shows a banner if the answer is
+   404 (a server too old to have this route at all) or if something it needs is
+   missing from `api`.
+
+   Deliberately cheap: no Python, no database, no .env parsing. It is called on
+   every page load and must never be the slow thing. --------------------------- */
+const API_CAPABILITIES = [
+  "password", "activity", "activity-seen", "activity-clear", "sector", "usage",
+  "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
+  "setup-unlock", "brand", "ping",
+];
+const SERVER_STARTED = Math.floor(Date.now() / 1000);
+app.get("/api/ping", (_q, res) => {
+  res.json({ ok: true, api: API_CAPABILITIES, started: SERVER_STARTED });
+});
+
+/* THE BRAND, AND NOTHING ELSE.
+   The office header needs the agency's name and what the website is called.
+   It used to get those from /api/settings, which also carries the ntfy topic,
+   the SMTP user and the model routing — and /api/settings is behind the setup
+   password now. A front-of-house screen should not be asking for the key
+   cupboard to learn what the firm is called, so it asks for exactly this. */
+app.get("/api/brand", (_q, res) => {
+  res.json({ ok: true, agencyName: (readEnv().AGENCY_NAME || "").trim(),
+             website: siteLabel() });
+});
 
 // STATE — the Control Room's snapshot. Reads the filing cabinet via Python
 // (coordination/state.py), then merges in the .env-derived connections here.
@@ -990,8 +1140,7 @@ app.get("/api/status", (_q, res) => {
     // parsing JSON reads that as "the server is down". The screens check this
     // list before offering a control, so a stale process is named as a stale
     // process. Add the name here when you add a route a screen depends on.
-    api: ["password", "activity", "activity-seen", "sector", "usage",
-          "notify-preview", "chat", "faults", "comms", "sectors"],
+    api: API_CAPABILITIES,
     ok: true, mode,
     providers: { credentials: (ps && ps.credentials) || 0, models: (ps && ps.models) || 0 },
     brains, brainsReady, brainsTotal, checks,

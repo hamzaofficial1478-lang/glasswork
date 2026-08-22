@@ -371,7 +371,11 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
   <div class="foot"><span class="lock">🔒</span><span>Keys are written to the server only (a git-ignored file), shown back masked as <code>****1234</code>, and never committed. Check the <a href="/status">status page</a> to see which provider each part is using.</span></div>
 </main>
 
+<script src="/stale.js"></script>
 <script>
+/* Say so, on screen, when the running server is older than this page. */
+try{ Stale.check(['site-name','setup-unlock']); }catch(e){}
+
 const $ = (s)=>document.querySelector(s);
 const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // Attribute-safe: quotes escaped too, for anything going inside title="...".
@@ -391,6 +395,24 @@ function setBrand(name){
 async function api(method, url, body){
   const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store'});
   let j={}; try{ j=await r.json(); }catch(_){}
+  // The setup ticket runs out after a few minutes, on purpose. When it does,
+  // say so and send him back through the door rather than letting every field
+  // on the screen fail with an unexplained "Request failed (401)".
+  if(r.status===401 && j && j.needsSetupUnlock){
+    if(!window.__setupExpired){
+      window.__setupExpired = true;
+      alert('Setup has locked itself again. You will be asked for your password.');
+      location.href = '/setup';
+    }
+    j.error = 'Setup locked — asking for your password again.';
+    return j;
+  }
+  // A route this server has never heard of is not "request failed", it is a
+  // server older than this page. Name it.
+  if(r.status===404 && j && j.notFound){
+    j.error = 'The running program does not have this yet — restart it and try again.';
+    return j;
+  }
   if(!r.ok && !j.error) j.error = 'Request failed ('+r.status+')';
   return j;
 }

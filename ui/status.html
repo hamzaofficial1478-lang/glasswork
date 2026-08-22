@@ -108,7 +108,11 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
   </div>
 </main>
 
+<script src="/stale.js"></script>
 <script>
+/* Say so, on screen, when the running server is older than this page. */
+try{ Stale.check(['ping']); }catch(e){}
+
 const $ = (s)=>document.querySelector(s);
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 

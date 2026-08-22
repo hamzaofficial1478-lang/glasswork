@@ -13,6 +13,7 @@ the Watcher files tickets and queues changes without ever applying one.
 Everything runs against a throwaway cabinet and local fixture HTML; no real
 site is touched.
 """
+import os
 import sqlite3
 import sys
 import tempfile
@@ -196,9 +197,24 @@ def test_run_files_but_never_fixes():
 
 
 def test_no_site_configured():
-    print("No site configured:")
+    """
+    'No site configured' has to be SIMULATED, not assumed.
+
+    This test used to just pass url="" and trust the machine had no website
+    saved anywhere. That is true on a fresh checkout and false on every machine
+    the agency is actually running on — site_url() falls back to the process
+    environment, then .env, then config/site.json, so as soon as the owner saved
+    his website this test started failing on his copy for no reason connected to
+    the code. Every source is silenced here instead.
+    """
+    from coordination import site as _site
     real = board.DB
     board.DB = _fresh_db()
+    saved_env = os.environ.pop("SITE_URL", None)
+    saved_from_env, saved_load = _site.from_env_file, _site.load
+    _site.from_env_file = lambda: ""
+    _site.load = lambda: {}
+    print("No site configured:")
     try:
         board.post_task("IT", "health baseline", "detail")
         r = it.run(agent="it-watcher", url="")
@@ -209,6 +225,9 @@ def test_no_site_configured():
               con.execute("SELECT count(*) FROM site_issues").fetchone()[0], 0)
         con.close()
     finally:
+        _site.from_env_file, _site.load = saved_from_env, saved_load
+        if saved_env is not None:
+            os.environ["SITE_URL"] = saved_env
         board.DB = real
 
 

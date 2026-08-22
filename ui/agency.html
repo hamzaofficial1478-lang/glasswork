@@ -303,7 +303,11 @@
 
 <footer>The brain plans, it never touches the hands · reading from the filing cabinet · claim, don't grab · append, don't overwrite</footer>
 
+<script src="/stale.js"></script>
 <script>
+/* Say so, on screen, when the running server is older than this page. */
+try{ Stale.check(['password','sectors','activity-seen','faults']); }catch(e){}
+
 /* ---------------------------------------------------------------------------
    STATE. fetchState() reads /api/state (the filing cabinet, through the server).
    If that call fails the screen goes EMPTY and says so — it never falls back to
@@ -433,6 +437,16 @@ function renderRooms(st){
    question he will ask, and the answer should be on the screen rather than in
    his memory. Switching back on needs no explanation. */
 async function toggleSector(key, wasOff){
+  // Refuse before asking him anything. Putting up a prompt, taking his reason
+  // and THEN discovering the route does not exist is how he ended up believing
+  // Content was switched off when nothing had been saved at all.
+  if(Stale.blocked('sectors')){
+    alert('The program running on this machine is older than this screen and has '
+        + 'no sector switches yet.\n\nRestart it (pm2 restart all, or close the '
+        + 'window it is running in and start it again), then try again. Nothing '
+        + 'has been changed.');
+    return;
+  }
   const turningOn = !!wasOff;
   let note='';
   if(!turningOn){
@@ -854,7 +868,10 @@ $('#setupBtn').onclick=async()=>{
       <div class="gh2">Who may open it</div>
       <p style="line-height:1.7;color:var(--muted);margin-top:0">
         ${locked
-          ? `Locked${who?' for <b>'+esc(who)+'</b>':''}. You will be asked for the password.`
+          ? `Locked${who?' for <b>'+esc(who)+'</b>':''}. You are asked for the password `
+            +`<b>every time you open Setup</b>, not once per sign-in &mdash; being `
+            +`signed into the agency gets you into the building, not into the room `
+            +`with the keys in it.`
           : '<b style="color:var(--amber)">Nobody is stopping them.</b> On a machine only you '
             +'use that is a fair trade. The moment this box is shared &mdash; or reachable over '
             +'the network &mdash; a password is the only thing between a passer-by and your keys.'}
