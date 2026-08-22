@@ -65,9 +65,55 @@ def _now():
 # The first two matter most: without them a switched-off sector accumulates a
 # backlog it is forbidden to clear, and then gets marked down for the backlog.
 
+# SECTORS THAT CANNOT BE SWITCHED OFF.
+#
+# These four are not services the agency offers, they are how it runs at all:
+#
+#   Director  plans the day and posts the work. Off, the board never fills and
+#             every other sector correctly refuses to invent work for itself.
+#   IT        holds the only door to production and the only agents that can
+#             change code — including the fix for whatever broke.
+#   Report    scores what happened and marks the MD's decisions. Off, the agency
+#             stops learning and every score freezes where it stands.
+#   Security  screens everything arriving from outside before another agent acts
+#             on it. Off is not "less security", it is scraped text and unchecked
+#             leads reaching agents that trust them.
+#
+# Content, SEO and Leads are the ones with an honest off switch: they are work
+# the owner may not want done this month, and stopping them costs him nothing
+# but that work. Enforced here rather than by hiding the button, because a rule
+# that only exists in the interface is not a rule.
+ESSENTIAL_SECTORS = {"director", "it", "report", "security"}
+
+WHY_ESSENTIAL = {
+    "director": "the MD plans the day and posts the work — with it off the board "
+                "never fills and every other sector has nothing to claim",
+    "it": "IT holds the only door to production and the only agents that can "
+          "change code, including the fix for whatever breaks next",
+    "report": "Report scores the day and marks the MD's decisions worked or "
+              "failed — with it off the agency stops learning",
+    "security": "Security screens everything coming in from outside before "
+                "another agent acts on it; off is not less security, it is "
+                "scraped pages and unchecked leads reaching agents that trust them",
+}
+
+
+def sector_essential(sector) -> bool:
+    return str(sector or "").strip().lower() in ESSENTIAL_SECTORS
+
+
 def sector_enabled(sector) -> bool:
-    """Is this sector allowed to work? Unknown or unset means yes."""
+    """
+    Is this sector allowed to work? Unknown or unset means yes.
+
+    An essential sector is always on, whatever a row says. Belt and braces: if a
+    stale 'off' row for IT ever reached the table — an older build, a hand-edited
+    cabinet, a restore from backup — it would silently disable the only sector
+    that can fix the problem, and nothing would be able to turn it back on.
+    """
     if not sector:
+        return True
+    if sector_essential(sector):
         return True
     with _conn() as c:
         _migrate(c)
@@ -92,11 +138,19 @@ def sector_switches() -> dict:
                               "changed_at": r["changed_at"]} for r in rows}
 
 
+class SectorEssential(Exception):
+    """Raised when something tries to switch off a sector the agency runs on."""
+
+
 def set_sector(sector, enabled, note=""):
     """Turn a sector on or off. Returns the new state."""
     sector = str(sector or "").strip()
     if not sector:
         raise ValueError("which sector?")
+    if not enabled and sector_essential(sector):
+        raise SectorEssential(
+            f"{sector} cannot be switched off — " +
+            WHY_ESSENTIAL.get(sector.lower(), "the agency runs on it") + ".")
     with _conn() as c:
         _migrate(c)
         c.execute("""INSERT INTO sector_switches (sector, enabled, note, changed_at)

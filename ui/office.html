@@ -146,6 +146,33 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   animation:pulse 1s infinite}
 .emp.blocked .head,.emp.pw.blocked .head{border-color:var(--danger);
   box-shadow:0 0 14px rgba(229,86,91,.5)}
+/* SWITCHED OFF: the lights are actually out.
+   Last in the file and heavier than every rule above it on purpose — an agent
+   in a stopped sector must not keep a green lamp because .pw is still on the
+   element, and must not keep blinking because it was mid-run when the owner
+   flipped the switch. Off beats powered, working and blocked. The desks stay on
+   the floor, dimmed: a sector he switched off should look stopped, not deleted. */
+.emp.off .figure{opacity:.3;filter:grayscale(1)}
+.emp.off .antenna{background:#3a474d}
+.emp.off .antenna::after,
+.emp.off.pw .antenna::after,
+.emp.off.working .antenna::after,
+.emp.off.pw.working .antenna::after,
+.emp.off.blocked .antenna::after,
+.emp.off.pw.blocked .antenna::after{background:#2b363b;border-color:#3c4a51;
+  box-shadow:none;animation:none}
+.emp.off .head,.emp.off.pw .head,.emp.off.working .head,
+.emp.off.pw.working .head,.emp.off.blocked .head,.emp.off.pw.blocked .head{
+  border-color:#3c4a51;box-shadow:none}
+.emp.off .monitor .scan{background:#2b363b;animation:none}
+.emp.off .name,.emp.off .role{opacity:.42}
+/* And the room around them, so it reads as stopped at a glance rather than
+   needing you to notice six dark lamps. */
+.room.off{opacity:.66;border-style:dashed}
+.room.off .plaque{color:var(--faint)}
+.room.off .plaque::after{content:' · OFF';color:var(--amber);letter-spacing:.12em;
+  font-size:9px;font-weight:600}
+
 .body{width:34px;height:20px;border-radius:10px 10px 5px 5px;margin:-2px auto 0;background:linear-gradient(180deg,#41565f,#2e3f47);border:1px solid #223038}
 .desk{width:54px;height:14px;border-radius:5px;margin:3px auto 0;position:relative;background:linear-gradient(180deg,#3a4c54,#293840);border:1px solid #1e2a30;box-shadow:0 4px 8px rgba(0,0,0,.3)}
 .monitor{position:absolute;top:-11px;left:50%;transform:translateX(-50%);width:22px;height:14px;border-radius:3px;background:#0e161a;border:1px solid #33484f;overflow:hidden}
@@ -503,10 +530,16 @@ function renderFloor(){
     // can actually reach something. Not the same as busy, and not the same as
     // healthy — a thin or unproven sector still has a working key behind it.
     const powered = !!rd && rd.state !== 'blocked';
-    room.className='room '+rm.cls+(rd?' rd-'+rd.state:'');
+    // A sector the owner switched off is drawn stopped: dimmed room, OFF on the
+    // plaque, and every lamp out. It used to look exactly like a quiet sector,
+    // so the only place his own switch was visible was the control room.
+    const off = rm.enabled === false;
+    room.className='room '+rm.cls+(rd?' rd-'+rd.state:'')+(off?' off':'');
+    if(off) room.title = 'Switched off'+(rm.off_note?' — '+rm.off_note:'')
+      +'. Turn it back on in the full control room.';
     room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
     room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+`<div class="desks">`+
-      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls} ${powered?'pw':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role" title="${escA(a.role)}">${esc(a.role)}</div></div>`).join('')
+      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls} ${powered&&!off?'pw':''} ${off?'off':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role" title="${escA(a.role)}">${esc(a.role)}</div></div>`).join('')
       +`</div>`;
     floor.appendChild(room);
   });
@@ -935,6 +968,12 @@ function applyLive(j){
     if(!live) return;
     rm.score = live.score;
     rm.foot  = live.foot;
+    // The owner's switch, carried onto the floor. Without this the office had
+    // no idea a sector was stopped and drew it exactly like a quiet one — the
+    // switch was only visible in the control room where he had set it.
+    rm.enabled   = live.enabled !== false;
+    rm.essential = !!live.essential;
+    rm.off_note  = live.off_note || '';
     seatLive(rm, live.agents||[]);
   });
   renderRunButton(); renderTicker(); renderActBadge(); renderConns();

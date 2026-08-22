@@ -113,6 +113,10 @@
   .swx.on{background:var(--glass-dim);border-color:var(--glass)}
   .swx.on i{transform:translateX(17px);background:var(--glass)}
   .swx:disabled{opacity:.5;cursor:default}
+  /* No switch at all for the four the agency runs on — a padlock that explains
+     itself on hover, rather than a control that refuses when you press it. */
+  .swlock{font-size:13px;opacity:.42;cursor:help;user-select:none;
+    filter:grayscale(1)}
   /* A stopped room is visibly stopped — dimmed, not hidden. Hiding it would
      make a sector he switched off look like a sector that had disappeared. */
   .room.off{opacity:.62;border-style:dashed}
@@ -397,12 +401,21 @@ function renderRooms(st){
           <!-- The owner's off switch. Stops the sector doing work: the MD cannot
                post to it, nothing on the board can be claimed by it, and its
                step in the day is skipped. It keeps its agents and its history.
-               stopPropagation, or flipping the switch also opens the room. -->
-          <button class="swx ${rm.enabled===false?'':'on'}" data-sw="${escA(rm.key)}"
+               stopPropagation, or flipping the switch also opens the room.
+
+               Four sectors have no switch at all. Director, IT, Report and
+               Security are not services the agency offers, they are how it runs
+               — the MD fills the board, IT holds the only door to production
+               and the only agents that can fix code, Report is how it learns,
+               and Security screens everything arriving from outside. A padlock
+               that says why beats a switch that refuses when pressed. -->
+          ${rm.essential
+            ? `<span class="swlock" title="${escA(rm.why_essential||'')}">&#128274;</span>`
+            : `<button class="swx ${rm.enabled===false?'':'on'}" data-sw="${escA(rm.key)}"
                   onclick="event.stopPropagation();toggleSector('${escA(rm.key)}',${rm.enabled===false})"
                   title="${rm.enabled===false?'Switched off — turn '+escA(rm.name)+' back on'
                                              :'Working — switch '+escA(rm.name)+' off'}"
-                  aria-label="${rm.enabled===false?'Turn on':'Turn off'} ${escA(rm.name)}"><i></i></button>
+                  aria-label="${rm.enabled===false?'Turn on':'Turn off'} ${escA(rm.name)}"><i></i></button>`}
           ${ring(rm.score)}
         </div>
       </div>

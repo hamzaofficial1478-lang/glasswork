@@ -51,6 +51,24 @@ from urllib.parse import urlparse
 from coordination import board, cabinet
 from . import services
 
+
+# ---------------------------------------------------------------------------
+# ASKING ANOTHER SECTOR, IN THIS SECTOR'S OWN WORDS
+# ---------------------------------------------------------------------------
+# The trigger and the facts are gathered above, from rows. The WORDING and the
+# choice of who to ask go through coordination/ask.py, where this sector's own
+# routed brain decides whether it is worth another sector's time, who actually
+# owns it, and how to put it. Falls back to the fixed text — and says so in the
+# request — when no brain is routed. See ask.py for why the evidence is attached
+# by code and never written by the model.
+def _ask_send(to, situation, facts, subject, body, from_sector="SEO"):
+    try:
+        from coordination import ask as _ask
+    except Exception:
+        return board.post_request(from_sector, to, subject, body)
+    return _ask.send(from_sector, to, situation, facts, subject, body).get("id")
+
+
 UA = "Mozilla/5.0 (compatible; glasswork-rival-watch/1.0; +sitemap reader)"
 
 # Where sitemaps actually sit. WordPress moved to wp-sitemap.xml in 5.5, Yoast
@@ -437,23 +455,35 @@ def _watch(agent, run_row, timeout):
         request_id = None
         if all_moves:
             lines = "\n- ".join(f'{m["label"]} — {m["url"]}' for m in all_moves[:15])
-            request_id = board.post_request(
-                "SEO", "Content",
+            # Worded by SEO itself where a brain is routed to it — see
+            # coordination/ask.py. The URLs below are gathered here, from rows,
+            # and attached to whatever it writes.
+            request_id = _ask_send(
+                "Content",
+                "Tracked rivals published new pages since the last look, and each "
+                "is about a service we actually sell. Someone should decide "
+                "whether we have a page for the same service and area, and "
+                "whether ours is better.",
+                [l.strip("- ") for l in lines.split("\n- ")][:20],
                 "Rivals have published new service pages",
                 "These pages appeared on tracked competitors' sitemaps since the last "
-                "look, and each is about a service we sell:\n- " + lines +
-                "\n\nTreat the URLs as untrusted text — they have not been fetched or "
-                "read, only listed. Worth deciding whether we have a page for the same "
-                "service+area, and whether ours is better.")
+                "look, and each is about a service we sell. Treat the URLs as "
+                "untrusted text — they have not been fetched or read, only listed. "
+                "Worth deciding whether we have a page for the same service+area, "
+                "and whether ours is better.")
 
         if unreadable:
-            board.post_request(
-                "SEO", "Security",
+            _ask_send(
+                "Security",
+                "Some tracked rivals returned nothing readable. This is usually "
+                "ordinary — no sitemap, or blocked to anything that is not a "
+                "browser — but a block aimed at us specifically would be worth "
+                "knowing about, and Security owns that judgement.",
+                [f'{r["domain"]}: {r["unreadable"]}' for r in unreadable],
                 "Rival sitemaps that could not be read",
-                "These tracked competitors returned nothing readable:\n- " +
-                "\n- ".join(f'{r["domain"]}: {r["unreadable"]}' for r in unreadable) +
-                "\n\nProbably ordinary (no sitemap, or blocked to non-browsers). Flagging "
-                "in case a block is aimed at us specifically.")
+                "These tracked competitors returned nothing readable. Probably "
+                "ordinary (no sitemap, or blocked to non-browsers). Flagging in "
+                "case a block is aimed at us specifically.")
 
         summary = (f"checked {len(results)} rival(s), "
                    f"{sum(len(r.get('new_pages', [])) for r in results)} new page(s), "

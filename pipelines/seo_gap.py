@@ -30,6 +30,24 @@ import urllib.request
 from coordination import cabinet, board
 from providers import store
 
+
+# ---------------------------------------------------------------------------
+# ASKING ANOTHER SECTOR, IN THIS SECTOR'S OWN WORDS
+# ---------------------------------------------------------------------------
+# The trigger and the facts are gathered above, from rows. The WORDING and the
+# choice of who to ask go through coordination/ask.py, where this sector's own
+# routed brain decides whether it is worth another sector's time, who actually
+# owns it, and how to put it. Falls back to the fixed text — and says so in the
+# request — when no brain is routed. See ask.py for why the evidence is attached
+# by code and never written by the model.
+def _ask_send(to, situation, facts, subject, body, from_sector="SEO"):
+    try:
+        from coordination import ask as _ask
+    except Exception:
+        return board.post_request(from_sector, to, subject, body)
+    return _ask.send(from_sector, to, situation, facts, subject, body).get("id")
+
+
 # the business's real service + area taxonomy (this is the grounding evidence)
 SERVICES = ["glass work", "glass partition", "glass railing", "glass balustrade",
             "shower glass", "glass door", "aluminium windows", "aluminium doors",
@@ -175,7 +193,15 @@ def _gap(agent, max_seeds, cost_ceiling):
         body = (f"Keyword-gap list for UAE glass & aluminium — {len(top)} new in-scope "
                 f"phrases not yet tracked (source: {source}). Top buying-intent gaps:\n- "
                 + "\n- ".join(buy or [g["phrase"] for g in top[:12]]))
-        rid = board.post_request("SEO", "Content", "Keyword-gap list ready", body)
+        # SEO words this itself where it has a brain — coordination/ask.py. The
+        # gap list is gathered here, from rows, and attached underneath.
+        rid = _ask_send(
+            "Content",
+            f"{len(top)} service-and-area searches came back that nothing on our "
+            "site targets yet. Content decides what gets written, so the list is "
+            "theirs to judge — some of these will not be worth a page.",
+            [str(t.get("phrase", t)) for t in top][:20],
+            "Keyword-gap list ready", body)
         did = board.log_decision(
             "seo-gap",
             reasoning=(f"Pulled {len(fetched)} real suggestions from {source} across "

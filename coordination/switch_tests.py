@@ -110,15 +110,22 @@ def test_work_already_on_the_board_cannot_be_claimed():
 
 
 def test_the_overseer_can_still_file_against_a_stopped_sector():
+    """
+    This used to switch IT off to make its point. IT is essential now and cannot
+    be switched off at all, so the test says the same thing with a sector that
+    genuinely can be: a fault ticket is ABOUT a sector, not work FOR it, and it
+    has to be filed even when that sector is stopped — otherwise switching a
+    sector off would also switch off the agency's ability to notice it broke.
+    """
     print("\nA fault ticket is ABOUT a sector, not work for it:")
     with _Cabinet() as cab:
-        board.set_sector("IT", False)
-        tid = board.post_task("IT", "Fix: seo-strategist stalled", "d",
+        board.set_sector("Content", False, "paused")
+        tid = board.post_task("Content", "Fix: content-writer stalled", "d",
                               created_by="Overseer", force=True)
         check("the Overseer's ticket is still filed", bool(tid), True)
         # ...but ordinary work still is not.
         try:
-            board.post_task("IT", "Ordinary IT job", "d")
+            board.post_task("Content", "Ordinary content job", "d")
             check("ordinary work is still refused", "allowed", "refused")
         except board.SectorOff:
             check("ordinary work is still refused", True, True)
@@ -183,6 +190,92 @@ def test_the_day_skips_a_stopped_sector():
         check("Content's step is skipped", "Content" in skipped, True)
         check("and nothing else is", set(skipped), {"Content"})
         check("the rest of the day still runs", "SEO" in ran and "IT" in ran, True)
+
+
+def test_the_four_the_agency_runs_on_cannot_be_switched_off():
+    print("\nFour sectors have no off switch, because the agency runs on them:")
+    with _Cabinet():
+        for key in ("Director", "IT", "Report", "Security"):
+            try:
+                board.set_sector(key, False, "trying it on")
+                check(f"{key} is refused", "it was allowed", "refused")
+            except board.SectorEssential as e:
+                check(f"{key} is refused", key in str(e), True)
+                check(f"  and says why {key} matters", len(str(e)) > 40, True)
+            check(f"  {key} is still working", board.sector_enabled(key), True)
+
+        for key in ("Content", "SEO", "Leads"):
+            board.set_sector(key, False)
+            check(f"{key} CAN be switched off", board.sector_enabled(key), False)
+            board.set_sector(key, True)
+
+
+def test_an_essential_sector_stays_on_even_if_the_row_says_otherwise():
+    """
+    Belt and braces. A stale 'off' row for IT — an older build, a hand-edited
+    cabinet, a restore from a backup taken mid-experiment — would disable the
+    one sector that can fix the problem, and nothing would be able to turn it
+    back on. The code decides, not the row.
+    """
+    print("\nA stale 'off' row cannot disable an essential sector:")
+    with _Cabinet() as cab:
+        c = sqlite3.connect(board.DB)
+        c.execute("INSERT INTO sector_switches (sector, enabled, note, changed_at)"
+                  " VALUES ('IT', 0, 'planted by hand', 0)")
+        c.commit(); c.close()
+        check("the row really is there",
+              cab.sql("SELECT enabled FROM sector_switches WHERE sector='IT'")[0]["enabled"], 0)
+        check("but IT still works", board.sector_enabled("IT"), True)
+        check("and can still be given work", bool(board.post_task("IT", "fix it", "d")), True)
+
+
+def test_a_stopped_sector_is_marked_off_for_the_screens():
+    print("\nEvery screen is told, so the office floor can put the lights out:")
+    with _Cabinet():
+        # Real runs first, or the rooms come back with no desks at all and the
+        # assertions below pass vacuously against empty lists.
+        now = int(time.time())
+        c = sqlite3.connect(board.DB)
+        for agent, sector in (("content-writer", "Content"), ("seo-strategist", "SEO")):
+            c.execute("INSERT INTO agent_runs(agent,started_at,ended_at,status,note)"
+                      " VALUES(?,?,?, 'ok','did a thing')", (agent, now - 300, now - 240))
+        c.commit(); c.close()
+
+        board.set_sector("Content", False, "rewriting the service pages myself")
+        rooms = {r["key"]: r for r in st.build()["rooms"]}
+        check("the stopped room really has desks to mark",
+              len(rooms["Content"]["agents"]) > 0, True)
+        check("the room says it is off", rooms["Content"]["enabled"], False)
+        check("with the owner's own reason", rooms["Content"]["off_note"],
+              "rewriting the service pages myself")
+        check("and every desk in it reads 'off', not idle",
+              sorted({a["s"] for a in rooms["Content"]["agents"]}), ["off"])
+        check("no other room is touched",
+              all(rooms[k]["enabled"] for k in rooms if k != "Content"), True)
+        check("and their desks are not marked off",
+              any(a["s"] != "off" for k in rooms if k != "Content"
+                  for a in rooms[k]["agents"]), True)
+        check("essential rooms are flagged so no switch is drawn for them",
+              sorted(k for k, r in rooms.items() if r["essential"]),
+              ["Director", "IT", "Report", "Security"])
+
+
+def test_nothing_can_claim_work_for_a_stopped_sector():
+    """
+    Not just the tidy route. An agent reaching past next_open_task and claiming
+    by id must be refused too, or the switch is a suggestion.
+    """
+    print("\nEvery route to picking work up is closed, not just the tidy one:")
+    with _Cabinet() as cab:
+        tid = board.post_task("Leads", "Mail the cleared firms", "d")
+        board.set_sector("Leads", False)
+        check("next_open_task finds nothing",
+              board.next_open_task("Leads", "leads-outreach"), None)
+        check("claiming by id is refused too",
+              board.claim_task(tid, "leads-hunter"), False)
+        check("and the job is still there, untouched, for when he turns it back on",
+              cab.sql("SELECT status,owner FROM tasks WHERE id=?", (tid,))[0],
+              {"status": "open", "owner": None})
 
 
 def test_turning_it_back_on_changes_nothing_else():
@@ -309,6 +402,10 @@ def main():
               test_try_post_returns_none_instead_of_raising,
               test_a_stopped_sector_is_not_scored_as_failing,
               test_the_day_skips_a_stopped_sector,
+              test_the_four_the_agency_runs_on_cannot_be_switched_off,
+              test_an_essential_sector_stays_on_even_if_the_row_says_otherwise,
+              test_a_stopped_sector_is_marked_off_for_the_screens,
+              test_nothing_can_claim_work_for_a_stopped_sector,
               test_turning_it_back_on_changes_nothing_else):
         t()
     print()

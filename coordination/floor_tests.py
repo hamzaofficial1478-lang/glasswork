@@ -238,7 +238,14 @@ def test_a_desk_label_says_the_whole_job():
     check("with the whole thing on hover", 'title="${escA(a.role)}"' in html, True)
     # Kept to ONE line deliberately: a second line adds ~10px per desk row and
     # the SEO room, at five desks, has 8px of slack. See the room-capacity test.
-    css = html[html.index(".role{"):html.index(".role{") + 200]
+    #
+    # Anchored to the START of the rule, not to the substring '.role{'. A later
+    # rule for switched-off desks — '.emp.off .name,.emp.off .role{' — contains
+    # those six characters too, so a plain index() found the wrong block and
+    # reported the ellipsis missing when it was there all along.
+    m = re.search(r"(?:^|\})\s*\.role\{([^}]*)\}", html, re.M)
+    check("the .role rule is found at all", bool(m), True)
+    css = m.group(1) if m else ""
     check("it stays on one line, cut with an ellipsis",
           "nowrap" in css and "ellipsis" in css, True)
     roles = re.findall(r'role:"([^"]+)"', html)

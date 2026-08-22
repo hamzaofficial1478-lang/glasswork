@@ -501,12 +501,21 @@ def build():
         score, why = _health(c, key, match, day0, now)
         word, meaning = band(score)
         sw = switches.get(key, {})
+        on = board.sector_enabled(key)
         rooms.append({"key": key, "name": name, "score": score, "foot": foot,
                       "why": why, "band": word, "band_means": meaning,
-                      "sec": sec, "agents": agents,
+                      "sec": sec,
+                      # A stopped sector's desks are not idle, waiting or
+                      # blocked — they are off. Every screen reads this, so the
+                      # office floor and the control room cannot disagree about
+                      # whether a room is working.
+                      "agents": ([{**a, "s": "off", "t": "switched off"} for a in agents]
+                                 if not on else agents),
                       # The owner's switch, so every screen can draw the room as
                       # deliberately stopped rather than mysteriously idle.
-                      "enabled": bool(sw.get("enabled", True)),
+                      "enabled": on,
+                      "essential": board.sector_essential(key),
+                      "why_essential": board.WHY_ESSENTIAL.get(key.lower(), ""),
                       "off_note": sw.get("note", "")})
 
     # ---- header metrics ----
@@ -774,14 +783,21 @@ if __name__ == "__main__":
             print(json.dumps({"ok": False, "error": f"no sector called {name!r}",
                               "sectors": [r[0] for r in SECTORS]}))
         else:
-            board.set_sector(key, on, note)
-            print(json.dumps({"ok": True, "sector": key, "enabled": on, "note": note}))
+            try:
+                board.set_sector(key, on, note)
+                print(json.dumps({"ok": True, "sector": key, "enabled": on,
+                                  "note": note}))
+            except board.SectorEssential as e:
+                print(json.dumps({"ok": False, "sector": key, "essential": True,
+                                  "error": str(e)}))
     elif "--switches" in sys.argv:
-        known = {r[0]: True for r in SECTORS}
-        known.update({k: v["enabled"] for k, v in board.sector_switches().items()})
+        sw = board.sector_switches()
         print(json.dumps({"ok": True, "sectors": [
-            {"key": r[0], "name": r[1], "enabled": known.get(r[0], True),
-             "note": board.sector_switches().get(r[0], {}).get("note", "")}
+            {"key": r[0], "name": r[1],
+             "enabled": board.sector_enabled(r[0]),
+             "essential": board.sector_essential(r[0]),
+             "why_essential": board.WHY_ESSENTIAL.get(r[0].lower(), ""),
+             "note": sw.get(r[0], {}).get("note", "")}
             for r in SECTORS]}))
     elif "--sector" in sys.argv:
         print(json.dumps(sector_detail(sys.argv[sys.argv.index("--sector") + 1])))

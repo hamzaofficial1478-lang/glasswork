@@ -64,6 +64,24 @@ try:
 except ImportError:  # pragma: no cover
     import fetcher, services, site_services
 
+
+# ---------------------------------------------------------------------------
+# ASKING ANOTHER SECTOR, IN THIS SECTOR'S OWN WORDS
+# ---------------------------------------------------------------------------
+# The trigger and the facts are gathered above, from rows. The WORDING and the
+# choice of who to ask go through coordination/ask.py, where this sector's own
+# routed brain decides whether it is worth another sector's time, who actually
+# owns it, and how to put it. Falls back to the fixed text — and says so in the
+# request — when no brain is routed. See ask.py for why the evidence is attached
+# by code and never written by the model.
+def _ask_send(to, situation, facts, subject, body, from_sector="SEO"):
+    try:
+        from coordination import ask as _ask
+    except Exception:
+        return board.post_request(from_sector, to, subject, body)
+    return _ask.send(from_sector, to, situation, facts, subject, body).get("id")
+
+
 AGENT = "seo-answers"
 
 # ---------------------------------------------------------------------------
@@ -994,8 +1012,12 @@ def _work(agent, url, max_pages) -> dict:
             tail = ("\n\nNothing here is a ranking theory: these are the structural "
                     "things an answer box and a model look for, and every one is "
                     "checkable on the page afterwards.")
-            result[f"asked_{sector.lower()}"] = board.post_request(
-                "SEO", sector, f"AEO/GEO fixes for {sector}", head + body + tail)
+            result[f"asked_{sector.lower()}"] = _ask_send(
+                sector,
+                f"The answer audit found things on our own pages that stop us "
+                f"being picked as the answer, and {sector} owns the fixes.",
+                [ln.strip("- ") for ln in body.split("\n") if ln.strip().startswith("-")][:20],
+                f"AEO/GEO fixes for {sector}", head + body + tail)
 
         if robots.get("blocked"):
             board.queue_site_change(

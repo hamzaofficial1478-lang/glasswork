@@ -760,23 +760,48 @@ def ask_for_help(con, built, top) -> list:
     and they were silently dropped from the research, rivals were never read and
     nobody was told the signal was missing.
 
-    Each one below is a real dependency on another sector, addressed to the
-    sector that owns it, with the evidence attached. Nothing is invented: it
-    only asks when the cabinet shows it actually needs the answer.
+    Each one below is a real dependency on another sector, with the evidence
+    attached. Nothing is invented: it only asks when the cabinet shows it
+    actually needs the answer.
+
+    WHAT CHANGED, AND WHY. The trigger and the facts were always real, but the
+    wording and the choice of who to ask were fixed text written months ago —
+    the agent filled in a form. Each one now goes through coordination/ask.py:
+    SEO's own brain is shown the situation and decides whether it is worth
+    another sector's time, which sector actually owns it, and how to put it. The
+    facts below are still gathered here, from rows, and attached to whatever it
+    writes; a model may reason, it may not supply evidence. With no brain routed
+    to SEO the original wording is used and the request says so.
     """
     asked = []
+    try:
+        from coordination import ask as _ask
+    except Exception:
+        _ask = None
+
+    def _send(to, situation, facts, subject, body):
+        if _ask is None:
+            return board.post_request("SEO", to, subject, body)
+        r = _ask.send("SEO", to, situation, facts, subject, body)
+        return r.get("id")
 
     # 1. Search Console is IT's door — it is a property and a service account,
     #    not a keyword question, and SEO cannot fix either.
     why = built.get("gsc_why") or ""
     if why and not built.get("gsc_rows"):
-        asked.append(board.post_request(
-            "SEO", "IT", "Search Console is not answering, and it is our best source",
+        asked.append(_send(
+            "IT",
+            "Search Console returned nothing this pass, so the keyword work ran "
+            "without the only source that knows which searches already reach us. "
+            "It is a property and a service account, which SEO cannot fix.",
+            [f"Google's exact words: {why}",
+             f"striking-distance queries available this pass: "
+             f"{built.get('gsc_rows') or 0}"],
+            "Search Console is not answering, and it is our best source",
             "The keyword pass ran without the one source that knows which searches "
-            "already reach us. Google said, verbatim:\n\n    " + why + "\n\n"
-            "Until this works there is no striking-distance list — the queries we "
-            "rank 5th to 20th for, which are the cheapest traffic available. "
-            "Everything else in the pass carried on and is on file."))
+            "already reach us. Until this works there is no striking-distance list "
+            "— the queries we rank 5th to 20th for, which are the cheapest traffic "
+            "available. Everything else in the pass carried on and is on file."))
 
     # 2. Things the SITE sells that the catalogue has never heard of. Content
     #    owns the service list; SEO must not quietly widen it on its own.
@@ -786,15 +811,19 @@ def ask_for_help(con, built, top) -> list:
     except sqlite3.Error:
         unknown = []
     if unknown:
-        asked.append(board.post_request(
-            "SEO", "Content", f"{len(unknown)} thing(s) on our site are not in the "
-            f"service catalogue",
+        asked.append(_send(
+            "Content",
+            f"{len(unknown)} thing(s) appear on our own website but have no entry "
+            "in the service catalogue, so nothing targets them and nothing is "
+            "written about them. Content owns the service list; SEO must not "
+            "widen it on its own.",
+            [f"found on the site, not in the catalogue: {u}" for u in unknown[:20]],
+            f"{len(unknown)} thing(s) on our site are not in the service catalogue",
             "These appear on our own website but the agency has no service entry "
-            "for them, so nothing targets them and nothing writes about them:\n- "
-            + "\n- ".join(unknown[:20])
-            + "\n\nIf they are real services, catalogue them and they join the "
-              "research automatically. If they are not, say so and I will stop "
-              "reading them off the site."))
+            "for them, so nothing targets them and nothing writes about them. If "
+            "they are real services, catalogue them and they join the research "
+            "automatically. If they are not, say so and I will stop reading them "
+            "off the site."))
 
     # 3. No rival signal at all. Knowing what competitors keep a page for is one
     #    of the four things this ranks on, and it comes from the rival watch.
@@ -814,8 +843,15 @@ def ask_for_help(con, built, top) -> list:
     # 4. Nothing from his own enquiries. That is the one source no competitor
     #    has, and it is empty until Leads has replies on file.
     if top and not built.get("from_enquiries"):
-        asked.append(board.post_request(
-            "SEO", "Leads", "No customer wording on file yet",
+        asked.append(_send(
+            "Leads",
+            "The keyword ranking uses the words real customers write to us, which "
+            "is the one signal no competitor can copy. There are no replies on "
+            "file, so that part of the ranking is idle. This may simply be where "
+            "the business is, in which case it is not worth anyone's time.",
+            [f"replies on file to read: 0",
+             f"phrases shortlisted without any customer wording: {len(top)}"],
+            "No customer wording on file yet",
             "The strongest signal we have that nobody else can copy is the words "
             "customers use when they write in. There are no replies in the cabinet "
             "to read, so that part of the ranking is idle. Once outreach starts "
