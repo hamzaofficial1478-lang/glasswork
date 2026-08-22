@@ -340,6 +340,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   </div>
   <button class="htab on">Office</button>
   <button class="htab" onclick="openActivity()">Activity <span id="actBadge"></span></button>
+  <button class="htab" onclick="openComms()">Sector traffic <span id="commBadge"></span></button>
   <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
   <button class="htab" onclick="openPanel('connPanel')">Connections</button>
   <div class="spacer"></div>
@@ -380,6 +381,17 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   <h2><span>Activity <small id="actHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
       <button class="x" onclick="closeAll()">×</button></h2>
   <div class="pgroup" id="actBody"></div>
+</div>
+
+<!-- SECTOR TRAFFIC. One sector asking another for something, and what came
+     back. These are the same rows the beams on the floor are drawn from, and
+     the same rows the handbook makes the sectors use — there is no second
+     channel, because a second channel is how two agents end up answering the
+     same question. Read-only: replying happens in the work, not here. -->
+<div class="panel wide full" id="commPanel">
+  <h2><span>Sector traffic <small id="commHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <button class="x" onclick="closeAll()">×</button></h2>
+  <div class="pgroup" id="commBody"></div>
 </div>
 
 <!-- THE RUN BUTTON. Three beats: check everything, take the owner's orders,
@@ -588,19 +600,43 @@ function drawLinks(){
     });
   });
 }
-const COMMS=[
-  {a:"Leads",b:"Security",label:"verify lead?",type:"amber"},
-  {a:"Security",b:"Leads",label:"✓ cleared",type:"glass"},
-  {a:"Content",b:"SEO",label:"keyword worth it?",type:"glass"},
-  {a:"SEO",b:"IT",label:"change page",type:"glass"},
-  {a:"IT",b:"Report",label:"fix logged",type:"glass"},
-  {a:"Content",b:"Security",label:"scraped — check",type:"amber"},
-  {a:"Report",b:"Director",label:"scores in",type:"glass"},
-  {a:"Leads",b:"Director",label:"hot reply",type:"amber"}
-];
+/* ---- WHAT THE SECTORS ARE ACTUALLY SAYING ---------------------------------
+   These beams used to be eight hardcoded strings — "verify lead?", "✓ cleared"
+   — fired at random every couple of seconds. They looked exactly like the
+   agency working, and they fired identically on a morning when nothing had run
+   at all. That is worse than an empty floor: it told the owner his agency was
+   busy when it was asleep.
+
+   Every beam now is one row on the real request board (coordination/comms.py →
+   the requests table). The label is the actual subject, the colour is the
+   actual state, and if no sector has spoken to another the floor is quiet. The
+   quiet is information. ------------------------------------------------- */
+let COMMS=[], COMM_I=0, COMM_SEEN='';
+
+async function pullComms(){
+  try{
+    const j=await (await fetch('/api/comms')).json();
+    if(!j||!j.ok) return;
+    COMMS=(j.beams||[]).map(b=>({
+      a:b.from_room, b:b.to_room,
+      label:b.label, type:(b.tone==='amber'?'amber':'glass'), id:b.id,
+      subject:b.subject, from:b.from, to:b.to}));
+    // Restart the rotation when the traffic itself changes, so a new exchange
+    // is shown promptly rather than queued behind a cycle of older ones.
+    const sig=COMMS.map(c=>c.id).join(',');
+    if(sig!==COMM_SEEN){ COMM_SEEN=sig; COMM_I=0; }
+    COMM_HEAD=j.head||''; COMM_THREADS=j.threads||[];
+    const t=$('#commHead'); if(t) t.textContent=j.head||'';
+    if($('#commPanel') && $('#commPanel').classList.contains('open')) renderComms();
+  }catch(e){}
+}
+let COMM_HEAD='', COMM_THREADS=[];
+
 function fireComm(){
-  const c=COMMS[Math.floor(Math.random()*COMMS.length)];
+  if(!COMMS.length) return;      // nothing has been said: draw nothing
+  const c=COMMS[COMM_I % COMMS.length]; COMM_I++;
   const A=LAYOUT[c.a],B=LAYOUT[c.b];
+  if(!A||!B) return;
   const pa=edgePoint(A,B.x+B.w/2,B.y+B.h/2), pb=edgePoint(B,A.x+A.w/2,A.y+A.h/2);
   const col=c.type==='amber'?'var(--amber)':'var(--glass)';
   const svg=$('#links');
@@ -893,12 +929,14 @@ function shelfSummary(j){
 async function openActivity(){
   openPanel('actPanel');
   renderActivity();                       // paint what we have, instantly
-  if(!ACT) await paintActBadge();         // then make sure it is current
+  // Always re-read on open, not just when there is nothing cached. The old
+  // version reused a poll from up to a refresh ago and marked THAT moment as
+  // read, so everything since stayed unread and the badge came straight back —
+  // which is what "I opened it and it still says 23" was.
+  const j = await paintActBadge();
   renderActivity();
-  // Opening IS reading. The owner asked for the count to clear when the tab is
-  // opened rather than needing a separate button, which is how every unread
-  // badge he already uses behaves.
-  if(ACT){ actMarkSeen(ACT.at); const b=$('#actBadge'); if(b) b.innerHTML=''; }
+  // Opening IS reading, and it clears whether or not the network cooperates.
+  actMarkSeen((j && (j.newest_at || j.at)) || (ACT && (ACT.newest_at || ACT.at)) || 0);
 }
 
 function renderActivity(){
@@ -943,23 +981,95 @@ function renderActBadge(){
   paintActBadge();
 }
 
-const ACT_SEEN='wdta_activity_seen';
-function actSeen(){ try{ return parseInt(localStorage.getItem(ACT_SEEN)||'0',10)||0; }catch(e){ return 0; } }
-function actMarkSeen(ts){ try{ localStorage.setItem(ACT_SEEN,String(ts)); }catch(e){} }
-
+/* WHERE THE READ MARK LIVES. It was localStorage, and localStorage is keyed by
+   ORIGIN — this office on localhost and the control room on 127.0.0.1 kept two
+   separate marks, so clearing one left the other showing the same stubborn
+   number. It is in the cabinet now: one owner, one agency, one mark, and the
+   server is the one deciding what is unread. */
 let ACT=null;   // the last full read, so the panel and the badge cannot disagree
 
-async function paintActBadge(){
+function drawActBadge(n){
   const b=$('#actBadge'); if(!b) return;
+  b.innerHTML = n>0
+    ? `<span style="background:var(--danger);color:#fff;border-radius:999px;
+        padding:1px 6px;font-size:10.5px;font-weight:700">${n>99?'99+':n}</span>`
+    : '';
+}
+
+async function paintActBadge(){
+  if(!$('#actBadge')) return null;
   try{
-    const j=await (await fetch('/api/activity?since='+actSeen())).json();
-    if(!j||!j.ok) return;
+    const j=await (await fetch('/api/activity')).json();
+    if(!j||!j.ok) return null;
     ACT=j;
-    b.innerHTML = j.unread>0
-      ? `<span style="background:var(--danger);color:#fff;border-radius:999px;
-          padding:1px 6px;font-size:10.5px;font-weight:700">${j.unread>99?'99+':j.unread}</span>`
-      : '';
+    drawActBadge(j.unread||0);
+    return j;
+  }catch(e){ return null; }
+}
+
+// Clear it here and now, then tell the agency. A read that only counts if a
+// POST succeeds is a read that sometimes silently does not happen.
+function actMarkSeen(ts){
+  drawActBadge(0);
+  if(ACT) ACT.unread=0;
+  try{
+    fetch('/api/activity/seen',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({seen_to: ts||0})});
   }catch(e){}
+}
+
+/* ---- READING THE TRAFFIC ---------------------------------------------------
+   The floor shows that two sectors spoke. This shows what they said. Both read
+   the same rows, so the beam and the thread can never tell different stories. */
+async function openComms(){
+  openPanel('commPanel');
+  renderComms();
+  await pullComms();
+  renderComms();
+}
+
+function renderComms(){
+  const T=COMM_THREADS||[];
+  $('#commHead').textContent = COMM_HEAD ? '· '+COMM_HEAD : '';
+  if(!T.length){
+    $('#commBody').innerHTML =
+      `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
+      + `No sector has asked another for anything yet. This fills in on its own: `
+      + `Leads asks Security to clear a lead before anyone contacts it, Content `
+      + `asks SEO whether a keyword is worth writing for, and anything wanting a `
+      + `change to the live site asks IT. Press <b>Run the day</b> and they will `
+      + `start talking.</p>`;
+    return;
+  }
+  // Deliberately NOT the .act class — that is a fixed-column flex row built for
+  // one-line events, and a conversation folded into its 38px time column comes
+  // out as a vertical stack of single letters. This has its own layout.
+  const tone = t => t.tone==='amber' ? 'var(--amber)'
+                  : t.tone==='live'  ? 'var(--glass)' : 'var(--muted)';
+  const state = t => t.state==='closed' ? 'closed'
+                   : t.state==='answered' ? 'answered'
+                   : t.waited>10800 ? 'waiting '+t.ago : t.state;
+  $('#commBody').innerHTML = T.map(t=>`
+    <div style="border-left:2px solid ${tone(t)};padding:2px 0 10px 12px;margin-bottom:16px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+        <b style="font-size:13px;font-weight:600">${esc(t.from)} &rarr; ${esc(t.to)}</b>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+              letter-spacing:.08em;text-transform:uppercase;color:${tone(t)}">
+          ${esc(state(t))}</span>
+        <span style="font-size:10.5px;color:var(--faint)">${esc(t.ago)}${
+          t.handler?' · '+esc(t.handler):''}</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${esc(t.subject)}</div>
+      ${(t.messages||[]).map(m=>`
+        <div style="margin-top:9px;font-size:12px;line-height:1.6">
+          <span style="font-weight:600">${esc(m.author)}</span>
+          <span style="color:var(--faint);font-size:10px;font-family:'IBM Plex Mono',monospace">
+            ${esc(m.hhmm)}</span>
+          <div style="white-space:pre-wrap;color:var(--ink);margin-top:1px">${
+            esc((m.body||'').slice(0,1200))}</div>
+        </div>`).join('')}
+    </div>`).join('');
 }
 
 /* The bottom strip: one line, only while something is actually happening. A
@@ -1221,6 +1331,9 @@ function schedulePoll(){
 }
 schedulePoll();
 renderSiteMenu();renderConns();boot();
+// The beams are real rows now, so they have to be fetched. Slower than the
+// animation: the traffic changes when a pipeline runs, not every two seconds.
+pullComms(); setInterval(pullComms, 30000);
 setInterval(fireComm,2200);
 setInterval(()=>{const d=new Date();$('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');},1000);
 document.addEventListener('click',e=>{if(!e.target.closest('.site-switch'))$('#siteMenu').classList.remove('open');});

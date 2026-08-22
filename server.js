@@ -35,8 +35,8 @@ app.use(express.json());
    server already listens on this computer alone, so a forced login on a laptop
    he is signed into is a nuisance that teaches him to click through prompts.
    It earns its keep the moment he shares the machine or opens BIND_HOST — and
-   then it is the only thing between a passer-by and his API keys. Set it with
-   `python backend.py --password`.
+   then it is the only thing between a passer-by and his API keys. It is set on
+   the Setup screen, which posts to /api/password below.
 --------------------------------------------------------------------------- */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -148,7 +148,11 @@ app.post("/api/password", express.json(), (req, res) => {
   const next = String(b.password || "");
   if (b.clear) {
     if (!current) return res.json({ ok: true, locked: false, note: "There was no password set." });
-    updateEnv({ ADMIN_PASSWORD_HASH: "" });
+    try { updateEnv({ ADMIN_PASSWORD_HASH: "" }); }
+    catch (err) {
+      return res.status(500).json({ ok: false,
+        error: "Could not write the settings file: " + String(err.message || err) });
+    }
     SESSIONS.clear();
     return res.json({ ok: true, locked: false, note: "Removed. This machine is open again." });
   }
@@ -164,11 +168,18 @@ app.post("/api/password", express.json(), (req, res) => {
   const stored = `pbkdf2$${iter}$${salt.toString("base64")}$${dk.toString("base64")}`;
   const partial = { ADMIN_PASSWORD_HASH: stored };
   if (String(b.name || "").trim()) partial.ADMIN_NAME = String(b.name).trim().slice(0, 60);
-  updateEnv(partial);
+  // If the settings file cannot be written — read-only, owned by another user,
+  // a full disk — say THAT. Letting it throw hands the browser an HTML error
+  // page, and a screen expecting JSON reads an HTML page as "no server".
+  try { updateEnv(partial); }
+  catch (err) {
+    return res.status(500).json({ ok: false,
+      error: "Could not write the settings file: " + String(err.message || err) });
+  }
   // Every existing session dies with the old password, including this one.
   SESSIONS.clear();
-  return res.json({ ok: true, locked: true,
-    note: "Set. You will be asked for it the next time this is opened." });
+  return res.json({ ok: true, locked: true, signedOut: true,
+    note: "Set. You have been signed out — sign in with it now." });
 });
 
 app.post("/api/logout", (req, res) => {
@@ -581,9 +592,47 @@ app.get("/api/sector/:key", (req, res) => {
 // ACTIVITY, with an unread count. `since` is the timestamp the browser last
 // opened the panel; everything newer is unread. The count lives here rather
 // than in the page so it survives a refresh and agrees across tabs.
+// ---- the activity log, and how far he has read ------------------------------
+// The read mark is kept in the cabinet, not the browser. localStorage is
+// per-origin, so the office on localhost and the control room on 127.0.0.1 held
+// two different marks and clearing one left the other showing the same number.
+// `since` is still accepted for a caller asking a hypothetical; left off, the
+// stored mark is used, which is what both screens now do.
 app.get("/api/activity", (req, res) => {
-  const since = String(parseInt(req.query.since, 10) || 0);
-  res.json(pyModule("coordination.activity", ["--json", "--since", since], 25000));
+  const since = parseInt(req.query.since, 10);
+  const args = ["--json"];
+  if (Number.isFinite(since) && since > 0) args.push("--since", String(since));
+  res.json(pyModule("coordination.activity", args, 25000));
+});
+
+// ---- what the sectors have actually said to each other -----------------------
+// The office floor used to animate eight hardcoded phrases at random, which
+// looked like the agency working on a morning when nothing had run. Both the
+// beams and the readable panel come from here now — the real request board.
+app.get("/api/comms", (req, res) => {
+  const n = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 40));
+  res.json(pyModule("coordination.comms", ["--json", "--limit", String(n)], 25000));
+});
+
+// ---- faults in the agency itself --------------------------------------------
+// Not the website: the AGENTS. A stall, a crash, a claimed task nobody
+// finished, a sector ignoring another sector. Read-only here — the scan that
+// files and routes them runs as a step of the day, not off a page load.
+app.get("/api/faults", (req, res) => {
+  const args = ["--json", "--list"];
+  if (req.query.sector) args.push("--sector", String(req.query.sector).slice(0, 40));
+  res.json(pyModule("coordination.faults", args, 25000));
+});
+
+// Opening the panel IS reading it. The screen posts the timestamp of the newest
+// line it actually showed him — not its own clock, which can be wrong — and the
+// mark only ever moves forward, so a second tab holding an older read cannot
+// resurrect a count he has just cleared.
+app.post("/api/activity/seen", (req, res) => {
+  const to = parseInt((req.body || {}).seen_to, 10);
+  const args = ["--json", "--mark-read"];
+  if (Number.isFinite(to) && to > 0) args.push(String(to));
+  res.json(pyModule("coordination.activity", args, 25000));
 });
 app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
 
@@ -726,10 +775,10 @@ app.post("/api/orders", (req, res) => {
 // these exist for anything that wants just the one thing.
 app.get("/api/readiness", (_q, res) =>
   res.json(pyModule("coordination.readiness", ["--json"], 60000)));
-app.get("/api/activity", (req, res) => {
-  const n = Math.max(1, Math.min(300, parseInt(req.query.limit, 10) || 60));
-  res.json(pyModule("coordination.activity", ["--json", "--limit", String(n)], 60000));
-});
+// (There was a second /api/activity handler here. Express answers with the
+// first route that matches, so it had never run once — but it took no `since`
+// and ignored the read mark, and the next person to reorder this file would
+// have got a badge that never cleared and no idea why. Deleted, not moved.)
 
 // ---- the owner's daily targets ---------------------------------------------
 // The numbers the agency works to. Read and written through coordination.targets
@@ -873,10 +922,47 @@ app.get("/api/status", (_q, res) => {
 
   res.json({
     locked, adminName,
+    // WHAT THIS PROCESS CAN DO. The screens are static files re-read on every
+    // request; this file is read once, at boot. Pull an update and refresh the
+    // browser and you get the new screen talking to the old server, which
+    // answers a route it has never heard of with an HTML 404 — and a screen
+    // parsing JSON reads that as "the server is down". The screens check this
+    // list before offering a control, so a stale process is named as a stale
+    // process. Add the name here when you add a route a screen depends on.
+    api: ["password", "activity", "activity-seen", "sector", "usage",
+          "notify-preview", "chat", "faults", "comms"],
     ok: true, mode,
     providers: { credentials: (ps && ps.credentials) || 0, models: (ps && ps.models) || 0 },
     brains, brainsReady, brainsTotal, checks,
   });
+});
+
+/* ---------------------------------------------------------------------------
+   AN API PATH ANSWERS IN JSON, ALWAYS — even when it fails.
+   ---------------------------------------------------------------------------
+   Express's built-in 404 and error handler both send HTML. Every screen in this
+   app does `await r.json()`, so an HTML answer throws in the same catch block a
+   dead socket does, and the screen says "could not reach the server" about a
+   server that answered perfectly clearly. That cost the owner an afternoon on
+   the password screen: he had pulled a new UI, the old Node process was still
+   running, /api/password 404'd in HTML, and the screen blamed the network.
+
+   These two go last, after every real route, so they only catch what nothing
+   else claimed. Anything under /api/ now fails in the language the caller
+   speaks. Pages are untouched — a browser typing a wrong URL still wants HTML.
+--------------------------------------------------------------------------- */
+app.use("/api", (req, res) => {
+  res.status(404).json({ ok: false, notFound: true,
+    error: `This server has no ${req.method} /api${req.path}. If the screen ` +
+           "offering it is newer than the running server, restart the server." });
+});
+
+app.use((err, req, res, _next) => {
+  console.error("unhandled:", err && err.stack ? err.stack : err);
+  const body = { ok: false, error: String((err && err.message) || err || "server error") };
+  if (res.headersSent) return res.end();
+  if (String(req.path || "").startsWith("/api/")) return res.status(500).json(body);
+  res.status(500).type("text/plain").send(body.error);
 });
 
 const PORT = process.env.PORT || 3000;
@@ -906,7 +992,7 @@ app.listen(PORT, HOST, () => {
   } else {
     console.log(`!! BIND_HOST=${HOST} — this is reachable from the network. ` +
       "Anyone who can reach this port can read your keys on /setup. " +
-      "Set an admin password (python backend.py --password) or put it behind a proxy.");
+      "Set an admin password on the Setup screen, or put it behind a proxy.");
   }
   if (adminHash()) console.log("Admin password is ON.");
 });

@@ -23,9 +23,10 @@ No network call is made: the suggest endpoints are monkeypatched.
 import sqlite3
 import sys
 import tempfile
+import time
 from pathlib import Path
 
-from coordination import board, notify
+from coordination import board, faults, notify
 from . import seo_intel
 
 _fail = []
@@ -301,18 +302,53 @@ def test_digest_items_stay_off_the_phone():
     real_db = board.DB
     board.DB = _fresh_db()
     con = sqlite3.connect(board.DB)
+    # Long enough to be a stall, recent enough not to be blocking — a stall
+    # nobody has fixed for hours IS worth waking him for, and that is tested
+    # separately below.
     con.execute("INSERT INTO agent_runs(agent,started_at,status,note)"
-                " VALUES('seo-strategist',1,'running','stuck')")
+                " VALUES('seo-strategist',?, 'running','stuck')",
+                (int(time.time()) - 1500,))
     con.commit()
     con.close()
     try:
+        # The owner is told about faults the agency has FILED, not about raw
+        # rows notify went looking for itself. That is the point of the change:
+        # what reaches his phone and what reaches the sectors are one list, so
+        # he is never told about something no sector has been given.
+        check("nothing is on his phone before the Overseer has looked",
+              [a for a in notify.collect() if a["key"].startswith("fault:")], [])
+        faults.scan()
         alerts = notify.collect()
-        check("the stall is collected", any(a["key"].startswith("stall:") for a in alerts), True)
+        check("once filed, the stall is collected",
+              any(a["key"].startswith("fault:") for a in alerts), True)
         check("and marked digest, not now",
-              [a["urgency"] for a in alerts if a["key"].startswith("stall:")],
+              [a["urgency"] for a in alerts if a["key"].startswith("fault:")],
               [notify.DIGEST])
+        check("and it says who was given it",
+              any("IT" in a["body"] for a in alerts if a["key"].startswith("fault:")), True)
         out = notify.send(dry_run=True)
         check("so nothing goes to the phone", out["alerts"], [])
+    finally:
+        board.DB = real_db
+
+
+def test_a_blocking_fault_does_reach_the_phone():
+    print("\nBut the agency actually stopped is a today, not a digest:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO agent_runs(agent,started_at,status,note)"
+                " VALUES('seo-strategist',?, 'running','stuck')",
+                (int(time.time()) - 5 * faults.STALL_SECS,))
+    con.commit()
+    con.close()
+    try:
+        faults.scan()
+        alerts = [a for a in notify.collect() if a["key"].startswith("fault:")]
+        check("it is collected", len(alerts) >= 1, True)
+        check("as a today", alerts[0]["urgency"], notify.TODAY)
+        out = notify.send(dry_run=True)
+        check("and it would go out", len(out["alerts"]) >= 1, True)
     finally:
         board.DB = real_db
 
@@ -637,6 +673,7 @@ def main():
     test_only_things_that_need_him()
     test_it_does_not_repeat_itself()
     test_digest_items_stay_off_the_phone()
+    test_a_blocking_fault_does_reach_the_phone()
     test_preview_sends_nothing()
     test_no_channel_is_reported_not_swallowed()
     print()

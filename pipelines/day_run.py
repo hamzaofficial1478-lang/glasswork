@@ -65,6 +65,13 @@ LOCK_HOLDER = "owner-run-button"
 # The order the handbook lays down, mirrored from run.py's DAY. The MD plans
 # first or the board is empty and every sector correctly refuses to invent work.
 STEPS = [
+    # BEFORE the MD plans, not after. The MD is supposed to reason from the live
+    # state of the business, and "SEO's strategist has been dead since Tuesday"
+    # is part of that state — planning a day of SEO work around a desk that is
+    # not answering is exactly the mistake this is here to stop. It also closes
+    # yesterday's faults that have since fixed themselves, so the MD is not
+    # planning around a problem that has gone.
+    ("The Overseer checks the agency itself", "coordination.faults", "Director"),
     ("The MD plans the day", "pipelines.md_cycle", "Director"),
     ("IT checks the site", "pipelines.it_health", "IT"),
     ("IT reindexes site search", "pipelines.site_search", "IT"),
@@ -79,6 +86,12 @@ STEPS = [
     # what Content is briefed to fix, so they have to exist before the briefing.
     ("SEO audits the answers (AEO/GEO)", "pipelines.seo_answers", "SEO"),
     ("Content briefs the pages", "pipelines.content_briefs", "Content"),
+    # AGAIN, at the end. The first pass catches what broke yesterday; this one
+    # catches what broke during today — an agent that died three steps ago would
+    # otherwise sit unfiled until tomorrow morning, which is precisely the
+    # forty-one minutes of nothing the owner watched. It runs before Report so
+    # the digest that reaches his phone includes it.
+    ("The Overseer checks the agency again", "coordination.faults", "Director"),
     ("Report scores the day", "pipelines.report_daily", "Report"),
 ]
 

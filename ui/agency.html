@@ -576,22 +576,41 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !sheet.hidden) 
 
 /* ---- ACTIVITY -------------------------------------------------------------
    An unread count that behaves like an unread count: it climbs while you are
-   away and clears when you read it. The last-seen mark is kept in this browser
-   because it is a per-person thing — the agency does not need to know when he
-   looked. */
-const SEEN_KEY='wdta_activity_seen';
-function lastSeen(){ try{ return parseInt(localStorage.getItem(SEEN_KEY)||'0',10)||0; }catch(e){ return 0; } }
-function markSeen(ts){ try{ localStorage.setItem(SEEN_KEY, String(ts)); }catch(e){} }
+   away and clears when you read it.
+
+   The mark used to live in this browser's localStorage, which is per-ORIGIN.
+   Open the office on localhost and the control room on 127.0.0.1 and those are
+   two separate memories: clear the count in one and the other still shows it,
+   which is exactly what the owner kept reporting. It is kept in the cabinet
+   now, so both screens and both addresses agree, and it survives clearing the
+   browser. The server decides what counts as unread; this file only paints it. */
+let ACT_BADGE_N=null;   // what the badge is showing, so a slow poll cannot undo a read
+
+function paintBadge(n){
+  ACT_BADGE_N=n;
+  const b=$('#actBadge'); if(!b) return;
+  if(n>0){ b.hidden=false; b.textContent=n>99?'99+':n; } else b.hidden=true;
+}
 
 async function pollActivity(){
   try{
-    const r=await fetch('/api/activity?since='+lastSeen());
+    const r=await fetch('/api/activity');
     const j=await r.json(); if(!j||!j.ok) return null;
-    const b=$('#actBadge');
-    if(j.unread>0){ b.hidden=false; b.textContent=j.unread>99?'99+':j.unread; }
-    else b.hidden=true;
+    paintBadge(j.unread||0);
     return j;
   }catch(e){ return null; }
+}
+
+// Tell the agency he has read up to the newest line it just showed him. Fire
+// and forget: the badge is cleared here and now, because a read that only takes
+// effect if a POST succeeds is a read that sometimes does not happen.
+function markSeen(ts){
+  paintBadge(0);
+  try{
+    fetch('/api/activity/seen',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({seen_to: ts||0})});
+  }catch(e){}
 }
 
 function evRow(e){
@@ -616,7 +635,8 @@ $('#actBtn').onclick=async()=>{
     +`<div class="gh2">${unread?'Earlier today':'Today'}</div>`
     +(j.events.filter(e=>!unread||e.at<=j.seen_to).map(evRow).join('')
       || '<p class="empty">Nothing else today.</p>');
-  markSeen(j.at); $('#actBadge').hidden=true;   // reading it clears the count
+  // Opening it IS reading it. Mark to the newest line actually on screen.
+  markSeen(j.newest_at||j.at);
 };
 
 /* ---- ONE SECTOR, IN FULL -------------------------------------------------- */
@@ -649,7 +669,29 @@ async function openSector(key){
       + `padding-left:20px;margin:0;color:var(--muted);font-size:12.5px">`
       + j.how_to_raise.map(t=>`<li style="margin-bottom:6px">${esc(t)}</li>`).join('')
       + `</ol>` : '';
-  $('#sheetBody').innerHTML = why + raise_
+  /* WHAT IS BROKEN, AND WHO WAS TOLD. This block is the answer to the owner
+     watching seo-strategist sit dead for forty-one minutes: the floor drew it
+     red and that was the end of it. Now the fault says where it went — the
+     sector's own thread, the ticket with IT, whether the MD was escalated to —
+     so "who fixes this?" has a visible answer rather than an assumption. */
+  const F = j.faults||[];
+  const faults = !F.length ? '' :
+      `<div class="gh2" style="color:var(--danger)">Broken here, and where it went (${F.length})</div>`
+    + F.map(f=>{
+        // No <b> in here: .ev .tx b is display:block, so a bold word would
+        // snap "given to IT" onto three lines.
+        const bits=[];
+        if(f.routed_to) bits.push('given to <i style="font-style:normal;'
+          +'color:var(--ink)">'+esc(f.routed_to)+'</i>');
+        else bits.push('<i style="font-style:normal;color:var(--amber)">not routed yet</i>');
+        if(f.escalated_at) bits.push('MD told');
+        if(f.seen_count>1) bits.push('still true after '+f.seen_count+' checks');
+        return `<div class="ev ${f.severity==='blocking'?'bad':''}">`
+          +`<div class="vb">${esc(f.severity)}</div><div class="vb">${esc(f.kind)}</div>`
+          +`<div class="tx"><b>${esc(f.what)}</b><span>${bits.join(' · ')}</span></div></div>`;
+      }).join('');
+
+  $('#sheetBody').innerHTML = why + faults + raise_
     + `<div class="gh2">What it made · ${esc(j.output_label)} (${j.made.length})</div>` + made
     + `<div class="gh2">Its board (${j.tasks.length})</div>`
     + list(j.tasks, t=>`<div class="ev"><div class="vb">${esc(t.status)}</div>`
@@ -674,8 +716,18 @@ async function openSector(key){
    password is set the server itself refuses without it — this is the prompt,
    not the lock. */
 $('#setupBtn').onclick=async()=>{
-  let locked=false, who='';
-  try{ const j=await (await fetch('/api/status')).json(); locked=!!(j&&j.locked); who=(j&&j.adminName)||''; }catch(e){}
+  let locked=false, who='', canSet=false, reached=false;
+  try{
+    const j=await (await fetch('/api/status')).json();
+    reached=true; locked=!!(j&&j.locked); who=(j&&j.adminName)||'';
+    // Does the RUNNING server know this route? The screen you are reading is
+    // re-read from disk on every refresh; the server is read once, when it
+    // started. Update the code, refresh the page, and you can be looking at a
+    // form the process behind it has never heard of. Offering the form anyway
+    // is what produced "could not reach the server" about a server that was up.
+    canSet=Array.isArray(j&&j.api) && j.api.indexOf('password')>=0;
+  }catch(e){}
+  const stale = reached && !canSet;
   openSheet('Setup','keys, models, caps',
     `<div style="max-width:640px">
       <p style="line-height:1.7">This screen holds <b>every API key in the agency</b>, your
@@ -692,6 +744,15 @@ $('#setupBtn').onclick=async()=>{
       </p>
 
       <div class="pwbox">
+        ${stale?`
+        <p style="line-height:1.7;margin:0">
+          <b style="color:var(--amber)">The server needs restarting first.</b><br>
+          This screen is read fresh every time you open it. The program behind it
+          is only read when it starts, and the copy running right now is older
+          than this screen &mdash; it does not have the password control yet.
+          Stop it and start it again (<code>pm2 restart all</code>, or close the
+          window you started it in and run it again), then come back here.</p>`
+        :`
         ${locked?`<label>Current password</label><input id="pwCur" type="password" autocomplete="current-password">`:''}
         <label>Your name</label>
         <input id="pwName" type="text" placeholder="e.g. Hamza" value="${escA(who)}">
@@ -707,8 +768,9 @@ $('#setupBtn').onclick=async()=>{
         </div>
         <p style="font-size:11.5px;color:var(--etch);line-height:1.6;margin:12px 0 0">
           Only a salted hash is kept &mdash; PBKDF2-SHA256, 240,000 rounds. The password
-          itself is never stored and never leaves this machine. Changing it signs
-          every open session out, including this one.</p>
+          itself is never stored and never leaves this machine. Setting or changing
+          it signs every open session out, including this one, so you will be asked
+          to sign in straight away.</p>`}
       </div>
 
       <div style="display:flex;gap:10px;margin-top:22px">
@@ -718,16 +780,39 @@ $('#setupBtn').onclick=async()=>{
       </div>
     </div>`);
 
-  const msg=(t,c)=>{ const m=$('#pwMsg'); m.textContent=t; m.style.color=c; };
+  const msg=(t,c)=>{ const m=$('#pwMsg'); if(m){ m.textContent=t; m.style.color=c; } };
+
+  /* Three different failures used to share one sentence, and it was the wrong
+     sentence for two of them:
+       - the fetch itself threw          → the server really is unreachable
+       - the server answered, not in JSON → it IS up; say what it actually said
+       - the server answered in JSON      → show its own words
+     "Could not reach the server" on a 404 sent the owner looking at his network
+     when the answer was that the process needed restarting. */
   const post=async(body,okText)=>{
     msg('Saving…','var(--muted)');
+    let r;
     try{
-      const r=await fetch('/api/password',{method:'POST',
+      r=await fetch('/api/password',{method:'POST',
         headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const j=await r.json();
-      if(j.ok){ msg(j.note||okText,'var(--ok)'); }
-      else msg(j.error||'Could not save.','var(--danger)');
-    }catch(e){ msg('Could not reach the server.','var(--danger)'); }
+    }catch(e){
+      return msg('Could not reach the server — it looks like it has stopped.','var(--danger)');
+    }
+    let j=null, raw='';
+    try{ raw=await r.text(); j=JSON.parse(raw); }catch(_){}
+    if(!j){
+      if(r.status===404) return msg(
+        'The running server does not have this control yet — restart it and try again.',
+        'var(--danger)');
+      return msg('The server answered '+r.status+' but not with an answer this '
+        +'screen understands. Check the window it is running in.','var(--danger)');
+    }
+    if(!j.ok) return msg(j.error||('Could not save (HTTP '+r.status+').'),'var(--danger)');
+    msg(j.note||okText,'var(--ok)');
+    // Setting or changing the password kills every session, this one included.
+    // Saying "saved" and leaving the page polling endpoints that now all 401 is
+    // how a working save looks broken. Send him to the door he now needs.
+    if(j.signedOut) setTimeout(()=>{ location.href='/login'; }, 1400);
   };
   if($('#pwSave')) $('#pwSave').onclick=()=>post({
     current: ($('#pwCur')||{}).value||'', name: $('#pwName').value,

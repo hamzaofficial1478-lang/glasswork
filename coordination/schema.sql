@@ -441,3 +441,49 @@ CREATE TABLE IF NOT EXISTS notifications (
   first_seen INTEGER, sent_at INTEGER,
   route      TEXT, detail TEXT
 );
+
+-- WHAT THE OWNER HAS ALREADY LOOKED AT.
+-- This lived in the browser's localStorage, which is wrong for exactly the
+-- reason he kept reporting: localStorage is per-origin, so opening the office
+-- on localhost and the control room on 127.0.0.1 are two different memories,
+-- and the badge he had just cleared came straight back. There is one owner and
+-- one agency — where he got to is a fact about the agency, so it belongs in the
+-- cabinet with every other fact. One row per thing that can be read.
+CREATE TABLE IF NOT EXISTS read_marks (
+  what     TEXT PRIMARY KEY,          -- 'activity'
+  seen_to  INTEGER NOT NULL,          -- unix seconds; everything at or before is read
+  at       INTEGER                    -- when he marked it
+);
+
+-- WHEN AN AGENT ITSELF BREAKS.
+-- Everything else in this cabinet records work. This records the work NOT
+-- happening: a run that started and never came back, a run that raised, a task
+-- claimed and abandoned, a request nobody answered. Until this table existed a
+-- stall was something the screens WORKED OUT and drew in red, and that was all
+-- that ever happened to it — no ticket, no sector told, no MD, nothing. The
+-- owner watched an agent sit dead for 41 minutes with the whole agency
+-- carrying on around it.
+--
+-- `key` is what makes this a ticket and not a firehose: one row per distinct
+-- fault, updated on every scan, so a stall that is still true at the next pass
+-- raises its seen_count rather than filing a second ticket. See faults.py.
+CREATE TABLE IF NOT EXISTS faults (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  key          TEXT NOT NULL UNIQUE,
+  kind         TEXT,             -- stall | crash | abandoned | unanswered | lock
+  agent        TEXT,             -- the desk that broke, where there is one
+  sector       TEXT,             -- the sector that owns that desk
+  routed_to    TEXT,             -- the sector asked to fix it
+  severity     TEXT,             -- blocking | degraded | noted
+  what         TEXT,             -- one plain line
+  detail       TEXT,
+  evidence     TEXT,             -- the row this is a claim about
+  first_seen   INTEGER, last_seen INTEGER,
+  seen_count   INTEGER DEFAULT 1,
+  request_id   TEXT,             -- the board request opened with the owning sector
+  task_id      TEXT,             -- the ticket posted to whoever can fix it
+  escalated_at INTEGER,          -- when the MD was told
+  status       TEXT DEFAULT 'open',   -- open | routed | escalated | resolved
+  resolved_at  INTEGER, resolution TEXT
+);
+CREATE INDEX IF NOT EXISTS faults_open ON faults(status, last_seen);

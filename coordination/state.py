@@ -682,12 +682,21 @@ def sector_detail(key):
                   " WHERE lower(to_sector)=? ORDER BY created_at DESC LIMIT 15", (match,))
     outbox = _rows("SELECT id,to_sector,subject,status,created_at FROM requests"
                    " WHERE lower(from_sector)=? ORDER BY created_at DESC LIMIT 15", (match,))
+    # What is broken about this sector's own agents, and — the part that was
+    # missing — who was told. A desk drawn in red with nothing beside it is how
+    # a stall sat for forty-one minutes with nobody acting on it.
+    faults = _rows("SELECT id,kind,severity,what,routed_to,escalated_at,seen_count,"
+                   "first_seen FROM faults WHERE status!='resolved' AND lower(sector)=?"
+                   " ORDER BY CASE severity WHEN 'blocking' THEN 0"
+                   " WHEN 'degraded' THEN 1 ELSE 2 END, last_seen DESC LIMIT 12",
+                   (match,))
     c.close()
     word, meaning = band(score)
     return {"ok": True, "key": key, "name": name, "score": score, "why": why,
             "band": word, "band_means": meaning, "how_to_raise": HOW_TO_RAISE,
             "output_label": label, "columns": list(cols), "made": made,
-            "tasks": tasks, "runs": runs, "inbox": inbox, "outbox": outbox}
+            "tasks": tasks, "runs": runs, "inbox": inbox, "outbox": outbox,
+            "faults": faults}
 
 
 if __name__ == "__main__":

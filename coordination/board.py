@@ -100,6 +100,43 @@ def finish_task(task_id, agent, result, status="done"):
             raise PermissionError(f"{agent} does not own task {task_id}")
 
 
+def withdraw_task(task_id, by, reason):
+    """
+    Take back a task you posted, because the reason for it has gone.
+
+    ONLY WHILE IT IS STILL OPEN. Once an agent has claimed it, the work belongs
+    to that agent and nobody — not the poster, not the Overseer — may reach in
+    and close it; that is the whole point of claiming. A claimed task gets a
+    note appended instead and its owner decides.
+
+    Returns 'withdrawn', 'noted' (claimed, so left alone) or 'gone'.
+    """
+    with _conn() as c:
+        c.execute("BEGIN IMMEDIATE;")
+        row = c.execute("SELECT status, result FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            c.execute("COMMIT;")
+            return "gone"
+        if row["status"] == "open":
+            c.execute("UPDATE tasks SET status='done', result=?, finished_at=?"
+                      " WHERE id=? AND status='open'",
+                      (json.dumps({"withdrawn_by": by, "reason": reason}), _now(), task_id))
+            c.execute("COMMIT;")
+            return "withdrawn"
+        # Claimed or already finished: append, never overwrite.
+        prev = row["result"]
+        try:
+            prev = json.loads(prev) if prev else {}
+        except Exception:
+            prev = {"note": str(prev)}
+        if not isinstance(prev, dict):
+            prev = {"note": prev}
+        prev.setdefault("notes", []).append({"by": by, "at": _now(), "note": reason})
+        c.execute("UPDATE tasks SET result=? WHERE id=?", (json.dumps(prev), task_id))
+        c.execute("COMMIT;")
+        return "noted"
+
+
 def get_task(task_id):
     with _conn() as c:
         r = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()

@@ -172,17 +172,39 @@ def collect() -> list:
         except Exception:
             pass
 
-        # 6. An agent that started and never came back. The Overseer's job, and
-        #    until now it had no way to say so out loud.
-        stalled = _rows(c, "SELECT agent, note, started_at FROM agent_runs"
-                           " WHERE status='running' AND started_at < ?"
-                           " ORDER BY started_at LIMIT 3",
-                        (int(time.time()) - 1800,))
-        for r in stalled:
-            out.append({"key": f"stall:{r['agent']}:{r['started_at']}",
-                        "urgency": DIGEST,
-                        "title": f"{r['agent']} has been running for over 30 minutes",
-                        "body": (r["note"] or "no note") + " — probably stuck."})
+        # 6. THE AGENCY BREAKING ITSELF — a desk stalled, an agent crashing, a
+        #    sector sitting on work or ignoring another sector.
+        #
+        #    This used to be its own little query for stalls only, which meant
+        #    the owner heard "seo-strategist has been running for 30 minutes"
+        #    and nothing else ever happened: no ticket, no sector told, no MD.
+        #    It reads coordination/faults.py now, which is the thing that
+        #    actually routes them — so what reaches his phone and what reaches
+        #    the sectors are the same list, and he is told where it went.
+        #
+        #    Urgency follows the fault's own severity rather than a flat digest:
+        #    a blocking fault is the agency stopped, which is a today.
+        for r in _rows(c, "SELECT id, kind, agent, sector, severity, what,"
+                          " routed_to, escalated_at, seen_count FROM faults"
+                          " WHERE status!='resolved'"
+                          " ORDER BY CASE severity WHEN 'blocking' THEN 0"
+                          " WHEN 'degraded' THEN 1 ELSE 2 END, last_seen DESC"
+                          " LIMIT 5"):
+            where = (f"Given to {r['routed_to']}." if r["routed_to"]
+                     else "Not routed anywhere yet.")
+            md = " The MD has been told." if r["escalated_at"] else ""
+            out.append({
+                "key": f"fault:{r['id']}",
+                "urgency": TODAY if r["severity"] == "blocking" else DIGEST,
+                "title": (f"{r['sector'] or 'The agency'} — "
+                          + {"stall": "an agent stopped responding",
+                             "crash": "an agent is crashing",
+                             "abandoned": "work claimed and left",
+                             "unanswered": "a sector is not replying",
+                             "lock": "a resource is stuck",
+                             "sector": "several things broken at once",
+                             }.get(r["kind"], "something broke")),
+                "body": f"{r['what']}. {where}{md}"})
 
     out.sort(key=lambda a: _RANK.get(a["urgency"], 9))
     return out

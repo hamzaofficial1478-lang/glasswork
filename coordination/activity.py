@@ -272,25 +272,72 @@ def since(ts=None, limit=60) -> list:
     return ev[:max(1, int(limit))]
 
 
+def read_mark(what="activity") -> int:
+    """How far the owner has read. 0 if he never has."""
+    c = _conn()
+    try:
+        r = _rows(c, "SELECT seen_to FROM read_marks WHERE what=?", (what,))
+        return int(r[0]["seen_to"]) if r else 0
+    finally:
+        c.close()
+
+
+def mark_read(seen_to=None, what="activity") -> int:
+    """
+    Record that everything up to `seen_to` has been read, and return the mark.
+
+    It only ever moves FORWARD. Two tabs open, one of them showing a poll from a
+    minute ago, and the older one would otherwise drag the mark backwards and
+    resurrect a count he had just cleared — which is what he kept seeing.
+    """
+    now = int(time.time())
+    ts = int(seen_to or now)
+    if ts > now + 300:      # a browser with a wrong clock cannot mark the future read
+        ts = now
+    c = _conn()
+    try:
+        c.execute("""INSERT INTO read_marks (what, seen_to, at) VALUES (?,?,?)
+                     ON CONFLICT(what) DO UPDATE SET
+                       seen_to=MAX(read_marks.seen_to, excluded.seen_to),
+                       at=excluded.at""", (what, ts, now))
+        c.commit()
+        r = _rows(c, "SELECT seen_to FROM read_marks WHERE what=?", (what,))
+        return int(r[0]["seen_to"]) if r else ts
+    except Exception:
+        return ts
+    finally:
+        c.close()
+
+
 def feed(ts=None, limit=60) -> dict:
     """
     The window's events, plus how many of them the owner has not seen.
 
-    `ts` is when he last OPENED the panel, not a window cutoff — the badge has
-    to keep counting while he is away, the way an unread count does, and the
-    panel still shows the whole day when he opens it. Two different questions,
-    one call, because a badge that disagrees with the list it opens is worse
-    than no badge.
+    The read mark is when he last OPENED the panel, not a window cutoff — the
+    badge has to keep counting while he is away, the way an unread count does,
+    and the panel still shows the whole day when he opens it. Two different
+    questions, one call, because a badge that disagrees with the list it opens
+    is worse than no badge.
+
+    Where the mark is kept matters more than it sounds. It used to live in the
+    browser, and localStorage is per-origin: the office on localhost and the
+    control room on 127.0.0.1 kept separate marks, so clearing one left the
+    other showing the same stubborn number. It is read from the cabinet now, so
+    every screen agrees. A caller may still pass `ts` to ask a hypothetical.
     """
     ev = since(None, limit)                       # the full window, always
-    seen_to = int(ts or 0)
+    seen_to = int(ts) if ts else read_mark()
     unread = sum(1 for e in ev if e["at"] > seen_to) if seen_to else len(ev)
     counts = {}
     for e in ev:
         counts[e["verb"]] = counts.get(e["verb"], 0) + 1
     live = sum(1 for e in ev if e["level"] == "live")
     bad = sum(1 for e in ev if e["level"] == "bad")
+    # newest_at is what a screen should mark as read when it shows this feed:
+    # the newest thing it actually put in front of him, not the clock. Marking
+    # the clock on a browser running a minute fast reads the future.
     return {"ok": True, "at": int(time.time()), "events": ev,
+            "newest_at": max([e["at"] for e in ev], default=int(time.time())),
             "unread": unread, "seen_to": seen_to,
             "counts": counts, "live": live, "errors": bad,
             "head": (f"{live} happening now" if live else
@@ -313,5 +360,18 @@ if __name__ == "__main__":
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--since", type=int, default=None)
     ap.add_argument("--limit", type=int, default=60)
+    ap.add_argument("--mark-read", type=int, nargs="?", const=0, default=None,
+                    metavar="TS",
+                    help="record that everything up to TS has been read "
+                         "(no TS = now), then print the feed")
     a = ap.parse_args()
-    print(json.dumps(feed(a.since, a.limit)) if a.json else as_text(a.limit))
+    if a.mark_read is not None:
+        mark = mark_read(a.mark_read or None)
+        if a.json:
+            d = feed(a.since, a.limit)
+            d["marked_to"] = mark
+            print(json.dumps(d))
+        else:
+            print(f"read up to {time.strftime('%H:%M:%S', time.localtime(mark))}")
+    else:
+        print(json.dumps(feed(a.since, a.limit)) if a.json else as_text(a.limit))
