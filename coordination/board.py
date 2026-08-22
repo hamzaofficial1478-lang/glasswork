@@ -44,8 +44,88 @@ def _now():
 # TASKS — claim, don't grab
 # ----------------------------------------------------------------------------
 
-def post_task(sector, title, detail, risk="green", created_by="MD"):
-    """MD (or a lead) posts work. Starts life as 'open' and unowned."""
+# ----------------------------------------------------------------------------
+# SECTOR SWITCHES — the owner's off button
+# ----------------------------------------------------------------------------
+#
+# His agency, his call. He may not want Leads sending cold outreach this month,
+# or Content publishing while he rewrites the service pages. The honest way to
+# say that is a switch: the sector keeps its agents, its history and its score,
+# and simply does no work until he turns it back on.
+#
+# A MISSING ROW MEANS ON. This is the important rule and it is deliberate — a
+# cabinet built before this table existed, or a sector added in a later version,
+# must default to working. If absence meant "off", one upgrade would silently
+# stop the entire agency and nothing on any screen would explain why.
+#
+# Enforced in three places, because one is not enough:
+#   post_task    the MD cannot pile work onto a sector that will not do it
+#   claim_task   nothing already on the board gets picked up by a stopped sector
+#   day_run      the sector's step is skipped, and the run panel says so
+# The first two matter most: without them a switched-off sector accumulates a
+# backlog it is forbidden to clear, and then gets marked down for the backlog.
+
+def sector_enabled(sector) -> bool:
+    """Is this sector allowed to work? Unknown or unset means yes."""
+    if not sector:
+        return True
+    with _conn() as c:
+        _migrate(c)
+        try:
+            r = c.execute("SELECT enabled FROM sector_switches WHERE lower(sector)=?",
+                          (str(sector).strip().lower(),)).fetchone()
+        except sqlite3.OperationalError:
+            return True
+        return True if r is None else bool(r["enabled"])
+
+
+def sector_switches() -> dict:
+    """Every switch the owner has actually set. Sectors he has not touched are absent."""
+    with _conn() as c:
+        _migrate(c)
+        try:
+            rows = c.execute("SELECT sector, enabled, note, changed_at"
+                             " FROM sector_switches").fetchall()
+        except sqlite3.OperationalError:
+            return {}
+        return {r["sector"]: {"enabled": bool(r["enabled"]), "note": r["note"] or "",
+                              "changed_at": r["changed_at"]} for r in rows}
+
+
+def set_sector(sector, enabled, note=""):
+    """Turn a sector on or off. Returns the new state."""
+    sector = str(sector or "").strip()
+    if not sector:
+        raise ValueError("which sector?")
+    with _conn() as c:
+        _migrate(c)
+        c.execute("""INSERT INTO sector_switches (sector, enabled, note, changed_at)
+                     VALUES (?,?,?,?)
+                     ON CONFLICT(sector) DO UPDATE SET
+                       enabled=excluded.enabled, note=excluded.note,
+                       changed_at=excluded.changed_at""",
+                  (sector, 1 if enabled else 0, (note or "")[:300], _now()))
+    return {"sector": sector, "enabled": bool(enabled), "note": note}
+
+
+class SectorOff(Exception):
+    """Raised when work is aimed at a sector the owner has switched off."""
+
+
+def post_task(sector, title, detail, risk="green", created_by="MD", force=False):
+    """
+    MD (or a lead) posts work. Starts life as 'open' and unowned.
+
+    Refuses a sector the owner has switched off. Posting anyway would leave the
+    board filling with work that is forbidden to be done — and the sector would
+    then be scored down for the backlog it is not allowed to clear. `force` is
+    for the Overseer, whose fault tickets are ABOUT a sector rather than work
+    for it, and which must still be filed when a sector is stopped.
+    """
+    if not force and not sector_enabled(sector):
+        raise SectorOff(
+            f"{sector} is switched off, so it was not given: {title!r}. "
+            "Turn the sector back on to let work reach it.")
     tid = uuid.uuid4().hex[:12]
     with _conn() as c:
         c.execute(
@@ -56,6 +136,20 @@ def post_task(sector, title, detail, risk="green", created_by="MD"):
     return tid
 
 
+def try_post_task(sector, title, detail, risk="green", created_by="MD"):
+    """
+    post_task, but a switched-off sector returns None instead of raising.
+
+    For a pipeline posting a follow-up to its OWN sector as a side effect of
+    finishing: the owner switching that sector off mid-run is an instruction,
+    not an error, and it must not take the whole pass down with it.
+    """
+    try:
+        return post_task(sector, title, detail, risk=risk, created_by=created_by)
+    except SectorOff:
+        return None
+
+
 def claim_task(task_id, agent):
     """
     Atomically claim an open task. Returns True only if THIS agent got it.
@@ -63,12 +157,19 @@ def claim_task(task_id, agent):
     The UPDATE ... WHERE status='open' is the whole trick: SQLite serialises it,
     so if two agents race, exactly one UPDATE affects a row. The loser gets False
     and moves on. No task is ever worked by two agents.
+
+    A task belonging to a switched-off sector cannot be claimed at all. The
+    check is in the same WHERE clause as the race, not before it, so a sector
+    switched off mid-claim loses the race rather than half-winning it.
     """
     with _conn() as c:
+        _migrate(c)
         c.execute("BEGIN IMMEDIATE;")
         cur = c.execute(
             "UPDATE tasks SET status='in_progress', owner=?, claimed_at=?"
-            " WHERE id=? AND status='open'",
+            " WHERE id=? AND status='open'"
+            "   AND lower(sector) NOT IN ("
+            "     SELECT lower(sector) FROM sector_switches WHERE enabled=0)",
             (agent, _now(), task_id),
         )
         c.execute("COMMIT;")
@@ -168,6 +269,9 @@ _ADDED_COLUMNS = (
     # once. See pipelines/report_daily.py.
     ("decisions",    "evidence",     "TEXT"),
     ("decisions",    "outcome_note", "TEXT"),
+    # 'Clear' on the activity panel hides what has been read. Added after
+    # read_marks shipped, so cabinets built in between need the column.
+    ("read_marks",   "cleared_to",   "INTEGER DEFAULT 0"),
 )
 
 # Tables added after the first cabinets were built. CREATE IF NOT EXISTS is

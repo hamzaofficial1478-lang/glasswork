@@ -350,6 +350,17 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
     failed = 0
     try:
         for i, (label, mod, room) in enumerate(STEPS):
+            # THE OWNER'S OFF SWITCH. A sector he has stopped does not run, and
+            # the run panel says so in as many words — a step that silently
+            # vanished would look like the day was shorter than it was, and he
+            # would have no way to tell "switched off" from "never got to it".
+            if not board.sector_enabled(room):
+                _step(rid, i, status="skipped", started_at=_now(), ended_at=_now(),
+                      code=0, summary=f"{room} is switched off — you turned this "
+                                      "sector off, so it did no work today")
+                with sqlite3.connect(board.DB, timeout=30) as c:
+                    c.execute("UPDATE day_runs SET steps_done=steps_done+1 WHERE id=?", (rid,))
+                continue
             _step(rid, i, status="running", started_at=_now())
             try:
                 p = subprocess.run([PY, "-m", mod], cwd=str(ROOT), capture_output=True,

@@ -122,8 +122,14 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
     <div class="card-b">
       <div class="field">
         <label for="siteUrl">Website address</label>
-        <input id="siteUrl" placeholder="https://glassworks.ae" inputmode="url">
+        <input id="siteUrl" placeholder="https://yourbusiness.ae" inputmode="url">
         <div class="hint">The address people type to reach your site, including <code>https://</code>.</div>
+      </div>
+      <div class="field">
+        <label for="siteName">What to call it on screen <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+        <input id="siteName" placeholder="leave blank to use the address">
+        <div class="hint">Shown in the office header and the website switcher. Leave it
+          blank and your domain is used, which is at least always correct.</div>
       </div>
       <span style="display:block;font-size:12px;font-weight:500;margin-bottom:6px">Website mode</span>
       <div class="seg" id="modeSeg">
@@ -414,6 +420,7 @@ $('#modeSeg').addEventListener('click',e=>{const b=e.target.closest('button[data
 $('#saveWebsite').onclick=async()=>{
   const btn=$('#saveWebsite');btn.disabled=true;inl($('#siteMsg'),'dim','Saving…');
   const j=await api('POST','/api/website',{mode,siteUrl:$('#siteUrl').value.trim(),
+    siteName:$('#siteName').value.trim(),
     apiBase:$('#apiBase').value.trim(),apiToken:$('#siteApiToken').value});
   btn.disabled=false;
   if(j.ok){ inl($('#siteMsg'),'ok','✓ Saved ('+(j.mode==='full'?'Full access':'Read-only')+', database '+(j.database||'ready')+')'); $('#siteApiToken').value=''; }
@@ -1040,6 +1047,10 @@ async function loadSettings(){
   if(!j||!j.ok) return;
   const w=j.website||{}, o=j.optional||{};
   $('#siteUrl').value=w.siteUrl||'';
+  // Only fill the name box with an EXPLICIT name. The server falls back to the
+  // domain for display, and echoing that fallback into the field would silently
+  // turn "no name set" into a saved name he never typed.
+  $('#siteName').value=(w.siteName && w.siteName!==w.siteHost) ? w.siteName : '';
   setMode(w.mode||'readonly');
   $('#apiBase').value=w.apiBase||'';
   if(w.apiTokenSet) $('#siteApiToken').placeholder='saved — leave blank to keep';

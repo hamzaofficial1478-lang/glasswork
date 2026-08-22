@@ -189,6 +189,16 @@ def _run_feed(c, match, now):
                                  "command line and watch the output.")})
         elif r["status"] == "running":
             feed.append({**base, "s": "working", "t": r["note"] or r["title"] or "working…"})
+        elif r["status"] == "stalled":
+            # The Overseer reaped it: the agent stopped answering and the claim
+            # to be running was retracted. Past tense, unlike the branch above.
+            feed.append({**base, "s": "blocked",
+                         "t": "stopped responding · " + _ago(age),
+                         "why": ("This agent began a run and never reported back, so "
+                                 "the Overseer declared it dead and closed the run off. "
+                                 + (r["note"] or "") +
+                                 " A fault was filed against this desk and given to IT; "
+                                 "open the sector to see where it went.")})
         elif r["status"] == "error":
             feed.append({**base, "s": "blocked",
                          "t": (r["note"] or "the run failed") + " · " + _ago(age),
@@ -246,6 +256,18 @@ def _health(c, key, match, day0, now):
     shows this.
     """
     why = []
+    # SWITCHED OFF IS NOT FAILING. A sector the owner has stopped has not run,
+    # produced nothing and cleared no backlog — every component below would
+    # score it near zero, and it would then drag the agency average down for
+    # obeying him. It has no score at all, and says why.
+    if not board.sector_enabled(key):
+        sw = board.sector_switches().get(key, {})
+        return None, [{"label": "Switched off", "points": 0,
+                       "detail": ("You turned this sector off, so it did no work "
+                                  "and there is nothing to score. It keeps its "
+                                  "history and its agents; turn it back on and it "
+                                  "picks up from the next run."
+                                  + (f" Your note: {sw['note']}" if sw.get("note") else ""))}]
     # AGENT_ALIASES, not a bare LIKE. The MD runs as 'managing-director' and
     # Report as 'reporter', so a `lower(agent) LIKE 'md-%'` test can never match
     # either of them — the same trap _run_feed already had to climb out of, and
@@ -255,8 +277,11 @@ def _health(c, key, match, day0, now):
     where = where.replace("r.agent", "agent")
     ran = _one(c, "SELECT count(*) FROM agent_runs WHERE started_at>=? AND " + where,
                (day0, *args))
+    # A run the Overseer had to declare dead did not finish cleanly either. It
+    # used to fall through to 'done' and count as a clean run, which flattered a
+    # sector for the exact failure the owner was watching.
     bad = _one(c, "SELECT count(*) FROM agent_runs WHERE started_at>=?"
-                  " AND status='error' AND " + where, (day0, *args))
+                  " AND status IN ('error','stalled') AND " + where, (day0, *args))
     table, when = _OUTPUT.get(key, (None, None))
     made = _one(c, f"SELECT count(*) FROM {table} WHERE {when}>=?", (day0,)) if table else 0
     backlog = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=?"
@@ -433,6 +458,9 @@ def build():
     now = int(time.time())
 
     # ---- rooms: what each sector's agents are doing, and what's waiting ----
+    # Read once, not once per room: seven separate lookups for a table with at
+    # most seven rows is seven connections for nothing.
+    switches = board.sector_switches()
     rooms = []
     for key, name, match, sec in SECTORS:
         try:
@@ -472,9 +500,14 @@ def build():
         foot, _old = _room_stats(c, key, day0, open_tasks)
         score, why = _health(c, key, match, day0, now)
         word, meaning = band(score)
+        sw = switches.get(key, {})
         rooms.append({"key": key, "name": name, "score": score, "foot": foot,
                       "why": why, "band": word, "band_means": meaning,
-                      "sec": sec, "agents": agents})
+                      "sec": sec, "agents": agents,
+                      # The owner's switch, so every screen can draw the room as
+                      # deliberately stopped rather than mysteriously idle.
+                      "enabled": bool(sw.get("enabled", True)),
+                      "off_note": sw.get("note", "")})
 
     # ---- header metrics ----
     leads_today = _one(c, "SELECT count(*) FROM leads WHERE found_at>=?", (day0,))
@@ -490,6 +523,27 @@ def build():
     # unhealthy, and the header says "—" rather than pretending otherwise.
     scored_rooms = [r["score"] for r in rooms if r["score"] is not None]
     health = round(sum(scored_rooms) / len(scored_rooms)) if scored_rooms else None
+    # WHY THERE IS NO NUMBER, in a sentence he can act on. Showing a blank and
+    # leaving him to guess is what turned an honest "no evidence yet" into a
+    # screen that just read `null` and told him nothing about how to change it.
+    unscored = [r["name"] for r in rooms if r["score"] is None]
+    if health is None:
+        health_why = (
+            "No sector has done anything measurable yet, so there is no honest "
+            "number to average. The agency health is the mean of the sectors "
+            "that HAVE a score, and a sector earns one the first time it runs, "
+            "produces a row, or gets a decision marked. Press Run the day and "
+            "this fills in as the sectors report back.")
+    elif unscored:
+        health_why = (
+            f"The average of the {len(scored_rooms)} sector(s) with evidence today. "
+            f"Not counted yet: {', '.join(unscored)} — they have not run, produced "
+            "anything, or had a decision scored, and averaging a sector in as "
+            "zero for having done nothing would report the agency as unhealthy "
+            "when it is only untested.")
+    else:
+        health_why = (f"The average of all {len(scored_rooms)} sectors. Open any "
+                      "room in the control room to see exactly what it scored and why.")
     open_all = _one(c, "SELECT count(*) FROM tasks WHERE status IN ('open','in_progress')")
     md_state = f"{open_all} tasks on the board" if open_all else "idle — board clear"
 
@@ -596,7 +650,9 @@ def build():
 
     return {"ok": True, "ts": int(time.time()),
             "md": {"state": md_state},
-            "metrics": {"health": health, "leads": leads_today, "spend": f"${spend:.2f}"},
+            "metrics": {"health": health, "health_why": health_why,
+                        "scored_sectors": len(scored_rooms), "sectors": len(rooms),
+                        "leads": leads_today, "spend": f"${spend:.2f}"},
             "rooms": rooms, "approvals": approvals, "security": security, "shelf": shelf,
             "readiness": ready, "activity": acts, "run": run,
             "orders": todays_orders}
@@ -704,7 +760,30 @@ if __name__ == "__main__":
     # `-m coordination.state` prints the whole board; `--sector SEO` prints one
     # sector in full, which is what the control room asks for when a room is
     # clicked. Same module either way, so the numbers can never disagree.
-    if "--sector" in sys.argv:
+    # `--switch SEO=off "reason"` is the owner's on/off control, reachable from
+    # a terminal as well as from the screen. It writes through board so the
+    # rules that stop work reaching a stopped sector are the same rules.
+    if "--switch" in sys.argv:
+        i = sys.argv.index("--switch")
+        spec = sys.argv[i + 1]
+        note = sys.argv[i + 2] if len(sys.argv) > i + 2 else ""
+        name, _, val = spec.partition("=")
+        on = val.strip().lower() not in ("off", "0", "false", "no")
+        key = next((r[0] for r in SECTORS if r[0].lower() == name.strip().lower()), None)
+        if not key:
+            print(json.dumps({"ok": False, "error": f"no sector called {name!r}",
+                              "sectors": [r[0] for r in SECTORS]}))
+        else:
+            board.set_sector(key, on, note)
+            print(json.dumps({"ok": True, "sector": key, "enabled": on, "note": note}))
+    elif "--switches" in sys.argv:
+        known = {r[0]: True for r in SECTORS}
+        known.update({k: v["enabled"] for k, v in board.sector_switches().items()})
+        print(json.dumps({"ok": True, "sectors": [
+            {"key": r[0], "name": r[1], "enabled": known.get(r[0], True),
+             "note": board.sector_switches().get(r[0], {}).get("note", "")}
+            for r in SECTORS]}))
+    elif "--sector" in sys.argv:
         print(json.dumps(sector_detail(sys.argv[sys.argv.index("--sector") + 1])))
     else:
         print(json.dumps(build()))

@@ -344,7 +344,7 @@ def _work(agent) -> dict:
 
         free_now = [r for r in short if r["effort"] == "free"]
         if free_now:
-            board.post_task(
+            board.try_post_task(
                 "SEO", f"Claim {len(free_now)} free listing(s) that need no pitch",
                 "\n".join(f"{r['name']} ({r['url']}) — {r['why']}" for r in free_now),
                 risk="green", created_by="SEO")

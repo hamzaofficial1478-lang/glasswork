@@ -212,7 +212,15 @@ def _activity_tests():
     st = [e for e in ev if e["who"] == "seo-strategist"]
     check("started 66 minutes ago and never came back -> errored",
           st[0]["verb"], "errored")
-    check("and says so", "stalled" in st[0]["what"], True)
+    # The wording is anchored to when the run BEGAN, not recomputed against
+    # now() on every read. "started 12h ago and never came back" was rebuilt
+    # fresh each time the log was opened, so a desk that recovered hours
+    # earlier still carried a report of being dead that looked brand new.
+    check("and says so", "stopped responding" in st[0]["what"], True)
+    check("naming when it began, not how long ago that was",
+          "began at" in st[0]["what"], True)
+    check("and what happens to it next",
+          "Overseer" in (st[0]["detail"] or ""), True)
 
     print("\nA cabinet with none of these tables degrades, never crashes:")
     # An owner who built his cabinet before half these tables existed must get

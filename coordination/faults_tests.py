@@ -76,6 +76,17 @@ class _Cabinet:
             c.close()
 
 
+def _recovered(cab, agent="seo-strategist"):
+    """
+    The desk comes back the only way a desk actually comes back: the agent runs
+    again and finishes. The dead run stays dead — nothing ever reaches back and
+    edits it, which is why the fault cannot be cleared by touching that row.
+    """
+    now = int(time.time())
+    cab.write("INSERT INTO agent_runs(agent, started_at, ended_at, status, note)"
+              " VALUES(?,?,?, 'ok', 'ran clean')", (agent, now - 60, now))
+
+
 def _stall(cab, agent="seo-strategist", ago=None):
     """A run that started and never came back — the owner's actual fault."""
     started = int(time.time()) - (ago if ago is not None else F.STALL_SECS + 300)
@@ -194,8 +205,7 @@ def test_a_fault_that_fixes_itself_closes_what_it_opened():
         _stall(cab)
         F.scan()
         f = cab.sql("SELECT * FROM faults")[0]
-        cab.write("UPDATE agent_runs SET status='ok', ended_at=? WHERE status='running'",
-                  (int(time.time()),))
+        _recovered(cab)
         out = F.scan()
         check("the fault is closed", out["resolved"], 1)
         check("the sector's thread is closed too",
@@ -213,12 +223,12 @@ def test_a_claimed_ticket_is_never_yanked():
         F.scan()
         f = cab.sql("SELECT * FROM faults")[0]
         board.claim_task(f["task_id"], "it-fixer")
-        cab.write("UPDATE agent_runs SET status='ok', ended_at=? WHERE status='running'",
-                  (int(time.time()),))
+        _recovered(cab)
         F.scan()
         t = cab.sql("SELECT status, owner, result FROM tasks WHERE id=?", (f["task_id"],))[0]
         check("the claim stands", (t["status"], t["owner"]), ("in_progress", "it-fixer"))
-        check("but IT is told the reason has gone", "cleared" in (t["result"] or ""), True)
+        check("but IT is told the reason has gone",
+              "working again" in (t["result"] or ""), True)
 
 
 def test_a_fault_that_comes_back_is_reported_again():
@@ -256,6 +266,52 @@ def test_an_abandoned_task_goes_to_its_own_sector_not_it():
               cab.sql("SELECT count(*) n FROM tasks WHERE created_by='Overseer'")[0]["n"], 0)
 
 
+def test_a_dead_run_stops_claiming_to_be_running():
+    print("\nA dead run's claim to be working is retracted, not left standing:")
+    from . import activity
+    with _Cabinet() as cab:
+        _stall(cab)
+        said = [e["what"] for e in activity.feed()["events"] if "respond" in e["what"]]
+        check("before the sweep it reads as an open problem", bool(said), True)
+
+        F.scan()
+        run = cab.sql("SELECT status, ended_at, note FROM agent_runs")[0]
+        check("the Overseer marks the run dead", run["status"], "stalled")
+        check("with an ending time, so its age stops growing", bool(run["ended_at"]), True)
+        check("and says who declared it", "Overseer" in (run["note"] or ""), True)
+
+        # This is the bit the owner watched go wrong: the log kept saying "never
+        # came back" in the present tense, recomputed from now(), for a desk
+        # that had recovered hours earlier.
+        ev = [e for e in activity.feed()["events"] if e["who"] == "seo-strategist"]
+        check("the log now reports it in the past tense",
+              any("was declared dead" in e["what"] for e in ev), True)
+        check("and no longer says it is still running",
+              any("never came back" in e["what"] for e in ev), False)
+
+        # Reaping is the Overseer disbelieving the claim, NOT the fault being
+        # fixed. Nobody has touched the cause.
+        check("the fault stays open",
+              cab.sql("SELECT status FROM faults")[0]["status"] != "resolved", True)
+        check("and a second sweep does not re-file it", F.scan()["filed"], 0)
+
+
+def test_a_run_is_only_reaped_after_somebody_is_told():
+    print("\nNothing is swept up before it has been reported:")
+    with _Cabinet() as cab:
+        _stall(cab)
+        # detect() alone must not touch the row — it is the read-only pass, and
+        # erasing the evidence before anyone is told would be the worst order.
+        F.detect()
+        check("detect() changes nothing",
+              cab.sql("SELECT status FROM agent_runs")[0]["status"], "running")
+        F.scan()
+        check("scan() reaps it only after routing",
+              cab.sql("SELECT status FROM agent_runs")[0]["status"], "stalled")
+        check("and the sector was told first",
+              bool(cab.sql("SELECT 1 FROM requests WHERE to_sector='SEO'")), True)
+
+
 def test_nothing_broken_says_nothing():
     print("\nA healthy agency is quiet:")
     with _Cabinet() as cab:
@@ -277,6 +333,8 @@ def main():
               test_a_claimed_ticket_is_never_yanked,
               test_a_fault_that_comes_back_is_reported_again,
               test_an_abandoned_task_goes_to_its_own_sector_not_it,
+              test_a_dead_run_stops_claiming_to_be_running,
+              test_a_run_is_only_reaped_after_somebody_is_told,
               test_nothing_broken_says_nothing):
         t()
     print()

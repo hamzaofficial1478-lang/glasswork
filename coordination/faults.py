@@ -150,10 +150,24 @@ def detect(now=None) -> list:
         board._migrate(c)
 
         # 1. A RUN THAT NEVER CAME BACK. The one the owner actually hit.
+        #    'stalled' is included: once reaped the row is no longer claiming to
+        #    be running, but the fault is not fixed just because the Overseer
+        #    stopped believing the claim. It stays open until the cause is dealt
+        #    with, or resolve() closes it.
+        #
+        #    THE DESK IS BETTER WHEN IT RUNS AGAIN. Not when the dead run
+        #    changes — it never will, that is what dead means. The NOT EXISTS
+        #    below is the recovery test: the same agent has since started a run
+        #    that finished cleanly. Without it a stall stayed on the books for
+        #    ever, and the owner sat looking at a desk that was plainly working
+        #    while the screen still reported it dead.
         for r in _rows(c, "SELECT r.id, r.agent, r.started_at, r.task_id, r.note,"
-                          " t.title FROM agent_runs r LEFT JOIN tasks t"
+                          " r.status, t.title FROM agent_runs r LEFT JOIN tasks t"
                           " ON t.id=r.task_id"
-                          " WHERE r.status='running' AND r.started_at < ?"
+                          " WHERE r.status IN ('running','stalled') AND r.started_at < ?"
+                          "   AND NOT EXISTS (SELECT 1 FROM agent_runs b"
+                          "     WHERE b.agent=r.agent AND b.status='ok'"
+                          "       AND b.started_at > r.started_at)"
                           " ORDER BY r.started_at", (now - STALL_SECS,)):
             held = now - int(r["started_at"] or now)
             out.append({
@@ -321,8 +335,23 @@ def _still_true(c, f, now):
             if not r:
                 return False
             if kind == "stall":
-                # It came back, or somebody marked it. Either way, not stalled.
-                return r["status"] == "running" and (now - int(r["started_at"] or now)) > STALL_SECS
+                # WHEN IS A DEAD DESK BETTER?
+                #
+                # Not when the dead run changes — it never will; that is what
+                # dead means, and the Overseer's own 'stalled' mark is a
+                # retraction of the claim, not a recovery. The honest signal is
+                # THE SAME AGENT RUNNING AGAIN AND FINISHING. That is what the
+                # owner was looking at when he said the desk was live again
+                # while the log still called it dead.
+                if r["status"] not in ("running", "stalled"):
+                    return False        # the run itself reached a real ending
+                if (now - int(r["started_at"] or now)) <= STALL_SECS:
+                    return False
+                back = c.execute(
+                    "SELECT 1 FROM agent_runs WHERE agent=? AND status='ok'"
+                    " AND started_at > ? LIMIT 1",
+                    (f["agent"], int(r["started_at"] or 0))).fetchone()
+                return not back
             return r["status"] == "error"
         if kind == "abandoned" and ev.startswith("tasks#"):
             tid = ev.split("#", 1)[1]
@@ -344,6 +373,48 @@ def _still_true(c, f, now):
     except Exception:
         pass
     return True     # cannot tell: leave it open rather than closing it blind
+
+
+def _reap_run(c, row, now):
+    """
+    Retract a claim the agent can no longer make.
+
+    A run row says status='running'. That is a statement about RIGHT NOW, and
+    the agent that wrote it is gone, so nobody will ever correct it. Every
+    screen that reads the row re-derives "stalled — started 12h ago and never
+    came back", forever, including long after the desk recovered and was working
+    again — the owner watched a live green agent sit underneath a permanent
+    report that it was dead.
+
+    Marking it 'stalled' with an ended_at turns an eternal present tense into
+    something that happened, at a time, once. The FAULT stays open — the
+    Overseer disbelieving the claim is not the same as the problem being fixed —
+    which is why _still_true() counts 'stalled' as ongoing.
+
+    Only reaped after the fault has been filed and routed. Reaping first would
+    erase the evidence before anyone was told.
+    """
+    if not (row["request_id"] or row["task_id"]):
+        return False
+    ev = row["evidence"] or ""
+    if row["kind"] != "stall" or not ev.startswith("agent_runs#"):
+        return False
+    try:
+        rid = int(ev.split("#", 1)[1])
+    except ValueError:
+        return False
+    r = c.execute("SELECT status, started_at, note FROM agent_runs WHERE id=?",
+                  (rid,)).fetchone()
+    if not r or r["status"] != "running":
+        return False
+    held = now - int(r["started_at"] or now)
+    c.execute("UPDATE agent_runs SET status='stalled', ended_at=?, note=?"
+              " WHERE id=? AND status='running'",
+              (now, (f"stopped responding after {_ago(held)} — "
+                     f"declared dead by the Overseer" +
+                     (f" (was: {r['note']})" if r["note"] else ""))[:400], rid))
+    c.commit()
+    return True
 
 
 def _close_out(c, row, note, status):
@@ -418,6 +489,11 @@ def _route(c, row, now):
     fixer = FIXER_OF.get(row["kind"])
     if fixer and not tid:
         c.commit()
+        # force=True: a fault ticket is ABOUT a sector, not work FOR it, and it
+        # has to be filed even when the owner has stopped the sector that broke.
+        # (The fixer here is IT, which he can also switch off — if he has, he
+        # has said he does not want IT working, and this ticket waits with
+        # everything else rather than vanishing.)
         tid = board.post_task(
             fixer,
             f"Fix: {row['what'][:90]}",
@@ -427,7 +503,7 @@ def _route(c, row, now):
                    "change code. Reproduce it from the command line first — the "
                    "run is in agent_runs and the error, if there was one, is in "
                    "its note.",
-            risk="green", created_by=OVERSEER)
+            risk="green", created_by=OVERSEER, force=True)
 
     c.execute("UPDATE faults SET request_id=?, task_id=?, routed_to=?,"
               " status=CASE WHEN status='open' THEN 'routed' ELSE status END"
@@ -533,7 +609,7 @@ def scan(now=None) -> dict:
     now = int(now or time.time())
     found = detect(now)
     keys = {f["key"] for f in found}
-    filed = routed = escalated = resolved = 0
+    filed = routed = escalated = resolved = reaped = 0
     c = _conn()
     try:
         board._migrate(c)
@@ -545,12 +621,14 @@ def scan(now=None) -> dict:
                 continue
             if _still_true(c, row, now):
                 continue
+            note = ("the desk is working again — "
+                    f"{row['agent']} has since completed a run"
+                    if row["kind"] == "stall" and row["agent"]
+                    else "cleared on its own — the condition is no longer true")
             c.execute("UPDATE faults SET status='resolved', resolved_at=?,"
-                      " resolution=? WHERE id=?",
-                      (now, "cleared on its own — the condition is no longer true",
-                       row["id"]))
+                      " resolution=? WHERE id=?", (now, note, row["id"]))
             c.commit()      # board writes on its own connection; free the lock
-            _close_out(c, row, "The fault has cleared on its own. " + row["what"],
+            _close_out(c, row, f"Closing this: {note}. " + row["what"],
                        "resolved-itself")
             resolved += 1
         c.commit()
@@ -572,6 +650,10 @@ def scan(now=None) -> dict:
             if _escalate(c, fresh, now):
                 escalated += 1
                 c.commit()
+            # Somebody has been told; now retract the dead run's claim to be
+            # working, so the screens stop reporting it in the present tense.
+            if _reap_run(c, fresh, now):
+                reaped += 1
 
         counts = {}
         for row in _rows(c, "SELECT lower(sector) s, count(*) n FROM faults"
@@ -584,7 +666,7 @@ def scan(now=None) -> dict:
         c.close()
     return {"ok": True, "at": now, "found": len(found), "filed": filed,
             "routed": routed, "escalated": escalated, "resolved": resolved,
-            "sector_alarms": alarms}
+            "reaped": reaped, "sector_alarms": alarms}
 
 
 # ----------------------------------------------------------------------------

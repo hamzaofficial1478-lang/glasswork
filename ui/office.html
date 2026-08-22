@@ -206,10 +206,18 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .panel{position:fixed;top:0;right:-460px;width:460px;max-width:94vw;height:100vh;background:var(--panel);border-left:1px solid var(--line2);z-index:85;transition:right .26s ease;overflow-y:auto}.panel.open{right:0}
 .panel h2{margin:0;padding:18px 20px;font-size:15px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
 .panel h2 .x{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer}
+.actbtn{background:none;border:1px solid var(--line2);color:var(--muted);font:inherit;
+  font-size:11.5px;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.actbtn:hover:not(:disabled){border-color:var(--glass);color:var(--glass)}
+.actbtn:disabled{opacity:.4;cursor:default}
 .pgroup{padding:16px 20px;border-bottom:1px solid var(--line)}.pgroup .gh{margin-bottom:12px}
 .conn{display:flex;align-items:center;gap:12px;padding:10px 0}
 .conn .ic{width:32px;height:32px;border-radius:8px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none}
-.conn .nm{flex:1}.conn .nm b{display:block;font-size:13px;font-weight:500}.conn .nm span{font-size:10.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace}
+.conn .nm{flex:1;min-width:0}.conn .nm b{display:block;font-size:13px;font-weight:500}
+/* A metric can now carry a sentence explaining itself (why agency health has no
+   number yet), so this wraps instead of running off the edge of the panel. */
+.conn .nm span{display:block;font-size:10.5px;color:var(--muted);line-height:1.5;
+  font-family:'IBM Plex Mono',monospace;white-space:normal;overflow-wrap:anywhere}
 .field{margin:0 0 12px}.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}
 .field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:'IBM Plex Mono',monospace}
 .field input:focus,.field select:focus{outline:none;border-color:var(--glass)}
@@ -335,7 +343,10 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 <header>
   <div class="brand"><b id="brandName">World Deal Technical Agency</b><span class="etch">Live office</span></div>
   <div class="site-switch">
-    <button class="site-btn" onclick="toggleSites(event)"><span class="fav" id="curFav">GD</span><span id="curSite">Glassworks Dubai</span><span style="color:var(--muted)">▾</span></button>
+    <!-- Filled from /api/settings. The markup shows a neutral placeholder, not
+         a name: whatever is written here is what the owner sees for the first
+         second, and it used to be another company's. -->
+    <button class="site-btn" onclick="toggleSites(event)"><span class="fav" id="curFav">··</span><span id="curSite">Loading…</span><span style="color:var(--muted)">▾</span></button>
     <div class="site-menu" id="siteMenu"></div>
   </div>
   <button class="htab on">Office</button>
@@ -361,15 +372,25 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 <div class="scrim" id="scrim" onclick="closeAll()"></div>
 <div class="panel" id="connPanel"><h2>Connections <button class="x" onclick="closeAll()">×</button></h2><div id="connBody"></div></div>
 <div class="panel" id="perfPanel"><h2>Performance <button class="x" onclick="closeAll()">×</button></h2><div id="perfBody"></div></div>
+<!-- This was a four-field form that promised "a fresh office with all six
+     sectors staffed, kept completely separate from your other websites". None
+     of that existed: the button added a row to a JavaScript object which was
+     gone on the next refresh, and the agency has one SITE_URL, one cabinet and
+     one set of agents. The panel now says what is true and points at the one
+     screen that does change the website. -->
 <div class="panel" id="sitePanel">
-  <h2>Add a website <button class="x" onclick="closeAll()">×</button></h2>
+  <h2>This agency works on one website <button class="x" onclick="closeAll()">×</button></h2>
   <div class="pgroup">
-    <div class="field"><label>Business name</label><input id="nsName" placeholder="e.g. Sharjah Glass Co"></div>
-    <div class="field"><label>Website URL</label><input id="nsUrl" placeholder="https://…"></div>
-    <div class="field"><label>Platform</label><select id="nsStack"><option>WordPress</option><option>Custom backend</option><option>Shopify</option><option>Other</option></select></div>
-    <div class="field"><label>Main areas (comma separated)</label><input id="nsAreas" placeholder="Dubai, Abu Dhabi, Sharjah"></div>
-    <button class="pbtn" onclick="addSite()">Create office for this website</button>
-    <p style="font-size:11.5px;color:var(--muted);margin-top:12px">A fresh office opens with all six sectors staffed, kept completely separate from your other websites.</p>
+    <p style="font-size:12.5px;line-height:1.7;color:var(--muted);margin:0 0 14px">
+      One filing cabinet, one set of agents, one address. Running a second
+      business through the same office would mix its leads, rankings and
+      spending in with this one, so it is not offered &mdash; a second business
+      wants its own copy of the agency.</p>
+    <p style="font-size:12.5px;line-height:1.7;color:var(--muted);margin:0 0 16px">
+      To point this office at a different address, change it on the setup
+      screen. Everything the agents do reads from there.</p>
+    <a class="pbtn" href="/setup" style="display:inline-block;text-decoration:none">
+      Open the setup screen &rarr;</a>
   </div>
 </div>
 
@@ -379,7 +400,14 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
      write. See coordination/activity.py for why. -->
 <div class="panel wide full" id="actPanel">
   <h2><span>Activity <small id="actHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
-      <button class="x" onclick="closeAll()">×</button></h2>
+      <span style="display:flex;gap:8px;align-items:center">
+        <!-- Opening the panel already marks it read. These are here because the
+             owner asked for a button he can press and watch work, rather than
+             trusting that opening it did something invisible. -->
+        <button class="actbtn" id="actReadAll" onclick="markAllRead()">Mark all read</button>
+        <button class="actbtn" id="actClear" onclick="clearActivity()">Clear</button>
+        <button class="x" onclick="closeAll()">×</button>
+      </span></h2>
   <div class="pgroup" id="actBody"></div>
 </div>
 
@@ -440,9 +468,16 @@ function sectors(){return [
 const BLANK_METRICS=[["—","Agency health","glass"],["—","Leads today",""],
                      ["—","Awaiting you","amber"],["—","Shelf","ok"],
                      ["—","Spend today","mono"]];
-const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",
-                 metrics:BLANK_METRICS.map(m=>m.slice()),rooms:sectors()}};
-let CURRENT="gd";
+/* THE WEBSITE THIS OFFICE IS WORKING ON.
+   This was `{name:"Glassworks Dubai", url:"glassworks.ae"}` — a constant, so the
+   switcher showed a business that was not the owner's and no amount of saving
+   on the setup screen could change it. It is filled from /api/settings now,
+   which asks coordination/site.py, which reads what he actually saved. Until
+   that answers, the entry says it does not know yet rather than inventing a
+   name — an honest blank beats a confident wrong one. */
+const SITES={site:{name:"Loading…",fav:"··",url:"",configured:false,
+                   metrics:BLANK_METRICS.map(m=>m.slice()),rooms:sectors()}};
+let CURRENT="site";
 /* Room sizes are load-bearing, not decoration. A desk is 72px wide with a 4px
    gap inside 8px padding, so a room fits floor((w-16)/76) desks per row and
    .desks clips whatever will not fit. SEO grew to five agents when Answers
@@ -666,8 +701,9 @@ function fireComm(){
 
 function renderPerf(){
   const m=SITES[CURRENT].metrics;
-  $('#perfStrip').innerHTML=m.map(([v,l,c])=>`<div class="pstat"><span class="v ${c}">${v}</span><span class="l etch">${l}</span></div>`).join('')+`<a href="agency.html">Open full control room →</a>`;
-  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working'||a.s==='done').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
+  $('#perfStrip').innerHTML=m.map(([v,l,c,why])=>`<div class="pstat"${
+    why?` title="${esc(why)}" style="cursor:help"`:''}><span class="v ${c}">${v}</span><span class="l etch">${l}</span></div>`).join('')+`<a href="agency.html">Open full control room →</a>`;
+  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c,why])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>${why?esc(why):'live'}</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working'||a.s==='done').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
     const sub = r.foot ? r.foot.join(' · ') : (w+'/'+tot+' working');
     return `<div class="conn"><div class="ic">▦</div><div class="nm"><b>${r.name}</b><span>${sub}</span></div><div style="width:80px;height:6px;border-radius:3px;background:var(--line)"><div style="width:${pct}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`;}).join('')+`</div>`
     + shelfPanel();
@@ -739,12 +775,30 @@ function renderConns(){
     + `<a class="pbtn" href="/setup" style="display:block;text-align:center;text-decoration:none">`
     + `Open setup</a></div>`;
 }
+/* The menu used to end with "+ Add another website", which built an entry in
+   this page's memory and nothing else: it vanished on refresh, no agent ever
+   heard of it, and the agency has exactly one SITE_URL. It offers the thing
+   that actually works instead — changing the website on the setup screen. */
 function renderSiteMenu(){
-  $('#siteMenu').innerHTML=Object.entries(SITES).map(([id,s])=>`<div class="site-item" onclick="switchSite('${id}')"><span class="fav">${s.fav}</span><div><b>${s.name}</b><small>${s.url}</small></div></div>`).join('')+`<div class="site-add" onclick="openPanel('sitePanel');toggleSites()">+ Add another website</div>`;
+  const items=Object.entries(SITES).map(([id,s])=>{
+    // When he has not given the site a name, the label IS the domain — and
+    // printing the domain twice, once bold and once small, looks like a bug.
+    const sub = !s.configured ? s.url
+              : (s.name===s.url ? 'the website this agency works on' : s.url);
+    return `<div class="site-item" onclick="switchSite('${id}')"><span class="fav">${esc(s.fav)}</span>`
+      +`<div><b>${esc(s.name)}</b><small>${esc(sub)}</small></div></div>`;
+  }).join('');
+  const st=SITES[CURRENT]||{};
+  $('#siteMenu').innerHTML = items
+    + `<a class="site-add" href="/setup" style="display:block;text-decoration:none">`
+    + (st.configured ? 'Change this website →' : 'Save your website →') + `</a>`;
 }
 function toggleSites(e){if(e)e.stopPropagation();$('#siteMenu').classList.toggle('open');}
 function switchSite(id){CURRENT=id;$('#curSite').textContent=SITES[id].name;$('#curFav').textContent=SITES[id].fav;$('#siteMenu').classList.remove('open');boot();}
-function addSite(){const name=($('#nsName').value.trim()||'New Website'),url=($('#nsUrl').value.trim()||'example.com');const id='s'+Object.keys(SITES).length,fav=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();SITES[id]={name,fav,url,metrics:BLANK_METRICS.map(m=>m.slice()),rooms:sectors()};renderSiteMenu();switchSite(id);closeAll();}
+/* addSite() lived here. It built a website entry in this page's memory that no
+   agent, pipeline or database row had ever heard of, and which disappeared on
+   the next refresh. Changing the website is /setup, which writes SITE_URL where
+   everything actually reads it. */
 let cur;
 /* ---- TALKING TO AN AGENT ------------------------------------------------
    The drawer used to reply "On it. I'll claim that as a task on the board…" to
@@ -856,8 +910,15 @@ function applyLive(j){
   if(!j) return;
   const st = SITES[CURRENT];
   const pend = (j.approvals||[]).length;
+  // `String(null)` is the four letters n-u-l-l, and that is exactly what the
+  // header showed. A score the agency cannot honestly give is an em dash, and
+  // the tile carries the reason so "when does this appear?" has an answer on
+  // the screen rather than needing to be asked.
+  const health = (j.metrics.health===null || j.metrics.health===undefined)
+    ? '—' : String(j.metrics.health);
+  st.healthWhy = j.metrics.health_why || '';
   st.metrics = [
-    [String(j.metrics.health), "Agency health", "glass"],
+    [health, "Agency health", "glass", st.healthWhy],
     [String(j.metrics.leads),  "Leads today",   ""],
     [String(pend),             "Awaiting you",  "amber"],
     [shelfSummary(j),          "Shelf",         "ok"],
@@ -946,10 +1007,20 @@ function renderActivity(){
   const ev = a.events||[];
   const cut = a.seen_to||0;
   $('#actHead').textContent = a.head ? '· '+a.head : '';
+  const back = a.hidden
+    ? `<p style="margin-top:14px;font-size:12px;color:var(--muted)">`
+      + `${a.hidden} line${a.hidden===1?'':'s'} cleared. Nothing was deleted — `
+      + `every one of them is a record of work that really happened. `
+      + `<a href="#" onclick="showAllActivity();return false" `
+      + `style="color:var(--glass)">Show them again</a>.</p>` : '';
   if(!ev.length){
-    $('#actBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
-      + `Nothing has run in the last 24 hours, so there is nothing to show. This fills in `
-      + `on its own the moment a sector picks something up — press <b>Run the day</b> to start one.</p>`;
+    $('#actBody').innerHTML = (a.hidden
+      ? `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
+        + `Cleared. Anything the agency does from now on appears here.</p>`
+      : `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
+        + `Nothing has run in the last 24 hours, so there is nothing to show. This fills in `
+        + `on its own the moment a sector picks something up — press <b>Run the day</b> to start one.</p>`)
+      + back;
     return;
   }
   const VERBS=['pushed','got','grabbed','delivered','errored'];
@@ -968,7 +1039,8 @@ function renderActivity(){
   $('#actBody').innerHTML =
       (fresh.length && cut ? `<div class="gh">New since you last looked (${fresh.length})</div>` : '')
     + fresh.map(row).join('')
-    + (older.length ? `<div class="gh" style="margin-top:18px">Earlier</div>`+older.map(row).join('') : '');
+    + (older.length ? `<div class="gh" style="margin-top:18px">Earlier</div>`+older.map(row).join('') : '')
+    + back;
 }
 
 function renderActBadge(){
@@ -996,27 +1068,73 @@ function drawActBadge(n){
     : '';
 }
 
+/* A LOCAL FLOOR UNDER THE SERVER'S COUNT.
+   The read mark belongs in the cabinet — that is what makes it agree across
+   both screens and both hostnames. But if the running server is older than
+   this page it has no /api/activity/seen route at all, the POST 404s, and the
+   badge comes straight back on the next poll no matter how many times he
+   presses the button. That is exactly what he kept reporting.
+
+   So the browser also remembers the newest thing it has shown him. It can only
+   ever SUPPRESS a count he has already acknowledged here; it can never invent
+   one, and the cabinet still wins the moment the server can answer. */
+const ACT_FLOOR='wdta_activity_floor';
+function actFloor(){ try{ return parseInt(localStorage.getItem(ACT_FLOOR)||'0',10)||0; }catch(e){ return 0; } }
+function setActFloor(ts){ try{ if(ts>actFloor()) localStorage.setItem(ACT_FLOOR,String(ts)); }catch(e){} }
+
 async function paintActBadge(){
   if(!$('#actBadge')) return null;
   try{
     const j=await (await fetch('/api/activity')).json();
     if(!j||!j.ok) return null;
     ACT=j;
-    drawActBadge(j.unread||0);
+    const unread = (j.newest_at && actFloor()>=j.newest_at) ? 0 : (j.unread||0);
+    j.unread = unread;
+    drawActBadge(unread);
     return j;
   }catch(e){ return null; }
 }
 
 // Clear it here and now, then tell the agency. A read that only counts if a
 // POST succeeds is a read that sometimes silently does not happen.
-function actMarkSeen(ts){
+function actMarkSeen(ts, extra){
   drawActBadge(0);
   if(ACT) ACT.unread=0;
-  try{
-    fetch('/api/activity/seen',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({seen_to: ts||0})});
-  }catch(e){}
+  if(ts) setActFloor(ts);
+  return fetch('/api/activity/seen',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({seen_to: ts||0}, extra||{}))})
+    .then(r=>r.json()).catch(()=>null);
+}
+
+/* The two buttons on the panel. Opening it already marks it read, but the owner
+   asked for something he can press and watch work — and after being told twice
+   that the count had been fixed, a button that visibly does it is worth more
+   than another invisible mechanism. */
+async function markAllRead(){
+  const b=$('#actReadAll'); if(b){ b.disabled=true; b.textContent='Marking…'; }
+  await actMarkSeen((ACT && (ACT.newest_at||ACT.at)) || Math.floor(Date.now()/1000));
+  await paintActBadge(); renderActivity();
+  if(b){ b.disabled=false; b.textContent='Mark all read'; }
+}
+
+async function clearActivity(){
+  // Hides, never deletes. Every line here is derived from a row the work wrote,
+  // so 'delete this event' would mean deleting the record of a real run.
+  const b=$('#actClear'); if(b){ b.disabled=true; b.textContent='Clearing…'; }
+  const ts=(ACT && (ACT.newest_at||ACT.at)) || Math.floor(Date.now()/1000);
+  const j=await actMarkSeen(ts,{clear:true});
+  if(j && j.ok) ACT=j; else await paintActBadge();
+  drawActBadge(0); renderActivity();
+  if(b){ b.disabled=false; b.textContent='Clear'; }
+}
+
+async function showAllActivity(){
+  const j=await fetch('/api/activity/seen',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({showAll:true})}).then(r=>r.json()).catch(()=>null);
+  if(j && j.ok) ACT=j; else await paintActBadge();
+  renderActivity();
 }
 
 /* ---- READING THE TRAFFIC ---------------------------------------------------
@@ -1347,13 +1465,38 @@ document.addEventListener('click',e=>{if(!e.target.closest('.site-switch'))$('#s
     const r = await fetch('/api/settings'); if(!r.ok) return;
     const j = await r.json();
     const n = (j && j.optional && j.optional.agencyName || '').trim();
-    if(!n) return;
-    const el = document.getElementById('brandName');
-    if(el){ const wasUpper = el.textContent === el.textContent.toUpperCase();
-            el.textContent = wasUpper ? n.toUpperCase() : n; }
-    document.title = n + document.title.replace(/^[^\u2014]*/, '');
+    if(n){
+      const el = document.getElementById('brandName');
+      if(el){ const wasUpper = el.textContent === el.textContent.toUpperCase();
+              el.textContent = wasUpper ? n.toUpperCase() : n; }
+      document.title = n + document.title.replace(/^[^\u2014]*/, '');
+    }
+    // ...and the WEBSITE, which is a different thing from the agency and used
+    // to be a constant in this file. Whatever he saved on setup is what shows.
+    applySite(j && j.website);
   }catch(e){}
 })();
+
+function applySite(w){
+  const st = SITES[CURRENT]; if(!st) return;
+  if(w && w.siteConfigured){
+    st.name = w.siteName || w.siteHost || 'Your website';
+    st.url  = w.siteHost || '';
+    st.fav  = w.siteInitials || '\u2014';
+    st.configured = true;
+  }else{
+    // Never fill this in. A name here that he did not enter is a name he will
+    // spend an afternoon trying to find and change.
+    st.name = 'No website saved';
+    st.url  = 'set it on the setup screen';
+    st.fav  = '\u2014';
+    st.configured = false;
+  }
+  const cs=$('#curSite'), cf=$('#curFav');
+  if(cs) cs.textContent = st.name;
+  if(cf) cf.textContent = st.fav;
+  renderSiteMenu();
+}
 </script>
 </body>
 </html>

@@ -885,7 +885,7 @@ def _work(agent, deep, budget=None) -> dict:
 
         wins = result["wins"]
         if wins:
-            board.post_task(
+            board.try_post_task(
                 "SEO", f"{len(wins)} page(s) are one push from the first page",
                 "Google already ranks these 5th to 20th with real impressions. "
                 "They need better answers on the page, not new pages:\n- "

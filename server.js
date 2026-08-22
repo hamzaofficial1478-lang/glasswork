@@ -275,7 +275,8 @@ function updateEnv(partial) {
     "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
     // Telegram keys are kept in the file if they're already there — an owner
     // mid-switch shouldn't lose his fallback — but nothing writes them now.
-    "AGENCY_NAME", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
+    "AGENCY_NAME", "SITE_NAME",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "OUTREACH_DOMAIN",
     "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER", "CRAWLER_ON_OWN_SITE",
     "ADMIN_NAME", "ADMIN_PASSWORD_HASH",
     "DAILY_SPEND_CAP_USD", "OUTREACH_DAILY_CAP", "SITE_API_BASE", "SITE_API_TOKEN", "PORT",
@@ -385,6 +386,31 @@ function pyState() {
   catch (_) { return { ok: false, error: "bad state output: " + out.slice(0, 300) }; }
 }
 
+// WHAT THE OWNER'S WEBSITE IS CALLED.
+//
+// Worked out by coordination/site.py and only there, because the office, the
+// control room and the status page each used to answer this for themselves —
+// and one of them answered with "Glassworks Dubai / glassworks.ae" written into
+// the HTML as a constant. No amount of saving on the setup screen could change
+// a name that was never read from anywhere.
+//
+// Falls back to the raw .env values if Python cannot be reached, so the header
+// degrades to the real address rather than to somebody else's business.
+function siteLabel() {
+  const out = pyModule("coordination.site", ["--json"], 15000);
+  if (out && out.ok) return {
+    siteName: out.siteName, siteHost: out.siteHost, siteInitials: out.siteInitials,
+    siteSource: out.siteSource, siteConfigured: out.siteConfigured,
+  };
+  const e = readEnv();
+  const url = (e.SITE_URL || "").trim();
+  const host = url.replace(/^[a-z]+:\/\//i, "").split("/")[0].replace(/^www\./i, "");
+  const name = (e.SITE_NAME || "").trim() || host;
+  return { siteName: name, siteHost: host, siteConfigured: !!url,
+           siteInitials: name ? name.split(".")[0].slice(0, 2).toUpperCase() : "—",
+           siteSource: url ? ".env" : null };
+}
+
 // the outside-world connections, from .env — what's wired and what isn't
 function readConnections() {
   const e = readEnv();
@@ -424,8 +450,13 @@ app.post("/api/website", (req, res) => {
     } else {
       siteLine = `SITE = ReadOnlySite(${py(siteUrl)})`;
     }
+    // What to CALL the site on screen. Optional — left blank, every screen
+    // falls back to the domain itself, which is at least his. The office used
+    // to have a name and a domain written into the HTML as constants, so it
+    // showed a business that was not his no matter what he saved here.
+    const siteName = String(b.siteName || "").trim().slice(0, 80);
     updateEnv({
-      SITE_MODE: mode, SITE_URL: siteUrl,
+      SITE_MODE: mode, SITE_URL: siteUrl, SITE_NAME: siteName,
       SITE_API_BASE: mode === "full" ? apiBase : "",
       SITE_API_TOKEN: mode === "full" ? apiToken : "",
     });
@@ -440,7 +471,7 @@ app.post("/api/website", (req, res) => {
       const cfgDir = path.join(__dirname, "config");
       fs.mkdirSync(cfgDir, { recursive: true });
       fs.writeFileSync(path.join(cfgDir, "site.json"),
-        JSON.stringify({ url: siteUrl, mode }, null, 2) + "\n");
+        JSON.stringify({ url: siteUrl, mode, name: siteName }, null, 2) + "\n");
     } catch (e) {
       console.error("could not write config/site.json:", e.message);
     }
@@ -457,7 +488,8 @@ app.post("/api/website", (req, res) => {
     fs.writeFileSync(connPath, conn);
 
     const db = ensureDb();
-    return res.json({ ok: true, mode, siteUrl, database: db.built ? "ready" : "not built" });
+    return res.json({ ok: true, mode, siteUrl, siteName,
+                      database: db.built ? "ready" : "not built" });
   } catch (e) {
     return res.status(500).json({ ok: false, error: "Could not save: " + e.message });
   }
@@ -605,6 +637,26 @@ app.get("/api/activity", (req, res) => {
   res.json(pyModule("coordination.activity", args, 25000));
 });
 
+// ---- the owner's per-sector on/off switches ----------------------------------
+// His agency, his call. A sector he switches off keeps its agents, its history
+// and its score — it simply does no work: the MD cannot post to it, nothing on
+// the board can be claimed by it, and its step in the day is skipped and says
+// so. Enforced in coordination/board.py, not here, so a switch means the same
+// thing whether it was flipped on this screen or from a terminal.
+app.get("/api/sectors", (_q, res) => {
+  res.json(pyModule("coordination.state", ["--switches"], 25000));
+});
+
+app.post("/api/sectors", (req, res) => {
+  const b = req.body || {};
+  const sector = String(b.sector || "").replace(/[^A-Za-z]/g, "").slice(0, 20);
+  if (!sector) return res.status(400).json({ ok: false, error: "Which sector?" });
+  const on = b.enabled === true || b.enabled === "true" || b.enabled === 1;
+  const args = ["--switch", `${sector}=${on ? "on" : "off"}`];
+  if (typeof b.note === "string" && b.note.trim()) args.push(b.note.trim().slice(0, 300));
+  res.json(pyModule("coordination.state", args, 25000));
+});
+
 // ---- what the sectors have actually said to each other -----------------------
 // The office floor used to animate eight hardcoded phrases at random, which
 // looked like the agency working on a morning when nothing had run. Both the
@@ -629,9 +681,14 @@ app.get("/api/faults", (req, res) => {
 // mark only ever moves forward, so a second tab holding an older read cannot
 // resurrect a count he has just cleared.
 app.post("/api/activity/seen", (req, res) => {
-  const to = parseInt((req.body || {}).seen_to, 10);
-  const args = ["--json", "--mark-read"];
-  if (Number.isFinite(to) && to > 0) args.push(String(to));
+  const b = req.body || {};
+  const to = parseInt(b.seen_to, 10);
+  // Three things the buttons on the panel can ask for. `clear` HIDES what has
+  // been read — it never deletes, because every event is derived from a row the
+  // work itself wrote, and `showAll` puts it straight back.
+  const flag = b.showAll ? "--show-all" : b.clear ? "--clear" : "--mark-read";
+  const args = ["--json", flag];
+  if (flag !== "--show-all" && Number.isFinite(to) && to > 0) args.push(String(to));
   res.json(pyModule("coordination.activity", args, 25000));
 });
 app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
@@ -829,6 +886,10 @@ app.get("/api/settings", (_q, res) => {
     website: {
       mode: String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly",
       siteUrl: v("SITE_URL"),
+      // Name, bare host and initials for the switcher, worked out in ONE place
+      // (coordination/site.py) so the office, the control room and the agents
+      // cannot disagree about what the owner's website is called.
+      ...siteLabel(),
       apiBase: v("SITE_API_BASE"),
       apiTokenSet: set("SITE_API_TOKEN"),
     },
@@ -930,7 +991,7 @@ app.get("/api/status", (_q, res) => {
     // list before offering a control, so a stale process is named as a stale
     // process. Add the name here when you add a route a screen depends on.
     api: ["password", "activity", "activity-seen", "sector", "usage",
-          "notify-preview", "chat", "faults", "comms"],
+          "notify-preview", "chat", "faults", "comms", "sectors"],
     ok: true, mode,
     providers: { credentials: (ps && ps.credentials) || 0, models: (ps && ps.models) || 0 },
     brains, brainsReady, brainsTotal, checks,

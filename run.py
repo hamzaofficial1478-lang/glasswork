@@ -233,6 +233,7 @@ def tests():
     mods = ["coordination.cabinet_tests", "coordination.floor_tests",
             "coordination.targets_tests", "coordination.hook_tests",
             "coordination.faults_tests", "coordination.comms_tests",
+            "coordination.switch_tests",
             "providers.tests", "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",
             "pipelines.leads_tests", "pipelines.security_tests",

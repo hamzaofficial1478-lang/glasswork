@@ -104,6 +104,20 @@
     font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
   .room-foot b{color:var(--text)}
 
+  /* ---- the owner's per-sector on/off switch ---- */
+  .swx{width:38px;height:21px;border-radius:999px;border:1px solid var(--line2);
+    background:var(--panel);padding:0;position:relative;cursor:pointer;flex:none;
+    transition:background .16s ease,border-color .16s ease}
+  .swx i{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+    background:var(--faint);transition:transform .16s ease,background .16s ease}
+  .swx.on{background:var(--glass-dim);border-color:var(--glass)}
+  .swx.on i{transform:translateX(17px);background:var(--glass)}
+  .swx:disabled{opacity:.5;cursor:default}
+  /* A stopped room is visibly stopped — dimmed, not hidden. Hiding it would
+     make a sector he switched off look like a sector that had disappeared. */
+  .room.off{opacity:.62;border-style:dashed}
+  .room.off .agents{filter:grayscale(1)}
+
   /* security room accent */
   .room.sec{border-color:rgba(229,86,91,.3)}
   .room.sec .room-head{border-bottom-color:rgba(229,86,91,.25)}
@@ -368,12 +382,25 @@ function renderRooms(st){
     return;
   }
   $('#rooms').innerHTML = st.rooms.map(rm=>`
-    <div class="room ${rm.sec?'sec':''}" data-key="${rm.key}" style="cursor:pointer"
-         title="Open ${rm.name} — what it made, why it scores what it does">
+    <div class="room ${rm.sec?'sec':''} ${rm.enabled===false?'off':''}" data-key="${rm.key}"
+         style="cursor:pointer"
+         title="Open ${escA(rm.name)} — what it made, why it scores what it does">
       ${rm.sec?'<div class="scanline"></div>':''}
       <div class="room-head">
-        <div class="room-title"><b>${rm.name}</b><span class="etch">${rm.key} room</span></div>
-        ${ring(rm.score)}
+        <div class="room-title"><b>${esc(rm.name)}</b>
+          <span class="etch">${rm.enabled===false?'switched off':esc(rm.key)+' room'}</span></div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <!-- The owner's off switch. Stops the sector doing work: the MD cannot
+               post to it, nothing on the board can be claimed by it, and its
+               step in the day is skipped. It keeps its agents and its history.
+               stopPropagation, or flipping the switch also opens the room. -->
+          <button class="swx ${rm.enabled===false?'':'on'}" data-sw="${escA(rm.key)}"
+                  onclick="event.stopPropagation();toggleSector('${escA(rm.key)}',${rm.enabled===false})"
+                  title="${rm.enabled===false?'Switched off — turn '+escA(rm.name)+' back on'
+                                             :'Working — switch '+escA(rm.name)+' off'}"
+                  aria-label="${rm.enabled===false?'Turn on':'Turn off'} ${escA(rm.name)}"><i></i></button>
+          ${ring(rm.score)}
+        </div>
       </div>
       <div class="agents">
         ${rm.agents.length ? rm.agents.map(a=>`
@@ -386,13 +413,52 @@ function renderRooms(st){
       <div class="room-foot"><span>${rm.foot[0]}</span><b>${rm.foot[1]}</b></div>
       <!-- The number alone told nobody anything. 30 out of 100 reads like a
            failing grade and usually means "ran fine, had nothing to produce". -->
-      <div class="band" title="${escA(rm.band_means||'')}">${esc(rm.band||'')}</div>
+      <div class="band" title="${escA(rm.band_means||'')}">${
+        rm.enabled===false
+          ? 'switched off'+(rm.off_note?' — '+esc(rm.off_note):'')
+          : esc(rm.band||'')}</div>
     </div>`).join('');
   // Clicking a room opens what it actually made. The owner asked to be able to
   // read the results, not just count them.
   document.querySelectorAll('.room[data-key]').forEach(el=>{
     el.onclick = ()=>openSector(el.dataset.key);
   });
+}
+
+/* TURN A SECTOR OFF, OR BACK ON.
+   The switch is the whole feature; everything that enforces it lives in
+   coordination/board.py, so flipping it here means exactly what flipping it
+   from a terminal means. Switching OFF asks for a reason — not to be
+   bureaucratic, but because in three weeks "why is Leads doing nothing?" is a
+   question he will ask, and the answer should be on the screen rather than in
+   his memory. Switching back on needs no explanation. */
+async function toggleSector(key, wasOff){
+  const turningOn = !!wasOff;
+  let note='';
+  if(!turningOn){
+    note = prompt(
+      `Switch ${key} off?\n\n`
+      + `It keeps its agents, its history and its score. It simply does no work: `
+      + `the MD stops giving it jobs, nothing on the board gets picked up by it, `
+      + `and its step is skipped when you run the day.\n\n`
+      + `Why, in a few words? (optional)`, '');
+    if(note===null) return;          // he changed his mind
+  }
+  document.querySelectorAll(`.swx[data-sw="${key}"]`).forEach(b=>b.disabled=true);
+  try{
+    const r=await fetch('/api/sectors',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sector:key, enabled:turningOn, note})});
+    const j=await r.json().catch(()=>null);
+    if(!j||!j.ok){
+      alert((j&&j.error) || (r.status===404
+        ? 'The running server does not have the sector switches yet — restart it and try again.'
+        : 'Could not change that sector (HTTP '+r.status+').'));
+    }
+  }catch(e){
+    alert('Could not reach the server — it looks like it has stopped.');
+  }
+  await refresh();
 }
 
 function renderApprovals(st){
@@ -585,6 +651,7 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !sheet.hidden) 
    now, so both screens and both addresses agree, and it survives clearing the
    browser. The server decides what counts as unread; this file only paints it. */
 let ACT_BADGE_N=null;   // what the badge is showing, so a slow poll cannot undo a read
+let ACT_LAST=null;      // the last full read, so the buttons know what they saw
 
 function paintBadge(n){
   ACT_BADGE_N=n;
@@ -592,25 +659,43 @@ function paintBadge(n){
   if(n>0){ b.hidden=false; b.textContent=n>99?'99+':n; } else b.hidden=true;
 }
 
+/* A LOCAL FLOOR UNDER THE SERVER'S COUNT.
+   The mark belongs in the cabinet — that is what makes it agree between this
+   screen and the office, and between localhost and 127.0.0.1. But a running
+   server older than this page has no /api/activity/seen route at all: the POST
+   404s and the badge returns on the next poll however many times he presses
+   the button. The browser therefore also remembers the newest line it has
+   shown him. It can only ever SUPPRESS a count he has already acknowledged
+   here — never invent one — and the cabinet wins as soon as it can answer. */
+const ACT_FLOOR='wdta_activity_floor';
+function actFloor(){ try{ return parseInt(localStorage.getItem(ACT_FLOOR)||'0',10)||0; }catch(e){ return 0; } }
+function setActFloor(ts){ try{ if(ts>actFloor()) localStorage.setItem(ACT_FLOOR,String(ts)); }catch(e){} }
+
 async function pollActivity(){
   try{
     const r=await fetch('/api/activity');
     const j=await r.json(); if(!j||!j.ok) return null;
+    if(j.newest_at && actFloor()>=j.newest_at) j.unread=0;
+    ACT_LAST=j;
     paintBadge(j.unread||0);
     return j;
   }catch(e){ return null; }
 }
 
-// Tell the agency he has read up to the newest line it just showed him. Fire
-// and forget: the badge is cleared here and now, because a read that only takes
-// effect if a POST succeeds is a read that sometimes does not happen.
+function postSeen(body){
+  return fetch('/api/activity/seen',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body||{})}).then(r=>r.json()).catch(()=>null);
+}
+
+// Tell the agency he has read up to the newest line it just showed him. The
+// badge clears here and now, because a read that only takes effect if a POST
+// succeeds is a read that sometimes silently does not happen.
 function markSeen(ts){
   paintBadge(0);
-  try{
-    fetch('/api/activity/seen',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({seen_to: ts||0})});
-  }catch(e){}
+  if(ACT_LAST) ACT_LAST.unread=0;
+  if(ts) setActFloor(ts);
+  return postSeen({seen_to: ts||0});
 }
 
 function evRow(e){
@@ -623,21 +708,53 @@ function evRow(e){
     +`</div></div>`;
 }
 
+function drawActivity(j){
+  const unread=j.unread||0, hidden=j.hidden||0;
+  $('#sheetSub').textContent=j.head+(unread?` · ${unread} new`:'');
+  /* Two buttons the owner can press and watch work. Opening the sheet already
+     marks it read, but after being told twice that the count was fixed, an
+     invisible mechanism is worth less than a button. Clear HIDES — every line
+     here is derived from a row the work itself wrote, so deleting one would
+     mean deleting the record of a real run. */
+  const bar = `<div style="display:flex;gap:8px;margin:0 0 14px">`
+    + `<button class="navbtn" onclick="actAll()">Mark all read</button>`
+    + `<button class="navbtn" onclick="actClear()">Clear</button>`
+    + (hidden?`<button class="navbtn" onclick="actShowAll()">Show the ${hidden} cleared</button>`:'')
+    + `</div>`;
+  const body = !j.events.length
+    ? `<p class="empty">${hidden?'Cleared. Anything the agency does from now on appears here.'
+                               :'Nothing has run in the last 24 hours.'}</p>`
+    : (unread?`<div class="gh2">New since you last looked (${unread})</div>`
+            +j.events.filter(e=>e.at>j.seen_to).map(evRow).join(''):'')
+      +`<div class="gh2">${unread?'Earlier today':'Today'}</div>`
+      +(j.events.filter(e=>!unread||e.at<=j.seen_to).map(evRow).join('')
+        || '<p class="empty">Nothing else today.</p>');
+  $('#sheetBody').innerHTML = bar + body;
+}
+
 $('#actBtn').onclick=async()=>{
   openSheet('Activity','reading…','<p class="empty">Loading…</p>');
   const j=await pollActivity();
   if(!j){ $('#sheetBody').innerHTML='<p class="empty">Could not read the activity log.</p>'; return; }
-  const unread=j.unread||0;
-  $('#sheetSub').textContent=j.head+(unread?` · ${unread} new`:'');
-  $('#sheetBody').innerHTML =
-     (unread?`<div class="gh2">New since you last looked (${unread})</div>`
-            +j.events.filter(e=>e.at>j.seen_to).map(evRow).join(''):'')
-    +`<div class="gh2">${unread?'Earlier today':'Today'}</div>`
-    +(j.events.filter(e=>!unread||e.at<=j.seen_to).map(evRow).join('')
-      || '<p class="empty">Nothing else today.</p>');
+  drawActivity(j);
   // Opening it IS reading it. Mark to the newest line actually on screen.
   markSeen(j.newest_at||j.at);
 };
+
+async function actAll(){
+  await markSeen((ACT_LAST && (ACT_LAST.newest_at||ACT_LAST.at))||0);
+  const j=await pollActivity(); if(j) drawActivity(j);
+}
+async function actClear(){
+  const ts=(ACT_LAST && (ACT_LAST.newest_at||ACT_LAST.at))||0;
+  const j=await postSeen({seen_to:ts, clear:true});
+  paintBadge(0);
+  if(j&&j.ok){ ACT_LAST=j; drawActivity(j); } else { const k=await pollActivity(); if(k) drawActivity(k); }
+}
+async function actShowAll(){
+  const j=await postSeen({showAll:true});
+  if(j&&j.ok){ ACT_LAST=j; drawActivity(j); } else { const k=await pollActivity(); if(k) drawActivity(k); }
+}
 
 /* ---- ONE SECTOR, IN FULL -------------------------------------------------- */
 async function openSector(key){

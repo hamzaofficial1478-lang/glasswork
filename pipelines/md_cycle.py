@@ -412,9 +412,17 @@ def _cycle(agent, dry_run):
 
     posted = []
     for c in kept:
-        tid = board.post_task(c["sector"], c["title"],
-                              c["detail"] + f"\n\n[MD evidence] {c['evidence']}",
-                              risk=c.get("risk", "green"), created_by="MD")
+        # A sector the owner has switched off is not a failure to plan around —
+        # it is an instruction. The item is recorded as skipped, with the reason,
+        # rather than crashing the cycle or silently disappearing.
+        try:
+            tid = board.post_task(c["sector"], c["title"],
+                                  c["detail"] + f"\n\n[MD evidence] {c['evidence']}",
+                                  risk=c.get("risk", "green"), created_by="MD")
+        except board.SectorOff as e:
+            rejected.append({"sector": c["sector"], "title": c["title"],
+                             "why": str(e)})
+            continue
         posted.append({"task_id": tid, "sector": c["sector"], "title": c["title"],
                        "evidence": c["evidence"]})
         if c.get("proposal_id"):

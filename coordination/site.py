@@ -48,6 +48,7 @@ setup between machines by hand.
 """
 import json
 import os
+import re
 from pathlib import Path
 
 CONFIG = Path(__file__).parents[1] / "config" / "site.json"
@@ -116,7 +117,67 @@ def site_url(override: str = "") -> str:
     return ""
 
 
-def save(url: str, mode: str = "", areas=None) -> dict:
+def site_host(override: str = "") -> str:
+    """The bare domain, for showing. No scheme, no www., no trailing slash."""
+    u = site_url(override)
+    if not u:
+        return ""
+    h = u.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0].strip().lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def site_name(override: str = "") -> str:
+    """
+    What to CALL the website on screen.
+
+    The office used to have "Glassworks Dubai" and "glassworks.ae" written into
+    the HTML as a constant, so the owner's own site never appeared no matter
+    what he saved on the setup screen — the switcher was showing him somebody
+    else's business.
+
+    Order: SITE_NAME if he has set one, otherwise the domain itself. The domain
+    is not a pretty label but it is his, and a real address beats an invented
+    name every time. Empty when no website is saved at all, which the screen
+    must show as "not set yet" rather than filling in.
+    """
+    for src in (os.environ.get("SITE_NAME", ""), _env_value("SITE_NAME")):
+        v = (src or "").strip()
+        if v:
+            return v
+    v = (load().get("name") or "").strip()
+    return v or site_host(override)
+
+
+def site_initials(override: str = "") -> str:
+    """
+    Two letters for the little square beside the name.
+
+    A domain is not two words: splitting "worlddealtechnicalservices.com" on
+    punctuation and taking one letter from each part gives "WC", where the C is
+    from ".com". When the label IS the bare domain, take the first two letters
+    of the domain's own name instead.
+    """
+    name = site_name(override)
+    if not name:
+        return "—"
+    if name == site_host(override):
+        first = name.split(".", 1)[0]
+        return (first[:2].upper() or "—")
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", name) if w]
+    if len(words) >= 2:
+        return (words[0][0] + words[1][0]).upper()
+    return (words[0][:2].upper() if words else "—")
+
+
+def _env_value(key: str) -> str:
+    try:
+        from providers import integrations
+        return (integrations.read_env().get(key) or "").strip()
+    except Exception:
+        return ""
+
+
+def save(url: str, mode: str = "", areas=None, name: str = "") -> dict:
     """
     Record the public config. Called by the setup screen alongside the .env
     write. Deliberately refuses to store anything that looks like a credential:
@@ -130,6 +191,8 @@ def save(url: str, mode: str = "", areas=None) -> dict:
         data["mode"] = mode
     if areas:
         data["areas"] = list(areas)
+    if (name or "").strip():
+        data["name"] = name.strip()[:80]
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     CONFIG.write_text(json.dumps(data, indent=2) + "\n")
     return data
@@ -155,3 +218,32 @@ def status() -> dict:
                           "config/site.json"],
             "hint": ("save your website on /setup and press Save — or set "
                      "SITE_URL=https://yoursite.ae for one run")}
+
+
+def label() -> dict:
+    """
+    Everything a screen needs to NAME the website, worked out in one place.
+
+    The office, the control room and the status page each used to decide this
+    for themselves, and one of them decided it with a hardcoded constant. One
+    function, one answer.
+    """
+    st = status()
+    return {"siteName": site_name(), "siteHost": site_host(),
+            "siteInitials": site_initials(), "siteUrl": st["url"],
+            "siteSource": st.get("source"), "agencyName": agency_name(),
+            "siteConfigured": bool(st["url"])}
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="What this agency's website is called.")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+    d = label()
+    if a.json:
+        print(json.dumps({"ok": True, **d}))
+    elif d["siteConfigured"]:
+        print(f"{d['siteName']}  ({d['siteUrl']}, from {d['siteSource']})")
+    else:
+        print("No website saved yet — set it on /setup.")

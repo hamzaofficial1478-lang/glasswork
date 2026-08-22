@@ -70,7 +70,16 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   tokens_in   INTEGER DEFAULT 0,
   tokens_out  INTEGER DEFAULT 0,
   usd_cost    REAL DEFAULT 0,
-  status      TEXT,                    -- running | ok | error | killed
+  -- running | ok | error | killed | stalled
+  --
+  -- 'stalled' is written by the Overseer (coordination/faults.py), never by the
+  -- agent — an agent that could still write a status would not be stalled. It
+  -- exists because 'running' is a CLAIM about right now, and a claim nobody
+  -- ever retracts becomes a lie: the activity log re-derived "never came back"
+  -- from the same dead row every time it was read, so a desk that had long
+  -- since recovered still showed as broken. Reaping it turns an eternal
+  -- present tense into something that happened once, at a known time.
+  status      TEXT,
   note        TEXT                     -- one plain line: what it actually did
 );
 
@@ -452,7 +461,12 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE TABLE IF NOT EXISTS read_marks (
   what     TEXT PRIMARY KEY,          -- 'activity'
   seen_to  INTEGER NOT NULL,          -- unix seconds; everything at or before is read
-  at       INTEGER                    -- when he marked it
+  at       INTEGER,                   -- when he marked it
+  -- 'Clear' on the activity panel. It HIDES, it does not delete: every event is
+  -- derived from a row the work itself wrote, so deleting one would mean
+  -- deleting the record of a run, a claim or a sent mail. Everything at or
+  -- before this is left out of the list until he asks to see it all again.
+  cleared_to INTEGER DEFAULT 0
 );
 
 -- WHEN AN AGENT ITSELF BREAKS.
@@ -487,3 +501,19 @@ CREATE TABLE IF NOT EXISTS faults (
   resolved_at  INTEGER, resolution TEXT
 );
 CREATE INDEX IF NOT EXISTS faults_open ON faults(status, last_seen);
+
+-- WHICH SECTORS THE OWNER HAS TURNED OFF.
+-- His agency, his call. He may not want Leads doing cold outreach this month,
+-- or Content publishing while he rewrites the service pages, and the honest way
+-- to express that is a switch — not deleting agents, and not leaving a sector
+-- running while he ignores its output.
+--
+-- A missing row means ON. That matters: a cabinet built before this table
+-- existed, or a sector added later, must default to working rather than to
+-- silently doing nothing. Absence is never "off".
+CREATE TABLE IF NOT EXISTS sector_switches (
+  sector     TEXT PRIMARY KEY,      -- 'Leads', 'SEO', ... matches state.SECTORS
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  note       TEXT,                  -- why, in his words, if he gave one
+  changed_at INTEGER
+);

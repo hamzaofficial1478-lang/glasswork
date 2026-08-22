@@ -120,12 +120,30 @@ def since(ts=None, limit=60) -> list:
         elif r["status"] == "error":
             ev.append(_ev(r["ended_at"] or r["started_at"], ERRORED, r["agent"],
                           line, "the run raised and stopped", level="bad"))
+        elif r["status"] == "stalled":
+            # Reaped by the Overseer. Past tense, and anchored to when it was
+            # declared dead rather than to now — see the note below.
+            ev.append(_ev(r["ended_at"] or r["started_at"], ERRORED, r["agent"],
+                          "stopped responding and was declared dead",
+                          r["note"] or "", level="bad"))
         elif r["status"] == "running":
+            # A run still claiming to be running past the line is either
+            # genuinely stuck or a corpse nobody has swept up. Say the second
+            # thing, because the owner can act on it: the Overseer marks it
+            # 'stalled' on its next pass and this line stops moving.
+            #
+            # It used to read "started 12h ago and never came back", recomputed
+            # from now() on every read, which meant a desk that had recovered
+            # hours ago still had a fresh-looking report of being dead sitting
+            # at the top of the log. The age is anchored to the run's own start
+            # now, and the line says what will happen to it.
             stalled = (now - r["started_at"]) > 1200
             ev.append(_ev(r["started_at"], ERRORED if stalled else GRABBED, r["agent"],
-                          ("stalled — started " + _ago(now - r["started_at"])
-                           + " and never came back") if stalled else (line + " …"),
-                          "" if stalled else "working now",
+                          ("stopped responding — began at "
+                           + time.strftime("%H:%M", time.localtime(r["started_at"]))
+                           + " and never reported back") if stalled else (line + " …"),
+                          ("the Overseer closes this off on its next pass"
+                           if stalled else "working now"),
                           level="bad" if stalled else "live"))
 
     # ---- the board ------------------------------------------------------
@@ -276,8 +294,66 @@ def read_mark(what="activity") -> int:
     """How far the owner has read. 0 if he never has."""
     c = _conn()
     try:
+        board._migrate(c)
         r = _rows(c, "SELECT seen_to FROM read_marks WHERE what=?", (what,))
         return int(r[0]["seen_to"]) if r else 0
+    finally:
+        c.close()
+
+
+def clear_mark(what="activity") -> int:
+    """How far he has CLEARED. Everything at or before is hidden from the list."""
+    c = _conn()
+    try:
+        board._migrate(c)
+        r = _rows(c, "SELECT cleared_to FROM read_marks WHERE what=?", (what,))
+        return int(r[0]["cleared_to"] or 0) if r else 0
+    finally:
+        c.close()
+
+
+def clear_to(cleared_to=None, what="activity") -> int:
+    """
+    Hide everything up to `cleared_to` from the list.
+
+    This is not a delete and must never become one. Every line in the activity
+    log is derived from a row the work itself wrote — a claimed task, a granted
+    borrow, a finished run — so 'deleting an event' would mean deleting the
+    record that the work happened. The owner wanted a button that empties the
+    screen; this empties the screen. `--show-all` puts it back, and the history
+    was never gone.
+    """
+    now = int(time.time())
+    ts = int(cleared_to or now)
+    if ts > now + 300:
+        ts = now
+    c = _conn()
+    try:
+        board._migrate(c)
+        c.execute("""INSERT INTO read_marks (what, seen_to, cleared_to, at)
+                     VALUES (?,?,?,?)
+                     ON CONFLICT(what) DO UPDATE SET
+                       seen_to=MAX(read_marks.seen_to, excluded.seen_to),
+                       cleared_to=MAX(COALESCE(read_marks.cleared_to,0), excluded.cleared_to),
+                       at=excluded.at""", (what, ts, ts, now))
+        c.commit()
+        return ts
+    except Exception:
+        return ts
+    finally:
+        c.close()
+
+
+def show_all(what="activity") -> bool:
+    """Undo a Clear. The events were never gone, only hidden."""
+    c = _conn()
+    try:
+        board._migrate(c)
+        c.execute("UPDATE read_marks SET cleared_to=0 WHERE what=?", (what,))
+        c.commit()
+        return True
+    except Exception:
+        return False
     finally:
         c.close()
 
@@ -325,24 +401,42 @@ def feed(ts=None, limit=60) -> dict:
     other showing the same stubborn number. It is read from the cabinet now, so
     every screen agrees. A caller may still pass `ts` to ask a hypothetical.
     """
-    ev = since(None, limit)                       # the full window, always
+    everything = since(None, limit)               # the full window, always
     seen_to = int(ts) if ts else read_mark()
-    unread = sum(1 for e in ev if e["at"] > seen_to) if seen_to else len(ev)
+    unread = (sum(1 for e in everything if e["at"] > seen_to) if seen_to
+              else len(everything))
+
+    # EVERY NUMBER BELOW IS COUNTED FROM THE FULL WINDOW, not from the visible
+    # list. 'Clear' is a preference about what he wants to look at; whether two
+    # agents are running or three things are broken is a fact about the agency.
+    # Counting the visible list instead would mean pressing Clear made a live
+    # problem disappear from the ticker and the floor, which is the single worst
+    # thing a status screen can do.
     counts = {}
-    for e in ev:
+    for e in everything:
         counts[e["verb"]] = counts.get(e["verb"], 0) + 1
-    live = sum(1 for e in ev if e["level"] == "live")
-    bad = sum(1 for e in ev if e["level"] == "bad")
+    live = sum(1 for e in everything if e["level"] == "live")
+    bad = sum(1 for e in everything if e["level"] == "bad")
+    newest_at = max([e["at"] for e in everything], default=int(time.time()))
+
+    hidden_to = clear_mark()
+    ev = [e for e in everything if e["at"] > hidden_to] if hidden_to else everything
+    hidden = len(everything) - len(ev)
+
+    head = (f"{live} happening now" if live else
+            f"{bad} problem{'s' if bad != 1 else ''}" if bad else
+            f"{len(everything)} things today" if everything else "nothing has run yet")
+    if hidden:
+        head += f" · {hidden} cleared"
+
     # newest_at is what a screen should mark as read when it shows this feed:
     # the newest thing it actually put in front of him, not the clock. Marking
     # the clock on a browser running a minute fast reads the future.
     return {"ok": True, "at": int(time.time()), "events": ev,
-            "newest_at": max([e["at"] for e in ev], default=int(time.time())),
+            "newest_at": newest_at,
             "unread": unread, "seen_to": seen_to,
-            "counts": counts, "live": live, "errors": bad,
-            "head": (f"{live} happening now" if live else
-                     f"{bad} problem{'s' if bad != 1 else ''}" if bad else
-                     f"{len(ev)} things today" if ev else "nothing has run yet")}
+            "cleared_to": hidden_to, "hidden": hidden, "total": len(everything),
+            "counts": counts, "live": live, "errors": bad, "head": head}
 
 
 def as_text(limit=40) -> str:
@@ -364,14 +458,33 @@ if __name__ == "__main__":
                     metavar="TS",
                     help="record that everything up to TS has been read "
                          "(no TS = now), then print the feed")
+    ap.add_argument("--clear", type=int, nargs="?", const=0, default=None,
+                    metavar="TS",
+                    help="hide everything up to TS from the list (no TS = now). "
+                         "Hides only — nothing is deleted, --show-all puts it back")
+    ap.add_argument("--show-all", action="store_true",
+                    help="undo a --clear and show the whole window again")
     a = ap.parse_args()
-    if a.mark_read is not None:
+    if a.show_all:
+        show_all()
+        mark = 0
+    elif a.clear is not None:
+        mark = clear_to(a.clear or None)
+    elif a.mark_read is not None:
         mark = mark_read(a.mark_read or None)
-        if a.json:
-            d = feed(a.since, a.limit)
-            d["marked_to"] = mark
-            print(json.dumps(d))
-        else:
-            print(f"read up to {time.strftime('%H:%M:%S', time.localtime(mark))}")
     else:
+        mark = None
+
+    if mark is None:
         print(json.dumps(feed(a.since, a.limit)) if a.json else as_text(a.limit))
+    elif a.json:
+        d = feed(a.since, a.limit)
+        d["marked_to"] = mark
+        print(json.dumps(d))
+    elif a.show_all:
+        print("showing everything again")
+    elif a.clear is not None:
+        print(f"cleared up to {time.strftime('%H:%M:%S', time.localtime(mark))} "
+              "— hidden, not deleted")
+    else:
+        print(f"read up to {time.strftime('%H:%M:%S', time.localtime(mark))}")
