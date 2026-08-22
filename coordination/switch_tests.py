@@ -197,8 +197,112 @@ def test_turning_it_back_on_changes_nothing_else():
         check("and it can be claimed again", board.claim_task(tid, "leads-hunter"), True)
 
 
+def _old_cabinet(*without):
+    """
+    A cabinet built by an OLDER version: the schema with some tables missing.
+
+    This is what the owner actually had, and what nothing was testing.
+    """
+    import re
+    schema = (ROOT / "coordination" / "schema.sql").read_text()
+    for t in without:
+        schema = re.sub(r"CREATE TABLE IF NOT EXISTS %s \(.*?\);" % t, "",
+                        schema, flags=re.S)
+        schema = re.sub(r"CREATE INDEX IF NOT EXISTS %s\w*[^;]*;" % t, "", schema)
+    d = Path(tempfile.mkdtemp())
+    db = d / "agency.db"
+    con = sqlite3.connect(db)
+    con.executescript(schema)
+    con.commit()
+    con.close()
+    return db
+
+
+def test_an_older_cabinet_gets_every_new_table():
+    """
+    THE BUG THIS PINS.
+
+    Tables were declared in schema.sql and, separately, hand-copied into a list
+    in board.py that the migration actually read. The two drifted three times.
+    On the owner's cabinet — built before any of them existed — the result was:
+
+      sector_switches   "no such table" the moment he switched a sector off
+      read_marks        every write swallowed, so his activity badge reset on
+                        every poll and he reported it three times
+      faults            the Overseer's pass died on its first write
+
+    The first crashed loudly and got fixed. The other two failed silently and
+    were mistaken for other problems for days. So this does not test three
+    table names — it tests that EVERY table in schema.sql is reachable after
+    migrating a cabinet that has none of them, which is the check that keeps
+    working when the next table is added.
+    """
+    import re
+    print("\nA cabinet built before these tables existed gets them all:")
+    schema = (ROOT / "coordination" / "schema.sql").read_text()
+    want = set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", schema, re.I))
+    newest = ["faults", "read_marks", "sector_switches"]
+
+    real = board.DB
+    db = _old_cabinet(*newest)
+    board.DB = str(db)
+    board._MIGRATED.discard(str(db))
+    try:
+        con = sqlite3.connect(db)
+        before = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        con.close()
+        check("the old cabinet really is missing them",
+              sorted(set(newest) - before), sorted(newest))
+
+        # Any ordinary board call must heal it — the owner should never have to
+        # rebuild his cabinet or run a command to get a working feature.
+        board.sector_enabled("Leads")
+
+        con = sqlite3.connect(db)
+        after = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        con.close()
+        missing = sorted(want - after)
+        check("every table in schema.sql now exists", missing, [])
+        check("including the three that were missed", sorted(set(newest) - after), [])
+    finally:
+        board.DB = real
+
+    # And the features themselves work, not just the tables.
+    db = _old_cabinet(*newest)
+    board.DB = str(db)
+    board._MIGRATED.discard(str(db))
+    try:
+        board.set_sector("Content", False, "has apis, testing")
+        check("switching a sector off no longer crashes",
+              board.sector_enabled("Content"), False)
+
+        from . import activity
+        now = int(time.time())
+        con = sqlite3.connect(board.DB)
+        con.execute("INSERT INTO agent_runs(agent,started_at,status,note)"
+                    " VALUES('seo-strategist',?, 'ok','a run')", (now - 60,))
+        con.commit(); con.close()
+        activity.mark_read()
+        check("the activity read mark actually persists",
+              activity.feed()["unread"], 0)
+
+        from . import faults
+        con = sqlite3.connect(board.DB)
+        con.execute("INSERT INTO agent_runs(agent,started_at,status,note)"
+                    " VALUES('leads-hunter',?, 'running','x')",
+                    (now - faults.STALL_SECS - 300,))
+        con.commit(); con.close()
+        check("and the Overseer's pass runs instead of dying",
+              faults.scan()["filed"], 1)
+    finally:
+        board.DB = real
+
+
 def main():
-    for t in (test_a_sector_nobody_has_touched_is_on,
+    for t in (test_an_older_cabinet_gets_every_new_table,
+              test_a_sector_nobody_has_touched_is_on,
               test_switching_off_stops_work_reaching_it,
               test_work_already_on_the_board_cannot_be_claimed,
               test_the_overseer_can_still_file_against_a_stopped_sector,

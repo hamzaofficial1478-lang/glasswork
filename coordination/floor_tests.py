@@ -490,7 +490,18 @@ def test_tracing_never_breaks_the_work():
             run.task("nope").note("still works").spent(1.5)
             got.append("the body ran")
         check("the work still happens with no cabinet", got, ["the body ran"])
-        check("and the handle is inert, not half-alive", run.id, None)
+        # It used to end here with an inert handle: no cabinet, so no run
+        # recorded, and the only promise was that the job survived. The
+        # migration builds a missing cabinet on first touch now — which was
+        # forced by three tables never reaching the owner's existing one — so
+        # the stronger thing is true. The work happens AND it is traced.
+        check("and the run is now actually recorded, not silently dropped",
+              isinstance(run.id, int), True)
+        con = sqlite3.connect(board.DB)
+        row = con.execute("SELECT agent, note, usd_cost FROM agent_runs").fetchone()
+        con.close()
+        check("with what it did and what it cost",
+              (row[0], row[1], row[2]), ("leads-hunter", "still works", 1.5))
 
         # a crash inside the body must still propagate, untraced or not
         raised = None

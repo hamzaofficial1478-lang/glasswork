@@ -479,13 +479,28 @@ function resolvePython() {
 const NO_PY = "Python 3 wasn't found on this computer. Install Python 3 (python.org) and " +
   "restart the server, or set PYTHON_BIN to the full path of your python.exe / python3.";
 
+// APPLY THE SCHEMA ON EVERY BOOT, not only when the cabinet looks missing.
+//
+// This used to skip the whole thing when dbBuilt() said yes — and dbBuilt() is
+// a byte-scan of the database file for a handful of table NAMES from an old
+// version. Any cabinet built at any point in the past passes that test, so a
+// release that added a table shipped a database that never got it. Three
+// tables reached the owner that way: sector_switches (which crashed when he
+// tried to switch a sector off), read_marks (which swallowed every write, so
+// his activity count reset on every poll) and faults (which killed the
+// Overseer's pass on its first write).
+//
+// schema.sql is CREATE ... IF NOT EXISTS throughout, so running it every time
+// costs a few milliseconds and closes the hole permanently. Python's own
+// board._migrate does the same on its side; either route now heals a cabinet.
 function ensureDb() {
-  if (dbBuilt()) return { built: true, ran: false };
   const py = resolvePython();
-  if (!py) return { built: false, ran: false, error: NO_PY };
+  if (!py) return { built: dbBuilt(), ran: false, error: NO_PY };
   try {
-    const r = spawnSync(py.cmd, [...py.prefix, "coordination/init_db.py"], { cwd: __dirname, timeout: 20000 });
-    return { built: dbBuilt(), ran: true, error: r.status === 0 ? null : String(r.stderr || "") };
+    const r = spawnSync(py.cmd, [...py.prefix, "coordination/init_db.py"],
+                        { cwd: __dirname, timeout: 20000 });
+    return { built: dbBuilt(), ran: true,
+             error: r.status === 0 ? null : String(r.stderr || "") };
   } catch (e) {
     return { built: dbBuilt(), ran: true, error: e.message };
   }

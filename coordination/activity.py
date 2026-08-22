@@ -338,8 +338,6 @@ def clear_to(cleared_to=None, what="activity") -> int:
                        at=excluded.at""", (what, ts, ts, now))
         c.commit()
         return ts
-    except Exception:
-        return ts
     finally:
         c.close()
 
@@ -372,6 +370,11 @@ def mark_read(seen_to=None, what="activity") -> int:
         ts = now
     c = _conn()
     try:
+        # Migrate FIRST. A cabinet built before read_marks existed has no table
+        # to write to, and the except below used to turn that into a silent
+        # success — the owner pressed the button, was told it worked, and the
+        # count came back on the very next poll. Three times.
+        board._migrate(c)
         c.execute("""INSERT INTO read_marks (what, seen_to, at) VALUES (?,?,?)
                      ON CONFLICT(what) DO UPDATE SET
                        seen_to=MAX(read_marks.seen_to, excluded.seen_to),
@@ -379,8 +382,6 @@ def mark_read(seen_to=None, what="activity") -> int:
         c.commit()
         r = _rows(c, "SELECT seen_to FROM read_marks WHERE what=?", (what,))
         return int(r[0]["seen_to"]) if r else ts
-    except Exception:
-        return ts
     finally:
         c.close()
 

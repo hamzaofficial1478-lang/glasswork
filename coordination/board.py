@@ -274,9 +274,26 @@ _ADDED_COLUMNS = (
     ("read_marks",   "cleared_to",   "INTEGER DEFAULT 0"),
 )
 
-# Tables added after the first cabinets were built. CREATE IF NOT EXISTS is
-# cheap and idempotent, and an owner who built his cabinet last week should not
-# have to rebuild it to get the proposal queue.
+# WHY THIS LIST NO LONGER DECIDES ANYTHING
+#
+# This used to be THE list of tables a migration would create, hand-copied from
+# schema.sql. Two files describing the same tables is two files that drift, and
+# they did — three times. `faults`, `read_marks` and `sector_switches` were all
+# added to schema.sql and never added here, so on any cabinet built before them
+# the tables simply never appeared:
+#
+#   sector_switches   turning a sector off crashed outright, which is how it
+#                     was finally caught — "no such table: sector_switches"
+#   read_marks        every write was swallowed by a defensive except, so the
+#                     owner's activity count reset on every poll and he
+#                     reported the same stuck badge three times
+#   faults            the whole Overseer pass died on its first write
+#
+# The last two are the worse kind of bug: they failed silently and looked like
+# something else entirely. _migrate now applies schema.sql itself — every
+# statement in it is CREATE ... IF NOT EXISTS, so it is idempotent and cheap —
+# and this tuple is only a fallback for the case where schema.sql cannot be read
+# at all. Adding a table means editing ONE file now.
 _ADDED_TABLES = (
     """CREATE TABLE IF NOT EXISTS proposals (
          id TEXT PRIMARY KEY, sector TEXT NOT NULL, title TEXT NOT NULL,
@@ -365,16 +382,61 @@ _ADDED_TABLES = (
 )
 
 
+SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+
+def _schema_statements():
+    """
+    Every CREATE in schema.sql, one statement at a time.
+
+    Not executescript(): that issues an implicit COMMIT first, and _migrate is
+    called from inside functions that may already have work in flight. Executed
+    one by one, a migration can never end someone else's transaction early.
+
+    Only CREATE statements are taken. schema.sql contains nothing else today,
+    and this makes sure that stays true — a stray DELETE in the schema file
+    should not quietly run against every existing cabinet on the next upgrade.
+    """
+    try:
+        raw = SCHEMA_PATH.read_text()
+    except Exception:
+        return []
+    body = "\n".join(l.split("--", 1)[0] for l in raw.splitlines())
+    out = []
+    for stmt in body.split(";"):
+        s = stmt.strip()
+        if s.upper().startswith("CREATE "):
+            out.append(s)
+    return out
+
+
 def _migrate(c):
-    """Columns added after the first cabinets were built. Safe to run repeatedly."""
+    """
+    Bring a cabinet built by an older version up to date. Safe to run repeatedly.
+
+    Applies schema.sql — every statement in it is CREATE ... IF NOT EXISTS —
+    then the column additions, which SQL cannot express idempotently and so have
+    to be checked by hand. See the note on _ADDED_TABLES for why the schema file
+    is the source of truth rather than a list kept in this module.
+    """
     key = str(DB)
     if key in _MIGRATED:
         return
-    for ddl in _ADDED_TABLES:
+    stmts = _schema_statements()
+    for ddl in (stmts or _ADDED_TABLES):
         try:
             c.execute(ddl)
         except sqlite3.OperationalError:
             pass
+    # Belt and braces: if schema.sql was readable we have already run these, and
+    # IF NOT EXISTS makes the second pass free. If it was NOT readable, this is
+    # the only thing standing between an old cabinet and a crash.
+    if stmts:
+        for ddl in _ADDED_TABLES:
+            try:
+                c.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
     for table, col, coltype in _ADDED_COLUMNS:
         try:
             cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
@@ -382,6 +444,10 @@ def _migrate(c):
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
         except sqlite3.OperationalError:
             pass
+    try:
+        c.commit()
+    except Exception:
+        pass
     _MIGRATED.add(key)
 
 
