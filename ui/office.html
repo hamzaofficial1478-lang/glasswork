@@ -949,6 +949,13 @@ function openDrawer(a){
   if(a.s==='blocked'){
     open = `<b style="color:var(--danger)">I've stopped.</b> ${esc(a.t)}`
          + (a.why?`<br><br>${esc(a.why)}`:'')
+         // A red desk the owner could only look at was the whole complaint. If
+         // the line carries the job it is stuck on, offer to put it back.
+         + (a.task_id
+             ? `<br><br><button class="yes" id="relBtn" onclick="releaseStuck('${escA(a.task_id)}')"`
+               + ` style="font-size:12px;padding:5px 10px">Put it back on the board</button>`
+               + ` <span class="dim" id="relMsg" style="font-size:11.5px"></span>`
+             : '')
          + `<br><br>Ask me about it and I'll tell you what I know.`;
   } else if(a.s==='working'){
     open = `Working now — ${esc(a.t)}.`;
@@ -969,6 +976,37 @@ function openDrawer(a){
   $('#dInput').focus();
 }
 function closeDrawer(){ $('#drawer').classList.remove('open'); }
+
+/* Put a stuck job back on the board.
+
+   The server does the judging, not this — board.release_claim refuses a claim
+   that is merely slow, and says so. So a refusal is shown as the answer it is,
+   never swallowed: the one thing this screen must never do is report a change
+   the cabinet did not make (see the note on the approve button). */
+async function releaseStuck(taskId){
+  const btn = document.getElementById('relBtn');
+  const msg = document.getElementById('relMsg');
+  if(!btn || !msg) return;
+  btn.disabled = true; msg.textContent = 'releasing…'; msg.style.color = 'var(--muted)';
+  let j = null;
+  try{
+    const r = await fetch('/api/release',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id: taskId, by: 'owner'})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'could not reach the server'}; }
+  if(!j || !j.ok){
+    btn.disabled = false;
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '✕ ' + ((j && (j.error || j.why)) || 'not released');
+    return;
+  }
+  btn.remove();
+  msg.style.color = 'var(--ok)';
+  msg.textContent = '✓ back on the board — the next desk that can do it will take it';
+  const j2 = await pullLive();
+  if(j2){ LIVE=j2; applyLive(j2); renderFloor(); renderPerf(); }
+}
 
 let asking=false;
 async function askAgent(){
@@ -1073,6 +1111,9 @@ function seatLive(rm, feed){
     desk.s = f.s; desk.t = f.t;
     // a dark bulb always carries its reason — see state.py's _run_feed
     desk.why = f.why || '';
+    // and, when the desk is stuck on a claim, the job it is stuck on, so the
+    // drawer can offer to put it back rather than only describe the problem
+    desk.task_id = f.task_id || '';
     // show WHO actually did it — a desk labelled 'Writer' while content-writer
     // holds the task tells you nothing you didn't already know.
     desk.n = (f.n && f.n !== 'unassigned') ? f.n : desk.staff;

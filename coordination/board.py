@@ -378,6 +378,135 @@ def withdraw_task(task_id, by, reason):
         return "noted"
 
 
+# How long a claim with nothing running behind it stays a claim. Kept the same
+# as faults.ABANDONED_SECS on purpose: the Overseer must not be able to call a
+# claim dead while this function still calls it alive, or the ticket and the fix
+# disagree and the owner is told to do something that then gets refused.
+DEAD_CLAIM_SECS = 3600
+
+
+def release_claim(task_id, by, reason="", force=False):
+    """
+    Put a dead claim back on the board. Returns (ok, why).
+
+    THE GAP THIS FILLS
+
+    Claiming is exclusive, and that is the whole point — while a claim is held
+    nobody else may touch the work. The consequence nobody had handled: if the
+    holder never comes back, the claim is held FOR EVER. There was no way to
+    let go. withdraw_task refuses a claimed task by design, finish_task only
+    accepts the owner, and if that owner is a desk with no pipeline behind it
+    any more, the task is gone — not failed, not open, just permanently held by
+    a ghost. Two of them were sitting on the owner's live board, one for a
+    week, both drawn as a red desk he could do nothing about.
+
+    The Overseer has been filing these as 'abandoned' faults since it was
+    written, with the advice "either finish it or release the claim". There was
+    no release. It was telling him to do something the system could not do.
+
+    WHAT THIS DOES NOT DO
+
+    It does not make claims soft. A LIVE claim is still untouchable, and that
+    is enforced here rather than trusted:
+
+      the owner giving it back      always allowed. It is theirs to hand over.
+      a dead claim                  held longer than DEAD_CLAIM_SECS with no
+                                    run recording work against it since. Not
+                                    "the agent looks quiet" — no row.
+      anything else                 refused, with the reason.
+
+    `force` is the human override, for the owner alone, and it is recorded as
+    an override rather than passed off as an ordinary release.
+
+    The task returns to 'open' with its history intact — append, never
+    overwrite — so the next desk that can do the work picks it up in the normal
+    way, through dispatch, and the reason it came back is on the record.
+    """
+    with _conn() as c:
+        _migrate(c)
+        c.execute("BEGIN IMMEDIATE;")
+        row = c.execute("SELECT status, owner, claimed_at, result, title"
+                        " FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            c.execute("COMMIT;")
+            return False, "there is no such task"
+        if row["status"] != "in_progress":
+            c.execute("COMMIT;")
+            return False, f"that task is '{row['status']}', not claimed by anybody"
+
+        owner = row["owner"] or ""
+        held = _now() - int(row["claimed_at"] or _now())
+        giving_back = (by or "").strip().lower() == owner.strip().lower()
+
+        if not giving_back and not force:
+            if held < DEAD_CLAIM_SECS:
+                c.execute("COMMIT;")
+                return False, (
+                    f"{owner} claimed this {held // 60} minutes ago and a claim "
+                    "is exclusive while it is live. Wait, or have the owner "
+                    "force it.")
+            # Held long enough. Now the actual test: is anything running?
+            alive = c.execute(
+                "SELECT 1 FROM agent_runs WHERE agent=? AND started_at >= ?"
+                " AND status IN ('running','ok') LIMIT 1",
+                (owner, int(row["claimed_at"] or 0))).fetchone()
+            if alive:
+                c.execute("COMMIT;")
+                return False, (f"{owner} has been recording work since it claimed "
+                               "this — it is slow, not dead. Leave it alone.")
+
+        prev = row["result"]
+        try:
+            prev = json.loads(prev) if prev else {}
+        except Exception:
+            prev = {"note": str(prev)}
+        if not isinstance(prev, dict):
+            prev = {"note": prev}
+        prev.setdefault("notes", []).append({
+            "by": by, "at": _now(),
+            "note": (f"claim released after {held // 3600}h — "
+                     + (reason or ("handed back by its owner" if giving_back
+                                   else "nothing was running behind it"))
+                     + (" [forced by the owner]" if force and not giving_back else ""))})
+        c.execute("UPDATE tasks SET status='open', owner=NULL, claimed_at=NULL,"
+                  " result=? WHERE id=? AND status='in_progress'",
+                  (json.dumps(prev), task_id))
+        c.execute("COMMIT;")
+    return True, (f"{owner}'s claim on {row['title'][:60]!r} was released after "
+                  f"{held // 3600}h; it is back on the board")
+
+
+def dead_claims(now=None):
+    """
+    Every claim with nothing behind it, and how long it has been held.
+
+    Read-only, so any screen can ask. This is what turns "a desk is red and I
+    cannot do anything about it" into a list with a reason and an action.
+    """
+    now = int(now or _now())
+    out = []
+    with _conn() as c:
+        _migrate(c)
+        try:
+            rows = c.execute(
+                "SELECT id, sector, title, owner, claimed_at FROM tasks"
+                " WHERE status='in_progress' AND claimed_at < ?"
+                " ORDER BY claimed_at", (now - DEAD_CLAIM_SECS,)).fetchall()
+        except Exception:
+            return out
+        for r in rows:
+            alive = c.execute(
+                "SELECT 1 FROM agent_runs WHERE agent=? AND started_at >= ?"
+                " AND status IN ('running','ok') LIMIT 1",
+                (r["owner"] or "", int(r["claimed_at"] or 0))).fetchone()
+            if alive:
+                continue                 # slow, not dead
+            out.append({"id": r["id"], "sector": r["sector"], "title": r["title"],
+                        "owner": r["owner"], "claimed_at": r["claimed_at"],
+                        "held_secs": now - int(r["claimed_at"] or now)})
+    return out
+
+
 def get_task(task_id):
     with _conn() as c:
         r = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()

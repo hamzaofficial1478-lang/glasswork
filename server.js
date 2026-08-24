@@ -328,6 +328,7 @@ const API_CAPABILITIES = [
   "password", "activity", "activity-seen", "activity-clear", "sector", "usage",
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
+  "stuck", "release",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", (_q, res) => {
@@ -969,6 +970,36 @@ app.post("/api/approve", (req, res) => {
   if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
   const out = String(r.stdout || "");
   if (!out) return res.json({ ok: false, error: "approve error: " + String(r.stderr || "no output") });
+  try { return res.json(JSON.parse(out)); }
+  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+});
+
+// ---- put a stuck job back on the board --------------------------------------
+// A claimed task belongs to one agent and nobody else may touch it. The cost of
+// that rule: if the holder never comes back the job is held for ever, and the
+// office draws a red desk the owner can do nothing about. The Overseer clears
+// dead claims on its own pass; this is the manual door for when he is looking
+// at the desk. board.release_claim does the judging — it refuses a claim that
+// is merely slow unless he forces it, and records a forced one as forced.
+app.get("/api/stuck", (_q, res) =>
+  res.json(pyModule("coordination.release", ["--json"], 60000)));
+
+app.post("/api/release", (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const b = req.body || {};
+  if (!b.id) return res.status(400).json({ ok: false, error: "Send { id }." });
+  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.release", "--stdin"], {
+    cwd: __dirname,
+    input: JSON.stringify({ id: String(b.id).slice(0, 64),
+                            by: String(b.by || "owner").slice(0, 40),
+                            reason: String(b.reason || "").slice(0, 300),
+                            force: !!b.force }),
+    timeout: 60000, maxBuffer: 4 * 1024 * 1024,
+  });
+  if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
+  const out = String(r.stdout || "");
+  if (!out) return res.json({ ok: false, error: "release error: " + String(r.stderr || "no output") });
   try { return res.json(JSON.parse(out)); }
   catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
 });

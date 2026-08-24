@@ -266,6 +266,81 @@ def test_an_abandoned_task_goes_to_its_own_sector_not_it():
               cab.sql("SELECT count(*) n FROM tasks WHERE created_by='Overseer'")[0]["n"], 0)
 
 
+def test_a_dead_claim_is_put_back_and_a_live_one_is_not():
+    """
+    The hole the abandoned fault has been reporting since it was written.
+
+    A claimed task belongs to one agent and nobody else may touch it — that is
+    the rule that stops two agents doing one job, and it must not weaken. But
+    if the holder never comes back the task was held FOR EVER: withdraw_task
+    refuses a claimed task, finish_task only accepts the owner, and a desk with
+    no pipeline behind it will never be either. Two were on the owner's live
+    board, one for a week.
+
+    So: a dead claim goes back on the board. A LIVE one is still untouchable,
+    and that is what most of this test is about.
+    """
+    print("\nA claim nobody is honouring goes back on the board:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - F.ABANDONED_SECS - 600
+        cab.write("INSERT INTO tasks(id,sector,title,status,owner,created_at,claimed_at)"
+                  " VALUES('d1','Leads','Mail the cleared firms','in_progress',"
+                  "'leads-outreach',?,?)", (old, old))
+        F.scan()
+        row = cab.sql("SELECT status, owner FROM tasks WHERE id='d1'")[0]
+        check("it is open again", row["status"], "open")
+        check("and unowned", row["owner"], None)
+        check("with the reason written on it, not overwritten",
+              "claim released" in (cab.sql("SELECT result FROM tasks WHERE id='d1'")[0]
+                                   ["result"] or ""), True)
+        check("the sector was still told first",
+              bool(cab.sql("SELECT 1 FROM requests WHERE to_sector='Leads'")), True)
+
+    print("\n...but a desk that is merely slow keeps its claim:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - F.ABANDONED_SECS - 600
+        cab.write("INSERT INTO tasks(id,sector,title,status,owner,created_at,claimed_at)"
+                  " VALUES('d2','SEO','A long audit','in_progress','seo-answers',?,?)",
+                  (old, old))
+        # it HAS been recording work since it claimed — slow, not dead
+        cab.write("INSERT INTO agent_runs(agent,task_id,started_at,ended_at,status)"
+                  " VALUES('seo-answers','d2',?,?,'ok')", (old + 300, old + 400))
+        F.scan()
+        check("the claim is left alone",
+              cab.sql("SELECT status FROM tasks WHERE id='d2'")[0]["status"],
+              "in_progress")
+        ok, why = board.release_claim("d2", "somebody-else")
+        check("and reaching in is refused", ok, False)
+        check("with the reason", "slow, not dead" in why, True)
+
+    print("\n...and a fresh claim is nobody else's business at all:")
+    with _Cabinet() as cab:
+        now = int(time.time())
+        cab.write("INSERT INTO tasks(id,sector,title,status,owner,created_at,claimed_at)"
+                  " VALUES('d3','IT','Check the site','in_progress','it-watcher',?,?)",
+                  (now, now))
+        ok, why = board.release_claim("d3", "it-fixer")
+        check("refused", ok, False)
+        check("because a live claim is exclusive", "exclusive while it is live" in why, True)
+        ok, _ = board.release_claim("d3", "it-watcher")
+        check("but its own desk may always hand it back", ok, True)
+        check("and then anyone can take it",
+              board.claim_task("d3", "it-search"), True)
+
+    print("\n...and the owner can force one, on the record:")
+    with _Cabinet() as cab:
+        now = int(time.time())
+        cab.write("INSERT INTO tasks(id,sector,title,status,owner,created_at,claimed_at)"
+                  " VALUES('d4','IT','Check the site','in_progress','it-watcher',?,?)",
+                  (now, now))
+        ok, _ = board.release_claim("d4", "owner", reason="I need this back", force=True)
+        check("forced through", ok, True)
+        check("and recorded as forced, not passed off as ordinary",
+              "forced by the owner" in
+              (cab.sql("SELECT result FROM tasks WHERE id='d4'")[0]["result"] or ""),
+              True)
+
+
 def test_work_nobody_picks_up_is_a_fault_too():
     """
     The failure that routing work to a named desk introduces.
@@ -381,6 +456,7 @@ def main():
               test_a_claimed_ticket_is_never_yanked,
               test_a_fault_that_comes_back_is_reported_again,
               test_an_abandoned_task_goes_to_its_own_sector_not_it,
+              test_a_dead_claim_is_put_back_and_a_live_one_is_not,
               test_work_nobody_picks_up_is_a_fault_too,
               test_a_dead_run_stops_claiming_to_be_running,
               test_a_run_is_only_reaped_after_somebody_is_told,

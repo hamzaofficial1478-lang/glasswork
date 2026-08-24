@@ -465,7 +465,7 @@ def build():
     for key, name, match, sec in SECTORS:
         try:
             trows = c.execute(
-                "SELECT title,status,owner,claimed_at,risk,desk FROM tasks"
+                "SELECT id,title,status,owner,claimed_at,risk,desk FROM tasks"
                 " WHERE lower(sector)=? AND status IN ('open','in_progress')"
                 " ORDER BY created_at DESC LIMIT 6", (match,)).fetchall()
         except Exception:
@@ -514,12 +514,18 @@ def build():
             held = now - (t["claimed_at"] or now)
             agents.append({
                 "n": owner, "slot": slot,
+                # The task id travels with the line so the office can offer to
+                # put it back. Without it the drawer could describe the problem
+                # and do nothing about it, which is what the owner had.
+                "task_id": t["id"],
                 "s": "blocked" if held > STALL_SECS else "working",
                 "t": (f"holding '{t['title']}' since {_ago(held)} with nothing running"
                       if held > STALL_SECS else t["title"]),
                 **({"why": ("This task was claimed and never finished, and no run is "
                             "recording work against it. While it is held, no other "
-                            "agent can take it. Finish it or release it.")}
+                            "agent can take it — so it is not being done and nobody "
+                            "else can do it either. Put it back on the board and the "
+                            "next desk that can do the work picks it up.")}
                    if held > STALL_SECS else {})})
         open_tasks = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=? AND status IN ('open','in_progress')", (match,))
         foot, _old = _room_stats(c, key, day0, open_tasks)

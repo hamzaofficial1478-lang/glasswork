@@ -222,7 +222,9 @@ def detect(now=None) -> list:
                 "detail": ("A claimed task belongs to one agent and nobody else may "
                            "touch it. While this claim is held the work cannot move, "
                            "and the board reads as though it is being dealt with. "
-                           "Either finish it or release the claim."),
+                           "If nothing is running behind it, the Overseer puts it "
+                           "back on the board on the next pass; you can also "
+                           "release it yourself from the office."),
                 "evidence": f"tasks#{r['id']}",
             })
 
@@ -478,6 +480,44 @@ def _reap_run(c, row, now):
     return True
 
 
+def _free_dead_claim(c, row, now):
+    """
+    Put a claim nobody is honouring back on the board.
+
+    The same idea as _reap_run one table over, and the more damaging of the
+    two. A dead RUN makes a screen tell a lie. A dead CLAIM stops the work: a
+    claimed task belongs to one agent and nobody else may touch it, so if that
+    agent never comes back the task is held for ever — not failed, not open,
+    just permanently owned by a ghost. Two were sitting on the owner's live
+    board when this was written, one of them for a week, both drawn as a red
+    desk he could do nothing about.
+
+    This module has been filing them as 'abandoned' since it was written, with
+    the advice "either finish it or release the claim". There WAS no release.
+    The Overseer was telling him to do a thing the system could not do.
+
+    Same discipline as reaping: only after somebody has been told, and only
+    when the claim is genuinely dead — board.release_claim does the actual
+    test, and refuses a desk that has been recording work since it claimed.
+    Slow is not dead.
+    """
+    if row["kind"] != "abandoned":
+        return False
+    if not (row["request_id"] or row["task_id"]):
+        return False                     # nobody told yet; do not erase evidence
+    ev = row["evidence"] or ""
+    if not ev.startswith("tasks#"):
+        return False
+    tid = ev.split("#", 1)[1]
+    # board opens its own connection; an uncommitted write here holds the lock
+    # against it. Learned the hard way in _sector_alarm.
+    c.commit()
+    ok, _why = board.release_claim(
+        tid, OVERSEER,
+        reason="the Overseer found nothing running behind this claim")
+    return bool(ok)
+
+
 def _close_out(c, row, note, status):
     """
     Tidy up everything a fault opened: the sector's thread and the fixer's
@@ -676,7 +716,7 @@ def scan(now=None) -> dict:
     now = int(now or time.time())
     found = detect(now)
     keys = {f["key"] for f in found}
-    filed = routed = escalated = resolved = reaped = 0
+    filed = routed = escalated = resolved = reaped = freed = 0
     c = _conn()
     try:
         board._migrate(c)
@@ -721,6 +761,9 @@ def scan(now=None) -> dict:
             # working, so the screens stop reporting it in the present tense.
             if _reap_run(c, fresh, now):
                 reaped += 1
+            # And a dead CLAIM is retracted the same way, for the same reason.
+            if _free_dead_claim(c, fresh, now):
+                freed += 1
 
         counts = {}
         for row in _rows(c, "SELECT lower(sector) s, count(*) n FROM faults"
@@ -733,7 +776,7 @@ def scan(now=None) -> dict:
         c.close()
     return {"ok": True, "at": now, "found": len(found), "filed": filed,
             "routed": routed, "escalated": escalated, "resolved": resolved,
-            "reaped": reaped, "sector_alarms": alarms}
+            "reaped": reaped, "freed": freed, "sector_alarms": alarms}
 
 
 # ----------------------------------------------------------------------------
