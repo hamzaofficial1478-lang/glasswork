@@ -32,7 +32,7 @@ import os
 import re
 import sqlite3
 
-from coordination import board
+from coordination import board, dispatch
 from . import services
 
 # Where to look. The keyword work named the first six; the rest are simply where
@@ -464,9 +464,7 @@ def _hunt(agent, run_row):
         # 1. claim the MD's task (atomic — two Hunters cannot both take it)
         task = board.next_open_task("Leads", agent)
         if not task:
-            return {"ok": False, "error":
-                    "No open Leads task on the board to claim. The Hunter works from the "
-                    "board, never on its own initiative."}
+            return {"ok": False, "error": dispatch.why_nothing("Leads", agent)}
         run_row.task(task["id"])
 
         # 2. the MD scoped this as prep because there is no outreach route yet.

@@ -49,6 +49,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -62,42 +63,111 @@ PY = sys.executable or "python3"
 LOCK = "day_run"
 LOCK_HOLDER = "owner-run-button"
 
-# The order the handbook lays down, mirrored from run.py's DAY. The MD plans
-# first or the board is empty and every sector correctly refuses to invent work.
+# ---------------------------------------------------------------------------
+# LANES — what actually runs at the same time
+# ---------------------------------------------------------------------------
+#
+# THE OWNER'S QUESTION. "If an agent is taking more time and it's working, it
+# should be put into the other line so it doesn't hold up the other agents'
+# work."
+#
+# He is right, and the earlier answer — "the worst case is a writer waiting,
+# and it's already told to wait" — was about the wrong thing. That was about
+# the database, where a write takes about a millisecond and nobody waits for
+# anything. The real queue was here: sixteen steps in one `for` loop, each one
+# a `subprocess.run` that blocks until it returns, each allowed up to seven
+# minutes. SEO's four passes could not start until IT had finished checking the
+# site, and Content could not start until all four of those were done. Nothing
+# in the work required that. It was just the shape of the loop.
+#
+# So the list below is not an order any more, it is a set of LANES. A lane is a
+# queue of steps that genuinely must follow each other; separate lanes run at
+# the same time. `needs` names the steps a lane's first step cannot start
+# before.
+#
+# WHAT ACTUALLY DEPENDS ON WHAT — and nothing else does:
+#
+#   everything            waits for the MD, because until the MD plans, the
+#                         board is empty and every sector correctly refuses to
+#                         invent work for itself.
+#   Security              waits for Leads to collect, because it screens what
+#                         came in and there is nothing to screen before that.
+#   Content               waits for the AEO/GEO audit, because the findings are
+#                         what the briefs are written against.
+#   the closing Overseer  waits for all of it, because it is looking for agents
+#                         that died DURING the day.
+#   Report                waits for the Overseer, so the digest that reaches
+#                         his phone includes what broke.
+#
+# IT, Leads and SEO depend on none of each other. They are three lanes and they
+# run together.
+#
+# The cap is MAX_LANES, not "as many as there are". Three subprocesses is fine;
+# ten would have every sector's model call landing in the same second, which is
+# the thing that makes a primary slow in the first place.
+
 STEPS = [
+    # ---- 'open': the three that must happen before anything else ----------
     # Read the phone FIRST. An approval he gave last night is a decision the
     # agency should already be acting on this morning — not one it discovers
     # after planning the day around him not having answered.
-    ("Read your answers from the phone", "coordination.ntfy_replies", "Director"),
+    ("Read your answers from the phone", "coordination.ntfy_replies", "Director", "open"),
     # Then the Overseer, still BEFORE the MD plans. The MD reasons from the live
     # state of the business, and "SEO's strategist has been dead since Tuesday"
     # is part of that state — planning a day of SEO work around a desk that is
     # not answering is exactly the mistake this is here to stop. It also closes
     # yesterday's faults that have since fixed themselves, so the MD is not
     # planning around a problem that has gone.
-    ("The Overseer checks the agency itself", "coordination.faults", "Director"),
-    ("The MD plans the day", "pipelines.md_cycle", "Director"),
-    ("IT checks the site", "pipelines.it_health", "IT"),
-    ("IT reindexes site search", "pipelines.site_search", "IT"),
-    ("Leads maps its sources", "pipelines.leads_sources", "Leads"),
-    ("Leads collects", "pipelines.leads_hunt", "Leads"),
-    ("Security screens what came in", "pipelines.security_screen", "Security"),
-    ("SEO builds the keyword picture (free sources)", "pipelines.seo_intel", "SEO"),
-    ("SEO finds the gaps", "pipelines.seo_gap", "SEO"),
-    ("SEO watches the rivals", "pipelines.competitors", "SEO"),
-    ("SEO works the link list", "pipelines.seo_backlinks", "SEO"),
-    # After the gaps and before the briefs, deliberately: AEO/GEO findings are
-    # what Content is briefed to fix, so they have to exist before the briefing.
-    ("SEO audits the answers (AEO/GEO)", "pipelines.seo_answers", "SEO"),
-    ("Content briefs the pages", "pipelines.content_briefs", "Content"),
-    # AGAIN, at the end. The first pass catches what broke yesterday; this one
-    # catches what broke during today — an agent that died three steps ago would
-    # otherwise sit unfiled until tomorrow morning, which is precisely the
-    # forty-one minutes of nothing the owner watched. It runs before Report so
-    # the digest that reaches his phone includes it.
-    ("The Overseer checks the agency again", "coordination.faults", "Director"),
-    ("Report scores the day", "pipelines.report_daily", "Report"),
+    ("The Overseer checks the agency itself", "coordination.faults", "Director", "open"),
+    ("The MD plans the day", "pipelines.md_cycle", "Director", "open"),
+
+    # ---- three lanes that need nothing from each other --------------------
+    ("IT checks the site", "pipelines.it_health", "IT", "it"),
+    ("IT reindexes site search", "pipelines.site_search", "IT", "it"),
+
+    ("Leads maps its sources", "pipelines.leads_sources", "Leads", "leads"),
+    ("Leads collects", "pipelines.leads_hunt", "Leads", "leads"),
+
+    ("SEO builds the keyword picture (free sources)", "pipelines.seo_intel", "SEO", "seo"),
+    ("SEO finds the gaps", "pipelines.seo_gap", "SEO", "seo"),
+    ("SEO watches the rivals", "pipelines.competitors", "SEO", "seo"),
+    ("SEO works the link list", "pipelines.seo_backlinks", "SEO", "seo"),
+    # Last in the SEO lane and before the briefs, deliberately: AEO/GEO findings
+    # are what Content is briefed to fix, so they have to exist first.
+    ("SEO audits the answers (AEO/GEO)", "pipelines.seo_answers", "SEO", "seo"),
+
+    # ---- two that genuinely wait on one of the three above ----------------
+    ("Security screens what came in", "pipelines.security_screen", "Security", "security"),
+    ("Content briefs the pages", "pipelines.content_briefs", "Content", "content"),
+
+    # ---- 'close': after everything, because it is about everything --------
+    # The Overseer AGAIN. The first pass catches what broke yesterday; this one
+    # catches what broke during today — an agent that died mid-morning would
+    # otherwise sit unfiled until tomorrow, which is precisely the forty-one
+    # minutes of nothing the owner watched. Before Report, so the digest that
+    # reaches his phone includes it.
+    ("The Overseer checks the agency again", "coordination.faults", "Director", "close"),
+    ("Report scores the day", "pipelines.report_daily", "Report", "close"),
 ]
+
+# Which lanes a lane waits for. Waiting is on COMPLETION, not on success — IT
+# falling over must not stop Report scoring what Leads did, which was already
+# true when this was one loop and stays true now it is several.
+LANE_AFTER = {
+    "open":     (),
+    "it":       ("open",),
+    "leads":    ("open",),
+    "seo":      ("open",),
+    "security": ("leads",),      # nothing to screen until Leads has collected
+    "content":  ("seo",),        # briefs are written against the AEO findings
+    "close":    ("it", "leads", "seo", "security", "content"),
+}
+
+# How many steps may be in flight at once. Not "all of them": every step is a
+# Python process that will probably make a model call, and firing six at once
+# is how you turn one slow provider into six slow providers. Three is roughly
+# the number of independent lanes there are to run anyway.
+MAX_LANES = 3
 
 STEP_TIMEOUT = 420
 
@@ -138,7 +208,7 @@ def check_pipelines() -> list:
     posts something — do it during a check the owner thinks is read-only.
     """
     out = []
-    for label, mod, room in STEPS:
+    for label, mod, room, _lane in STEPS:
         code = f"import importlib,sys; importlib.import_module({mod!r})"
         p = subprocess.run([PY, "-c", code], cwd=str(ROOT), capture_output=True,
                            text=True, timeout=120)
@@ -222,9 +292,9 @@ def _open_run(note, forced, blocking):
                   "blocking,steps_total,steps_done) VALUES(?,?,?,?,?,?,?,?,0)",
                   (rid, _now(), "running", "owner", (note or "")[:2000],
                    1 if forced else 0, json.dumps(blocking or []), len(STEPS)))
-        for i, (label, mod, room) in enumerate(STEPS):
-            c.execute("INSERT INTO day_steps(run_id,seq,label,module,status)"
-                      " VALUES(?,?,?,?, 'waiting')", (rid, i, label, mod))
+        for i, (label, mod, room, lane) in enumerate(STEPS):
+            c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane)"
+                      " VALUES(?,?,?,?, 'waiting', ?)", (rid, i, label, mod, lane))
     return rid
 
 
@@ -316,6 +386,110 @@ def _verdict(out, code):
     return "ok"
 
 
+def _one_step(rid, seq) -> str:
+    """
+    Run one step and record what it did. Returns its verdict.
+
+    Everything a step needs is already in STEPS and in the cabinet, and the
+    only thing it hands back is a verdict — so this is safe to call from
+    several threads at once. The two writes it makes are a single-row UPDATE
+    and an atomic increment, both of which SQLite serialises for us.
+    """
+    label, mod, room, lane = STEPS[seq]
+
+    # THE OWNER'S OFF SWITCH. A sector he has stopped does not run, and the run
+    # panel says so in as many words — a step that silently vanished would look
+    # like the day was shorter than it was, and he would have no way to tell
+    # "switched off" from "never got to it".
+    if not board.sector_enabled(room):
+        _step(rid, seq, status="skipped", started_at=_now(), ended_at=_now(),
+              code=0, summary=f"{room} is switched off — you turned this "
+                              "sector off, so it did no work today")
+        _tick(rid)
+        return "skipped"
+
+    _step(rid, seq, status="running", started_at=_now())
+    try:
+        p = subprocess.run([PY, "-m", mod], cwd=str(ROOT), capture_output=True,
+                           text=True, timeout=STEP_TIMEOUT)
+        code, out = p.returncode, (p.stdout or "") + (p.stderr or "")
+    except subprocess.TimeoutExpired:
+        code, out = 124, f"timed out after {STEP_TIMEOUT}s"
+    except Exception as e:                               # pragma: no cover
+        code, out = 1, str(e)
+    verdict = _verdict(out, code)
+    _step(rid, seq, status=verdict, ended_at=_now(),
+          code=code, summary=_summarise(out, code))
+    _tick(rid)
+    return verdict
+
+
+def _tick(rid):
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        c.execute("UPDATE day_runs SET steps_done=steps_done+1 WHERE id=?", (rid,))
+
+
+def lanes() -> dict:
+    """{lane: [step index, ...]} in the order the steps are listed."""
+    out = {}
+    for i, (_label, _mod, _room, lane) in enumerate(STEPS):
+        out.setdefault(lane, []).append(i)
+    return out
+
+
+def _run_lanes(rid) -> int:
+    """
+    Run the day. Lanes side by side, steps within a lane one after another.
+
+    One thread per lane, and the thread does nothing but wait for the lanes it
+    depends on and then walk its own steps. The actual work is a subprocess, so
+    the GIL is not in the picture — the threads are just a way of waiting on
+    several `subprocess.run` calls at once.
+
+    MAX_LANES is held as a semaphore around the subprocess itself rather than
+    around the lane. A lane that is only WAITING must not hold a slot, or two
+    waiting lanes could between them stop the lane they are waiting for from
+    ever starting — a deadlock with a plausible-looking cause, which is the
+    worst kind.
+
+    Returns the number of steps that failed.
+    """
+    plan = lanes()
+    done = {name: threading.Event() for name in plan}
+    slots = threading.Semaphore(max(1, int(MAX_LANES)))
+    failed = []
+    lock = threading.Lock()
+
+    def walk(name):
+        try:
+            for dep in LANE_AFTER.get(name, ()):
+                ev = done.get(dep)
+                if ev is not None:
+                    # Bounded, so a lane that somehow never finishes cannot
+                    # hang the day for ever. The ceiling is what its steps are
+                    # allowed to take, plus room to be queued behind others.
+                    ev.wait(timeout=STEP_TIMEOUT * (len(plan[dep]) + 2))
+            for seq in plan[name]:
+                with slots:
+                    verdict = _one_step(rid, seq)
+                if verdict == "failed":
+                    with lock:
+                        failed.append(seq)
+        finally:
+            # ALWAYS set, even if the lane threw. A lane that dies holding its
+            # event closed takes every lane behind it down with it, and the
+            # owner sees a run that stopped for no stated reason.
+            done[name].set()
+
+    threads = [threading.Thread(target=walk, args=(n,), name=f"lane-{n}",
+                                daemon=True) for n in plan]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return len(failed)
+
+
 def start(orders=None, note="", force=False, quick=False, skip_check=False) -> dict:
     """
     Check, take the owner's instructions, then work. Returns when the day is done.
@@ -351,35 +525,8 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
             rejected[str(sec)[:40]] = str(e)
 
     rid = _open_run(note, force and not pre["ready"], pre.get("blocking"))
-    failed = 0
     try:
-        for i, (label, mod, room) in enumerate(STEPS):
-            # THE OWNER'S OFF SWITCH. A sector he has stopped does not run, and
-            # the run panel says so in as many words — a step that silently
-            # vanished would look like the day was shorter than it was, and he
-            # would have no way to tell "switched off" from "never got to it".
-            if not board.sector_enabled(room):
-                _step(rid, i, status="skipped", started_at=_now(), ended_at=_now(),
-                      code=0, summary=f"{room} is switched off — you turned this "
-                                      "sector off, so it did no work today")
-                with sqlite3.connect(board.DB, timeout=30) as c:
-                    c.execute("UPDATE day_runs SET steps_done=steps_done+1 WHERE id=?", (rid,))
-                continue
-            _step(rid, i, status="running", started_at=_now())
-            try:
-                p = subprocess.run([PY, "-m", mod], cwd=str(ROOT), capture_output=True,
-                                   text=True, timeout=STEP_TIMEOUT)
-                code, out = p.returncode, (p.stdout or "") + (p.stderr or "")
-            except subprocess.TimeoutExpired:
-                code, out = 124, f"timed out after {STEP_TIMEOUT}s"
-            except Exception as e:                       # pragma: no cover
-                code, out = 1, str(e)
-            verdict = _verdict(out, code)
-            failed += 1 if verdict == "failed" else 0
-            _step(rid, i, status=verdict, ended_at=_now(),
-                  code=code, summary=_summarise(out, code))
-            with sqlite3.connect(board.DB, timeout=30) as c:
-                c.execute("UPDATE day_runs SET steps_done=steps_done+1 WHERE id=?", (rid,))
+        failed = _run_lanes(rid)
         # A step that fails is not a day that failed. IT going down should not
         # stop Report scoring what Leads did — so every step runs, and the
         # verdict at the end says how many did not.
@@ -462,7 +609,7 @@ def status(run_id=None) -> dict:
             if not r:
                 return {"ok": True, "run": None, "steps": [],
                         "head": "the agency has never been run from the button"}
-            q = ("SELECT seq,label,module,status,started_at,ended_at,code,summary"
+            q = ("SELECT seq,label,module,status,started_at,ended_at,code,summary,lane"
                  " FROM day_steps WHERE run_id=? ORDER BY seq")
             steps = [dict(s) for s in c.execute(q, (r["id"],))]
             if r["status"] == "running" and _reap(c, r, steps):
@@ -476,7 +623,12 @@ def status(run_id=None) -> dict:
         run["blocking"] = json.loads(run.get("blocking") or "[]")
     except Exception:
         run["blocking"] = []
-    live = next((s for s in steps if s["status"] == "running"), None)
+    # PLURAL, now that lanes run side by side. Reading the first 'running' row
+    # and calling that "what the agency is doing" was honest when the day was
+    # one queue; with three lanes going it would name one of them and hide the
+    # other two, which reads as a slower day than is actually happening.
+    now_on = [s for s in steps if s["status"] == "running"]
+    live = now_on[0] if now_on else None
     done = sum(1 for s in steps if s["status"] in ("ok", "idle", "failed"))
     bad = sum(1 for s in steps if s["status"] == "failed")
     sat_out = sum(1 for s in steps if s["status"] == "idle")
@@ -484,6 +636,9 @@ def status(run_id=None) -> dict:
     if run["status"] == "stalled":
         head = ("the run was killed part-way through — "
                 f"{done} of {len(steps)} steps finished. Press Run again.")
+    elif len(now_on) > 1:
+        head = (live["label"] + f", and {len(now_on) - 1} other"
+                + ("s" if len(now_on) > 2 else "") + " at the same time…")
     elif live:
         head = live["label"] + "…"
     elif run["status"] not in ("done", "partial", "failed"):
@@ -496,6 +651,7 @@ def status(run_id=None) -> dict:
         head = "finished clean"
     return {"ok": True, "run": run, "steps": steps,
             "doing": live["label"] if live else None,
+            "doing_now": [s["label"] for s in now_on],
             "progress": [done, len(steps)], "idle": sat_out, "failed": bad,
             "head": head}
 

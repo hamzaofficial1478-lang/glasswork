@@ -181,7 +181,8 @@ class SectorOff(Exception):
     """Raised when work is aimed at a sector the owner has switched off."""
 
 
-def post_task(sector, title, detail, risk="green", created_by="MD", force=False):
+def post_task(sector, title, detail, risk="green", created_by="MD", force=False,
+              about="", desk=None):
     """
     MD (or a lead) posts work. Starts life as 'open' and unowned.
 
@@ -190,22 +191,61 @@ def post_task(sector, title, detail, risk="green", created_by="MD", force=False)
     then be scored down for the backlog it is not allowed to clear. `force` is
     for the Overseer, whose fault tickets are ABOUT a sector rather than work
     for it, and which must still be filed when a sector is stopped.
+
+    TWO FIELDS THAT DECIDE HOW THE TASK IS LATER HANDED OUT
+
+    `about` names the row this task exists because of — 'site_issues:7',
+    'leads:12', 'requests:88'. coordination/dispatch.py reads that row to work
+    out how urgent the task really is, instead of taking the poster's word for
+    it or, as before, ignoring the question entirely and going by arrival time.
+
+    `desk` names the desk it is for. Pass one to decide it here; pass None and
+    the roster in coordination/desks.py decides, which is better than leaving
+    it blank — the choice is made once at posting time rather than re-derived
+    by every idle desk that walks past. Pass "" to deliberately leave it open
+    to the whole sector.
     """
     if not force and not sector_enabled(sector):
         raise SectorOff(
             f"{sector} is switched off, so it was not given: {title!r}. "
             "Turn the sector back on to let work reach it.")
+    if desk is None:
+        try:
+            from . import desks as _desks
+            desk, _ = _desks.best_desk({"title": title, "detail": detail},
+                                       sector=sector)
+        except Exception:
+            desk = None
     tid = uuid.uuid4().hex[:12]
     with _conn() as c:
+        _migrate(c)
+        # ASK ONCE. The request board learned this after the owner found
+        # eighteen copies of one question on it; the task board had the same
+        # hole and four duplicate pairs sitting in it — two identical Overseer
+        # fault tickets, two identical listing jobs. A task nobody has picked
+        # up yet is not made more likely to be done by posting it again; it
+        # just pushes something else down the board.
+        #
+        # Only OPEN tasks count. Once one has been claimed and finished, the
+        # same title tomorrow is tomorrow's work, not a duplicate.
+        dup = c.execute(
+            "SELECT id FROM tasks WHERE sector=? AND lower(trim(title))=?"
+            " AND status='open' LIMIT 1",
+            (sector, (title or "").strip().lower())).fetchone()
+        if dup:
+            return dup["id"]
         c.execute(
-            "INSERT INTO tasks(id,sector,title,detail,risk,status,owner,created_by,created_at)"
-            " VALUES(?,?,?,?,?, 'open', NULL, ?, ?)",
-            (tid, sector, title, detail, risk, created_by, _now()),
+            "INSERT INTO tasks(id,sector,title,detail,risk,status,owner,"
+            "created_by,created_at,about,desk)"
+            " VALUES(?,?,?,?,?, 'open', NULL, ?,?,?,?)",
+            (tid, sector, title, detail, risk, created_by, _now(),
+             (about or "").strip(), (desk or "").strip().lower()),
         )
     return tid
 
 
-def try_post_task(sector, title, detail, risk="green", created_by="MD"):
+def try_post_task(sector, title, detail, risk="green", created_by="MD",
+                  about="", desk=None):
     """
     post_task, but a switched-off sector returns None instead of raising.
 
@@ -214,7 +254,8 @@ def try_post_task(sector, title, detail, risk="green", created_by="MD"):
     not an error, and it must not take the whole pass down with it.
     """
     try:
-        return post_task(sector, title, detail, risk=risk, created_by=created_by)
+        return post_task(sector, title, detail, risk=risk, created_by=created_by,
+                         about=about, desk=desk)
     except SectorOff:
         return None
 
@@ -246,16 +287,46 @@ def claim_task(task_id, agent):
 
 
 def next_open_task(sector, agent):
-    """Claim the oldest open task for a sector, if any. Returns the task or None."""
-    with _conn() as c:
+    """
+    Claim the task this desk should be doing next, and return it. None if there
+    is nothing on the board it can take.
+
+    THIS USED TO BE `ORDER BY created_at`, AND THAT WAS THE BUG.
+
+    Arrival order, handed to whoever asked first. Two consequences the owner
+    caught:
+
+      an urgent task queued behind a trivial one, for as long as both existed;
+      and any desk could claim any task in its sector, so it-watcher — which
+      files tickets and fixes nothing — could take "Fix the contact form",
+      own it, and leave it half-done where the Fixer could not see it.
+
+    Both are fixed one level up: coordination/dispatch.py orders the board by
+    what each task is worth (read off the row it is about) plus how long it has
+    waited, and coordination/desks.py says whether this desk may take it. The
+    behaviour here is unchanged in every other respect — one atomic claim, the
+    task returned, None when there is nothing.
+
+    The import is deliberately inside the function: dispatch imports board, and
+    at module level that is a cycle.
+    """
+    try:
+        from . import dispatch
+    except Exception:
+        dispatch = None
+    if dispatch is not None:
+        return dispatch.next_task(sector, agent)
+    # Fallback, if dispatch cannot be imported for any reason: the old
+    # behaviour, which is worse but is not nothing.
+    with _conn() as c:                                       # pragma: no cover
         rows = c.execute(
             "SELECT id FROM tasks WHERE sector=? AND status='open' ORDER BY created_at",
             (sector,),
         ).fetchall()
-    for r in rows:
+    for r in rows:                                           # pragma: no cover
         if claim_task(r["id"], agent):
             return get_task(r["id"])
-    return None
+    return None                                              # pragma: no cover
 
 
 def finish_task(task_id, agent, result, status="done"):
@@ -352,6 +423,17 @@ _ADDED_COLUMNS = (
     # name "leads-outreach" and ranked a stalled-agent notice as a customer
     # waiting for a reply.
     ("requests",     "about",        "TEXT"),
+    # The same two ideas, one table over. Tasks were handed out in arrival
+    # order with no notion of what they were about or who they were for, so an
+    # urgent one queued behind a trivial one and any desk could claim any task
+    # in its sector. See coordination/dispatch.py and coordination/desks.py.
+    ("tasks",        "about",        "TEXT"),
+    ("tasks",        "desk",         "TEXT"),
+    # Which lane of the day ran this step. The day used to be one queue, so
+    # there was nothing to record; it now runs independent sectors side by side
+    # (see pipelines/day_run.py) and "what was running at the same time as
+    # this" is a question the run panel has to be able to answer.
+    ("day_steps",    "lane",         "TEXT"),
 )
 
 # WHY THIS LIST NO LONGER DECIDES ANYTHING

@@ -372,6 +372,126 @@ def _day_run_tests():
           day_run._once(["b has no brain", "B HAS NO BRAIN", "a is empty"]),
           ["b has no brain", "a is empty"])
 
+    _lane_tests(day_run)
+
+
+def _lane_tests(day_run):
+    """
+    The day is lanes, not a queue.
+
+    The owner asked for a slow agent to be moved into another line so it stops
+    holding everyone else up. Three things have to be true, and the second and
+    third are what stop that turning into a mess: the lanes really do overlap,
+    the dependencies are still respected, and no more than MAX_LANES processes
+    are ever in flight.
+    """
+    import threading
+    import types
+
+    print("\nEvery step still belongs to exactly one lane:")
+    plan = day_run.lanes()
+    check("nothing is unassigned",
+          sorted(i for v in plan.values() for i in v), list(range(len(day_run.STEPS))))
+    check("no step is in two lanes",
+          len([i for v in plan.values() for i in v]), len(day_run.STEPS))
+    check("every lane a lane waits for exists",
+          sorted({d for deps in day_run.LANE_AFTER.values() for d in deps} - set(plan)),
+          [])
+    check("every lane says what it waits for",
+          sorted(set(plan) - set(day_run.LANE_AFTER)), [])
+
+    print("\nAnd waiting cannot go round in a circle:")
+    seen, order = set(), []
+
+    def visit(lane, trail=()):
+        if lane in trail:
+            order.append("CYCLE:" + "->".join(trail + (lane,)))
+            return
+        if lane in seen:
+            return
+        for dep in day_run.LANE_AFTER.get(lane, ()):
+            visit(dep, trail + (lane,))
+        seen.add(lane)
+        order.append(lane)
+    for lane in plan:
+        visit(lane)
+    check("no lane waits, however indirectly, on itself",
+          [o for o in order if o.startswith("CYCLE")], [])
+    check("'open' runs before everything that follows it", order[0], "open")
+    check("'close' runs last", order[-1], "close")
+
+    print("\nLanes really do overlap, and one slow desk holds nobody up:")
+    started, live, peak, lock = [], [0], [0], threading.Lock()
+    slow = "pipelines.seo_intel"
+
+    class _Done:
+        returncode = 0
+        stdout = '{"ok": true, "did": 1}'
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        mod = cmd[-1]
+        with lock:
+            started.append(mod)
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        time.sleep(0.30 if mod == slow else 0.02)
+        with lock:
+            live[0] -= 1
+        return _Done()
+
+    real_sub, day_run.subprocess = day_run.subprocess, types.SimpleNamespace(
+        run=fake_run, TimeoutExpired=real_timeout_error(day_run))
+    try:
+        t0 = time.time()
+        rid = day_run._open_run("lane test", False, [])
+        failed = day_run._run_lanes(rid)
+        took = time.time() - t0
+    finally:
+        day_run.subprocess = real_sub
+
+    check("nothing failed", failed, 0)
+    check("more than one step ran at once", peak[0] > 1, True)
+    check("and never more than the cap", peak[0] <= day_run.MAX_LANES, True)
+    # 16 steps, one of them 0.30s and the rest 0.02s, is 0.60s in one queue.
+    # In lanes the critical path is open(3) + seo(5, one slow) + content + close(2).
+    check("the day is shorter than running them one after another",
+          took < 0.60, True)
+
+    print("\n...but a step never starts before what it depends on has finished:")
+    at = {m: i for i, m in enumerate(started)}
+    check("the MD plans before any sector works",
+          at["pipelines.md_cycle"] < min(at["pipelines.it_health"],
+                                         at["pipelines.leads_sources"],
+                                         at["pipelines.seo_intel"]), True)
+    check("Security screens after Leads has collected",
+          at["pipelines.leads_hunt"] < at["pipelines.security_screen"], True)
+    check("Content is briefed after the AEO audit exists",
+          at["pipelines.seo_answers"] < at["pipelines.content_briefs"], True)
+    check("Report scores last of all",
+          at["pipelines.report_daily"], len(started) - 1)
+
+    print("\nAnd the run panel does not name one lane and hide the others:")
+    con = sqlite3.connect(board.DB)
+    con.execute("UPDATE day_steps SET status='running' WHERE run_id=? AND seq IN (3,5,7)",
+                (rid,))
+    con.execute("UPDATE day_runs SET status='running' WHERE id=?", (rid,))
+    con.commit()
+    con.close()
+    board.acquire_lock(day_run.LOCK, day_run.LOCK_HOLDER, wait=False, ttl=600)
+    try:
+        st = day_run.status(rid)
+        check("all three are reported", len(st["doing_now"]), 3)
+        check("and the headline says so", "at the same time" in st["head"], True)
+    finally:
+        board.release_lock(day_run.LOCK, day_run.LOCK_HOLDER)
+
+
+def real_timeout_error(day_run):
+    """The genuine TimeoutExpired, so the stub does not change what is caught."""
+    import subprocess as _sp
+    return _sp.TimeoutExpired
+
     print("\nOne press means one day:")
     check("the lock is free to start with",
           board.acquire_lock(day_run.LOCK, "someone-else", wait=False, ttl=60), True)

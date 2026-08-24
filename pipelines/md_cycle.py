@@ -245,7 +245,13 @@ def clear_inbox(facts, dry_run=False) -> dict:
                     f"Raised by {item['from']}, waiting {item['waited']}.\n\n"
                     f"The MD picked this up because: {why}.\n\n"
                     f"Request {item['id']} on the board has the detail and the "
-                    "evidence.", risk="green", created_by="MD")
+                    "evidence.", risk="green", created_by="MD",
+                    # The task carries forward the row the REQUEST was about, so
+                    # it keeps its urgency on the task board instead of arriving
+                    # there as ordinary work. Failing that, it is about the
+                    # request itself — which still counts for something if that
+                    # request said a sector was blocked.
+                    about=(item.get("about") or f"requests:{item['id']}"))
                 posted.append({"task_id": task_id, "sector": target})
             except board.SectorOff as e:
                 note = f" {target} is switched off, so nothing was posted: {e}"

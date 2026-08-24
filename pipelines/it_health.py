@@ -38,7 +38,7 @@ import time
 import urllib.error
 import urllib.request
 
-from coordination import board, site as _site
+from coordination import board, dispatch, site as _site
 
 UA = "Mozilla/5.0 (compatible; glasswork-it-watcher/1.0; read-only health check)"
 
@@ -217,9 +217,10 @@ def _check(agent, url, timeout, run_row):
     try:
         task = board.next_open_task("IT", agent)
         if not task:
-            return {"ok": False, "error":
-                    "No open IT task on the board to claim. The Watcher works from the "
-                    "board, never on its own initiative."}
+            # Not just "nothing to do". Since the board started routing work to
+            # the desk that can do it, an empty-handed Watcher usually means the
+            # opposite — there IS work, and it is somebody else's. Say which.
+            return {"ok": False, "error": dispatch.why_nothing("IT", agent)}
         run_row.task(task["id"])
 
         if not site:

@@ -266,6 +266,54 @@ def test_an_abandoned_task_goes_to_its_own_sector_not_it():
               cab.sql("SELECT count(*) n FROM tasks WHERE created_by='Overseer'")[0]["n"], 0)
 
 
+def test_work_nobody_picks_up_is_a_fault_too():
+    """
+    The failure that routing work to a named desk introduces.
+
+    Sending a fix to it-fixer is right — the Watcher cannot write one. But if
+    no pipeline runs as it-fixer, that task waits for ever and the board looks
+    calm rather than stuck, which is the exact shape of the problem the owner
+    kept catching by eye. It has to raise a fault on its own.
+    """
+    print("\nA task nobody ever claims is not a quiet board, it is a stuck one:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - F.UNCLAIMED_SECS - 600
+        cab.write("INSERT INTO tasks(id,sector,title,status,desk,created_at)"
+                  " VALUES('u1','IT','Fix the contact form','open','it-fixer',?)",
+                  (old,))
+        found = [f for f in F.detect() if f["kind"] == "unclaimed"]
+        check("the Overseer sees it", len(found), 1)
+        check("and names the desk it is waiting on", "it-fixer" in found[0]["detail"], True)
+        F.scan()
+        check("the sector that owns the board is told",
+              cab.sql("SELECT to_sector FROM requests WHERE from_sector='Overseer'"
+                      " AND subject LIKE '%picking up%'")[0]["to_sector"], "IT")
+
+        print("  ...and a whole stuck board is ONE ticket, not one per task:")
+        cab.write("INSERT INTO tasks(id,sector,title,status,desk,created_at)"
+                  " VALUES('u1b','IT','Fix the pricing table','open','it-fixer',?)",
+                  (old,))
+        found = [f for f in F.detect() if f["kind"] == "unclaimed"]
+        check("still one fault", len(found), 1)
+        check("but it says how much is stuck", "2 task(s)" in found[0]["what"], True)
+
+        print("  ...and it closes the moment the board is being worked again:")
+        cab.write("UPDATE tasks SET status='in_progress', owner='it-fixer'"
+                  " WHERE id IN ('u1','u1b')")
+        F.scan()
+        check("resolved without the work having to be finished",
+              cab.sql("SELECT status FROM faults WHERE kind='unclaimed'")[0]["status"],
+              "resolved")
+
+    print("\n...but a task posted this morning is just a task:")
+    with _Cabinet() as cab:
+        cab.write("INSERT INTO tasks(id,sector,title,status,created_at)"
+                  " VALUES('u2','IT','Check the site','open',?)",
+                  (int(time.time()) - 3600,))
+        check("no fault for an hour-old task",
+              [f for f in F.detect() if f["kind"] == "unclaimed"], [])
+
+
 def test_a_dead_run_stops_claiming_to_be_running():
     print("\nA dead run's claim to be working is retracted, not left standing:")
     from . import activity
@@ -333,6 +381,7 @@ def main():
               test_a_claimed_ticket_is_never_yanked,
               test_a_fault_that_comes_back_is_reported_again,
               test_an_abandoned_task_goes_to_its_own_sector_not_it,
+              test_work_nobody_picks_up_is_a_fault_too,
               test_a_dead_run_stops_claiming_to_be_running,
               test_a_run_is_only_reaped_after_somebody_is_told,
               test_nothing_broken_says_nothing):

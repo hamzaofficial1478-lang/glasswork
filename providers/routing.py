@@ -3,7 +3,7 @@ routing.py — per-task provider binding. There is NO global "AI provider": each
 task binds independently to primary / secondary / fallback models, with a hard
 cost-tier guard and visible failover.
 """
-from . import client, store
+from . import client, load, store
 
 
 def _ordered_ids(route: dict):
@@ -90,19 +90,43 @@ def call_task(task: str, messages, max_tokens: int = 512, timeout: int = 0) -> d
     # hold a model open longer than the operator allowed.
     timeout = min(int(route.get("timeout", 120)),
                   int(timeout) if timeout else int(route.get("timeout", 120)))
+
+    # A BUSY PRIMARY IS NOT A FAILED PRIMARY, AND IT USED TO BE TREATED AS ONE.
+    #
+    # The cascade below only moves on when a provider FAILS, so two agents
+    # asking the same model at the same moment both queued on it and the second
+    # one waited out the whole timeout before trying a fallback that had been
+    # idle throughout. Harmless when the day ran one step at a time; the normal
+    # case now that day_run.py runs three sectors side by side.
+    #
+    # providers/load.py reorders — never re-selects. Same candidates, same
+    # cost-tier guard, same cascade; a provider that is mid-call simply goes
+    # second. With one model configured nothing happens at all.
+    cands, load_note = load.order(r["candidates"])
+
     failovers = []
-    for cand in r["candidates"]:
+    for cand in cands:
         cred, model = store.find_model(cand["model_id"])
-        res = client.chat(cred, model, messages, max_tokens=max_tokens, timeout=timeout)
+        token = load.begin(model["id"], cred.get("id", ""), task,
+                           holder=task, ttl=max(30, int(timeout) + 30))
+        try:
+            res = client.chat(cred, model, messages, max_tokens=max_tokens,
+                              timeout=timeout)
+        finally:
+            # ALWAYS cleared, including on an exception on the way out. A row
+            # left behind makes a healthy model look busy to everyone else,
+            # and the expiry backstop would take minutes to notice.
+            load.end(token)
         if res["ok"]:
             store.record_usage(task, cred["id"], model["id"], calls=1, spend=0.0)
             return {"ok": True, "task": task,
                     "used": {"credential": cred["name"], "model": model["api_model_id"]},
-                    "output": res["output"], "failovers": failovers}
+                    "output": res["output"], "failovers": failovers,
+                    "load": load_note}
         failovers.append({"model": model["api_model_id"], "status": res["status"],
                           "cause": res.get("cause")})
     return {"ok": False, "task": task, "error": "all providers for this task failed",
-            "failovers": failovers}
+            "failovers": failovers, "load": load_note}
 
 
 # ---------------------------------------------------------------------------

@@ -184,9 +184,10 @@ def test_the_day_skips_a_stopped_sector():
     with _Cabinet():
         from pipelines import day_run
         board.set_sector("Content", False)
-        skipped = [room for (_l, _m, room) in day_run.STEPS
+        skipped = [room for (_l, _m, room, _lane) in day_run.STEPS
                    if not board.sector_enabled(room)]
-        ran = [room for (_l, _m, room) in day_run.STEPS if board.sector_enabled(room)]
+        ran = [room for (_l, _m, room, _lane) in day_run.STEPS
+               if board.sector_enabled(room)]
         check("Content's step is skipped", "Content" in skipped, True)
         check("and nothing else is", set(skipped), {"Content"})
         check("the rest of the day still runs", "SEO" in ran and "IT" in ran, True)

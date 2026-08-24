@@ -232,6 +232,86 @@ def test_probe_equals_production():
           ["Authorization"])
 
 
+def test_load_splits_across_both_apis():
+    """
+    A busy primary yields to a free fallback, and to nothing else.
+
+    The owner asked for the load to be divided between both APIs instead of
+    everything queueing on the first one. Four things have to hold, and the
+    last two matter as much as the first: it must not reorder when there is
+    nothing to gain, and it must not invent a provider.
+    """
+    import sqlite3
+    import tempfile
+    import time
+    from pathlib import Path
+    from coordination import board
+    from . import load
+
+    print("\nWhen the primary is busy, the fallback answers:")
+    d = Path(tempfile.mkdtemp())
+    db = d / "agency.db"
+    con = sqlite3.connect(db)
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text())
+    con.commit()
+    con.close()
+    was, board.DB = board.DB, db
+    try:
+        cands = [{"model_id": "m-primary", "api_model_id": "big"},
+                 {"model_id": "m-spare", "api_model_id": "spare"}]
+        names = lambda o: [c["api_model_id"] for c in o]     # noqa: E731
+
+        order, note = load.order(cands)
+        check("nothing in flight -> the route's own order", names(order), ["big", "spare"])
+        check("and nothing to explain", note, "")
+
+        tok = load.begin("m-primary", "c1", "seo", ttl=60)
+        order, note = load.order(cands)
+        check("primary mid-call -> the spare goes first", names(order), ["spare", "big"])
+        check("and it says why", "1 call(s) in flight" in note, True)
+
+        tok2 = load.begin("m-spare", "c2", "it", ttl=60)
+        order, note = load.order(cands)
+        check("both busy -> back to the route's order", names(order), ["big", "spare"])
+        check("nothing claimed about it", note, "")
+
+        load.end(tok)
+        load.end(tok2)
+        check("ending a call clears the ledger", load.busy(), {})
+
+        # A killed process leaves its row behind. It must not make a healthy
+        # model look busy for ever.
+        load.begin("m-primary", "c1", "seo", ttl=1)
+        time.sleep(2.2)
+        check("a row from a dead process expires", load.busy(), {})
+
+        check("one candidate is never reordered",
+              names(load.order([cands[0]])[0]), ["big"])
+        check("nor is an empty list", load.order([])[0], [])
+    finally:
+        board.DB = was
+
+
+def test_load_never_reaches_past_the_route():
+    """
+    The reordering must be exactly that — a reordering. Same members, same
+    count, every time. If this ever fails, something is picking providers the
+    route did not approve, and the cost-tier guard has been bypassed.
+    """
+    from . import load
+    print("\nReordering is never re-selecting:")
+    cands = [{"model_id": f"m{i}", "api_model_id": f"model-{i}"} for i in range(4)]
+    fake = {"m0": 3, "m1": 0, "m2": 9, "m3": 1}
+    order, _ = load.order(cands, load=fake)
+    check("same providers, no more and no fewer",
+          sorted(c["model_id"] for c in order), ["m0", "m1", "m2", "m3"])
+    check("least busy first", [c["model_id"] for c in order],
+          ["m1", "m3", "m0", "m2"])
+    tied, _ = load.order(cands, load={"m0": 2, "m1": 2, "m2": 2, "m3": 2})
+    check("all equally busy -> route order untouched",
+          [c["model_id"] for c in tied], ["m0", "m1", "m2", "m3"])
+
+
 def main():
     test_urls()
     test_auth()
@@ -241,6 +321,8 @@ def main():
     test_integrations_unconfigured()
     test_the_owner_can_always_be_reached()
     test_probe_equals_production()
+    test_load_splits_across_both_apis()
+    test_load_never_reaches_past_the_route()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

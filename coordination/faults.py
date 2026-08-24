@@ -67,6 +67,10 @@ ABANDONED_SECS = 3600
 # A sector asked another sector for something and got nothing back. Requests are
 # how the sectors work at all, so an unanswered one stops real work.
 UNANSWERED_SECS = 3 * 3600
+# An open task nobody has claimed at all. A long fuse on purpose: posted this
+# morning and untouched this afternoon is a normal day; still sitting there
+# tomorrow means no desk is ever going to take it.
+UNCLAIMED_SECS = 24 * 3600
 # A shared resource — the live site, the publishing pipeline — held past its
 # lease. Everyone else queues behind it, so this is blocking by definition.
 LOCK_GRACE = 600
@@ -94,7 +98,7 @@ SECTOR_OF = {
 # an unanswered request is a sector not doing its own job — the fix is that
 # sector picking the work back up, and handing that to IT would be nonsense.
 FIXER_OF = {"stall": "IT", "crash": "IT", "lock": "IT",
-            "abandoned": None, "unanswered": None}
+            "abandoned": None, "unanswered": None, "unclaimed": None}
 
 OVERSEER = "Overseer"
 
@@ -220,6 +224,52 @@ def detect(now=None) -> list:
                            "and the board reads as though it is being dealt with. "
                            "Either finish it or release the claim."),
                 "evidence": f"tasks#{r['id']}",
+            })
+
+        # 3b. A TASK NOBODY EVER PICKED UP. The opposite failure to the one
+        #     above, and it arrived with the board learning to route work to the
+        #     desk that can do it (coordination/desks.py). That is the right
+        #     rule — it stops the Watcher claiming a fix it cannot write — but
+        #     it introduces a way for work to wait for ever: a task named for a
+        #     desk that has no pipeline behind it will never be claimed by
+        #     anyone, and an unclaimed task looks exactly like a quiet board.
+        #
+        #     Deliberately a long fuse. A task posted this morning and not
+        #     picked up by this afternoon is normal; one still sitting there a
+        #     day later is not.
+        #     GROUPED BY SECTOR, for the reason spelled out under #4 below and
+        #     proved again the first time this ran: twelve stuck tasks became
+        #     twelve tickets across four sectors, which is four problems
+        #     reported twelve times. One board that is not being worked is one
+        #     fault, and how much is on it is part of how bad it is.
+        stuck = {}
+        for r in _rows(c, "SELECT id, sector, title, desk, created_at FROM tasks"
+                          " WHERE status='open' AND created_at < ?"
+                          " ORDER BY created_at LIMIT 200", (now - UNCLAIMED_SECS,)):
+            stuck.setdefault(r["sector"] or "", []).append(r)
+        for sector, rows in stuck.items():
+            oldest = rows[0]
+            waited = now - int(oldest["created_at"] or now)
+            waiting_on = sorted({(r["desk"] or "").strip() for r in rows} - {""})
+            out.append({
+                "key": f"unclaimed:{sector}",
+                "kind": "unclaimed", "agent": waiting_on[0] if waiting_on else "",
+                "sector": sector, "severity": DEGRADED,
+                "what": (f"{len(rows)} task(s) on the {sector} board have been open "
+                         f"up to {_ago(waited)} and nobody has picked them up"
+                         if len(rows) > 1 else
+                         f"\"{(oldest['title'] or '')[:70]}\" has been open "
+                         f"{_ago(waited)} and nobody has picked it up"),
+                "detail": ("Nothing is holding this work — it is simply not being "
+                           "claimed, which produces no error and no result and "
+                           "leaves the board looking calm.\n\nOldest: "
+                           f"\"{(oldest['title'] or '')[:70]}\", {_ago(waited)}.\n"
+                           + (f"Addressed to: {', '.join(waiting_on)} — either "
+                              "that desk is not running, or it has nothing that "
+                              "can do the work.\n" if waiting_on else
+                              "Open to any desk in this sector.\n")
+                           + "Claim it, or withdraw it if it is no longer wanted."),
+                "evidence": "tasks#" + ",".join(r["id"] for r in rows),
             })
 
         # 4. ONE SECTOR ASKED ANOTHER AND GOT NOTHING BACK. Requests are how the
@@ -358,6 +408,17 @@ def _still_true(c, f, now):
             r = c.execute("SELECT status, claimed_at FROM tasks WHERE id=?", (tid,)).fetchone()
             return bool(r) and r["status"] == "in_progress" \
                 and (now - int(r["claimed_at"] or now)) > ABANDONED_SECS
+        if kind == "unclaimed" and ev.startswith("tasks#"):
+            # Fixed the moment the board is being worked again. Unlike an
+            # abandoned claim, this does not need the work FINISHED — a desk
+            # picking it up is the whole thing that was missing. Grouped, so it
+            # stays true while ANY of the tasks is still sitting there.
+            ids = [i for i in ev.split("#", 1)[1].split(",") if i]
+            if not ids:
+                return False
+            q = ("SELECT count(*) FROM tasks WHERE status='open' AND id IN (%s)"
+                 % ",".join("?" * len(ids)))
+            return bool(c.execute(q, ids).fetchone()[0])
         if kind == "unanswered" and ev.startswith("requests#"):
             # Grouped: still true while ANY of the copies is unanswered.
             ids = [i for i in ev.split("#", 1)[1].split(",") if i]
@@ -473,6 +534,7 @@ def _route(c, row, now):
         "stall": "Your desk is down",
         "crash": "One of your agents is crashing",
         "abandoned": "You are sitting on a claimed task",
+        "unclaimed": "Work on your board that nobody is picking up",
         "unanswered": "You have not answered",
         "lock": "You are holding a lock nobody can take",
     }.get(row["kind"], "Fault on your desk")
@@ -503,7 +565,8 @@ def _route(c, row, now):
                    "change code. Reproduce it from the command line first — the "
                    "run is in agent_runs and the error, if there was one, is in "
                    "its note.",
-            risk="green", created_by=OVERSEER, force=True)
+            risk="green", created_by=OVERSEER, force=True,
+            about=f"faults:{row['id']}")
 
     c.execute("UPDATE faults SET request_id=?, task_id=?, routed_to=?,"
               " status=CASE WHEN status='open' THEN 'routed' ELSE status END"

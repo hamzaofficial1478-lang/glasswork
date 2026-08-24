@@ -16,8 +16,26 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_by  TEXT,
   created_at  INTEGER,
   claimed_at  INTEGER,
-  finished_at INTEGER
+  finished_at INTEGER,
+  about       TEXT,                    -- the row this exists because of, e.g. 'site_issues:7'
+  desk        TEXT                     -- the desk it was posted for, e.g. 'it-fixer'
 );
+
+-- Which models are mid-call RIGHT NOW, across every process in the building.
+-- providers/load.py writes a row before a call and deletes it after, so a
+-- second agent can see that the primary is busy and take the fallback instead
+-- of queueing behind it. expires_at is the backstop for a process that dies
+-- holding a row.
+CREATE TABLE IF NOT EXISTS model_inflight (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  model_id      TEXT NOT NULL,
+  credential_id TEXT,
+  task          TEXT,
+  holder        TEXT,
+  started_at    INTEGER,
+  expires_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_inflight_model ON model_inflight(model_id);
 
 CREATE TABLE IF NOT EXISTS locks (
   resource    TEXT PRIMARY KEY,        -- live_site | publish_pipeline | page:<slug> ...
@@ -336,7 +354,8 @@ CREATE TABLE IF NOT EXISTS day_steps (
   started_at INTEGER,
   ended_at   INTEGER,
   code       INTEGER,
-  summary    TEXT                  -- one plain line: what the step actually did
+  summary    TEXT,                 -- one plain line: what the step actually did
+  lane       TEXT                  -- which lane ran it; lanes run side by side
 );
 
 -- ---- where a link to us could come from -----------------------------------
