@@ -68,7 +68,16 @@ check("it-releaser is allowed through red line 1",
       run("Bash", {"command": f"{ACT} ./out/ host:/var/www/{SITE}/"}, agent="it-releaser"), ALLOW)
 
 print("\nScript-by-path indirection:")
-d = Path(tempfile.mkdtemp())
+# A SPACE IN THE DIRECTORY NAME, DELIBERATELY.
+#
+# The owner's Windows account is "ammar laptops", so every temp path on his
+# machine has a space in it — and the hook's path matcher stopped at the first
+# space, so the script was never opened and never scanned. Eight indirection
+# checks reported ALLOW on his machine and BLOCK on every developer's. That was
+# not a Windows quirk in the test; it was a real hole in the seatbelt, and it
+# was open on Linux too for anyone whose home directory has a space in it.
+d = Path(tempfile.mkdtemp()) / "a b"
+d.mkdir(parents=True, exist_ok=True)
 script = d / "step.sh"
 script.write_text(f"#!/bin/sh\n{ACT} -a ./dist/ web@box:/var/www/{SITE}/\n", encoding="utf-8")
 os.chmod(script, 0o755)
@@ -96,6 +105,17 @@ py = d / "step.py"
 py.write_text(f"import os\nos.system('{DEL} /var/www')\n", encoding="utf-8")
 check("a destructive python script run by path is scanned",
       run("Bash", {"command": f"python3 {py}"}), BLOCK)
+
+
+print("\n...and a Windows-shaped path is a path:")
+win = d / "ship.bat"
+win.write_text(f"{ACT} -a ./dist/ web@box:/var/www/{SITE}/\n", encoding="utf-8")
+check("a .bat run by its own name is scanned",
+      run("Bash", {"command": str(win)}), BLOCK)
+check("...and quoted, the way a shell needs it when there is a space",
+      run("Bash", {"command": f'bash "{win}"'}), BLOCK)
+check("...with a flag after the path, not before it",
+      run("Bash", {"command": f'bash "{win}" --dry-run'}), BLOCK)
 
 print("\nDestructive and concession lines still hold:")
 check("destructive command blocked", run("Bash", {"command": f"{DEL} /tmp/x"}), BLOCK)

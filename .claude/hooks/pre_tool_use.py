@@ -46,12 +46,32 @@ OUTBOUND_WORDS = re.compile(r"\b(send|sends|sending|sent|email|dm|message[sd]?)\
 #   an interpreter flag first - leading -flags are skipped, so a run written
 #     as 'bash -x ship.sh' finds ship.sh instead of stopping at -x.
 #   the source builtin        - now listed alongside the '.' form.
+#   A SPACE IN THE PATH        - and this one was a real hole, not a theory.
+#     The path was matched as [^\s;&|]+, so it stopped at the first space, and
+#     a script under 'C:\Users\ammar laptops\...' or '/home/al smith/...' was
+#     never opened and never scanned. The owner's own Windows username has a
+#     space in it, which is how it surfaced: his hook tests reported the
+#     indirection checks as passing-through rather than blocked.
+#   A WINDOWS PATH             - the bare-path branch required a leading '/'
+#     or './', so 'C:\build\ship.sh' matched nothing at all.
+SCRIPT_EXT = r"(?:sh|bash|zsh|py|js|mjs|cjs|rb|pl|ps1|bat|cmd)"
+INTERPRETER = r"(?:source|bash|sh|zsh|python3?|node|perl|ruby|pwsh|powershell|\.)"
+
 SCRIPT_RUN = re.compile(
-    r"(?:^|[;&|\n]\s*)"
-    r"(?:source|bash|sh|zsh|python3?|node|perl|ruby|\.)\s+"
-    r"((?:-\S+\s+)*)([^\s;&|]+)"
-    r"|(?:^|[;&|\n]\s*)(\.{0,2}/[^\s;&|]+\.(?:sh|py|js|rb|pl))\b",
-    re.MULTILINE)
+    # an interpreter, optional -flags, then the argument — quoted, or run on
+    # until a real shell separator (NOT the first space)
+    r"(?:^|[;&|\n]\s*)" + INTERPRETER + r"\s+((?:-\S+\s+)*)"
+    r"(?:\"([^\"\n]+)\"|'([^'\n]+)'|([^;&|\n]+))"
+    # or a path executed directly, POSIX or Windows, with or without spaces
+    r"|(?:^|[;&|\n]\s*)"
+    r"(?:\"([^\"\n]+\." + SCRIPT_EXT + r")\"|'([^'\n]+\." + SCRIPT_EXT + r")'"
+    r"|((?:[A-Za-z]:[\\/]|\.{0,2}[\\/])[^;&|\n]+?\." + SCRIPT_EXT + r"))(?=\s|$)",
+    re.MULTILINE | re.IGNORECASE)
+
+# Inside one argument, the longest prefix that ends in a script extension. This
+# is what lets an unquoted path with spaces be recovered: 'ammar laptops\a.sh
+# --flag' yields 'ammar laptops\a.sh' rather than 'ammar'.
+_ENDS_IN_SCRIPT = re.compile(r"^(.*?\." + SCRIPT_EXT + r")(?=\s|$)", re.IGNORECASE)
 
 
 # A price concession only matters when it is heading OUT to a client. The old
@@ -217,18 +237,46 @@ def log(agent, tool, args, decision, reason):
 def _script_contents(command: str) -> str:
     """Read any script this Bash command runs by path, so the checks below see
     what it actually does, not just the one line that launched it."""
-    found = []
+    found, seen = [], set()
     for m in SCRIPT_RUN.finditer(command or ""):
-        path = m.group(2) or m.group(3)
-        if not path:
-            continue
-        try:
-            p = Path(path)
-            if p.is_file() and p.stat().st_size < 200_000:
-                found.append(p.read_text(encoding="utf-8", errors="ignore"))
-        except Exception:
-            pass
+        for raw in m.groups()[1:]:          # group 1 is the -flags, skip it
+            if not raw:
+                continue
+            for cand in _candidates(raw):
+                if cand in seen:
+                    continue
+                seen.add(cand)
+                try:
+                    p = Path(cand)
+                    if p.is_file() and p.stat().st_size < 200_000:
+                        found.append(p.read_text(encoding="utf-8", errors="ignore"))
+                except Exception:
+                    pass
     return "\n".join(found)
+
+
+def _candidates(arg: str):
+    """
+    The paths one command argument might be, longest first.
+
+    An unquoted argument can hold a path with spaces followed by flags, and
+    there is no way to tell them apart by looking — so try the whole thing, the
+    prefix that ends in a script extension, and the first word. Whichever is
+    actually a file on disk gets read. Trying more is the safe direction: the
+    cost of a wrong guess is a stat() that finds nothing.
+    """
+    arg = (arg or "").strip().strip("\"'")
+    if not arg:
+        return []
+    out = [arg]
+    m = _ENDS_IN_SCRIPT.match(arg)
+    if m:
+        out.append(m.group(1))
+    first = arg.split()[0] if arg.split() else ""
+    if first:
+        out.append(first)
+    # de-duplicate, longest first, so the most specific match is read first
+    return sorted(dict.fromkeys(out), key=len, reverse=True)
 
 
 def main():
