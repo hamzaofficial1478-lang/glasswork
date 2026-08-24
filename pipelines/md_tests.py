@@ -76,10 +76,33 @@ def test_the_brain_never_touches_the_hands():
                  or m in ("it_health", "leads_hunt", "seo_gap", "mail")]
     check("it imports no pipeline", pipelines, [])
 
-    # the only writes it may make are posting tasks and logging its own decision
+    # The only writes it may make are posting work, answering its own post, and
+    # logging its own decision.
+    #
+    # claim_request and reply_request were added to this list deliberately, and
+    # the reasoning matters because widening a red line to make new code pass is
+    # exactly how a red line stops meaning anything.
+    #
+    # The rule is "the MD executes nothing". Answering a request ADDRESSED TO THE
+    # MD is not executing work — it is the coordination protocol the handbook
+    # lays down: open -> claimed -> answered -> closed. The MD must claim its own
+    # post before answering it or two passes both answer it, and it must reply or
+    # the asker waits for ever. What it does about the content is still
+    # post_task, to the sector that can act. Before this the MD had an inbox
+    # nothing ever opened, and twenty-six requests sat in it for two days.
+    #
+    # The assertions below are what actually enforce the rule, and they are
+    # tighter than the allowlist: whatever the MD may call, it may never finish
+    # somebody else's work, and it may never claim a TASK.
     writes = set(re.findall(r"board\.(\w+)\(", src))
-    allowed = {"post_task", "log_decision", "agent_run", "recent_hit_rate"}
-    check("it only ever posts tasks and logs the decision", writes - allowed, set())
+    allowed = {"post_task", "log_decision", "agent_run", "recent_hit_rate",
+               "claim_request", "reply_request"}
+    check("it only posts work, answers its own post, and logs the decision",
+          writes - allowed, set())
+    check("it never finishes a task — that is the doing", "finish_task" in writes, False)
+    check("it never claims a task off the board", "claim_task" in writes, False)
+    check("it never takes a shelf or a lock",
+          bool(writes & {"acquire", "borrow", "release"}), False)
 
     check("it never sends outreach", "smtp" in src.lower(), False)
     check("it never touches site_queue", "queue_site_change" in src, False)

@@ -517,3 +517,17 @@ CREATE TABLE IF NOT EXISTS sector_switches (
   note       TEXT,                  -- why, in his words, if he gave one
   changed_at INTEGER
 );
+
+-- HOW A REQUEST GETS ITS PLACE IN THE QUEUE.
+-- Added when the owner asked what happens if five sectors ask the MD at once.
+-- The answer was "whichever asked first", which is wrong twice over: an urgent
+-- thing waits behind a trivial one, and a trivial one can wait for ever.
+--
+-- `blocking` is the asker saying it cannot continue without an answer — not a
+-- mood, a fact about its own state, and it is the one thing an asker is
+-- genuinely the authority on. `urgency` is its own read, kept because it is
+-- useful context, but see coordination/triage.py: an asker's claim is never the
+-- whole score. Everything else is measured by the receiver.
+-- The two columns themselves are added by board._ADDED_COLUMNS, because ALTER
+-- TABLE cannot be written idempotently and this file is re-applied on every
+-- connection. They are declared there, not here.

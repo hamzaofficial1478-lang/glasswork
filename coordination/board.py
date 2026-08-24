@@ -326,6 +326,17 @@ _ADDED_COLUMNS = (
     # 'Clear' on the activity panel hides what has been read. Added after
     # read_marks shipped, so cabinets built in between need the column.
     ("read_marks",   "cleared_to",   "INTEGER DEFAULT 0"),
+    # A request's place in the queue. See coordination/triage.py — "whoever
+    # asked first" left an urgent request behind a trivial one, and a trivial
+    # one waiting for ever.
+    ("requests",     "blocking",     "INTEGER DEFAULT 0"),
+    ("requests",     "urgency",      "TEXT"),
+    # What row this request is ABOUT, e.g. 'outreach_log:42', 'site_issues:7'.
+    # triage.py reads that row to decide weight, instead of guessing from words
+    # in the subject line — the first version matched "lead" inside the agent
+    # name "leads-outreach" and ranked a stalled-agent notice as a customer
+    # waiting for a reply.
+    ("requests",     "about",        "TEXT"),
 )
 
 # WHY THIS LIST NO LONGER DECIDES ANYTHING
@@ -691,14 +702,27 @@ def lock(resource, agent, ttl=600):
 # REQUEST BOARD — sector-to-sector, append-only, turn-taking
 # ----------------------------------------------------------------------------
 
-def post_request(from_sector, to_sector, subject, body):
-    """One sector asks another for something and waits. Never reaches in directly."""
+def post_request(from_sector, to_sector, subject, body,
+                 blocking=False, urgency="", about=""):
+    """
+    One sector asks another for something and waits. Never reaches in directly.
+
+    `blocking`  the asker cannot continue without an answer. The one thing the
+                asker genuinely knows better than the receiver, so it is taken
+                at face value — but it is one factor in the queue, not the whole
+                score, or every sender would set it. See coordination/triage.py.
+    `about`     the row this is about: 'outreach_log:42', 'site_issues:7'. Triage
+                reads that row rather than guessing from words in the subject.
+    `urgency`   the asker's own read. Context, not authority.
+    """
     rid = uuid.uuid4().hex[:12]
     with _conn() as c:
+        _migrate(c)
         c.execute(
-            "INSERT INTO requests(id,from_sector,to_sector,subject,status,created_at)"
-            " VALUES(?,?,?,?, 'open', ?)",
-            (rid, from_sector, to_sector, subject, _now()),
+            "INSERT INTO requests(id,from_sector,to_sector,subject,status,created_at,"
+            "blocking,urgency,about) VALUES(?,?,?,?, 'open', ?,?,?,?)",
+            (rid, from_sector, to_sector, subject, _now(),
+             1 if blocking else 0, (urgency or "").strip()[:20], (about or "").strip()[:60]),
         )
         _append_msg(c, rid, from_sector, body)
     return rid
@@ -731,13 +755,40 @@ def _append_msg(c, request_id, author, body):
     )
 
 
-def open_requests_for(sector):
+def open_requests_for(sector, triaged=True):
+    """
+    This sector's inbox, worst first.
+
+    It used to be ORDER BY created_at — whoever asked first. That put an urgent
+    request behind a trivial one that happened to arrive earlier, which is the
+    question the owner asked and the answer he would not have liked. Ordering is
+    coordination/triage.py's job now: weight from evidence the receiver can
+    check, plus an ageing bonus so nothing at the back starves.
+
+    `triaged=False` returns plain arrival order, for anything that genuinely
+    wants the thread in the order it happened rather than in the order it
+    matters.
+    """
     with _conn() as c:
-        rows = c.execute(
-            "SELECT * FROM requests WHERE to_sector=? AND status='open' ORDER BY created_at",
-            (sector,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        rows = [dict(r) for r in c.execute(
+            "SELECT * FROM requests WHERE to_sector=? AND status='open'"
+            " ORDER BY created_at", (sector,))]
+    if not triaged or len(rows) < 2:
+        return rows
+    try:
+        from . import triage as _triage
+    except Exception:
+        return rows
+    try:
+        order = {}
+        q = _triage.queue(sector, limit=len(rows))
+        for r in q["next"] + q["waiting"]:
+            for rid in r["ids"]:
+                order[rid] = r["position"]
+        rows.sort(key=lambda r: order.get(r["id"], 10_000))
+    except Exception:
+        pass          # a broken triage must not stop a sector reading its post
+    return rows
 
 
 # ----------------------------------------------------------------------------

@@ -48,6 +48,10 @@ import sqlite3
 from coordination import board, briefing, proposals as _props, state as _state, targets
 
 MAX_TASKS_PER_CYCLE = 6      # a plan nobody can finish is not a plan
+# How many of its own requests the MD answers in one pass. A queue of twenty-six
+# is not a reason to answer twenty-six: the rest stay queued, in order, and the
+# ageing in triage.py guarantees they rise rather than starve.
+INBOX_PER_CYCLE = 5
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +178,144 @@ def sense() -> dict:
         facts["sector_orders"] = _props.orders()
     except Exception:
         facts["sector_orders"] = {}
+
+    # THE MD'S OWN INBOX.
+    #
+    # This was missing, and it was the worst gap in the file. Security reads its
+    # inbox and Content reads its inbox; nothing read the Director's. The
+    # Overseer escalates a stalled agent to the MD, the row lands in `requests`,
+    # and there it stayed — twenty-six of them, the oldest fifty-three hours
+    # old, including every escalation about an agent that had been dead for
+    # days. The MD was planning each morning around a building it had not
+    # checked the post of.
+    #
+    # Triaged, not in arrival order: see coordination/triage.py for why, and
+    # what stops the bottom of the queue starving.
+    try:
+        from coordination import triage as _triage
+        facts["inbox"] = _triage.queue("Director", limit=INBOX_PER_CYCLE)
+    except Exception as e:
+        facts["inbox"] = {"next": [], "waiting": [], "total": 0,
+                          "head": f"could not read the inbox ({e})"}
     return facts
+
+
+# ---------------------------------------------------------------------------
+# ANSWER THE POST — the MD's inbox, worst first
+# ---------------------------------------------------------------------------
+#
+# Reading the inbox is not the same as dealing with it, and the second half is
+# the one that was missing. An escalation the MD has READ and left open is
+# indistinguishable from one it never saw.
+#
+# Each one is claimed (so two passes cannot both work it), answered, and closed.
+# Where the answer is "somebody should do something", that something is posted
+# to the board as a task and the reply names the task id — a promise with a row
+# behind it, rather than a sentence.
+
+def clear_inbox(facts, dry_run=False) -> dict:
+    """Deal with the top of the MD's queue. Returns what was done and what waits."""
+    inbox = facts.get("inbox") or {}
+    todo = inbox.get("next") or []
+    done, posted, left = [], [], list(inbox.get("waiting") or [])
+
+    for item in todo:
+        why = "; ".join(f"{w['label']}" for w in (item.get("why") or [])[:2])
+        line = {"id": item["id"], "from": item["from"], "subject": item["subject"],
+                "points": item["points"], "why": why, "waited": item["waited"],
+                "copies": item.get("copies", 1)}
+        if dry_run:
+            done.append({**line, "action": "would answer"})
+            continue
+
+        if not board.claim_request(item["id"], "managing-director"):
+            left.append(item)        # another pass got there first; not an error
+            continue
+
+        # An escalation about a sector is not work for the MD to do itself —
+        # the brain never touches the hands. What it CAN do is put the work on
+        # the board, addressed to whoever can act, and say so in the reply.
+        task_id = None
+        note = ""
+        target = _who_should_act(item)
+        if target:
+            try:
+                task_id = board.post_task(
+                    target, f"From the MD: {item['subject'][:80]}",
+                    f"Raised by {item['from']}, waiting {item['waited']}.\n\n"
+                    f"The MD picked this up because: {why}.\n\n"
+                    f"Request {item['id']} on the board has the detail and the "
+                    "evidence.", risk="green", created_by="MD")
+                posted.append({"task_id": task_id, "sector": target})
+            except board.SectorOff as e:
+                note = f" {target} is switched off, so nothing was posted: {e}"
+            except Exception as e:
+                note = f" Could not post it to {target}: {e}"
+
+        reply = (f"Read and picked up. This came {item['position']} in the queue "
+                 f"because: {why}."
+                 + (f" It has been asked {item['copies']} times."
+                    if item.get("copies", 1) > 1 else "")
+                 + (f"\n\nPosted to {target} as task {task_id}." if task_id
+                    else "\n\nNoted — no task posted, this needed acknowledging "
+                         "rather than doing.")
+                 + note)
+        try:
+            board.reply_request(item["id"], "managing-director", reply, close=True)
+        except Exception as e:
+            note += f" (reply failed: {e})"
+        done.append({**line, "action": "answered", "task_id": task_id,
+                     "posted_to": target})
+
+    return {"answered": done, "posted": posted,
+            "still_waiting": len(left),
+            "head": inbox.get("head", ""),
+            "total": inbox.get("total", 0)}
+
+
+SECTORS = ("IT", "Content", "SEO", "Leads", "Report", "Security")
+
+
+def _who_should_act(item):
+    """
+    Which sector should actually do something about this request.
+
+    The MD is a router here, not a doer.
+
+    Read from the ROW the request names, not from words in its subject. The
+    first version searched the subject for a sector name, which is the same
+    guess-from-text mistake triage.py had to unpick — "Reporting" contains
+    "Report", and a subject mentioning two sectors picks whichever is first in
+    my list rather than whichever owns the problem. An Overseer escalation
+    carries about='faults:<id>', and that row already knows whose desk broke.
+    """
+    frm = (item.get("from") or "").strip()
+    ref = (item.get("about") or "")
+
+    if ref.startswith("faults:"):
+        try:
+            con = sqlite3.connect(board.DB)
+            row = con.execute("SELECT sector, routed_to FROM faults WHERE id=?",
+                              (int(ref.split(":", 1)[1]),)).fetchone()
+            con.close()
+            if row:
+                # routed_to is who the Overseer already gave it to (IT for code
+                # faults); sector is whose desk it is. Prefer the fixer.
+                for cand in (row[1], row[0]):
+                    if cand and cand.strip() in SECTORS:
+                        return cand.strip()
+        except Exception:
+            pass
+    if ref.startswith("sector:"):
+        name = ref.split(":", 1)[1].strip().title()
+        if name in SECTORS:
+            return name
+
+    if frm in SECTORS:
+        return frm
+    if frm.lower() == "overseer":
+        return "IT"          # a fault naming no sector is code, and IT owns code
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +519,13 @@ def run(agent="managing-director", dry_run=False) -> dict:
 
 def _cycle(agent, dry_run):
     facts = sense()
+
+    # THE POST, BEFORE THE PLAN. Deliberately first: an escalation saying SEO's
+    # strategist has been dead for two days changes what the day should be, and
+    # reading it after planning is reading it too late. This is also the step
+    # that was missing entirely — the MD had an inbox nothing ever opened.
+    inbox = clear_inbox(facts, dry_run)
+
     candidates = plan(facts)
     kept, rejected = critic_check(candidates, facts)
 
@@ -402,13 +550,14 @@ def _cycle(agent, dry_run):
         summary = (f"Nothing to post. {len(rejected)} candidate(s) rejected; {scoreline}."
                    + (f" {len(stuck)} OF YOUR OWN ORDER(S) CANNOT RUN." if stuck else ""))
         return {"ok": True, "agent": agent, "posted": [], "rejected": rejected,
-                "owner_blocked": stuck, "answered": answered,
-                "facts": facts, "summary": summary}
+                "owner_blocked": stuck, "answered": answered, "inbox": inbox,
+                "facts": facts, "summary": _with_inbox(summary, inbox)}
 
     if dry_run:
         return {"ok": True, "agent": agent, "dry_run": True, "would_post": kept,
-                "rejected": rejected, "facts": facts,
-                "summary": f"{len(kept)} task(s) would be posted; nothing written"}
+                "rejected": rejected, "facts": facts, "inbox": inbox,
+                "summary": _with_inbox(
+                    f"{len(kept)} task(s) would be posted; nothing written", inbox)}
 
     posted = []
     for c in kept:
@@ -463,11 +612,35 @@ def _cycle(agent, dry_run):
                + (f". {note}" if note else ""))
     return {"ok": True, "agent": agent, "posted": posted, "rejected": rejected,
             "owner_blocked": stuck, "decision_id": did, "facts": facts,
-            "summary": summary}
+            "inbox": inbox, "summary": _with_inbox(summary, inbox)}
+
+
+def _with_inbox(summary, inbox):
+    """The post is part of the day's work, so it belongs in the day's summary."""
+    n = len(inbox.get("answered") or [])
+    if not n and not inbox.get("still_waiting"):
+        return summary
+    bits = []
+    if n:
+        bits.append(f"answered {n} request(s)")
+    if inbox.get("still_waiting"):
+        bits.append(f"{inbox['still_waiting']} still queued")
+    return "; ".join([summary] + bits) if summary else "; ".join(bits)
 
 
 def as_text(out) -> str:
     L = [f"MD CYCLE — {out.get('summary', '')}", ""]
+    ib = out.get("inbox") or {}
+    if ib.get("answered") or ib.get("still_waiting"):
+        L.append(f"THE POST — {ib.get('head', '')}")
+        for a in ib.get("answered") or []:
+            L.append(f"  [{a['points']:>5}] {a['from']} · {a['subject'][:56]}")
+            L.append(f"          {a['why']}")
+            if a.get("task_id"):
+                L.append(f"          -> posted to {a['posted_to']} as {a['task_id']}")
+        if ib.get("still_waiting"):
+            L.append(f"  ({ib['still_waiting']} left in the queue, rising as they wait)")
+        L.append("")
     if out.get("posted") or out.get("would_post"):
         L.append("POSTED TO THE BOARD" if out.get("posted") else "WOULD POST")
         for p in out.get("posted") or out.get("would_post"):

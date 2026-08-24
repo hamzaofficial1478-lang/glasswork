@@ -550,7 +550,10 @@ def _escalate(c, row, now):
         f"{time.strftime('%H:%M', time.localtime(row['first_seen']))}. "
         f"Evidence: {row['evidence']}.\n\n"
         "Plan around this sector until it clears. Do not post it work that "
-        "depends on the desk that is down.")
+        "depends on the desk that is down.",
+        # Name the row, so the MD routes from the fault's own sector rather than
+        # hunting for a sector name in the subject line.
+        blocking=(row["severity"] == BLOCKING), about=f"faults:{row['id']}")
     c.execute("UPDATE faults SET escalated_at=?, status='escalated' WHERE id=?",
               (now, row["id"]))
     return True
@@ -584,7 +587,8 @@ def _sector_alarm(c, now, counts):
             f"{listing}\n\n"
             "Each of these has been routed on its own. This message is about the "
             "pattern — plan tomorrow assuming this sector is unreliable until it "
-            "clears, and do not stack work on it that something else depends on.")
+            "clears, and do not stack work on it that something else depends on.",
+            about=f"sector:{sector}")
         # Recorded as a fault of its own so it is filed once and shows on the
         # board with everything else, rather than being an invisible side effect.
         c.execute("""INSERT INTO faults
