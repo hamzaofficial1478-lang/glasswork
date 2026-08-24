@@ -63,7 +63,7 @@ def resolve_task(task: str) -> dict:
     }
 
 
-def call_task(task: str, messages, max_tokens: int = 512) -> dict:
+def call_task(task: str, messages, max_tokens: int = 512, timeout: int = 0) -> dict:
     """
     Run a task: try its candidates in order, cascade on failure/timeout/rate-limit,
     and return the output plus a visible failover trail. The cost-tier guard is
@@ -74,7 +74,22 @@ def call_task(task: str, messages, max_tokens: int = 512) -> dict:
     if not r["ok"]:
         return {"ok": False, "task": task, "error": r["error"], "failovers": []}
     route = r["route"]
-    timeout = int(route.get("timeout", 120))
+    # A CALLER MAY ASK FOR LESS PATIENCE.
+    #
+    # The route's timeout is right for a pipeline: a keyword pass can afford to
+    # wait two minutes for the good model. It is wrong for somebody standing in
+    # front of the screen having clicked an agent to ask it a question — that
+    # waits the full two minutes on a slow primary before it even TRIES the
+    # second model, and the owner reported exactly that as the drawer hanging
+    # while a sector was busy.
+    #
+    # An interactive caller passes a short timeout, so a primary that is slow
+    # (usually because the same model is mid-run for a pipeline) is abandoned
+    # quickly and the fallback answers. The route's own value is still the
+    # ceiling — this can only ask for LESS time, never more, or one screen could
+    # hold a model open longer than the operator allowed.
+    timeout = min(int(route.get("timeout", 120)),
+                  int(timeout) if timeout else int(route.get("timeout", 120)))
     failovers = []
     for cand in r["candidates"]:
         cred, model = store.find_model(cand["model_id"])

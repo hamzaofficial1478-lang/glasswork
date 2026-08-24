@@ -188,8 +188,19 @@ def test_a_stale_reference_earns_nothing():
 def test_asking_five_times_is_one_problem_not_five():
     print("\nThe same question five times is one blockage, weighted as one:")
     with _Cabinet():
-        for _ in range(5):
-            board.post_request("SEO", "Director", "Clear these page targets", "b")
+        # Inserted directly, not via post_request — post_request refuses to make
+        # a duplicate now. This is the LEGACY case and it still matters: the
+        # owner's cabinet already holds eighteen copies of one question from
+        # before the dedup existed, and they have to collapse when read.
+        now = int(time.time())
+        c = sqlite3.connect(board.DB)
+        for i in range(5):
+            c.execute("INSERT INTO requests(id,from_sector,to_sector,subject,status,"
+                      "created_at) VALUES(?,'SEO','Director','Clear these page targets',"
+                      "'open',?)", (f"dup{i}", now - 3600 + i))
+            c.execute("INSERT INTO request_msgs(request_id,author,body,at)"
+                      " VALUES(?, 'SEO','b',?)", (f"dup{i}", now - 3600 + i))
+        c.commit(); c.close()
         board.post_request("IT", "Director", "A different thing", "b")
         q = triage.queue("Director")
         check("five copies collapse to one entry", q["total"], 2)
@@ -255,7 +266,9 @@ def main():
               test_the_inbox_is_read_in_triage_order,
               test_the_md_actually_opens_its_post,
               test_a_dry_run_reads_but_changes_nothing,
-              test_it_does_not_pile_work_on_a_stopped_sector):
+              test_it_does_not_pile_work_on_a_stopped_sector,
+              test_asking_again_does_not_fill_the_board,
+              test_two_equally_urgent_requests_have_a_defined_order):
         t()
     print()
     if _fail:
@@ -358,6 +371,73 @@ def test_it_does_not_pile_work_on_a_stopped_sector():
                         (rid,))[-1]["body"]
         check("and the reply says why nothing was posted",
               "switched off" in reply, True)
+
+
+
+
+def test_asking_again_does_not_fill_the_board():
+    """
+    The eighteen copies. Every pipeline that raises a request runs daily and
+    none of them checked whether they had already asked, so the owner's board
+    carried the same question from SEO to Content eighteen times — one per run
+    since the day it first went unanswered. That is one problem and seventeen
+    copies, and it buries everything else in the receiving inbox.
+    """
+    print("\nAsking again is a nudge, not another row:")
+    with _Cabinet() as cab:
+        ids = {board.post_request("SEO", "Content", "AEO/GEO fixes", "the list")
+               for _ in range(18)}
+        check("eighteen asks make one thread", len(ids), 1)
+        check("and one row on the board",
+              cab.sql("SELECT count(*) n FROM requests")[0]["n"], 1)
+        check("the cooldown stops it nudging on every run",
+              cab.sql("SELECT count(*) n FROM request_msgs")[0]["n"], 1)
+
+        rid = list(ids)[0]
+        c = sqlite3.connect(board.DB)
+        c.execute("UPDATE request_msgs SET at=? WHERE request_id=?",
+                  (int(time.time()) - 5 * HOUR, rid))
+        c.execute("UPDATE requests SET created_at=? WHERE id=?",
+                  (int(time.time()) - 30 * HOUR, rid))
+        c.commit(); c.close()
+        board.post_request("SEO", "Content", "AEO/GEO fixes", "the list")
+        msgs = cab.sql("SELECT body FROM request_msgs ORDER BY at")
+        check("after the cooldown it nudges once", len(msgs), 2)
+        check("saying how long it has waited", "1 days" in msgs[-1]["body"], True)
+        check("still one row", cab.sql("SELECT count(*) n FROM requests")[0]["n"], 1)
+
+        # A DIFFERENT question is a different thread — dedup must not swallow it.
+        board.post_request("SEO", "Content", "Something else entirely", "b")
+        check("a different question still opens its own thread",
+              cab.sql("SELECT count(*) n FROM requests")[0]["n"], 2)
+        # And once answered and closed, asking again is legitimately new.
+        board.reply_request(rid, "content-writer", "done", close=True)
+        board.post_request("SEO", "Content", "AEO/GEO fixes", "the list")
+        check("after it is closed, a fresh ask opens a fresh thread",
+              cab.sql("SELECT count(*) n FROM requests")[0]["n"], 3)
+
+
+def test_two_equally_urgent_requests_have_a_defined_order():
+    print("\nTwo things that score the same still have an order:")
+    with _Cabinet() as cab:
+        now = int(time.time())
+        a = board.post_request("SEO", "Director", "SEO needs a decision", "b")
+        b = board.post_request("IT", "Director", "IT needs a decision", "b",
+                               blocking=True)
+        c_ = board.post_request("Content", "Director", "Content needs one too", "b")
+        con = sqlite3.connect(board.DB)
+        for r in (a, b, c_):
+            con.execute("UPDATE requests SET created_at=? WHERE id=?", (now - 2 * HOUR, r))
+        con.commit(); con.close()
+
+        first = triage.queue("Director")["next"]
+        check("the blocked one goes first", first[0]["from"], "IT")
+        # The remaining two score identically. The order must be defined and
+        # repeatable, not whatever sort() happened to do.
+        rest = [r["from"] for r in first[1:]]
+        again = [r["from"] for r in triage.queue("Director")["next"][1:]]
+        check("the rest are in a stable order", rest, again)
+        check("and both are still there", sorted(rest), ["Content", "SEO"])
 
 
 if __name__ == "__main__":

@@ -40,6 +40,21 @@ def _now():
     return int(time.time())
 
 
+# How long before an unanswered question may be nudged again. Four hours: long
+# enough that a pipeline on a short timer cannot spam a thread, short enough
+# that a day's silence is visibly a day's silence.
+REASK_COOLDOWN = 4 * 3600
+
+
+def _ago(secs):
+    secs = max(0, int(secs))
+    if secs < 3600:
+        return f"{secs // 60} minutes"
+    if secs < 86400:
+        return f"{secs // 3600} hours"
+    return f"{secs // 86400} days"
+
+
 # ----------------------------------------------------------------------------
 # TASKS — claim, don't grab
 # ----------------------------------------------------------------------------
@@ -715,13 +730,48 @@ def post_request(from_sector, to_sector, subject, body,
                 reads that row rather than guessing from words in the subject.
     `urgency`   the asker's own read. Context, not authority.
     """
-    rid = uuid.uuid4().hex[:12]
+    now = _now()
     with _conn() as c:
         _migrate(c)
+
+        # ASK ONCE. THEN NUDGE.
+        #
+        # Every pipeline that raises a request runs daily, and none of them
+        # checked whether they had already asked. The owner's board had the same
+        # question from SEO to Content eighteen times, and to IT eighteen times
+        # — one for each run since the day it first went unanswered. Eighteen
+        # rows is not eighteen problems, it is one problem and seventeen copies,
+        # and it buries everything else in the receiving sector's inbox.
+        #
+        # An identical open question is therefore not posted again. The existing
+        # thread gets a nudge instead, and only after a cooldown — a pipeline
+        # running four times an hour must not append four times an hour either.
+        # The reader sees one conversation that says "asked again, still
+        # waiting", which is the truth, instead of a wall of duplicates.
+        dup = c.execute(
+            "SELECT id, created_at FROM requests WHERE from_sector=? AND to_sector=?"
+            "  AND subject=? AND status IN ('open','claimed')"
+            " ORDER BY created_at LIMIT 1",
+            (from_sector, to_sector, subject)).fetchone()
+        if dup:
+            last = c.execute("SELECT MAX(at) FROM request_msgs WHERE request_id=?",
+                             (dup["id"],)).fetchone()[0] or dup["created_at"] or 0
+            if now - int(last) >= REASK_COOLDOWN:
+                n = c.execute("SELECT count(*) FROM request_msgs WHERE request_id=?",
+                              (dup["id"],)).fetchone()[0]
+                _append_msg(c, dup["id"], from_sector,
+                            f"Still waiting — asked again ({n + 1} times now), "
+                            f"{_ago(now - int(dup['created_at'] or now))} after the "
+                            "first ask. Nothing has changed at this end.")
+                if blocking:
+                    c.execute("UPDATE requests SET blocking=1 WHERE id=?", (dup["id"],))
+            return dup["id"]
+
+        rid = uuid.uuid4().hex[:12]
         c.execute(
             "INSERT INTO requests(id,from_sector,to_sector,subject,status,created_at,"
             "blocking,urgency,about) VALUES(?,?,?,?, 'open', ?,?,?,?)",
-            (rid, from_sector, to_sector, subject, _now(),
+            (rid, from_sector, to_sector, subject, now,
              1 if blocking else 0, (urgency or "").strip()[:20], (about or "").strip()[:60]),
         )
         _append_msg(c, rid, from_sector, body)

@@ -247,7 +247,29 @@ def queue(sector, limit=DEFAULT_LIMIT, now=None) -> dict:
                 "copies": len(group), "ids": [r["id"] for r in group],
                 "points": pts, "why": why,
             })
-        scored.sort(key=lambda r: (-r["points"], r["created_at"] or 0))
+        # TWO THINGS THAT SCORE THE SAME.
+        #
+        # The owner asked what happens when two requests are equally urgent, and
+        # "whatever sort() happens to do" is not an answer — an order nobody can
+        # predict is an order nobody can check. Three tie-breaks, in order, each
+        # one a fact rather than a preference:
+        #
+        #   1. BLOCKED FIRST. Two things matter the same, but one has a sector
+        #      standing still behind it and the other does not. Clearing the
+        #      blocked one puts a whole sector back to work; clearing the other
+        #      puts one request to bed.
+        #   2. THEN THE OLDER. It has been waited on longer, and between two
+        #      equal claims the one that has already paid more is served.
+        #   3. THEN THE ID. Never a coin-flip: the same inbox must produce the
+        #      same order twice, or nobody can reproduce a complaint about it.
+        #
+        # Note this makes ties rare rather than common — the ageing bonus is
+        # continuous, so two requests genuinely level are two that arrived in
+        # the same minute with the same weight.
+        scored.sort(key=lambda r: (-r["points"],
+                                   0 if r.get("blocking") else 1,
+                                   r["created_at"] or 0,
+                                   r["id"]))
         for i, r in enumerate(scored):
             r["position"] = i + 1
 

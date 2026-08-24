@@ -325,6 +325,11 @@ def _offline_reply(f: dict, message: str) -> str:
     return "\n".join(L)
 
 
+# How long the drawer waits on one model before trying the next. Short on
+# purpose: a person is watching. The pipelines keep the route's full patience.
+CHAT_TIMEOUT = 25
+
+
 def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
     """
     One turn. Returns the reply plus everything it was based on.
@@ -373,7 +378,7 @@ def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
     r = call_task(w["brain_task"], [
         {"role": "system", "content": SYSTEM + "\n\n--- YOUR RECORD ---\n" + record},
         {"role": "user", "content": message or "What have you done today?"},
-    ], max_tokens=max_tokens)
+    ], max_tokens=max_tokens, timeout=CHAT_TIMEOUT)
 
     if not r.get("ok"):
         # A dead brain must not turn into silence — the owner asked a question

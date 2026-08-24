@@ -233,6 +233,28 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .panel{position:fixed;top:0;right:-460px;width:460px;max-width:94vw;height:100vh;background:var(--panel);border-left:1px solid var(--line2);z-index:85;transition:right .26s ease;overflow-y:auto}.panel.open{right:0}
 .panel h2{margin:0;padding:18px 20px;font-size:15px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
 .panel h2 .x{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer}
+.pstat.clicky{cursor:pointer;border-radius:8px;transition:background .14s ease}
+.pstat.clicky:hover{background:rgba(255,255,255,.05)}
+.pstat.clicky:hover .l{color:var(--glass)}
+.appr{border:1px solid var(--line2);border-radius:11px;padding:14px 16px;margin-bottom:12px}
+.appr .lvl{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--amber)}
+.appr h4{margin:6px 0 4px;font-size:14px;font-weight:600}
+.appr .why{font-size:12px;color:var(--muted);line-height:1.6;white-space:pre-wrap;
+  overflow-wrap:anywhere;max-height:180px;overflow:auto}
+.appr .row{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.appr button{padding:8px 16px;border-radius:8px;border:1px solid var(--line2);
+  background:transparent;color:var(--ink);font:inherit;font-size:12.5px;cursor:pointer}
+.appr button.yes{border-color:rgba(91,191,134,.5);color:var(--ok)}
+.appr button.yes:hover{background:rgba(91,191,134,.12)}
+.appr button.no:hover{background:rgba(229,86,91,.12);border-color:var(--danger);color:var(--danger)}
+.appr button:disabled{opacity:.45;cursor:default}
+.ldtable{width:100%;border-collapse:collapse;font-size:12.5px}
+.ldtable th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+  border-bottom:1px solid var(--line);padding:6px 10px 6px 0;font-weight:500}
+.ldtable td{padding:9px 10px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.ldtable .wait{color:var(--amber)}
 .actbtn{background:none;border:1px solid var(--line2);color:var(--muted);font:inherit;
   font-size:11.5px;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
 .actbtn:hover:not(:disabled){border-color:var(--glass);color:var(--glass)}
@@ -436,6 +458,27 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
         <button class="x" onclick="closeAll()">×</button>
       </span></h2>
   <div class="pgroup" id="actBody"></div>
+</div>
+
+<!-- WAITING ON YOU. The tile used to be a number and nothing else: the owner
+     could see that two things needed him and had no way to find out what, or to
+     answer either of them without opening the full control room. Each item now
+     carries its own Approve and Not now. -->
+<div class="panel wide full" id="apprPanel">
+  <h2><span>Waiting on you <small id="apprHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <button class="x" onclick="closeAll()">&times;</button></h2>
+  <div class="pgroup" id="apprBody"></div>
+</div>
+
+<!-- THE LEADS BEHIND THE NUMBER. Same problem: a count he could not open. -->
+<div class="panel wide full" id="leadPanel">
+  <h2><span>Leads <small id="leadHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" id="leadToday" onclick="openLeads('today')">Today</button>
+        <button class="actbtn" id="leadAll" onclick="openLeads('all')">All on file</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="leadBody"></div>
 </div>
 
 <!-- SECTOR TRAFFIC. One sector asking another for something, and what came
@@ -738,8 +781,15 @@ function fireComm(){
 
 function renderPerf(){
   const m=SITES[CURRENT].metrics;
-  $('#perfStrip').innerHTML=m.map(([v,l,c,why])=>`<div class="pstat"${
-    why?` title="${esc(why)}" style="cursor:help"`:''}><span class="v ${c}">${v}</span><span class="l etch">${l}</span></div>`).join('')+`<a href="agency.html">Open full control room →</a>`;
+  // Two of these open something. A number the owner cannot click is a number he
+  // has to go and look up somewhere else, which is what he was doing.
+  const OPENS = {"Awaiting you": "openApprovals()", "Leads today": "openLeads()"};
+  $('#perfStrip').innerHTML=m.map(([v,l,c,why])=>{
+    const act = OPENS[l];
+    return `<div class="pstat${act?' clicky':''}"${act?` onclick="${act}" role="button" tabindex="0"`:''}${
+      why?` title="${escA(why)}" style="cursor:help"`:act?' title="Click to open"':''
+    }><span class="v ${c}">${v}</span><span class="l etch">${l}${act?' &rsaquo;':''}</span></div>`;
+  }).join('')+`<a href="/control">Open full control room &rarr;</a>`;
   $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c,why])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>${why?esc(why):'live'}</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working'||a.s==='done').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
     const sub = r.foot ? r.foot.join(' · ') : (w+'/'+tot+' working');
     return `<div class="conn"><div class="ic">▦</div><div class="nm"><b>${r.name}</b><span>${sub}</span></div><div style="width:80px;height:6px;border-radius:3px;background:var(--line)"><div style="width:${pct}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`;}).join('')+`</div>`
@@ -1178,6 +1228,117 @@ async function showAllActivity(){
     body:JSON.stringify({showAll:true})}).then(r=>r.json()).catch(()=>null);
   if(j && j.ok) ACT=j; else await paintActBadge();
   renderActivity();
+}
+
+/* ---- WAITING ON YOU -------------------------------------------------------
+   Each item gets its own Approve and Not now, because they are separate
+   decisions about separate things — one button pair for a list of four would
+   make him agree to three things to say yes to one.
+
+   The decision goes to /api/approve, the same endpoint the control room uses,
+   which writes it to the row. The button was decoration once: it faded the item
+   and printed "sent to the agent" while nothing was sent anywhere and the next
+   poll brought the item straight back. So nothing here reports success unless
+   the server said the row changed. ------------------------------------------ */
+function openApprovals(){
+  openPanel('apprPanel');
+  renderApprovals();
+}
+
+function renderApprovals(){
+  const items = (LIVE && LIVE.approvals) || [];
+  $('#apprHead').textContent = items.length
+    ? `· ${items.length} decision${items.length===1?'':'s'} for you`
+    : '· nothing right now';
+  if(!items.length){
+    $('#apprBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+      + `Nothing is waiting on you. Anything the agents cannot decide for themselves `
+      + `&mdash; a change to the live site, a task the MD marked amber &mdash; appears `
+      + `here and on your phone.</p>`;
+    return;
+  }
+  $('#apprBody').innerHTML = items.map((a,i)=>`
+    <div class="appr" data-i="${i}">
+      <div class="lvl">${esc(a.lvl||'amber')}</div>
+      <h4>${esc(a.text||'(no description)')}</h4>
+      ${a.why?`<div class="why">${esc(a.why)}</div>`:''}
+      <div class="row">
+        <button class="yes" onclick="decide(${i},true)">Approve</button>
+        <button class="no"  onclick="decide(${i},false)">Not now</button>
+        <span class="msg" style="font-size:12px"></span>
+      </div>
+    </div>`).join('');
+}
+
+async function decide(i, yes){
+  const a = ((LIVE && LIVE.approvals) || [])[i];
+  const el = document.querySelector(`.appr[data-i="${i}"]`);
+  if(!a || !el) return;
+  const btns = el.querySelectorAll('button');
+  const msg = el.querySelector('.msg');
+  btns.forEach(b=>b.disabled=true);
+  msg.textContent = 'saving…'; msg.style.color = 'var(--muted)';
+  let j = null;
+  try{
+    const r = await fetch('/api/approve',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind:a.kind, id:a.id, decision: yes?'approved':'rejected'})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'could not reach the server'}; }
+
+  // Only say it worked if the row actually changed.
+  if(!j || !j.ok){
+    btns.forEach(b=>b.disabled=false);
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '✕ not saved — ' + ((j&&(j.error||j.why)) || 'unknown error');
+    return;
+  }
+  el.querySelector('.row').innerHTML =
+    `<span style="color:${yes?'var(--ok)':'var(--muted)'};font-size:12.5px">`
+    + (yes ? '✓ approved' : '✕ turned down') + '</span>';
+  el.style.opacity = '.6';
+  const j2 = await pullLive();
+  if(j2){ LIVE=j2; applyLive(j2); renderFloor(); renderPerf(); }
+}
+
+/* ---- THE LEADS BEHIND THE NUMBER ------------------------------------------ */
+let LEAD_SCOPE='today';
+async function openLeads(scope){
+  LEAD_SCOPE = scope || LEAD_SCOPE;
+  openPanel('leadPanel');
+  $('#leadBody').innerHTML = '<p style="color:var(--muted);font-size:12.5px">Reading…</p>';
+  let j=null;
+  try{ j = await (await fetch('/api/leads?scope='+encodeURIComponent(LEAD_SCOPE))).json(); }
+  catch(e){}
+  if(!j || !j.ok){
+    $('#leadBody').innerHTML = '<p style="color:var(--danger);font-size:12.5px">'
+      + 'Could not read the leads' + (j&&j.error?': '+esc(j.error):'.') + '</p>';
+    return;
+  }
+  $('#leadHead').textContent = `· ${j.head} · ${j.total} on file in total`;
+  $('#leadToday').style.borderColor = LEAD_SCOPE==='today' ? 'var(--glass)' : '';
+  $('#leadAll').style.borderColor   = LEAD_SCOPE==='all'   ? 'var(--glass)' : '';
+  if(!j.leads.length){
+    $('#leadBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+      + esc(j.head) + `. The Hunter finds these when the day runs; the Scanner drops `
+      + `anyone already on file so nobody is contacted twice.</p>`;
+    return;
+  }
+  $('#leadBody').innerHTML = `<table class="ldtable"><thead><tr>`
+    + `<th>Company</th><th>Where</th><th>Stage</th><th>Contact</th>`
+    + `<th>Reached</th><th>Found</th></tr></thead><tbody>`
+    + j.leads.map(l=>`<tr>
+        <td><b>${esc(l.company)}</b>${l.name?`<br><span style="color:var(--muted)">${esc(l.name)}</span>`:''}</td>
+        <td>${esc(l.area||'—')}${l.segment?`<br><span style="color:var(--faint);font-size:11px">${esc(l.segment)}</span>`:''}</td>
+        <td>${esc(l.stage)}${l.needs_owner?`<br><span style="color:var(--amber);font-size:11px">replied — needs you</span>`:''}</td>
+        <td style="overflow-wrap:anywhere">${esc(l.email||l.phone||'—')}${
+          l.email && !l.email_valid?`<br><span style="color:var(--amber);font-size:11px">not verified</span>`:''}</td>
+        <td>${l.waiting_on
+              ? `<span class="wait">${esc(l.waiting_on)}</span>`
+              : `${l.contacted} sent, ${l.replied} replied${l.last?`<br><span style="color:var(--faint);font-size:11px">${esc(l.last)}</span>`:''}`}</td>
+        <td style="color:var(--muted)">${esc(l.found)}</td>
+      </tr>`).join('')
+    + `</tbody></table>`;
 }
 
 /* ---- READING THE TRAFFIC ---------------------------------------------------

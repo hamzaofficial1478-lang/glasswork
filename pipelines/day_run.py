@@ -65,7 +65,11 @@ LOCK_HOLDER = "owner-run-button"
 # The order the handbook lays down, mirrored from run.py's DAY. The MD plans
 # first or the board is empty and every sector correctly refuses to invent work.
 STEPS = [
-    # BEFORE the MD plans, not after. The MD is supposed to reason from the live
+    # Read the phone FIRST. An approval he gave last night is a decision the
+    # agency should already be acting on this morning — not one it discovers
+    # after planning the day around him not having answered.
+    ("Read your answers from the phone", "coordination.ntfy_replies", "Director"),
+    # Then the Overseer, still BEFORE the MD plans. The MD reasons from the live
     # state of the business, and "SEO's strategist has been dead since Tuesday"
     # is part of that state — planning a day of SEO work around a desk that is
     # not answering is exactly the mistake this is here to stop. It also closes

@@ -327,7 +327,7 @@ app.get("/status", (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html
 const API_CAPABILITIES = [
   "password", "activity", "activity-seen", "activity-clear", "sector", "usage",
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
-  "setup-unlock", "brand", "ping",
+  "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", (_q, res) => {
@@ -800,6 +800,14 @@ app.get("/api/activity", (req, res) => {
   const args = ["--json"];
   if (Number.isFinite(since) && since > 0) args.push("--since", String(since));
   res.json(pyModule("coordination.activity", args, 25000));
+});
+
+// ---- the leads behind the number ---------------------------------------------
+// "Leads today: 0" with nothing behind it is a score, not a tool. This is who
+// they are, where they came from, and what is holding each one up.
+app.get("/api/leads", (req, res) => {
+  const scope = req.query.scope === "all" ? "all" : "today";
+  res.json(pyModule("coordination.leads_view", ["--json", "--scope", scope], 25000));
 });
 
 // ---- the owner's per-sector on/off switches ----------------------------------
