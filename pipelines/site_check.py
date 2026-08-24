@@ -115,7 +115,11 @@ def step_health(url):
 
     findings = it_health.check_health(status, ms, url, err)
     findings += it_health.check_hygiene(html or "")
-    enquiry, routes = it_health.check_enquiry_path(html or "")
+    # The contact page too, not just the home page. Judging the enquiry path on
+    # the home page alone told this owner his site was "missing a contact form"
+    # when the form is at /contact.php, which is exactly where it belongs.
+    contact_html, _u = it_health._contact_page(url, html or "")
+    enquiry, routes = it_health.check_enquiry_path(html or "", contact_html)
     findings += enquiry
 
     crit = [f for f in findings if f["severity"] == "critical"]

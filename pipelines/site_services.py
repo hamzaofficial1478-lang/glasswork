@@ -109,10 +109,50 @@ def phrases_from(html):
     seen, uniq = set(), []
     for p in out:
         k = p.lower()
-        if k not in seen:
+        if k not in seen and is_a_service_name(p):
             seen.add(k)
             uniq.append(p)
     return uniq
+
+
+# Words that mean this heading is SELLING, not naming a job. A heading is a
+# candidate service name only if it could plausibly appear on a quotation.
+_NOT_A_SERVICE = (
+    "best", "top ", "leading", "trusted", "no.1", "no 1", "#1", "number one",
+    "welcome", "why choose", "about us", "our story", "our team", "contact",
+    "get in touch", "testimonial", "review", "guarantee", "years of",
+    "ideas for", "guide to", "how to", "tips", "everything you need",
+    "company in", "partner in", "supplier in", "specialist in",
+)
+
+
+def is_a_service_name(txt) -> bool:
+    """
+    Could this phrase be a line on a quotation?
+
+    THE REPORT WAS COUNTING SLOGANS AS SERVICES. On the owner's own site it
+    announced "25 things you sell the agency does not know about" and the list
+    led with 'BEST ALUMINUM GLASS COMPANY IN UAE' and 'Your Trusted Partner in
+    Glass & Aluminium Industry' — a strapline and a tagline, neither of which
+    is a thing anybody buys. He read that as the agency not understanding his
+    business, and he was right to: mixing four real gaps in with a page of
+    marketing copy makes the four invisible.
+
+    A service name is a short noun phrase. A headline sells, an article title
+    explains, and both are longer and carry giveaway words.
+    """
+    t = " ".join(str(txt or "").split())
+    if not (2 < len(t) <= 48):
+        return False
+    if len(t.split()) > 5:
+        return False                      # an article title, not a product
+    low = t.lower()
+    if any(w in low for w in _NOT_A_SERVICE):
+        return False
+    letters = [c for c in t if c.isalpha()]
+    if letters and sum(c.isupper() for c in letters) / len(letters) > 0.7:
+        return False                      # SHOUTED HEADLINE
+    return True
 
 
 def _internal_links(html, base):
@@ -165,6 +205,18 @@ def discover(url, timeout=15, max_pages=10):
     # using them here fails on "Frameless Shower Enclosures", which is the name
     # of the job and mentions no buyer at all. match_by_name returns nothing
     # rather than guessing, which is what makes 'uncatalogued' meaningful.
+    # ACROSS pages, not per page. phrases_from de-duplicates within one page,
+    # so a nav item that appears on all four came back four times and the
+    # report said "25 uncatalogued" when there were nineteen distinct — the
+    # same phrase counted twice makes the number meaningless.
+    seen, deduped = set(), []
+    for p in phrases:
+        k = " ".join(p.lower().split())
+        if k not in seen:
+            seen.add(k)
+            deduped.append(p)
+    phrases = deduped
+
     confirmed, unmatched = {}, []
     for p in phrases:
         key, _matched = services.match_by_name(p)

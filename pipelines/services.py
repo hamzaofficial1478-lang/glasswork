@@ -84,7 +84,11 @@ SERVICES = {
                   "handrail",
                   "glass railings",
                   "banister",
-                  "railing"),
+                  "railing",
+                  # what a staircase balustrade is actually called on UAE sites
+                  "staircase glass",
+                  "staircase glasses",
+                  "stair glass"),
         "signals": ("villa", "tower", "residence", "staircase", "balcony", "terrace",
                     "developer", "landscap", "resort", "restaurant", "rooftop"),
         "buyers": ("developer", "property_management", "hotel", "restaurant",
@@ -174,7 +178,11 @@ SERVICES = {
                   "wood door",
                   "timber door",
                   "joinery",
-                  "carpentry"),
+                  "carpentry",
+                  "wooden work",
+                  "wooden ceiling",
+                  "wooden interior",
+                  "wooden flooring"),
         "signals": ("hotel", "apartment", "villa", "residence", "school", "clinic",
                     "interior", "joinery", "furniture", "fit out", "fit-out"),
         "buyers": ("hotel", "fitout_contractor", "interior_design", "developer",
@@ -198,12 +206,103 @@ SERVICES = {
                    "food_stall", "builder", "landlord", "nursery_local"),
         "related": ("glass_railing", "skylight", "aluminium_windows", "cladding"),
     },
+    # ---- FOUR THE CATALOGUE DID NOT KNOW, AND THE BUSINESS PLAINLY SELLS ---
+    #
+    # Read straight off worlddealtechnicalservices.com. The site's own headings
+    # say Folding Door, Lamination Glass, Sign Board and Glass Installation, in
+    # three variants each, and every one came back "uncatalogued" — so the
+    # agency could not target them, write about them, or pitch them to a lead.
+    # 'Sign Board' is in the site's own title tag, and there is a whole Leads
+    # segment for signage firms, which made its absence here the odd one out.
+    "folding_doors": {
+        "label": "folding and bi-fold doors",
+        "names": ("folding door",
+                  "bifold door",
+                  "bi-fold door",
+                  "sliding folding door",
+                  "accordion door",
+                  "folding partition",
+                  "concertina door",
+                  "aluminium folding",
+                  "aluminum folding",
+                  "wooden folding",
+                  "steel folding",
+                  "glass folding"),
+        "signals": ("villa", "balcony", "terrace", "restaurant", "cafe", "hotel",
+                    "office", "meeting room", "showroom", "patio", "garden"),
+        "buyers": ("restaurant", "hotel", "office", "coworking", "villa_compound",
+                   "builder", "landlord", "holiday_let", "retail", "food_stall"),
+        "related": ("aluminium_doors", "glass_partition", "glass_door", "pergola"),
+    },
+    "laminated_glass": {
+        "label": "laminated and safety glass",
+        "names": ("laminated glass",
+                  "lamination glass",
+                  "glass lamination",
+                  "safety glass",
+                  "toughened glass",
+                  "tempered glass",
+                  "double glazing",
+                  "insulated glass",
+                  "acoustic glass",
+                  "privacy glass",
+                  "frosted glass",
+                  "tinted glass",
+                  "obscure glass"),
+        "signals": ("school", "nursery", "hospital", "clinic", "bank", "villa",
+                    "balcony", "staircase", "shopfront", "security", "acoustic"),
+        "buyers": ("school", "nursery_local", "hospital", "clinic_small", "bank",
+                   "retail", "hotel", "builder", "developer", "landlord"),
+        "related": ("glass_partition", "glass_railing", "shopfront", "glass_repair"),
+    },
+    "sign_board": {
+        "label": "sign boards and display boards",
+        "names": ("sign board",
+                  "signboard",
+                  "signage",
+                  "display board",
+                  "acrylic letter",
+                  "3d letter",
+                  "light box",
+                  "name board",
+                  "shop sign",
+                  "billboard",
+                  "outdoor billboard",
+                  "hoarding"),
+        "signals": ("shop", "retail", "restaurant", "cafe", "salon", "clinic",
+                    "showroom", "office", "mall", "branding", "advertising"),
+        "buyers": ("signage", "retail", "restaurant", "food_stall", "salon",
+                   "supermarket", "clinic_small", "gym", "showroom", "startup",
+                   "local_market", "laundry"),
+        "related": ("shopfront", "cladding", "glass_repair"),
+    },
+    "glass_installation": {
+        "label": "glass and aluminium installation",
+        "names": ("glass installation",
+                  "aluminium installation",
+                  "aluminum installation",
+                  "glass fixing",
+                  "glass fitting",
+                  "glazing installation",
+                  "office glass",
+                  "office glasses",
+                  "bath glass",
+                  "bath glasses"),
+        "signals": ("install", "fit", "fix", "supply and fix", "office", "villa",
+                    "staircase", "bathroom", "apartment", "building"),
+        "buyers": ("office", "coworking", "builder", "landlord", "developer",
+                   "property_management", "holiday_let", "villa_compound",
+                   "clinic_small", "startup"),
+        "related": ("glass_partition", "glass_railing", "shower_glass",
+                    "glass_repair"),
+    },
     "skylight": {
         "label": "skylights and glass roofs",
         "names": ("skylight",
                   "glass roof",
                   "atrium",
-                  "roof glazing"),
+                  "roof glazing",
+                  "roof glass"),
         "signals": ("mall", "atrium", "showroom", "villa", "resort", "museum",
                     "airport", "warehouse", "clinic"),
         "buyers": ("mall", "developer", "hotel", "showroom", "construction",
@@ -234,6 +333,12 @@ ALL_SERVICE_LABELS = [SERVICES[k]["label"] for k in
                        "glass_railing", "mirror", "aluminium_windows", "aluminium_doors",
                        "cladding", "curtain_wall", "wooden_doors", "pergola",
                        "skylight", "glass_repair")]
+
+
+# Words that turn a glazing term into a different product: a film, a sticker or
+# a wrap is applied to somebody's existing glass, not fabricated and fitted.
+_TREATMENT_RE = re.compile(r"\b(film|films|sticker|stickers|vinyl|wrap|wraps|"
+                           r"decal|decals|tint(?:ing)? film)\b", re.I)
 
 
 @lru_cache(maxsize=None)
@@ -272,6 +377,17 @@ def match_by_name(text) -> tuple:
     always the more informative one.
     """
     t = (text or "").lower()
+    # A SURFACE TREATMENT IS NOT THE GLAZING. "Frosted glass" is a panel this
+    # business makes; "frosted glass film" is a vinyl somebody sticks on an
+    # existing pane, and they are different jobs with different prices. Adding
+    # 'frosted glass' to the catalogue made the matcher start swallowing the
+    # film too, which would have had the agency offering a pane to somebody
+    # asking for a sticker. Unless a service names one of these outright, a
+    # phrase carrying one is not ours.
+    if _TREATMENT_RE.search(t) and not any(
+            _TREATMENT_RE.search(n) for s in SERVICES.values()
+            for n in s.get("names", ())):
+        return (None, "")
     best = (0, None, "")
     for key, s in SERVICES.items():
         for n in s.get("names", ()):

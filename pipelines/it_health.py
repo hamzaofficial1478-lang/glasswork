@@ -96,14 +96,22 @@ def _fetch(url, timeout=20):
         return 0, "", int((time.time() - t0) * 1000), str(e)
 
 
-def check_enquiry_path(html):
+def check_enquiry_path(html, more_html=""):
     """
     Can a visitor actually reach this business? Findings here are 'critical'
     when nothing at all works, because that is a site quietly losing every job.
+
+    `more_html` is the CONTACT PAGE, and leaving it out was a bug that produced
+    a flatly wrong finding about the owner's own site. This read the home page
+    and nothing else, so it reported "Missing a contact form" for a business
+    whose contact form is at /contact.php — one click away, on the page called
+    Contact, which is where a contact form is supposed to be. A route is only
+    missing if it is missing everywhere a visitor would sensibly look.
     """
+    blob = (html or "") + "\n" + (more_html or "")
     found, missing = [], []
     for key, rx, why in ENQUIRY_CHECKS:
-        (found if re.search(rx, html, re.I) else missing).append((key, why))
+        (found if re.search(rx, blob, re.I) else missing).append((key, why))
 
     out = []
     if not found:
@@ -118,12 +126,39 @@ def check_enquiry_path(html):
                     "detail": f"Missing {why}."})
 
     # a phone number that is not a UAE number is worse than none — it looks wrong
-    tel = re.findall(r'href=["\']tel:([^"\']+)', html, re.I)
-    for t in tel:
+    tel = set(re.findall(r'href=["\']tel:([^"\']+)', blob, re.I))
+    for t in sorted(tel):
         if not looks_like_uae_number(t):
             out.append({"kind": "form_dead", "severity": "high",
                         "detail": f"click-to-call number does not look like a UAE number: {t}"})
     return out, found
+
+
+def _contact_page(site, home_html, timeout=15):
+    """
+    Fetch the site's own contact page, if it has one. Returns (html, url).
+
+    Follows the link the site itself offers rather than guessing at /contact —
+    the owner's own site calls it /contact.php, which no guess list contained.
+    The link-finding is pipelines/harvest.py's, so there is one idea in the
+    building about "which page is the contact page" rather than two.
+
+    Best-effort by design: no contact page, or an unreachable one, simply means
+    the home page is all we judge on. It must never fail the health check.
+    """
+    try:
+        from . import harvest
+        ranked = sorted(((harvest.worth_a_click(u, t), u)
+                         for u, t in harvest.links(home_html, site)), reverse=True)
+        for score, u in ranked[:2]:
+            if score <= 0:
+                break
+            _s, h, _ms, _e = _fetch(u, timeout)
+            if h:
+                return h, u
+    except Exception:
+        pass
+    return "", ""
 
 
 def check_health(status, ms, url, err):
@@ -234,8 +269,11 @@ def _check(agent, url, timeout, run_row):
         status, html, ms, err = _fetch(site, timeout)
         fetched = bool(html) or status > 0
 
-        # the enquiry path first, exactly as the MD ordered it
-        enquiry, found = check_enquiry_path(html) if html else ([], [])
+        # the enquiry path first, exactly as the MD ordered it — and on the
+        # contact page too, because that is where a contact form lives
+        contact_html, contact_url = _contact_page(site, html, timeout)
+        enquiry, found = (check_enquiry_path(html, contact_html) if html
+                          else ([], []))
         findings = enquiry + check_health(status, ms, site, err)
         if html:
             findings += check_hygiene(html)
