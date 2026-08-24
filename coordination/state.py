@@ -465,7 +465,7 @@ def build():
     for key, name, match, sec in SECTORS:
         try:
             trows = c.execute(
-                "SELECT title,status,owner,claimed_at FROM tasks"
+                "SELECT title,status,owner,claimed_at,risk,desk FROM tasks"
                 " WHERE lower(sector)=? AND status IN ('open','in_progress')"
                 " ORDER BY created_at DESC LIMIT 6", (match,)).fetchall()
         except Exception:
@@ -477,11 +477,36 @@ def build():
         busy = {a["slot"] for a in agents}
         for t in trows:
             owner = t["owner"] or "unassigned"
-            slot = _desk_of(owner) if t["owner"] else ""
+            # WHICH DESK AN UNCLAIMED TASK BELONGS TO.
+            #
+            # Before the board routed work (coordination/desks.py) an open task
+            # had no owner and therefore no desk, so the office sat it at
+            # whichever desk happened to be free — and the owner watched the SEO
+            # Auditor glow amber over a task that had nothing to do with the
+            # Auditor. It now reports the desk the task is ADDRESSED to; a task
+            # addressed to nobody still reports none, and the floor leaves every
+            # desk alone rather than picking one at random.
+            slot = _desk_of(owner) if t["owner"] else _desk_of(
+                (t["desk"] if "desk" in t.keys() else "") or "")
             if t["status"] == "in_progress" and slot in busy:
                 continue                      # already shown, with better detail
             if t["status"] != "in_progress":
-                agents.append({"n": owner, "slot": slot, "t": t["title"], "s": "waiting"})
+                # AMBER MEANS "WAITING ON YOU", AND NOTHING ELSE.
+                #
+                # Every unclaimed task used to light its desk amber, and amber on
+                # this floor reads as "this desk needs your permission". So the
+                # owner cleared every approval, watched a bulb stay orange, and
+                # reasonably concluded the agency had not heard him. It had — the
+                # bulb was never about approvals. Only an amber or red task is
+                # actually waiting on him; ordinary work nobody has picked up yet
+                # is 'queued', which is a different thing and a different colour.
+                pending = (t["risk"] if "risk" in t.keys() else "") in ("amber", "red")
+                agents.append({
+                    "n": owner, "slot": slot, "t": t["title"],
+                    "s": "waiting" if pending else "queued",
+                    **({"why": "This one needs your yes or no before the desk can "
+                               "start. Approve or decline it and the desk moves "
+                               "on to whatever is next."} if pending else {})})
                 continue
             # Claimed, but no run backing it. A claim with nothing behind it is a
             # held job nobody is doing — it blocks every other agent from taking

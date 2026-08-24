@@ -93,7 +93,13 @@
   .agent:hover{background:rgba(255,255,255,.025)}
   .agent .sd{width:9px;height:9px;border-radius:50%}
   .sd.working{background:var(--glass);box-shadow:0 0 0 3px var(--glass-dim);animation:pulse 1.8s infinite}
+  /* Amber is reserved for "this one needs the owner's yes or no". Work that is
+     merely sitting on the board unclaimed is 'queued' and is not an alarm —
+     see coordination/state.py. */
   .sd.waiting{background:var(--amber);box-shadow:0 0 0 3px var(--amber-dim)}
+  .sd.queued{background:var(--glass);opacity:.55}
+  .sd.off{background:#3c4a51}
+  .sd.done{background:var(--ok);opacity:.7}
   .sd.idle{background:var(--faint)}
   .sd.blocked{background:var(--danger);box-shadow:0 0 0 3px var(--danger-dim)}
   .agent .who{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -356,6 +362,10 @@ async function fetchState(){
 const $=(s)=>document.querySelector(s);
 const escA=(s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* A value that becomes a CSS CLASS is not text — escaping does nothing useful
+   for it, so it is checked against the list of states that actually exist. An
+   unknown state renders as idle rather than as a class nobody styled. */
+const oneOf=(v,allowed)=>allowed.includes(String(v))?String(v):allowed[0];
 
 /* A score of null means "no evidence yet" and MUST NOT render as 0. Untested
    is not unhealthy, and a red ring on a sector that simply has not run is the
@@ -422,7 +432,7 @@ function renderRooms(st){
       <div class="agents">
         ${rm.agents.length ? rm.agents.map(a=>`
           <div class="agent">
-            <span class="sd ${a.s}"></span>
+            <span class="sd ${oneOf(a.s,['idle','queued','waiting','working','done','blocked','off'])}"></span>
             <div class="who"><b>${a.n}</b><span>${a.t}</span></div>
             <span class="st">${a.s}</span>
           </div>`).join('') : '<div class="empty">No tasks on the board for this room.</div>'}

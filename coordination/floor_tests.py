@@ -132,11 +132,24 @@ def test_the_run_wins_over_a_stale_task_row():
         check("the Watcher appears once", len(agents), 1)
         check("showing the run, not the stale claim", agents[0]["t"].startswith("filed 3"), True)
 
-        # an unclaimed task is still shown — it is work waiting for someone
+        # An unclaimed task is still shown — it is work waiting for someone.
+        # 'queued', not 'waiting': nobody has picked it up, and that is a
+        # different statement from "this needs the owner's permission", which
+        # is what amber means on the floor.
         board.post_task("IT", "Check the gallery on mobile", "detail")
         agents = _room(state.build(), "IT")["agents"]
-        check("plus the unclaimed task, waiting", sorted(a["s"] for a in agents),
-              ["done", "waiting"])
+        check("plus the unclaimed task, queued", sorted(a["s"] for a in agents),
+              ["done", "queued"])
+
+        # And the one that genuinely needs him IS amber, so the colour keeps
+        # meaning exactly one thing.
+        board.post_task("IT", "Buy the paid rank tracker", "detail", risk="amber")
+        states = sorted(a["s"] for a in _room(state.build(), "IT")["agents"])
+        check("an amber task is the only thing that turns a desk amber",
+              states, ["done", "queued", "waiting"])
+        amber = [a for a in _room(state.build(), "IT")["agents"] if a["s"] == "waiting"]
+        check("and it says what the owner has to do",
+              "yes or no" in (amber[0].get("why") or ""), True)
     finally:
         board.DB = real_b
 

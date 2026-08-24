@@ -126,9 +126,26 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .emp.pw .antenna{background:#5f7d86}
 .emp.pw .head{border-color:var(--ok);box-shadow:0 0 12px rgba(92,192,136,.45)}
 
+/* AMBER MEANS ONE THING: THIS DESK NEEDS YOUR YES OR NO.
+   It used to mean "there is an unclaimed task in this room", which is a
+   completely different statement and is true almost all the time. The owner
+   cleared every approval he had, watched the SEO Auditor stay orange, and
+   fairly concluded the agency had not heard him — it had, and the bulb was
+   never about approvals. Ordinary unclaimed work is .queued, below. */
 .emp.pw.waiting .antenna::after{background:#fff6e6;border-color:var(--amber);
   box-shadow:0 0 0 2px rgba(234,165,67,.35), 0 0 10px 2px var(--amber), 0 0 20px rgba(234,165,67,.6)}
 .emp.pw.waiting .head{border-color:var(--amber);box-shadow:0 0 12px rgba(234,165,67,.45)}
+
+/* QUEUED: work is on the board for this desk and it has not started yet.
+   Deliberately the ordinary powered lamp with a soft glass ring rather than a
+   colour of its own — nothing is wrong, nobody is being asked for anything,
+   and a fourth alarm colour on the floor would only teach the owner to ignore
+   all of them. */
+.emp.pw.queued .antenna::after{background:#eafff4;border-color:var(--ok);
+  box-shadow:0 0 0 2px rgba(84,203,217,.30), 0 0 9px 1px var(--ok), 0 0 18px rgba(92,192,136,.45)}
+.emp.pw.queued .head{border-color:rgba(84,203,217,.55);
+  box-shadow:0 0 10px rgba(84,203,217,.28)}
+.emp.queued .monitor{border-color:rgba(84,203,217,.45)}
 
 /* WORKING: the same lamp, blinking. An agent can be mid-run before its sector
    has ever been proven, so this does not require .pw. */
@@ -582,7 +599,7 @@ function renderFloor(){
       +'. Turn it back on in the full control room.';
     room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
     room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+`<div class="desks">`+
-      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls} ${powered&&!off?'pw':''} ${off?'off':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role" title="${escA(a.role)}">${esc(a.role)}</div></div>`).join('')
+      rm.agents.map((a,i)=>`<div class="emp ${oneOf(a.s,['idle','queued','waiting','working','done','blocked','off'])} ${rm.cls} ${powered&&!off?'pw':''} ${off?'off':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role" title="${escA(a.role)}">${esc(a.role)}</div></div>`).join('')
       +`</div>`;
     floor.appendChild(room);
   });
@@ -938,7 +955,12 @@ function openDrawer(a){
   } else if(a.s==='done'){
     open = `Last thing I did: ${esc(a.t)}. Ask me anything about it.`;
   } else if(a.s==='waiting'){
-    open = `There's work on the board for me — ${esc(a.t)} — but nobody has claimed it yet.`;
+    open = `<b style="color:var(--amber)">I need your yes or no.</b> ${esc(a.t)}`
+         + `<br><br>Until you decide, I can't start it. Approve or decline it on `
+         + `<b>Awaiting you</b> and I'll move on to whatever's next.`;
+  } else if(a.s==='queued'){
+    open = `There's work on the board for me — ${esc(a.t)} — and I haven't `
+         + `started it yet. Nothing is blocking it and nobody is waiting on you.`;
   } else {
     open = `Nothing on the board for me right now. Ask what I'm for, or what the sector's carrying.`;
   }
@@ -1241,38 +1263,64 @@ async function showAllActivity(){
    poll brought the item straight back. So nothing here reports success unless
    the server said the row changed. ------------------------------------------ */
 function openApprovals(){
+  // A fresh sitting starts with a clean slate of receipts — yesterday's
+  // "approved" notes are history, not something to greet him with.
+  DECIDED.clear();
   openPanel('apprPanel');
   renderApprovals();
 }
 
+/* What has just been decided in this sitting, so the panel can say so after it
+   redraws. Keyed by kind+id, which is what the server actually acts on — the
+   list position is not an identity, and treating it as one is how deciding the
+   second item could act on the wrong row (see decide()). */
+const DECIDED = new Map();
+
 function renderApprovals(){
   const items = (LIVE && LIVE.approvals) || [];
+  const done = [...DECIDED.values()];
   $('#apprHead').textContent = items.length
     ? `· ${items.length} decision${items.length===1?'':'s'} for you`
-    : '· nothing right now';
+    : (done.length ? `· all clear — ${done.length} decided just now`
+                   : '· nothing right now');
+  const receipts = done.map(d=>`
+    <div class="appr" style="opacity:.55">
+      <div class="lvl">${esc(d.lvl||'amber')}</div>
+      <h4>${esc(d.text||'(no description)')}</h4>
+      <div class="row"><span style="color:${d.yes?'var(--ok)':'var(--muted)'};font-size:12.5px">`
+      + `${d.yes?'✓ approved':'✕ turned down'} — the desk has moved on</span></div>
+    </div>`).join('');
+
   if(!items.length){
-    $('#apprBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+    $('#apprBody').innerHTML = receipts
+      + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
       + `Nothing is waiting on you. Anything the agents cannot decide for themselves `
       + `&mdash; a change to the live site, a task the MD marked amber &mdash; appears `
       + `here and on your phone.</p>`;
     return;
   }
-  $('#apprBody').innerHTML = items.map((a,i)=>`
-    <div class="appr" data-i="${i}">
+  // data-key, not data-i. The list is re-read from the server after every
+  // decision, so a position captured when the panel was drawn can point at a
+  // different item by the time the next button is pressed.
+  $('#apprBody').innerHTML = items.map(a=>{
+    const k = `${a.kind}:${a.id}`;
+    return `
+    <div class="appr" data-key="${escA(k)}">
       <div class="lvl">${esc(a.lvl||'amber')}</div>
       <h4>${esc(a.text||'(no description)')}</h4>
       ${a.why?`<div class="why">${esc(a.why)}</div>`:''}
       <div class="row">
-        <button class="yes" onclick="decide(${i},true)">Approve</button>
-        <button class="no"  onclick="decide(${i},false)">Not now</button>
+        <button class="yes" onclick="decide('${escA(k)}',true)">Approve</button>
+        <button class="no"  onclick="decide('${escA(k)}',false)">Not now</button>
         <span class="msg" style="font-size:12px"></span>
       </div>
-    </div>`).join('');
+    </div>`;}).join('') + receipts;
 }
 
-async function decide(i, yes){
-  const a = ((LIVE && LIVE.approvals) || [])[i];
-  const el = document.querySelector(`.appr[data-i="${i}"]`);
+async function decide(key, yes){
+  const items = (LIVE && LIVE.approvals) || [];
+  const a = items.find(x=>`${x.kind}:${x.id}` === key);
+  const el = document.querySelector(`.appr[data-key="${CSS.escape(key)}"]`);
   if(!a || !el) return;
   const btns = el.querySelectorAll('button');
   const msg = el.querySelector('.msg');
@@ -1293,12 +1341,15 @@ async function decide(i, yes){
     msg.textContent = '✕ not saved — ' + ((j&&(j.error||j.why)) || 'unknown error');
     return;
   }
-  el.querySelector('.row').innerHTML =
-    `<span style="color:${yes?'var(--ok)':'var(--muted)'};font-size:12.5px">`
-    + (yes ? '✓ approved' : '✕ turned down') + '</span>';
-  el.style.opacity = '.6';
+  // MOVE ON. The old version faded the decided item and stopped there: the
+  // panel kept the stale list, the next item never came forward, and the owner
+  // was left looking at a screen that had not visibly reacted to him. Re-read
+  // the cabinet, redraw the queue from it, and keep a receipt so a decision he
+  // just made does not simply vanish off the screen.
+  DECIDED.set(key, {yes, text:a.text, lvl:a.lvl});
   const j2 = await pullLive();
   if(j2){ LIVE=j2; applyLive(j2); renderFloor(); renderPerf(); }
+  renderApprovals();
 }
 
 /* ---- THE LEADS BEHIND THE NUMBER ------------------------------------------ */
