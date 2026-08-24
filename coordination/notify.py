@@ -138,6 +138,28 @@ def collect() -> list:
             out.append({"key": f"change:{r['id']}", "urgency": TODAY,
                         "title": "A website change is waiting for your yes or no",
                         "body": f"{r['kind']}: {(r['detail'] or '')[:240]}"})
+
+        # 3b. The first cold mails the agency has ever written, held until he
+        #     has read one. Nothing goes to a real business before that, so
+        #     this alert is the thing standing between a collected lead and a
+        #     job — it is worth his phone buzzing once.
+        #
+        #     Grouped: one alert for the batch, not one per draft. Three
+        #     separate buzzes about the same decision is how an owner learns to
+        #     ignore the channel.
+        held = _rows(c, "SELECT id, company, subject FROM outreach_queue"
+                        " WHERE status='pending' ORDER BY queued_at LIMIT 5")
+        if held:
+            who = ", ".join((h["company"] or "a lead")[:28] for h in held[:3])
+            out.append({"key": f"outreach:{min(h['id'] for h in held)}",
+                        "urgency": TODAY,
+                        "title": (f"{len(held)} outreach mail(s) written and "
+                                  "waiting on you"),
+                        "body": (f"To {who}"
+                                 + (" and others" if len(held) > 3 else "")
+                                 + ". Read one in the office and approve it, and "
+                                   "outreach starts running on its own inside the "
+                                   "daily cap. Nothing has been sent yet.")})
         for r in _rows(c, "SELECT id, title, sector FROM tasks"
                           " WHERE status IN ('open','in_progress')"
                           " AND risk IN ('amber','red') LIMIT 5"):

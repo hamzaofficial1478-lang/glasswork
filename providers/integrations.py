@@ -49,19 +49,64 @@ ENV_PATH = Path(__file__).parents[1] / ".env"
 _TELEGRAM = "https://api.telegram.org"
 
 
+# The settings the agency reads by name. Used to decide which environment
+# variables may override the file — copying the whole environment in would put
+# PATH, HOME and every CI variable into a dict the office renders as the
+# owner's settings.
+ENV_KEYS = {
+    "SITE_URL", "SITE_MODE", "SITE_NAME", "AGENCY_NAME",
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+    "OUTREACH_DOMAIN", "OUTREACH_DAILY_CAP", "WHATSAPP_DAILY_CAP",
+    "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+    "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
+    "GOOGLE_PLACES_API_KEY", "GSC_PROPERTY",
+    "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
+    "CRAWLER_ON_OWN_SITE", "LEADS_ALLOW_INDIVIDUALS",
+    "SEO_SEEDS", "SEO_AREAS", "SEO_STRIKING_TO", "SEO_W_AREA", "SEO_W_ENQUIRIES",
+    "PORT",
+}
+
+
 def read_env(path=None) -> dict:
-    """Parse .env into a dict. Mirrors the reader in server.js so both agree."""
+    """
+    The agency's settings: .env, with the real environment on top.
+
+    THE ENVIRONMENT USED TO BE IGNORED, AND THE PROGRAM ADVERTISED OTHERWISE.
+
+    `run.py --check` tells the owner, in as many words, "set
+    SITE_URL=https://yoursite.ae for one run". coordination/site.py honours
+    that and reports the source as 'environment'. This function did not read
+    the environment at all — so the same setting was set and not set at the
+    same time, depending on who asked, and the preflight that decides whether
+    the day may start was the one saying not set. Doing exactly what the
+    program told you to do left IT and Leads blocked with no way to see why.
+
+    Precedence is the environment, because exporting a variable for one run is
+    a deliberate act and the saved file is the standing default. Everything
+    that reads a setting directly — mail.py, whatsapp.py, fetcher.py — already
+    used os.environ, so this brings the odd one out into line rather than
+    inventing a new rule.
+
+    Mirrored in server.js's readEnv() so the two never disagree again.
+    """
     env = {}
     p = Path(path) if path else ENV_PATH
-    if not p.exists():
-        return env
     try:
-        for line in p.read_text().splitlines():
-            m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
-            if m:
-                env[m.group(1)] = m.group(2).strip()
+        if p.exists():
+            for line in p.read_text().splitlines():
+                m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
+                if m:
+                    env[m.group(1)] = m.group(2).strip()
     except Exception:
-        return {}
+        env = {}
+    # Only keys the file already knows about, plus the ones the agency reads by
+    # name. Copying the WHOLE environment in would drag PATH, HOME and every
+    # CI variable into a dict the office renders as the owner's settings.
+    for k in set(env) | ENV_KEYS:
+        v = os.environ.get(k)
+        if v is not None and str(v).strip():
+            env[k] = str(v).strip()
     return env
 
 

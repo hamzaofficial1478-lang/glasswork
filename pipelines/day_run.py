@@ -127,6 +127,11 @@ STEPS = [
 
     ("Leads maps its sources", "pipelines.leads_sources", "Leads", "leads"),
     ("Leads collects", "pipelines.leads_hunt", "Leads", "leads"),
+    # LAST in the Leads lane, and only after Security has had its pass — see
+    # the 'outreach' lane below. Collecting a lead and writing to it in the
+    # same breath is how an unscreened one gets contacted.
+    ("Leads writes to the cleared ones", "pipelines.leads_outreach", "Leads",
+     "outreach"),
 
     ("SEO builds the keyword picture (free sources)", "pipelines.seo_intel", "SEO", "seo"),
     ("SEO finds the gaps", "pipelines.seo_gap", "SEO", "seo"),
@@ -160,7 +165,13 @@ LANE_AFTER = {
     "seo":      ("open",),
     "security": ("leads",),      # nothing to screen until Leads has collected
     "content":  ("seo",),        # briefs are written against the AEO findings
-    "close":    ("it", "leads", "seo", "security", "content"),
+    # Mail goes out AFTER Security has screened what came in today. Its own
+    # lane rather than the tail of 'leads' precisely so it cannot start early:
+    # the handbook says Leads asks Security to clear a lead before Outreach
+    # ever contacts it, and a lane boundary is how that is enforced rather
+    # than hoped for.
+    "outreach": ("security",),
+    "close":    ("it", "leads", "seo", "security", "content", "outreach"),
 }
 
 # How many steps may be in flight at once. Not "all of them": every step is a

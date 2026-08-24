@@ -423,6 +423,11 @@ def _lane_tests(day_run):
     print("\nLanes really do overlap, and one slow desk holds nobody up:")
     started, live, peak, lock = [], [0], [0], threading.Lock()
     slow = "pipelines.seo_intel"
+    # Which OTHER lanes finished a step while the slow one was still going. This
+    # is the owner's actual requirement — "if an agent is taking more time it
+    # should be put into the other line so it doesn't hold up the others" — and
+    # it is a fact about the interleaving, not about how fast the machine is.
+    slow_running, during = [False], set()
 
     class _Done:
         returncode = 0
@@ -435,9 +440,15 @@ def _lane_tests(day_run):
             started.append(mod)
             live[0] += 1
             peak[0] = max(peak[0], live[0])
+            if mod == slow:
+                slow_running[0] = True
         time.sleep(0.30 if mod == slow else 0.02)
         with lock:
             live[0] -= 1
+            if mod == slow:
+                slow_running[0] = False
+            elif slow_running[0]:
+                during.add(mod)
         return _Done()
 
     real_sub, day_run.subprocess = day_run.subprocess, types.SimpleNamespace(
@@ -453,10 +464,19 @@ def _lane_tests(day_run):
     check("nothing failed", failed, 0)
     check("more than one step ran at once", peak[0] > 1, True)
     check("and never more than the cap", peak[0] <= day_run.MAX_LANES, True)
-    # 16 steps, one of them 0.30s and the rest 0.02s, is 0.60s in one queue.
-    # In lanes the critical path is open(3) + seo(5, one slow) + content + close(2).
-    check("the day is shorter than running them one after another",
-          took < 0.60, True)
+    # DELIBERATELY NOT A STOPWATCH. The first version asserted the whole run
+    # took under 0.6s, which is a claim about the machine rather than about the
+    # code, and it duly failed once on a loaded box and passed on the retry. A
+    # test that is sometimes right teaches you to re-run tests.
+    #
+    # The property that actually matters is the owner's: while one desk is slow,
+    # the others get on with it. That is exactly what `during` records.
+    mods = lambda lane: {day_run.STEPS[i][1] for i in plan[lane]}   # noqa: E731
+    check("the whole IT lane got through while SEO's slow step ran",
+          mods("it") <= during, True)
+    check("so did the whole Leads lane", mods("leads") <= during, True)
+    check("and nothing in SEO's own lane overtook it — a lane is still a queue",
+          mods("seo") & during, set())
 
     print("\n...but a step never starts before what it depends on has finished:")
     at = {m: i for i, m in enumerate(started)}

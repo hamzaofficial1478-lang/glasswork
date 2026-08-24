@@ -404,7 +404,33 @@ const AGENCY_TASKS = [
 ];
 
 // read .env into a { KEY: value } map (used only to report what's filled)
-function readEnv() {
+// The settings the agency reads by name. Only these may be overridden from the
+// real environment — copying the whole of process.env in would put PATH and
+// every CI variable into what the office renders as the owner's settings.
+// Mirrors ENV_KEYS in providers/integrations.py.
+const ENV_KEYS = new Set([
+  "SITE_URL", "SITE_MODE", "SITE_NAME", "AGENCY_NAME",
+  "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+  "OUTREACH_DOMAIN", "OUTREACH_DAILY_CAP", "WHATSAPP_DAILY_CAP",
+  "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
+  "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+  "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
+  "GOOGLE_PLACES_API_KEY", "GSC_PROPERTY",
+  "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
+  "CRAWLER_ON_OWN_SITE", "LEADS_ALLOW_INDIVIDUALS",
+  "SEO_SEEDS", "SEO_AREAS", "SEO_STRIKING_TO", "SEO_W_AREA", "SEO_W_ENQUIRIES",
+  "PORT",
+]);
+
+// .env, with the real environment on top. The environment used to be ignored
+// here and in providers/integrations.py, while run.py --check told the owner to
+// "set SITE_URL=... for one run" and coordination/site.py honoured it — so one
+// setting was set and not set at the same time depending on who asked, and the
+// preflight that decides whether the day may start was the one saying not set.
+// What is actually written down. Kept separate from readEnv() so that a value
+// exported for ONE RUN cannot be written permanently into .env the next time
+// the owner presses Save on a completely unrelated section of /setup.
+function readEnvFile() {
   const map = {};
   if (fs.existsSync(ENV_PATH)) {
     for (const line of fs.readFileSync(ENV_PATH, "utf8").split(/\r?\n/)) {
@@ -415,10 +441,19 @@ function readEnv() {
   return map;
 }
 
+function readEnv() {
+  const map = readEnvFile();
+  for (const k of new Set([...Object.keys(map), ...ENV_KEYS])) {
+    const v = process.env[k];
+    if (v !== undefined && String(v).trim() !== "") map[k] = String(v).trim();
+  }
+  return map;
+}
+
 // merge keys into .env WITHOUT disturbing the rest — this is why saving one
 // section never wipes another (the bug the owner hit with the old single button).
 function updateEnv(partial) {
-  const merged = { ...readEnv(), ...partial };
+  const merged = { ...readEnvFile(), ...partial };
   if (!merged.PORT) merged.PORT = process.env.PORT || "3000";
   const order = [
     "SITE_MODE", "SITE_URL", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",

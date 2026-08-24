@@ -173,6 +173,28 @@ CREATE TABLE IF NOT EXISTS outreach_log (
 
 -- ---- site health (IT) -----------------------------------------------------
 
+-- Drafted mail waiting on the owner. The agency does not start cold-mailing
+-- real businesses on its own say-so: the FIRST batch is held here for him to
+-- read, and approving it arms outreach so later batches go straight out. One
+-- confirmation, then autonomous — see pipelines/leads_outreach.py.
+CREATE TABLE IF NOT EXISTS outreach_queue (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id    INTEGER,
+  company    TEXT,
+  to_email   TEXT,
+  subject    TEXT,
+  body       TEXT,
+  service    TEXT,
+  audit      TEXT,                   -- JSON: what the Auditor said about it
+  status     TEXT DEFAULT 'pending', -- pending | approved | rejected | sent | stale
+  queued_by  TEXT,
+  queued_at  INTEGER,
+  decided_at INTEGER,
+  sent_at    INTEGER,
+  note       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outq_status ON outreach_queue(status);
+
 CREATE TABLE IF NOT EXISTS site_issues (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT,                            -- bug | speed | broken_link | form_dead | ssl | security

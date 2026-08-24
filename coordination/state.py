@@ -610,6 +610,22 @@ def build():
                               "why": ((s["detail"] or "")[:150] + " — queued by " + (s["agent"] or "IT"))})
     except Exception:
         pass
+    # Drafted mail, held until he has read one. The whole draft goes in `why`,
+    # not a summary of it — the point of this queue is that he sees exactly
+    # what the agency would put in front of a real business, and a decision
+    # made on a one-line description is not the decision he was asked for.
+    try:
+        for m in c.execute("SELECT id,company,to_email,subject,body FROM outreach_queue"
+                           " WHERE status='pending' ORDER BY queued_at LIMIT 5"):
+            approvals.append({
+                "kind": "outreach", "id": m["id"], "lvl": "amber · Leads",
+                "text": f"Send this to {m['company'] or m['to_email']}?",
+                "why": (f"To: {m['to_email']}\nSubject: {m['subject']}\n\n"
+                        + (m["body"] or "")[:1200]
+                        + "\n\nApproving this also starts outreach running on "
+                          "its own, inside the daily cap.")})
+    except Exception:
+        pass
 
     # ---- security feed ----
     sevmap = {"critical": "hi", "high": "hi", "hi": "hi",

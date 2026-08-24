@@ -271,7 +271,32 @@ def claim_task(task_id, agent):
     A task belonging to a switched-off sector cannot be claimed at all. The
     check is in the same WHERE clause as the race, not before it, so a sector
     switched off mid-claim loses the race rather than half-winning it.
+
+    NOR CAN AN AMBER OR RED ONE, AND THAT WAS MISSING.
+
+    Amber means "this needs the owner's yes before the desk can start" — it is
+    what the floor draws amber for and what 'Awaiting you' lists. Nothing
+    enforced it. Any agent could claim an unapproved amber task and get on with
+    it, which on the Leads board means the one task titled "Mail the 9 cleared
+    firms" could have been picked up and acted on without him ever saying yes.
+    An approval that only changes a colour is not an approval.
+
+    Approving is what clears it: decide_approval drops the risk to 'green',
+    which is the moment the desk may take it. Refusing sets it 'blocked', so it
+    is not open either. `force_claim` exists for the one caller that legitimately
+    needs to bypass this — the owner acting through the office.
     """
+    return _claim(task_id, agent, allow_unapproved=False)
+
+
+def force_claim(task_id, agent):
+    """Claim regardless of the approval gate. For the owner, not for agents."""
+    return _claim(task_id, agent, allow_unapproved=True)
+
+
+def _claim(task_id, agent, allow_unapproved):
+    gate = "" if allow_unapproved else \
+        " AND COALESCE(lower(risk),'green') NOT IN ('amber','red')"
     with _conn() as c:
         _migrate(c)
         c.execute("BEGIN IMMEDIATE;")
@@ -279,7 +304,8 @@ def claim_task(task_id, agent):
             "UPDATE tasks SET status='in_progress', owner=?, claimed_at=?"
             " WHERE id=? AND status='open'"
             "   AND lower(sector) NOT IN ("
-            "     SELECT lower(sector) FROM sector_switches WHERE enabled=0)",
+            "     SELECT lower(sector) FROM sector_switches WHERE enabled=0)"
+            + gate,
             (agent, _now(), task_id),
         )
         c.execute("COMMIT;")
@@ -1252,6 +1278,87 @@ def decide_site_change(change_id, decision):
                   (decision, _now(), change_id))
 
 
+# ---------------------------------------------------------------------------
+# OUTREACH — drafted mail waiting on the owner
+# ---------------------------------------------------------------------------
+#
+# The agency does not start cold-mailing real businesses on its own say-so. The
+# first batch is queued here for him to read; approving it ARMS outreach, and
+# from then on drafts that pass Security and the Auditor go straight out inside
+# the daily cap. One confirmation, then autonomous — which is the handbook's
+# own rule about the owner being the tie-breaker on anything irreversible,
+# rather than a permission prompt he has to answer every morning.
+
+def queue_outreach(lead_id, company, to_email, subject, body, service="",
+                   audit=None, by="leads-outreach"):
+    """Hold one drafted mail for the owner. Returns the row id.
+
+    ASK ONCE: the same draft to the same address, still pending, is not queued
+    again. The Hunter runs daily and would otherwise fill his list with copies.
+    """
+    with _conn() as c:
+        _migrate(c)
+        dup = c.execute(
+            "SELECT id FROM outreach_queue WHERE status='pending'"
+            " AND to_email=? AND subject=? LIMIT 1",
+            ((to_email or "").strip().lower(), subject)).fetchone()
+        if dup:
+            return dup["id"]
+        cur = c.execute(
+            "INSERT INTO outreach_queue(lead_id,company,to_email,subject,body,"
+            "service,audit,status,queued_by,queued_at)"
+            " VALUES(?,?,?,?,?,?,?, 'pending', ?, ?)",
+            (lead_id, company, (to_email or "").strip().lower(), subject, body,
+             service, json.dumps(audit or {}), by, _now()))
+        return cur.lastrowid
+
+
+def pending_outreach(limit=50):
+    with _conn() as c:
+        _migrate(c)
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM outreach_queue WHERE status='pending'"
+            " ORDER BY queued_at LIMIT ?", (int(limit),))]
+
+
+def decide_outreach(qid, decision, note=""):
+    """Owner's yes or no on one drafted mail. 'approved' | 'rejected'."""
+    if decision not in ("approved", "rejected"):
+        raise ValueError(f"not a decision: {decision}")
+    with _conn() as c:
+        _migrate(c)
+        c.execute("UPDATE outreach_queue SET status=?, decided_at=?, note=?"
+                  " WHERE id=? AND status='pending'",
+                  (decision, _now(), note[:300], qid))
+        return c.total_changes > 0
+
+
+def outreach_armed() -> bool:
+    """
+    Has the owner ever approved a batch? Once he has, outreach runs on its own.
+
+    Read from the record rather than a config flag on purpose: the thing that
+    arms it is him actually approving mail, which is a row, not a setting
+    somebody could flip without meaning to.
+    """
+    with _conn() as c:
+        _migrate(c)
+        try:
+            r = c.execute("SELECT 1 FROM outreach_queue"
+                          " WHERE status IN ('approved','sent') LIMIT 1").fetchone()
+            return bool(r)
+        except Exception:
+            return False
+
+
+def mark_outreach_sent(qid, ok=True, note=""):
+    with _conn() as c:
+        _migrate(c)
+        c.execute("UPDATE outreach_queue SET status=?, sent_at=?, note=?"
+                  " WHERE id=?",
+                  ("sent" if ok else "rejected", _now(), note[:300], qid))
+
+
 def decide_approval(kind, ref, decision):
     """
     The owner's yes or no on one amber item, actually written down.
@@ -1277,6 +1384,15 @@ def decide_approval(kind, ref, decision):
     if kind == "site_change":
         decide_site_change(int(ref), decision)
         return {"ok": True, "kind": kind, "ref": ref, "decision": decision}
+    if kind == "outreach":
+        moved = decide_outreach(int(ref), decision, note=f"owner {decision} {when}")
+        return {"ok": bool(moved), "kind": kind, "ref": ref, "decision": decision,
+                "error": "" if moved else "that draft has already been decided",
+                "why": ("Approved. This one goes out on the next Leads pass, and "
+                        "outreach is now armed — later drafts that pass Security "
+                        "and the Auditor send without asking again."
+                        if decision == "approved" and moved else
+                        "Turned down. It will not be sent." if moved else "")}
     if kind != "task":
         raise ValueError(f"nothing of kind '{kind}' queues for approval")
     with _conn() as c:

@@ -232,6 +232,45 @@ def test_probe_equals_production():
           ["Authorization"])
 
 
+def test_a_bare_host_gets_its_version_path():
+    """
+    The bug that silently cost the agency every model call it ever made.
+
+    The store held 'https://api.openai.com' — which is what you get if you type
+    the provider's website address, and it is the obvious thing to type. Calls
+    went to /chat/completions, came back 404, the cascade tried the fallback and
+    got 404 there too, and every desk quietly fell back to reading its own rows
+    out. Nothing anywhere said the base URL was missing two characters.
+    """
+    print("\nA base URL with no version path is completed, not 404'd:")
+    check("openai", chat_endpoint("https://api.openai.com"),
+          "https://api.openai.com/v1/chat/completions")
+    check("anthropic", chat_endpoint("https://api.anthropic.com"),
+          "https://api.anthropic.com/v1/chat/completions")
+    check("a trailing slash is the same thing",
+          chat_endpoint("https://api.openai.com/"),
+          "https://api.openai.com/v1/chat/completions")
+    check("and models too", models_endpoint("https://api.openai.com"),
+          "https://api.openai.com/v1/models")
+
+    print("\n...and a base that already has a path is left exactly as set:")
+    for base, want in (
+            ("https://api.openai.com/v1", "https://api.openai.com/v1/chat/completions"),
+            ("https://x.ai/openai/v1", "https://x.ai/openai/v1/chat/completions"),
+            ("https://generativelanguage.googleapis.com/v1beta",
+             "https://generativelanguage.googleapis.com/v1beta/chat/completions"),
+            ("http://localhost:11434/v1", "http://localhost:11434/v1/chat/completions"),
+            ("https://api.openai.com/v1/chat/completions",
+             "https://api.openai.com/v1/chat/completions")):
+        check(f"  {base}", chat_endpoint(base), want)
+
+    print("\n...and the owner is told what was added:")
+    from .urls import derived_note
+    check("said out loud", "/v1 was added" in derived_note("https://api.openai.com"), True)
+    check("and not said when nothing was",
+          "/v1 was added" in derived_note("https://api.openai.com/v1"), False)
+
+
 def test_load_splits_across_both_apis():
     """
     A busy primary yields to a free fallback, and to nothing else.
@@ -321,6 +360,7 @@ def main():
     test_integrations_unconfigured()
     test_the_owner_can_always_be_reached()
     test_probe_equals_production()
+    test_a_bare_host_gets_its_version_path()
     test_load_splits_across_both_apis()
     test_load_never_reaches_past_the_route()
     print()

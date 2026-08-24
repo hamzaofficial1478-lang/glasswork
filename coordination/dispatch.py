@@ -228,6 +228,19 @@ def offer(sector, agent, now=None) -> dict:
     ordered = board_order(sector, now)
     take, passed, orphans = None, [], []
     for t in ordered:
+        # WAITING ON THE OWNER IS NOT WAITING FOR A DESK.
+        #
+        # board.claim_task refuses an unapproved amber or red task — that is
+        # what the approval means. This has to agree with it: without the check
+        # here, dispatch offered the task, the claim was refused, and the desk
+        # reported "it is claimable now, run again" for ever. Two parts of the
+        # same decision disagreeing is worse than either answer.
+        if (t.get("risk") or "green").strip().lower() in ("amber", "red"):
+            passed.append({"id": t["id"], "title": t["title"],
+                           "points": t["points"],
+                           "why": "waiting on the owner's yes — approve it on "
+                                  "'Awaiting you' and the desk can start"})
+            continue
         v = desks.verdict(agent, t)
         if v["allowed"]:
             if take is None:
