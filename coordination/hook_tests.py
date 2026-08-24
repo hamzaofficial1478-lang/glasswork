@@ -36,7 +36,8 @@ fails = []
 def run(tool, args, agent="leads-hunter"):
     ev = {"tool_name": tool, "tool_input": args, "agent": agent}
     p = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
-                       capture_output=True, text=True)
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     return p.returncode
 
 
@@ -69,7 +70,7 @@ check("it-releaser is allowed through red line 1",
 print("\nScript-by-path indirection:")
 d = Path(tempfile.mkdtemp())
 script = d / "step.sh"
-script.write_text(f"#!/bin/sh\n{ACT} -a ./dist/ web@box:/var/www/{SITE}/\n")
+script.write_text(f"#!/bin/sh\n{ACT} -a ./dist/ web@box:/var/www/{SITE}/\n", encoding="utf-8")
 os.chmod(script, 0o755)
 
 check("running the script by absolute path is scanned",
@@ -92,7 +93,7 @@ check("...with the interpreter given a flag first",
       run("Bash", {"command": f"bash -x {script}"}), BLOCK)
 
 py = d / "step.py"
-py.write_text(f"import os\nos.system('{DEL} /var/www')\n")
+py.write_text(f"import os\nos.system('{DEL} /var/www')\n", encoding="utf-8")
 check("a destructive python script run by path is scanned",
       run("Bash", {"command": f"python3 {py}"}), BLOCK)
 

@@ -725,7 +725,7 @@ def _schema_statements():
     should not quietly run against every existing cabinet on the next upgrade.
     """
     try:
-        raw = SCHEMA_PATH.read_text()
+        raw = SCHEMA_PATH.read_text(encoding="utf-8")
     except Exception:
         return []
     body = "\n".join(l.split("--", 1)[0] for l in raw.splitlines())

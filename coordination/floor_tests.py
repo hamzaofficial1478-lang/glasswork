@@ -43,7 +43,7 @@ def _fresh_db():
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
     con = sqlite3.connect(db)
-    con.executescript((ROOT / "coordination" / "schema.sql").read_text())
+    con.executescript((ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     return db
@@ -186,7 +186,7 @@ def test_every_desk_fits_in_its_room():
     room fits floor((w-16)/76) per row; a row is 89px tall under a 24px plaque.
     """
     print("Every room is big enough for the agents in it:")
-    html = (ROOT / "ui" / "office.html").read_text()
+    html = (ROOT / "ui" / "office.html").read_text(encoding="utf-8")
     src = html[html.index("const LAYOUT="):][:800]
     layout = {k: (int(w), int(h)) for k, w, h in
               re.findall(r"(\w+):\{x:\d+,y:\d+,w:(\d+),h:(\d+)\}", src)}
@@ -211,7 +211,7 @@ def test_a_room_label_and_its_chip_do_not_collide():
     the real numbers rather than trusting the constant.
     """
     print("A room's chip never prints over its name:")
-    html = (ROOT / "ui" / "office.html").read_text()
+    html = (ROOT / "ui" / "office.html").read_text(encoding="utf-8")
     m = re.search(r"const fits = width >= String\(roomName\|\|''\)\.length\*([\d.]+)"
                   r" \+ word\.length\*([\d.]+) \+ (\d+);", html)
     check("the fit rule is still where the test can read it", bool(m), True)
@@ -242,7 +242,7 @@ def test_a_desk_label_says_the_whole_job():
     SEO sector. It never was; the label ate it. Every desk was affected.
     """
     print("A desk label says the whole job, not its first word:")
-    html = (ROOT / "ui" / "office.html").read_text()
+    html = (ROOT / "ui" / "office.html").read_text(encoding="utf-8")
     # Match the RENDERING expression, not the prose: the CSS comment above it
     # explains the old bug and names the old call, which failed this check the
     # first time it ran.
@@ -273,7 +273,7 @@ def test_the_ui_does_not_open_on_a_lie():
     working. This reads the actual file — a comment promising it is not enough.
     """
     print("The first paint is honest:")
-    html = (ROOT / "ui" / "office.html").read_text()
+    html = (ROOT / "ui" / "office.html").read_text(encoding="utf-8")
     body = html[html.index("function sectors()"):html.index("const SITES=")]
     check("no desk ships as working", 's:"working"' in body, False)
     check("no desk ships as waiting", 's:"waiting"' in body, False)
@@ -319,7 +319,7 @@ def test_the_bulb_says_powered_working_or_broken():
     changed.
     """
     print("The bulb says powered, working, or broken:")
-    html = (ROOT / "ui" / "office.html").read_text()
+    html = (ROOT / "ui" / "office.html").read_text(encoding="utf-8")
 
     def seg(sel):
         return html.split(sel + "{")[1].split("}")[0]

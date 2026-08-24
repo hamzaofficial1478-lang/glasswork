@@ -225,7 +225,7 @@ def _script_contents(command: str) -> str:
         try:
             p = Path(path)
             if p.is_file() and p.stat().st_size < 200_000:
-                found.append(p.read_text(errors="ignore"))
+                found.append(p.read_text(encoding="utf-8", errors="ignore"))
         except Exception:
             pass
     return "\n".join(found)

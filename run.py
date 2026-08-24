@@ -67,7 +67,11 @@ def head(title):
 def sh(args, **kw):
     """Run a command, return (code, output). Never raises."""
     try:
+        # encoding is named — see the note in pipelines/day_run.py. Leaving it
+        # to the machine is why five suites "failed" on the owner's Windows box
+        # while passing everywhere else.
         p = subprocess.run(args, cwd=ROOT, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
                            timeout=kw.pop("timeout", 300), **kw)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     except FileNotFoundError:

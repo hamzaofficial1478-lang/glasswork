@@ -47,7 +47,7 @@ class _Cabinet:
         d = Path(tempfile.mkdtemp())
         db = d / "agency.db"
         con = sqlite3.connect(db)
-        con.executescript((ROOT / "coordination" / "schema.sql").read_text())
+        con.executescript((ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8"))
         con.commit()
         con.close()
         board.DB = str(db)
@@ -298,7 +298,7 @@ def _old_cabinet(*without):
     This is what the owner actually had, and what nothing was testing.
     """
     import re
-    schema = (ROOT / "coordination" / "schema.sql").read_text()
+    schema = (ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8")
     for t in without:
         schema = re.sub(r"CREATE TABLE IF NOT EXISTS %s \(.*?\);" % t, "",
                         schema, flags=re.S)
@@ -333,7 +333,7 @@ def test_an_older_cabinet_gets_every_new_table():
     """
     import re
     print("\nA cabinet built before these tables existed gets them all:")
-    schema = (ROOT / "coordination" / "schema.sql").read_text()
+    schema = (ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8")
     want = set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", schema, re.I))
     newest = ["faults", "read_marks", "sector_switches"]
 

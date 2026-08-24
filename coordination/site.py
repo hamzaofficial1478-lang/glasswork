@@ -77,7 +77,7 @@ def agency_name() -> str:
 def load() -> dict:
     """The public site config, or an empty dict if it has not been saved yet."""
     try:
-        d = json.loads(CONFIG.read_text())
+        d = json.loads(CONFIG.read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}
@@ -194,7 +194,7 @@ def save(url: str, mode: str = "", areas=None, name: str = "") -> dict:
     if (name or "").strip():
         data["name"] = name.strip()[:80]
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG.write_text(json.dumps(data, indent=2) + "\n")
+    CONFIG.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return data
 
 

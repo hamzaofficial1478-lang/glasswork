@@ -94,7 +94,7 @@ def read_env(path=None) -> dict:
     p = Path(path) if path else ENV_PATH
     try:
         if p.exists():
-            for line in p.read_text().splitlines():
+            for line in p.read_text(encoding="utf-8").splitlines():
                 m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
                 if m:
                     env[m.group(1)] = m.group(2).strip()

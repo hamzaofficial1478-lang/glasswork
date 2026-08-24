@@ -202,7 +202,7 @@ def test_the_site_address_survives_a_fresh_clone():
         # reset it to {"url": ""} and the health check told him to set a website
         # he had already set. .env is gitignored and is what actually survives.
         _site.from_env_file = lambda: "https://glassworks.ae"
-        _site.CONFIG.write_text('{"url": ""}\n')
+        _site.CONFIG.write_text('{"url": ""}\n', encoding="utf-8")
         check("a pull that empties the file does not lose the address",
               _site.site_url(), "https://glassworks.ae")
         check("and the owner is told which copy answered",
@@ -219,7 +219,7 @@ def test_the_site_address_survives_a_fresh_clone():
               _site.site_url("https://other.ae"), "https://other.ae")
 
         # the file is committed, so it must never be given a secret to hold
-        saved = json.loads(_site.CONFIG.read_text())
+        saved = json.loads(_site.CONFIG.read_text(encoding="utf-8"))
         check("only public facts are stored",
               set(saved) <= {"url", "mode", "areas"}, True)
     finally:

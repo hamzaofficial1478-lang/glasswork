@@ -68,7 +68,7 @@ class Server:
         # actual .env would lock him out of his own machine.
         self.env_path = ROOT / ".env"
         self.saved = self.env_path.read_bytes() if self.env_path.exists() else None
-        self.env_path.write_text("SITE_MODE=readonly\nSITE_URL=\n")
+        self.env_path.write_text("SITE_MODE=readonly\nSITE_URL=\n", encoding="utf-8")
 
         env = dict(os.environ, PORT=str(self.port))
         self.proc = subprocess.Popen(

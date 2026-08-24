@@ -38,7 +38,7 @@ def _fresh_db():
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
     con = sqlite3.connect(db)
-    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text())
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     # One place says where the cabinet is. Every reader goes through board.DB,
@@ -619,15 +619,15 @@ def _backend_tests():
     was = backend.ENV
     backend.ENV = _P(tempfile.mkdtemp()) / ".env"
     try:
-        backend.ENV.write_text("# my notes\nSMTP_PASS=hunter2\nNTFY_TOPIC=abc\n")
+        backend.ENV.write_text("# my notes\nSMTP_PASS=hunter2\nNTFY_TOPIC=abc\n", encoding="utf-8")
         backend.write_env("ADMIN_PASSWORD_HASH", h)
-        text = backend.ENV.read_text()
+        text = backend.ENV.read_text(encoding="utf-8")
         check("the comment survives", "# my notes" in text, True)
         check("the other secrets survive", "SMTP_PASS=hunter2" in text, True)
         check("and the new key is there", "ADMIN_PASSWORD_HASH=" in text, True)
 
         backend.write_env("ADMIN_PASSWORD_HASH", None)
-        text = backend.ENV.read_text()
+        text = backend.ENV.read_text(encoding="utf-8")
         check("removing it takes only that line", "ADMIN_PASSWORD_HASH" in text, False)
         check("everything else is still there",
               ("SMTP_PASS=hunter2" in text and "NTFY_TOPIC=abc" in text), True)
@@ -635,7 +635,7 @@ def _backend_tests():
         backend.ENV = was
 
     print("\nThe status line never prints a secret:")
-    src = (Path(__file__).parents[1] / "backend.py").read_text()
+    src = (Path(__file__).parents[1] / "backend.py").read_text(encoding="utf-8")
     body = src.split("def where(")[1].split("def main(")[0]
     for leaky in ("e.get(\"SMTP_PASS\")", "e['SMTP_PASS']", "e.get(\"SITE_API_TOKEN\")",
                   "e.get(\"DATAFORSEO_PASSWORD\")"):

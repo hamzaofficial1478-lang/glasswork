@@ -8,7 +8,7 @@ SCHEMA = HERE / "schema.sql"
 
 def init():
     con = sqlite3.connect(DB)
-    con.executescript(SCHEMA.read_text())
+    con.executescript(SCHEMA.read_text(encoding="utf-8"))
     con.commit()
     con.close()
     print(f"filing cabinet ready at {DB}")

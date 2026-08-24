@@ -51,7 +51,7 @@ class _Cabinet:
         d = Path(tempfile.mkdtemp())
         db = d / "agency.db"
         con = sqlite3.connect(db)
-        con.executescript((ROOT / "coordination" / "schema.sql").read_text())
+        con.executescript((ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8"))
         con.commit()
         con.close()
         board.DB = str(db)

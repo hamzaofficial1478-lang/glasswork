@@ -42,7 +42,7 @@ def main():
     if model.get("api_model_id"):
         env["ANTHROPIC_MODEL"] = model["api_model_id"]
 
-    cmd = ["claude", "-p", PROMPT, "--append-system-prompt", (ROOT / "CLAUDE.md").read_text()]
+    cmd = ["claude", "-p", PROMPT, "--append-system-prompt", (ROOT / "CLAUDE.md").read_text(encoding="utf-8")]
     if model.get("api_model_id"):
         cmd += ["--model", model["api_model_id"]]
 

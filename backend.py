@@ -220,7 +220,7 @@ def start_server(lock_down=False):
     except FileNotFoundError:
         say("  Node.js is not installed. Get it from nodejs.org, then run this again.")
         return None
-    PIDFILE.write_text(str(proc.pid))
+    PIDFILE.write_text(str(proc.pid), encoding="utf-8")
     for _ in range(40):
         time.sleep(0.25)
         if running():
@@ -236,7 +236,7 @@ def stop_server():
         say("  If one is running, it was started another way — close that window.")
         return
     try:
-        pid = int(PIDFILE.read_text().strip())
+        pid = int(PIDFILE.read_text(encoding="utf-8").strip())
         os.kill(pid, 9 if os.name == "nt" else 15)
         say(f"  Stopped (pid {pid}).")
     except Exception as e:
@@ -300,7 +300,7 @@ def where():
         say("    nothing saved yet — add your models and shelf keys on /setup")
     else:
         try:
-            d = json.loads(store.read_text() or "{}")
+            d = json.loads(store.read_text(encoding="utf-8") or "{}")
             creds = d.get("credentials") or []
             say(f"    {len(creds)} provider(s), "
                 f"{sum(len(c.get('models') or []) for c in creds)} model(s), "
@@ -312,7 +312,7 @@ def where():
     site = ROOT / "config" / "site.json"
     say()
     say("  config/site.json              (git-ignored — an update cannot wipe it)")
-    say(f"    {site.read_text().strip() if site.exists() else 'not written yet'}")
+    say(f"    {site.read_text(encoding='utf-8').strip() if site.exists() else 'not written yet'}")
     say()
     say("  No key is printed by this command, on purpose. Open the screen to change one.")
 

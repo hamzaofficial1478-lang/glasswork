@@ -222,7 +222,8 @@ def check_pipelines() -> list:
     for label, mod, room, _lane in STEPS:
         code = f"import importlib,sys; importlib.import_module({mod!r})"
         p = subprocess.run([PY, "-c", code], cwd=str(ROOT), capture_output=True,
-                           text=True, timeout=120)
+                           text=True, encoding="utf-8", errors="replace",
+                           timeout=120)
         if p.returncode == 0:
             out.append({"name": label, "module": mod, "room": room, "ok": True,
                         "says": "loads"})
@@ -421,8 +422,14 @@ def _one_step(rid, seq) -> str:
 
     _step(rid, seq, status="running", started_at=_now())
     try:
+        # encoding is named, never left to the machine. text=True decodes with
+        # the locale codepage, which on Windows is cp1252/cp1256 — and every
+        # pipeline in this program prints em-dashes and readiness lamps. A step
+        # that worked perfectly would come back as mojibake, or take the run
+        # down with a UnicodeDecodeError. See coordination/console.py.
         p = subprocess.run([PY, "-m", mod], cwd=str(ROOT), capture_output=True,
-                           text=True, timeout=STEP_TIMEOUT)
+                           text=True, encoding="utf-8", errors="replace",
+                           timeout=STEP_TIMEOUT)
         code, out = p.returncode, (p.stdout or "") + (p.stderr or "")
     except subprocess.TimeoutExpired:
         code, out = 124, f"timed out after {STEP_TIMEOUT}s"

@@ -32,7 +32,7 @@ def _fresh_db():
     """A real cabinet built from the real schema, in a temp dir."""
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
-    schema = (Path(__file__).parents[1] / "coordination" / "schema.sql").read_text()
+    schema = (Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8")
     con = sqlite3.connect(db)
     con.executescript(schema)
     con.commit()

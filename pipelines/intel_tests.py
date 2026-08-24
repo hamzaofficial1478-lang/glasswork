@@ -44,7 +44,7 @@ def _fresh_db():
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
     con = sqlite3.connect(db)
-    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text())
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     return db
@@ -446,7 +446,7 @@ def test_search_console_talks_to_the_right_endpoint():
     made = not sa_path.exists()
     if made:
         sa_path.parent.mkdir(parents=True, exist_ok=True)
-        sa_path.write_text("{}")
+        sa_path.write_text("{}", encoding="utf-8")
     real_env, real_post = integrations.read_env, requests.post
     integrations.read_env = lambda: {"GSC_PROPERTY": "sc-domain:example.ae"}
     try:

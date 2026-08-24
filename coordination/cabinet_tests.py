@@ -7,6 +7,7 @@ over-ceiling spend are flagged for escalation, and the live board reports the
 holder, the queue and the day's spend. Runs against a throwaway DB so it never
 touches the real filing cabinet.
 """
+import re
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -29,7 +30,7 @@ def check(name, got, want):
 def _fresh_db():
     tmp = Path(tempfile.mkdtemp()) / "test_agency.db"
     con = sqlite3.connect(tmp)
-    con.executescript((Path(__file__).parent / "schema.sql").read_text())
+    con.executescript((Path(__file__).parent / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     # point both modules at the throwaway DB (they read board.DB at call time)
@@ -147,7 +148,7 @@ def test_only_shelves_something_borrows():
     for folder in ("pipelines", "providers", "coordination"):
         for f in (ROOT / folder).glob("*.py"):
             if not f.name.endswith("_tests.py"):
-                src += f.read_text()
+                src += f.read_text(encoding="utf-8")
     for shelf in store.SHELF_KINDS:
         if shelf == "other":
             continue          # the landing place for a tool saved with no shelf
@@ -177,7 +178,7 @@ def test_brains_are_not_a_shelf():
         check("llm is reported as a brain, not a shelf", kinds["llm"], "model")
     check("no empty model categories are injected any more",
           [n for n in ("image", "embedding") if n in kinds], [])
-    html = (ROOT / "ui" / "setup.html").read_text()
+    html = (ROOT / "ui" / "setup.html").read_text(encoding="utf-8")
     check("and the board says so where he reads it",
           "never shared" in html, True)
 
@@ -269,7 +270,63 @@ def test_an_abandoned_waiter_is_reaped():
         board.DB = real
 
 
+# ---------------------------------------------------------------------------
+# WINDOWS
+# ---------------------------------------------------------------------------
+
+def test_no_file_is_read_at_the_mercy_of_the_machines_codepage():
+    """
+    The owner ran the suite on Windows and five suites failed that pass on every
+    Linux box. Nothing was wrong with the code they tested. Python on Windows
+    reads text files and writes stdout in the machine's ANSI codepage — cp1252,
+    or cp1256 in the UAE — not UTF-8. Every file in this repository is UTF-8,
+    and the program prints readiness lamps (● ○ ◐ ✕) that cp1252 has no
+    characters for, so `print()` raised before a single assertion ran.
+
+    This walks the source rather than trusting anybody to remember. A new
+    read_text() without an encoding is the exact shape of the bug coming back,
+    and it would come back silently: it works perfectly on the machine of
+    whoever writes it.
+    """
+    print("\nNo file is read at the mercy of the machine's codepage:")
+    root = Path(__file__).parents[1]
+    skip = {"__pycache__", ".git", "node_modules", ".venv"}
+    bare_read, bare_write, bare_open, bare_sub = [], [], [], []
+    for py in sorted(root.rglob("*.py")):
+        if any(part in skip for part in py.parts):
+            continue
+        src = py.read_text(encoding="utf-8")
+        rel = str(py.relative_to(root))
+        for m in re.finditer(r"\.read_text\(([^)]*)\)", src):
+            if "encoding" not in m.group(1):
+                bare_read.append(rel)
+        for m in re.finditer(r"\.write_text\(", src):
+            line = src[m.start():src.find("\n", m.start())]
+            if "encoding" not in line and not line.rstrip().endswith(","):
+                bare_write.append(rel)
+        for m in re.finditer(r"text=True", src):
+            line = src[max(0, m.start() - 200):m.start() + 200]
+            if "encoding" not in line:
+                bare_sub.append(rel)
+    check("every read_text names its encoding", sorted(set(bare_read)), [])
+    check("so does every write_text", sorted(set(bare_write)), [])
+    check("and every subprocess that captures text",
+          sorted(set(bare_sub)), [])
+
+    print("\n...and the console is set up by importing the package, not by ritual:")
+    from . import console
+    check("coordination sets it up", "console" in
+          (root / "coordination" / "__init__.py").read_text(encoding="utf-8"), True)
+    check("so does pipelines", "console" in
+          (root / "pipelines" / "__init__.py").read_text(encoding="utf-8"), True)
+    check("so does providers", "console" in
+          (root / "providers" / "__init__.py").read_text(encoding="utf-8"), True)
+    check("and calling it twice is harmless", (console.setup(), console.setup()),
+          (None, None))
+
+
 def main():
+    test_no_file_is_read_at_the_mercy_of_the_machines_codepage()
     test_classify()
     test_borrow_rules()
     test_live_state()
