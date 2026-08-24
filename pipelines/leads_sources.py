@@ -155,6 +155,82 @@ SEGMENTS = {
         "why": "Studios, agencies and startups — first fit-out of a new office.",
         "queries": ("marketing agency", "photography studio", "software company"),
     },
+
+    # --- LOCAL AND STREET-LEVEL ---------------------------------------------
+    #
+    # The owner's correction, and it was a fair one: "on maps most of the data
+    # is related to agencies, businesses and majors, while what I want is to
+    # target the locals". The segments above are mostly buildings and firms
+    # with a procurement process. These are the ones where the person who
+    # decides is the person standing behind the counter, and they buy the
+    # smaller, faster, better-margin jobs — a shopfront, a shower screen, a
+    # sign board, a pergola over the terrace.
+    "supermarket": {
+        "why": "Grocers and supermarkets — shopfronts, cold-room glass, sign boards, "
+               "and they refit a unit at a time rather than tendering it.",
+        "queries": ("supermarket", "grocery store", "hypermarket", "mini mart",
+                    "baqala"),
+    },
+    "local_market": {
+        "why": "Souks, community markets and small malls — dozens of small units "
+               "behind one landlord, each with its own frontage.",
+        "queries": ("souk", "local market", "community mall", "market place",
+                    "fish market", "vegetable market"),
+    },
+    "signage": {
+        "why": "Sign and advertising companies — they SUBCONTRACT the aluminium "
+               "framing, acrylic and display glass they cannot make themselves. "
+               "One relationship here is repeat work every month.",
+        "queries": ("signage company", "sign board maker", "advertising company",
+                    "billboard company", "printing press", "branding company"),
+    },
+    "holiday_let": {
+        "why": "Holiday-home and short-let operators — they turn units over "
+               "constantly and fix what the last guest broke, out of their own "
+               "pocket, this week.",
+        "queries": ("holiday homes", "short term rental", "vacation homes",
+                    "serviced apartments", "guest house"),
+    },
+    "landlord": {
+        "why": "Small landlords and building owners — the ones who own two or "
+               "three buildings and manage them themselves, so there is nobody "
+               "to get past.",
+        "queries": ("building owner", "landlord", "rental apartments",
+                    "flats for rent", "labour accommodation"),
+    },
+    "builder": {
+        "why": "Small builders and villa contractors — the ones who build one "
+               "villa at a time and buy the glazing themselves rather than "
+               "putting it out to tender.",
+        "queries": ("villa contractor", "building renovation", "home renovation",
+                    "villa construction", "swimming pool contractor",
+                    "landscaping company"),
+    },
+    "laundry": {
+        "why": "Laundries, tailors, key-cutters and the rest of the parade — "
+               "small shopfronts, cheap to win, and they talk to each other.",
+        "queries": ("laundry", "dry cleaners", "tailor shop", "mobile repair shop",
+                    "key cutting", "car wash"),
+    },
+    "clinic_small": {
+        "why": "Single-branch clinics — physio, optical, veterinary, dental — "
+               "who need partitions and hygiene glass without a procurement "
+               "department in the way.",
+        "queries": ("physiotherapy clinic", "optical shop", "veterinary clinic",
+                    "dermatology clinic", "homeopathy clinic"),
+    },
+    "nursery_local": {
+        "why": "Home nurseries and small learning centres — safety glass, "
+               "railings and shades, and a very short decision chain.",
+        "queries": ("home nursery", "day care", "tuition centre", "learning centre"),
+    },
+    "food_stall": {
+        "why": "Cafeterias, juice shops, bakeries and shawarma counters — the "
+               "densest shopfront segment in the UAE and the one nobody else "
+               "bothers to call.",
+        "queries": ("cafeteria", "juice shop", "bakery", "shawarma", "sweets shop",
+                    "butchery", "catering kitchen"),
+    },
 }
 
 # WHERE WE FIND THEM
@@ -211,12 +287,83 @@ SOURCES = [
     {"name": "Hotel and hospital group corporate sites", "kind": "website",
      "segments": ["hotel", "hospital", "mall", "school"], "business_data": True,
      "access": "public", "why": "Groups buy centrally — one procurement contact covers twenty buildings."},
+    # ---- WHERE THE LOCALS ARE, WHICH IS NOT WHERE THE FIRMS ARE ------------
+    #
+    # The owner's point: "on maps most of the data is related to agencies,
+    # businesses and majors, while what I want is the locals." Maps has the
+    # small shops too — a cafeteria in Al Quoz is on Maps — but you only reach
+    # them by searching for what they ARE, area by area, which is what the
+    # local segments above now do. These are the places that hold what Maps
+    # does not.
+    {"name": "Instagram business profiles by UAE location tag", "kind": "social",
+     "segments": ["salon", "spa", "gym", "restaurant", "food_stall", "retail",
+                  "supermarket", "laundry", "clinic_small", "nursery_local",
+                  "holiday_let", "signage"],
+     "business_data": True, "access": "public business profiles",
+     "why": "Where a UAE salon, café or gym actually lives. Business profiles "
+            "publish a phone or a WhatsApp button in the bio, and a location "
+            "tag puts them in an area. Business profiles only — never a "
+            "personal account."},
+    {"name": "Food-delivery platform listings (Talabat, Deliveroo, Zomato)",
+     "kind": "portal",
+     "segments": ["restaurant", "food_stall", "supermarket", "laundry"],
+     "business_data": True, "access": "public listing pages",
+     "why": "Every cafeteria, juice shop and grocer in the country, with its "
+            "area and trading name. The densest shopfront list there is."},
+    {"name": "UAE local directories (Yellow Pages, Connect.ae, Dubai listings)",
+     "kind": "directory",
+     "segments": ["supermarket", "local_market", "laundry", "food_stall",
+                  "signage", "builder", "clinic_small", "nursery_local", "retail"],
+     "business_data": True, "access": "public",
+     "why": "The small businesses that never bothered with a website but did "
+            "get themselves listed. Often a landline and nothing else — which "
+            "is still a way to reach them."},
+    {"name": "Holiday-let operator pages (Airbnb/Booking host listings)",
+     "kind": "portal", "segments": ["holiday_let", "landlord"],
+     "business_data": True, "access": "public",
+     "why": "Operators managing several units, who fix what the last guest "
+            "broke out of their own pocket and this week. The OPERATOR's own "
+            "site or company page — not a guest, and not a private host."},
+    {"name": "Signage and print companies' client and portfolio pages",
+     "kind": "website", "segments": ["signage"], "business_data": True,
+     "access": "public",
+     "why": "They subcontract the aluminium framing and acrylic they cannot "
+            "make. One relationship here is repeat work every month, and their "
+            "portfolio page names the shops they fitted out — who are leads too."},
+    {"name": "Owners' association and building manager listings (Mollak/DLD)",
+     "kind": "registry", "segments": ["landlord", "property_management",
+                                      "villa_compound"],
+     "business_data": True, "access": "public search",
+     "why": "The registered manager of a building is the person who signs off "
+            "railings, windows and lobby glass across every unit in it."},
+
     # Kept in the list on purpose so the screen has something real to refuse and
     # you can see the rule biting rather than take it on trust.
     {"name": "Classifieds villa-owner listings", "kind": "classifieds",
      "segments": ["private_individual"], "business_data": False,
      "access": "public", "why": "Private individuals at home — see the note on ALLOW_INDIVIDUALS."},
 ]
+
+# WHICH SEGMENTS ARE "THE LOCALS"
+#
+# Not a category of business, a category of DECISION. On this list the person
+# who decides is the person behind the counter or the one who owns the villa:
+# no procurement, no tender, no three quotes, and the job is wanted this month.
+# The rest have a process to get through. The owner asked to be pointed at the
+# first group, and this is what lets the source map answer him rather than
+# leaving him to count the list himself.
+LOCAL_SEGMENTS = {
+    "supermarket", "local_market", "signage", "holiday_let", "landlord",
+    "builder", "laundry", "clinic_small", "nursery_local", "food_stall",
+    "salon", "gym", "spa", "restaurant", "retail", "startup", "coworking",
+    "villa_compound",
+}
+
+
+def reaches_locals(source) -> bool:
+    """Does this source find street-level buyers, or only firms with a process?"""
+    segs = set(source.get("segments") or [])
+    return bool(segs & LOCAL_SEGMENTS)
 
 # PRIVATE INDIVIDUALS — the one limit left, and it is the owner's to lift
 #
@@ -369,7 +516,8 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
         if not ok:
             refused.append({"company": c.get("company") or c.get("name"), "why": why})
             continue
-        if contact_kind(c) == "personal":
+        kind = contact_kind(c)
+        if kind == "personal":
             # counted separately so you can always see how much personal data the
             # cabinet is holding, rather than discovering it during an audit
             personal.append(c.get("company"))
@@ -377,7 +525,10 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
         if board.lead_seen(c.get("email"), c.get("phone"), c.get("company")):
             dupes.append(c.get("company"))
             continue
-        lid = board.add_lead_if_new({**c, "source": c.get("source", "leads-hunter")})
+        # Stored WITH how we can reach them, so nobody has to re-derive it later
+        # and get a different answer. See pipelines/harvest.py.
+        lid = board.add_lead_if_new({**c, "source": c.get("source", "leads-hunter"),
+                                     "contact_kind": kind})
         if lid is None:
             dupes.append(c.get("company"))
         else:
@@ -410,8 +561,13 @@ def build_source_map():
         by_segment[seg] = {"why_they_buy": meta["why"],
                            "search_terms": list(meta["queries"]),
                            "services_they_need": [services.label(k) for k in svc],
-                           "sources": hits, "source_count": len(hits)}
+                           "sources": hits, "source_count": len(hits),
+                           # street-level buyer, or a firm with a process
+                           "local": seg in LOCAL_SEGMENTS}
+    local_srcs = [s["name"] for s in usable if reaches_locals(s)]
     return {"segments": by_segment, "usable_sources": usable, "districts": DISTRICTS,
+            "local_segments": sorted(s for s in by_segment if by_segment[s]["local"]),
+            "local_sources": local_srcs,
             "refused_sources": [{"name": r["name"], "because": r["refused_because"]}
                                 for r in refused]}
 

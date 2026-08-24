@@ -434,6 +434,16 @@ _ADDED_COLUMNS = (
     # (see pipelines/day_run.py) and "what was running at the same time as
     # this" is a question the run panel has to be able to answer.
     ("day_steps",    "lane",         "TEXT"),
+    # What the Harvester read off the business's own website — the details Maps
+    # does not hold. `whatsapp` is filled ONLY from a click-to-chat button the
+    # business published itself; `evidence` records where every detail came
+    # from, so a number can be argued with six months later.
+    # See pipelines/harvest.py.
+    ("leads",        "website",      "TEXT"),
+    ("leads",        "whatsapp",     "TEXT"),
+    ("leads",        "address",      "TEXT"),
+    ("leads",        "contact_kind", "TEXT"),
+    ("leads",        "evidence",     "TEXT"),
 )
 
 # WHY THIS LIST NO LONGER DECIDES ANYTHING
@@ -1011,13 +1021,20 @@ def add_lead_if_new(lead: dict):
     """
     if lead_seen(lead.get("email"), lead.get("phone"), lead.get("company")):
         return None
+    ev = lead.get("evidence")
+    if ev is not None and not isinstance(ev, str):
+        ev = json.dumps(ev)
     with _conn() as c:
+        _migrate(c)
         cur = c.execute(
-            "INSERT INTO leads(name,company,email,phone,socials,source,area,segment,found_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO leads(name,company,email,phone,socials,source,area,segment,"
+            "found_at,website,whatsapp,address,contact_kind,evidence)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (lead.get("name"), lead.get("company"), _norm(lead.get("email")),
              lead.get("phone"), lead.get("socials"), lead.get("source"),
-             lead.get("area"), lead.get("segment"), _now()),
+             lead.get("area"), lead.get("segment"), _now(),
+             lead.get("website"), lead.get("whatsapp"), lead.get("address"),
+             lead.get("contact_kind"), ev),
         )
         return cur.lastrowid
 

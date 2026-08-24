@@ -85,6 +85,12 @@ def build(scope="today", limit=200) -> dict:
                 "score": r.get("score"),
                 "found": _ago(now - int(r.get("found_at") or now)),
                 "found_at": r.get("found_at"),
+                # What the Harvester read off their own website. Maps holds
+                # none of this — see pipelines/harvest.py.
+                "website": r.get("website") or "",
+                "whatsapp": r.get("whatsapp") or "",
+                "address": r.get("address") or "",
+                "contact_kind": r.get("contact_kind") or "",
                 "contacted": len(sent),
                 "replied": len(reps),
                 "needs_owner": any(m["needs_owner"] for m in reps),
@@ -93,7 +99,15 @@ def build(scope="today", limit=200) -> dict:
                 # untouched is the most common thing on this list and the least
                 # explained.
                 "waiting_on": ("" if sent else
-                               "no email address on file" if not (r.get("email") or "").strip()
+                               # A lead with no mail address but a chat button
+                               # they published is reachable, and calling it
+                               # "no address on file" hides that.
+                               "no address on file — but they published a chat "
+                               "button, so this one is reachable"
+                               if not (r.get("email") or "").strip()
+                               and (r.get("whatsapp") or "").strip()
+                               else "no email address on file"
+                               if not (r.get("email") or "").strip()
                                else "email never verified" if not r.get("email_valid")
                                else "not contacted yet"),
             })

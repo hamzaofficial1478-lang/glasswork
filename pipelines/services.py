@@ -44,7 +44,8 @@ SERVICES = {
                     "insurance", "agency", "studio", "workspace", "fit out", "fit-out",
                     "interior design", "design studio", "designer"),
         "buyers": ("office", "coworking", "clinic", "bank", "real_estate_agency",
-                   "fitout_contractor", "interior_design", "startup"),
+                   "fitout_contractor", "interior_design", "startup",
+                   "clinic_small", "signage"),
         "related": ("glass_door", "aluminium_doors", "mirror", "glass_repair"),
     },
     "shopfront": {
@@ -57,7 +58,8 @@ SERVICES = {
                   "shopfitting"),
         "signals": ("shop", "store", "retail", "boutique", "showroom", "outlet",
                     "pharmacy", "supermarket", "mall", "kiosk", "bakery"),
-        "buyers": ("retail", "showroom", "mall", "restaurant", "salon", "pharmacy"),
+        "buyers": ("retail", "showroom", "mall", "restaurant", "salon", "pharmacy",
+                   "supermarket", "local_market", "laundry", "food_stall", "signage"),
         "related": ("glass_door", "aluminium_doors", "glass_repair", "cladding"),
     },
     "shower_glass": {
@@ -71,7 +73,8 @@ SERVICES = {
         "signals": ("hotel", "resort", "spa", "hostel", "apartment", "residence",
                     "villa", "bathroom", "sanitary", "wellness", "hospital"),
         "buyers": ("hotel", "spa", "hospital", "property_management", "developer",
-                   "fitout_contractor"),
+                   "fitout_contractor",
+                   "holiday_let", "landlord", "builder", "clinic_small"),
         "related": ("mirror", "glass_door", "glass_repair", "aluminium_windows"),
     },
     "glass_railing": {
@@ -85,7 +88,8 @@ SERVICES = {
         "signals": ("villa", "tower", "residence", "staircase", "balcony", "terrace",
                     "developer", "landscap", "resort", "restaurant", "rooftop"),
         "buyers": ("developer", "property_management", "hotel", "restaurant",
-                   "construction", "villa_compound"),
+                   "construction", "villa_compound",
+                   "builder", "landlord", "holiday_let"),
         "related": ("pergola", "glass_partition", "aluminium_windows", "glass_repair"),
     },
     "glass_door": {
@@ -98,7 +102,8 @@ SERVICES = {
                   "patch fitting"),
         "signals": ("entrance", "lobby", "reception", "clinic", "hospital", "bank",
                     "office", "hotel", "supermarket", "showroom", "airport"),
-        "buyers": ("office", "hotel", "hospital", "clinic", "retail", "bank", "mall"),
+        "buyers": ("office", "hotel", "hospital", "clinic", "retail", "bank", "mall",
+                   "supermarket", "clinic_small", "food_stall", "laundry"),
         "related": ("shopfront", "glass_partition", "aluminium_doors", "glass_repair"),
     },
     "mirror": {
@@ -107,7 +112,8 @@ SERVICES = {
                   "mirror"),
         "signals": ("salon", "barber", "gym", "fitness", "spa", "dance", "yoga",
                     "beauty", "hotel", "boutique", "studio"),
-        "buyers": ("salon", "gym", "spa", "hotel", "retail", "school"),
+        "buyers": ("salon", "gym", "spa", "hotel", "retail", "school",
+                   "clinic_small", "laundry", "nursery_local"),
         "related": ("shower_glass", "glass_partition", "glass_repair", "glass_door"),
     },
     "aluminium_windows": {
@@ -120,7 +126,8 @@ SERVICES = {
         "signals": ("villa", "apartment", "building", "residence", "tower", "compound",
                     "developer", "contracting", "school", "warehouse", "labour camp"),
         "buyers": ("developer", "property_management", "construction", "school",
-                   "villa_compound", "warehouse"),
+                   "villa_compound", "warehouse",
+                   "builder", "landlord", "holiday_let", "nursery_local"),
         "related": ("aluminium_doors", "glass_repair", "cladding", "skylight"),
     },
     "aluminium_doors": {
@@ -131,7 +138,8 @@ SERVICES = {
         "signals": ("warehouse", "factory", "workshop", "garage", "storage", "logistics",
                     "building", "school", "clinic", "office", "compound"),
         "buyers": ("warehouse", "construction", "school", "office", "facility_management",
-                   "property_management"),
+                   "property_management",
+                   "builder", "signage"),
         "related": ("aluminium_windows", "glass_door", "glass_repair", "cladding"),
     },
     "cladding": {
@@ -144,7 +152,8 @@ SERVICES = {
                   "façade panel"),
         "signals": ("tower", "building", "façade", "facade", "developer", "contracting",
                     "hotel", "mall", "showroom", "petrol", "signage"),
-        "buyers": ("developer", "construction", "mall", "hotel", "facility_management"),
+        "buyers": ("developer", "construction", "mall", "hotel", "facility_management",
+                   "builder"),
         "related": ("curtain_wall", "aluminium_windows", "skylight", "glass_repair"),
     },
     "curtain_wall": {
@@ -169,7 +178,8 @@ SERVICES = {
         "signals": ("hotel", "apartment", "villa", "residence", "school", "clinic",
                     "interior", "joinery", "furniture", "fit out", "fit-out"),
         "buyers": ("hotel", "fitout_contractor", "interior_design", "developer",
-                   "property_management", "school"),
+                   "property_management", "school",
+                   "builder", "holiday_let", "landlord"),
         "related": ("glass_door", "glass_partition", "mirror", "aluminium_doors"),
     },
     "pergola": {
@@ -184,7 +194,8 @@ SERVICES = {
         "signals": ("restaurant", "cafe", "café", "resort", "villa", "garden", "landscap",
                     "pool", "terrace", "rooftop", "nursery", "school", "compound"),
         "buyers": ("restaurant", "hotel", "school", "villa_compound", "property_management",
-                   "developer"),
+                   "developer",
+                   "food_stall", "builder", "landlord", "nursery_local"),
         "related": ("glass_railing", "skylight", "aluminium_windows", "cladding"),
     },
     "skylight": {
@@ -195,7 +206,8 @@ SERVICES = {
                   "roof glazing"),
         "signals": ("mall", "atrium", "showroom", "villa", "resort", "museum",
                     "airport", "warehouse", "clinic"),
-        "buyers": ("mall", "developer", "hotel", "showroom", "construction"),
+        "buyers": ("mall", "developer", "hotel", "showroom", "construction",
+                   "local_market", "supermarket", "builder"),
         "related": ("curtain_wall", "pergola", "cladding", "glass_repair"),
     },
     "glass_repair": {
@@ -209,7 +221,8 @@ SERVICES = {
         "signals": ("facility", "maintenance", "management", "property", "handover",
                     "snagging", "building services", "hospital", "school", "hotel"),
         "buyers": ("facility_management", "property_management", "real_estate_agency",
-                   "hotel", "hospital", "school", "mall"),
+                   "hotel", "hospital", "school", "mall",
+                   "holiday_let", "landlord", "supermarket", "food_stall", "laundry", "local_market", "clinic_small", "nursery_local", "signage", "builder"),
         "related": ("glass_partition", "aluminium_windows", "glass_door", "shopfront"),
     },
 }

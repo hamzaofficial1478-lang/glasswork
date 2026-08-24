@@ -49,6 +49,7 @@ import urllib.parse
 import urllib.request
 
 from coordination import board
+from . import harvest
 from . import leads_sources as ls
 from . import services
 
@@ -247,13 +248,63 @@ def emails_from_site(url, max_pages=3, timeout=12):
 
 
 def enrich(candidate, timeout=12):
-    """Add the published email, and read their own words for a better service match."""
+    """
+    Read the business's own site for everything Maps does not hold, and read
+    their own words for a better service match.
+
+    THIS USED TO BE ITS OWN LITTLE CRAWLER AND IT WAS THE WEAK LINK.
+
+    Raw urllib against eight guessed paths: no rendering, so a Wix or
+    Squarespace site — which is most UAE small businesses — came back an empty
+    shell and the lead was filed phone-only; no cache; no spend guard; and a
+    guessed /contact was a 404 on any site that calls the page something else.
+    The owner's own site calls it /contact.php, so the guesser would have missed
+    the address on the business this agency belongs to.
+
+    pipelines/harvest.py replaces it: the site's OWN links are followed, pages
+    are read through the fetcher (address checked, plain HTTP first because it
+    is nothing, renderer behind it, cached, metered), and every detail comes
+    back with a note saying where it was found and how.
+    """
     site = candidate.get("website")
-    emails, pages = emails_from_site(site, timeout=timeout)
-    if emails:
-        candidate["email"] = emails[0]
-        candidate["other_emails"] = emails[1:4]
+    if not site:
+        candidate["pages_read"] = []
+        return candidate
+
+    h = harvest.harvest(site, timeout=max(timeout, 20))
+    pages = [p["url"] for p in h.get("pages") or []]
     candidate["pages_read"] = pages
+    candidate["harvest"] = h.get("head", "")
+
+    if h.get("emails"):
+        candidate["email"] = h["emails"][0]["value"]
+        candidate["other_emails"] = [e["value"] for e in h["emails"][1:4]]
+    # Maps gives A number. The site often gives the one somebody answers.
+    if h.get("phones") and not candidate.get("phone"):
+        candidate["phone"] = h["phones"][0]["value"]
+    # ONLY from a click-to-chat button. See the note in harvest.py: a business
+    # that put a WhatsApp button on its own website has invited people to
+    # message it there, and that is not the same as a mobile number we happened
+    # to find. The maybes are carried separately and never used to contact.
+    if h.get("whatsapp"):
+        candidate["whatsapp"] = h["whatsapp"][0]["value"]
+    if h.get("whatsapp_maybe"):
+        candidate["whatsapp_maybe"] = [w["value"] for w in h["whatsapp_maybe"][:2]]
+    if h.get("address"):
+        candidate["address"] = h["address"]
+    if h.get("people"):
+        candidate["name"] = h["people"][0]["name"]
+        candidate["name_role"] = h["people"][0].get("role", "")
+    if h.get("socials"):
+        candidate["socials"] = ", ".join(s["value"] for s in h["socials"][:4])
+    # Where every detail came from, kept with the lead. A contact with no
+    # provenance is a rumour, and in six months nobody can tell a real one from
+    # a parsing accident.
+    candidate["evidence"] = {
+        k: [{kk: vv for kk, vv in row.items() if kk in ("value", "name", "how", "where")}
+            for row in (h.get(k) or [])[:4]]
+        for k in ("emails", "phones", "whatsapp", "people")}
+
     if pages:
         # their own site describes what they do better than a Maps category does
         blurb = _get(pages[0], timeout)[:20000]

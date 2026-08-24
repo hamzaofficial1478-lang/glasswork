@@ -157,7 +157,12 @@ CREATE TABLE IF NOT EXISTS leads (
   email_valid INTEGER DEFAULT 0,
   score INTEGER,
   stage TEXT DEFAULT 'new',            -- new | contacted | replied | qualified | won | lost | nurture
-  found_at INTEGER
+  found_at INTEGER,
+  website TEXT,                        -- where the details below were read from
+  whatsapp TEXT,                       -- E.164, ONLY from a click-to-chat button they published
+  address TEXT,                        -- as they printed it
+  contact_kind TEXT,                   -- role inbox | named person | phone only
+  evidence TEXT                        -- JSON: where each detail came from and how
 );
 CREATE TABLE IF NOT EXISTS outreach_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

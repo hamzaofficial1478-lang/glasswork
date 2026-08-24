@@ -113,23 +113,37 @@ def _now():
 # So: http and https only, public addresses only, and every redirect hop is
 # checked too — a perfectly ordinary rival URL is allowed to 302 to 127.0.0.1.
 
-def _is_public_host(host: str) -> bool:
-    """False for anything that resolves to a loopback, private or link-local IP."""
+def host_verdict(host: str) -> tuple:
+    """
+    (ok, why) for one hostname. Two refusals, and they are NOT the same thing.
+
+    The single message this used to give — "x is not a public address" — sent
+    somebody looking for a firewall rule when the real answer was that the
+    domain does not exist. A business whose website has lapsed is a normal
+    thing to meet while harvesting leads, and it is worth saying plainly rather
+    than dressing up as a security refusal.
+    """
     try:
         infos = socket.getaddrinfo(host, None)
     except Exception:
-        return False              # cannot resolve it, so we do not fetch it
+        return False, f"{host} does not resolve — no such host, or DNS is down"
     if not infos:
-        return False
+        return False, f"{host} does not resolve to anything"
     for info in infos:
         try:
             ip = ipaddress.ip_address(info[4][0])
         except ValueError:
-            return False
+            return False, f"{host} resolved to something that is not an IP address"
         if (ip.is_private or ip.is_loopback or ip.is_link_local
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-            return False
-    return True
+            return False, (f"{host} points inside the network ({ip}) — refusing, "
+                           "this is how a crawler becomes a credential leak")
+    return True, ""
+
+
+def _is_public_host(host: str) -> bool:
+    """False for anything that resolves to a loopback, private or link-local IP."""
+    return host_verdict(host)[0]
 
 
 def safe_url(url: str) -> tuple:
@@ -142,8 +156,9 @@ def safe_url(url: str) -> tuple:
         return False, f"refusing scheme {u.scheme or 'none'!r} — only http and https"
     if not u.hostname:
         return False, "no host in that URL"
-    if not _is_public_host(u.hostname):
-        return False, f"{u.hostname} is not a public address"
+    ok, why = host_verdict(u.hostname)
+    if not ok:
+        return False, why
     return True, ""
 
 

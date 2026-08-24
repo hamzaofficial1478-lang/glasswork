@@ -1383,7 +1383,12 @@ async function openLeads(scope){
         <td>${esc(l.area||'—')}${l.segment?`<br><span style="color:var(--faint);font-size:11px">${esc(l.segment)}</span>`:''}</td>
         <td>${esc(l.stage)}${l.needs_owner?`<br><span style="color:var(--amber);font-size:11px">replied — needs you</span>`:''}</td>
         <td style="overflow-wrap:anywhere">${esc(l.email||l.phone||'—')}${
-          l.email && !l.email_valid?`<br><span style="color:var(--amber);font-size:11px">not verified</span>`:''}</td>
+          l.email && !l.email_valid?`<br><span style="color:var(--amber);font-size:11px">not verified</span>`:''}${
+          /* The chat button they published on their own site. Shown because a
+             lead with no address and a WhatsApp button is reachable, and the
+             old column said only "—". */
+          l.whatsapp?`<br><span style="color:var(--ok);font-size:11px">whatsapp ${esc(l.whatsapp)}</span>`:''}${
+          l.email && l.phone?`<br><span style="color:var(--faint);font-size:11px">${esc(l.phone)}</span>`:''}</td>
         <td>${l.waiting_on
               ? `<span class="wait">${esc(l.waiting_on)}</span>`
               : `${l.contacted} sent, ${l.replied} replied${l.last?`<br><span style="color:var(--faint);font-size:11px">${esc(l.last)}</span>`:''}`}</td>
