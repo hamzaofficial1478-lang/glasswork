@@ -980,12 +980,31 @@ def queue_site_change(agent, kind, detail):
     """
     In read-only mode a site-touching agent records what it WOULD change here,
     for the owner to approve, rather than reaching the site. Returns the row id.
+
+    ASK ONCE. The same daily-pipeline problem as post_request: the agents run
+    every day, none of them checked whether the identical change was already
+    waiting, and the owner's approval queue filled with ten copies of
+    'catalogue_services' — one per run. Ten identical rows is not ten decisions,
+    it is one decision he now has to make ten times, and it pushes the change
+    that actually matters off the bottom of his list.
+
+    An identical PENDING change is therefore not queued again; its row id comes
+    back instead, so the caller still has something to log against. Once he has
+    decided it — approved or refused — a later identical change is a genuinely
+    new proposal and does queue.
     """
+    body = json.dumps(detail)[:2000]
     with _conn() as c:
+        dup = c.execute(
+            "SELECT id FROM site_queue WHERE agent=? AND kind=? AND detail=?"
+            "  AND status='pending' ORDER BY queued_at LIMIT 1",
+            (agent, kind, body)).fetchone()
+        if dup:
+            return dup["id"]
         cur = c.execute(
             "INSERT INTO site_queue(agent,kind,detail,status,queued_at)"
             " VALUES(?,?,?, 'pending', ?)",
-            (agent, kind, json.dumps(detail)[:2000], _now()),
+            (agent, kind, body, _now()),
         )
         return cur.lastrowid
 

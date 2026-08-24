@@ -216,6 +216,12 @@ def gather(agent: str) -> dict:
         "site tickets open": _one(c, "SELECT count(*) FROM site_issues WHERE status='open'"),
         "people contacted ever": _one(c, "SELECT count(*) FROM outreach_log WHERE direction='sent'"),
     }
+
+    # THE ROWS THIS DESK ITSELF PRODUCED. Without these the record was six
+    # agency-wide counts identical for every desk, and an agent asked about its
+    # own work had nothing of its own to answer from.
+    facts["evidence"] = _evidence(c, who)
+    facts["no_output_reason"] = NO_OUTPUT_YET.get(who["agent"], "")
     c.close()
 
     try:
@@ -231,6 +237,183 @@ def gather(agent: str) -> dict:
     except Exception:
         facts["can_do_now"], facts["cannot_do_yet"] = [], []
     return facts
+
+
+# ---------------------------------------------------------------------------
+# WHAT THIS DESK ACTUALLY PRODUCED
+# ---------------------------------------------------------------------------
+#
+# The owner said the agents answer with guesses rather than real analysis, and
+# he was right about the cause even if not the wording. Nothing was inventing
+# anything — the rules below forbid it — but the RECORD each desk was handed was
+# its own run notes plus six agency-wide counts, identical for every desk in the
+# building. The SEO Auditor and the Leads Hunter both saw "3 leads, 221
+# keywords, 13 pages briefed" and neither saw a single row of its own work.
+#
+# So ask the Auditor what is wrong with the site and it had three hundred and
+# twenty-three findings on file and none of them in front of it. It could only
+# talk in general terms, which reads exactly like guessing.
+#
+# Each desk now gets the rows IT wrote: the failing checks, the ranked phrases,
+# the rivals' new pages, the leads, the tickets. Real analysis is not a better
+# prompt, it is having the evidence in the room.
+#
+# Every query is scoped to that desk's own output. A desk is never handed
+# another desk's work to talk about — that is how you get an agent confidently
+# describing something it had no part in.
+
+EVIDENCE = {
+    # ---- SEO -------------------------------------------------------------
+    "seo-answers": [
+        ("What the answer audit found failing, worst first",
+         "SELECT url, family, check_id, weight, detail, fix FROM aeo_findings"
+         " WHERE passed=0 ORDER BY weight DESC, found_at DESC LIMIT 12"),
+        ("What it found passing",
+         "SELECT url, check_id FROM aeo_findings WHERE passed=1"
+         " ORDER BY found_at DESC LIMIT 6"),
+        ("How many findings per page",
+         "SELECT url, SUM(passed=0) AS failing, count(*) AS checked"
+         " FROM aeo_findings GROUP BY url ORDER BY failing DESC LIMIT 8"),
+    ],
+    "seo-strategist": [
+        ("The phrases it ranked highest, with the evidence behind each",
+         "SELECT phrase, area, ROUND(score,1) AS score, position, impressions,"
+         " suggest_breadth, rival_pages, in_enquiries, we_have_page, evidence"
+         " FROM keyword_intel ORDER BY score DESC LIMIT 12"),
+        ("Striking distance — already ranking 5th to 20th",
+         "SELECT phrase, position, impressions FROM keyword_intel"
+         " WHERE striking=1 ORDER BY impressions DESC LIMIT 8"),
+        ("Service and area combinations on file",
+         "SELECT phrase, area, intent FROM keywords ORDER BY id DESC LIMIT 10"),
+    ],
+    "seo-rival": [
+        ("Rivals tracked, and what changed at each",
+         "SELECT c.name, c.domain, s.reviews, s.new_pages, s.notes"
+         " FROM competitors c LEFT JOIN competitor_snapshots s"
+         " ON s.competitor_id=c.id GROUP BY c.id ORDER BY s.taken_at DESC LIMIT 8"),
+    ],
+    "seo-backlinks": [
+        ("Link opportunities on file, by how little they cost to get",
+         "SELECT name, host, kind, effort, local, status, why FROM backlinks"
+         " ORDER BY CASE effort WHEN 'free' THEN 0 ELSE 1 END, found_at DESC LIMIT 12"),
+    ],
+    "seo-auditor": [
+        ("Site tickets this sector raised",
+         "SELECT kind, severity, detail, url, status FROM site_issues"
+         " ORDER BY found_at DESC LIMIT 10"),
+    ],
+    # ---- IT --------------------------------------------------------------
+    "it-watcher": [
+        ("Every open ticket on the site, worst first",
+         "SELECT kind, severity, detail, url, found_by FROM site_issues"
+         " WHERE status='open' ORDER BY CASE severity WHEN 'critical' THEN 0"
+         " WHEN 'high' THEN 1 ELSE 2 END, found_at DESC LIMIT 12"),
+        ("Tickets already dealt with",
+         "SELECT kind, detail, status FROM site_issues WHERE status!='open'"
+         " ORDER BY found_at DESC LIMIT 6"),
+    ],
+    "it-fixer": [
+        ("Tickets waiting to be fixed",
+         "SELECT kind, severity, detail, url, status FROM site_issues"
+         " WHERE status IN ('open','fixing') ORDER BY found_at DESC LIMIT 10"),
+    ],
+    "it-releaser": [
+        ("Changes queued for the owner, and what happened to each",
+         "SELECT agent, kind, detail, status FROM site_queue"
+         " ORDER BY queued_at DESC LIMIT 10"),
+    ],
+    # ---- Content ---------------------------------------------------------
+    "content-writer": [
+        ("Everything in the content queue and where it has got to",
+         "SELECT title, type, status, channel FROM content_queue"
+         " ORDER BY created_at DESC LIMIT 12"),
+        ("Briefs written but not yet drafted",
+         "SELECT title, brief FROM content_queue WHERE status='briefed' LIMIT 5"),
+    ],
+    "content-publisher": [
+        ("What is approved, published, or held",
+         "SELECT title, status, channel FROM content_queue"
+         " WHERE status IN ('approved','published','in_review') LIMIT 10"),
+    ],
+    # ---- Leads -----------------------------------------------------------
+    "leads-hunter": [
+        ("The leads on file, newest first",
+         "SELECT company, area, segment, source, stage, email_valid FROM leads"
+         " ORDER BY found_at DESC LIMIT 12"),
+        ("Where they came from",
+         "SELECT source, count(*) AS found FROM leads GROUP BY source"
+         " ORDER BY found DESC LIMIT 8"),
+    ],
+    "leads-outreach": [
+        ("What has been sent, and to whom",
+         "SELECT l.company, o.channel, o.direction, o.reply_class FROM outreach_log o"
+         " LEFT JOIN leads l ON l.id=o.lead_id ORDER BY o.at DESC LIMIT 12"),
+    ],
+    "leads-responder": [
+        ("Replies from real people, and which still need the owner",
+         "SELECT l.company, o.reply_class, o.needs_owner, o.body FROM outreach_log o"
+         " LEFT JOIN leads l ON l.id=o.lead_id WHERE o.direction='reply'"
+         " ORDER BY o.at DESC LIMIT 8"),
+    ],
+    "leads-scanner": [
+        ("Leads on file, and how many carry a verified address",
+         "SELECT stage, count(*) AS n, SUM(email_valid) AS verified FROM leads"
+         " GROUP BY stage"),
+    ],
+    # ---- Security --------------------------------------------------------
+    "security-screener": [
+        ("Everything Security has flagged",
+         "SELECT kind, severity, source, detail, action FROM security_events"
+         " ORDER BY at DESC LIMIT 12"),
+    ],
+    "security-guard": [
+        ("Everything Security has flagged",
+         "SELECT kind, severity, source, detail, action FROM security_events"
+         " ORDER BY at DESC LIMIT 12"),
+    ],
+    # ---- Director and Report ---------------------------------------------
+    "managing-director": [
+        ("Decisions on record, and whether they came off",
+         "SELECT cycle, reasoning, expectation, outcome, outcome_note FROM decisions"
+         " ORDER BY created_at DESC LIMIT 8"),
+        ("What is on the board right now",
+         "SELECT sector, title, status, risk FROM tasks"
+         " WHERE status IN ('open','in_progress') ORDER BY created_at DESC LIMIT 12"),
+    ],
+    "reporter": [
+        ("The daily reports it has written",
+         "SELECT day, health_score, summary, spend_usd FROM daily_reports"
+         " ORDER BY day DESC LIMIT 5"),
+        ("Decisions it has scored",
+         "SELECT cycle, outcome, outcome_note FROM decisions"
+         " WHERE outcome IS NOT NULL ORDER BY scored_at DESC LIMIT 8"),
+    ],
+}
+
+# Desks with no table of their own yet. Named explicitly so the record can SAY
+# so — "I have no output table" is a real answer and much better than a desk
+# quietly having nothing and filling the gap with something plausible.
+NO_OUTPUT_YET = {
+    "content-illustrator": "images are attached to the content queue, not stored separately",
+    "it-search": "the search index lives at Algolia, not in this cabinet",
+    "critic": "the Critic's rejections are recorded on the MD's decisions, not separately",
+}
+
+
+def _evidence(c, who) -> list:
+    """
+    The rows THIS desk produced. [{title, columns, rows}], never another desk's.
+    """
+    out = []
+    for title, sql in EVIDENCE.get(who["agent"], []):
+        try:
+            cur = c.execute(sql)
+            cols = [d[0] for d in cur.description]
+            rows = [list(r) for r in cur.fetchall()]
+        except Exception:
+            continue          # a cabinet without that table yet is not an error
+        out.append({"title": title, "columns": cols, "rows": rows})
+    return out
 
 
 def _facts_text(f: dict) -> str:
@@ -256,8 +439,32 @@ def _facts_text(f: dict) -> str:
     op = f.get("sector_open_tasks") or []
     L.append("WAITING FOR YOUR SECTOR, UNCLAIMED: " + (", ".join(op) if op else "nothing"))
 
+    # THE DESK'S OWN OUTPUT, IN FULL, AS ROWS. This is what turns "I look at
+    # the site's answer quality" into "faq.php fails LocalBusiness markup,
+    # weight 9, here is the fix" — the difference the owner was asking for.
+    ev = f.get("evidence") or []
+    if ev:
+        L.append("")
+        L.append("YOUR OWN OUTPUT — the rows you wrote. Quote these, do not summarise")
+        L.append("them away. If he asks about your work, the answer is in here:")
+        for block in ev:
+            L.append("")
+            L.append(f"  {block['title']} ({len(block['rows'])} row(s)):")
+            if not block["rows"]:
+                L.append("    (none on file)")
+                continue
+            L.append("    | " + " | ".join(block["columns"]))
+            for row in block["rows"]:
+                cells = [("" if v is None else str(v)).replace("\n", " ")[:120]
+                         for v in row]
+                L.append("    | " + " | ".join(cells))
+    elif f.get("no_output_reason"):
+        L.append("")
+        L.append(f"YOU HAVE NO OUTPUT TABLE: {f['no_output_reason']}. Say that "
+                 "plainly if he asks what you have produced.")
+
     L.append("")
-    L.append("WHAT THE AGENCY IS HOLDING:")
+    L.append("WHAT THE AGENCY IS HOLDING (context only — this is NOT your work):")
     for k, v in (f.get("sector_numbers") or {}).items():
         L.append(f"  {v} {k}")
 
@@ -285,18 +492,42 @@ UAE glass & aluminium business. You are speaking directly to the owner.
 Answer ONLY from the record you are given. It is the complete truth about your
 work — there is nothing you did that is not in it.
 
+ANSWER FROM YOUR OWN OUTPUT, NOT FROM WHAT YOUR JOB SOUNDS LIKE.
+
+Under "YOUR OWN OUTPUT" are the actual rows you wrote — the failing checks, the
+ranked phrases, the leads, the tickets. That is your analysis. Use it.
+
+  Wrong: "I check the site's answer quality and look for schema problems."
+         That is a description of your job. He knows what your job is.
+  Right: "faq.php has no LocalBusiness markup — for a one-address trade that is
+         the most valuable schema on the site. Same on the home page and four
+         others. That is the single biggest thing on my list."
+
+Name the page, the phrase, the company, the number. Specifics come from the
+rows; if you find yourself writing a sentence that would be true of any agency,
+delete it and quote a row instead.
+
 Hard rules:
 - If the record shows no runs, say plainly that you have not done anything yet,
   and say what would make you run. Never imply work you cannot point to.
-- Never invent a number. If a figure is not in the record, say you do not have it.
+- Never invent a number, a URL, a company or a date. If it is not in the record,
+  you do not have it — say so. A specific answer you made up is far worse than
+  "I have not measured that".
+- Your record has edges. It holds a sample of your rows, not all of them, and
+  nothing about other desks' work. If he asks something outside it, say which
+  part you can answer and which you cannot, rather than reaching.
 - If your last run failed, lead with that. He needs to know before anything else.
 - If asked to do something the agency cannot do yet, say so and name what is missing.
 - You cannot take actions in this conversation. You can explain, and you can say
   what you would do. Do not claim to have started anything.
+- The "WHAT THE AGENCY IS HOLDING" counts are context about the building, not
+  your work. Do not present them as things you did.
 
 Tone: British English, plain, short. You are a tradesman's colleague, not a
-support bot. Two or three sentences unless he asks for detail. No filler, no
-"I'd be happy to", no restating his question back at him."""
+support bot. Lead with the finding, not the preamble. No filler, no "I'd be
+happy to", no restating his question back at him. Length follows the question:
+one line for a one-line question, and as long as it needs when he asks what you
+found — a list of real findings is not padding."""
 
 
 def _offline_reply(f: dict, message: str) -> str:
@@ -322,6 +553,25 @@ def _offline_reply(f: dict, message: str) -> str:
     hold = f.get("holding") or []
     if hold:
         L.append("Holding: " + ", ".join(h["title"] for h in hold))
+
+    # WITH NO BRAIN, READ THE FINDINGS OUT. This used to stop at the run notes,
+    # which meant an agency with no API key could tell the owner it had run and
+    # not one thing it had found — while three hundred rows of its own analysis
+    # sat in the cabinet. Unphrased facts beat a fluent summary of nothing.
+    for block in (f.get("evidence") or [])[:2]:
+        if not block["rows"]:
+            continue
+        L.append("")
+        L.append(f"{block['title']}:")
+        for row in block["rows"][:6]:
+            cells = [("" if v is None else str(v)).replace("\n", " ")
+                     for v in row]
+            L.append("  · " + " — ".join(c[:90] for c in cells if c.strip())[:280])
+        if len(block["rows"]) > 6:
+            L.append(f"  … and {len(block['rows']) - 6} more on file.")
+    if f.get("no_output_reason"):
+        L.append("")
+        L.append(f"I have no output table of my own: {f['no_output_reason']}.")
     return "\n".join(L)
 
 

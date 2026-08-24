@@ -448,8 +448,6 @@ def test_the_agent_chat_is_not_canned():
             check(f"the office label '{label}' finds its OWN brain",
                   agent_chat.whois(label)["brain_task"], want)
 
-        # And a name we cannot place gets NO brain rather than the strongest one
-        # in the building. A wrong refusal costs one answer read off the record;
         # a wrong guess puts the MD's voice behind a sector it never ran.
         check("an unknown name does not crash",
               agent_chat.whois("")["sector"], "unknown")
@@ -477,6 +475,81 @@ def test_the_agent_chat_is_not_canned():
         # four now: the three above plus the unrecognised desk. A conversation
         # that produced no model answer is still a conversation and still logged.
         check("every conversation is logged, not private", n, 4)
+    finally:
+        board.DB = agent_chat.DB = real_b
+
+
+def test_a_desk_answers_from_its_own_findings():
+    """
+    The owner said the agents give guesses rather than real analysis, and the
+    cause was not the rules — those already forbid inventing anything. It was
+    the RECORD. Every desk was handed its own run notes plus six agency-wide
+    counts, identical for every desk in the building, and nothing else. The
+    Auditor had three hundred and twenty-three findings on file and not one of
+    them in front of it, so all it could do was describe its job.
+    """
+    print("A desk answers from the rows it wrote, not from what its job sounds like:")
+    from . import agent_chat
+    real_b = board.DB
+    board.DB = agent_chat.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        con.execute("""CREATE TABLE IF NOT EXISTS aeo_findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT, family TEXT,
+            check_id TEXT, passed INTEGER, weight REAL, detail TEXT, fix TEXT,
+            owner_sector TEXT, found_at INTEGER)""")
+        con.execute("INSERT INTO aeo_findings(url,family,check_id,passed,weight,"
+                    "detail,fix,found_at) VALUES"
+                    "('https://x.ae/faq.php','aeo','aeo.localbusiness',0,9,"
+                    "'no LocalBusiness markup','Add LocalBusiness JSON-LD',1)")
+        con.execute("INSERT INTO aeo_findings(url,family,check_id,passed,weight,"
+                    "detail,fix,found_at) VALUES"
+                    "('https://x.ae/','aeo','aeo.answer_first',1,5,'fine','',1)")
+        con.execute("INSERT INTO site_issues(kind,severity,detail,url,status,"
+                    "found_by,found_at) VALUES"
+                    "('form_dead','critical','the contact form posts nowhere',"
+                    "'https://x.ae/contact','open','it-watcher',1)")
+        con.commit(); con.close()
+
+        rec = agent_chat._facts_text(agent_chat.gather("seo-answers"))
+        check("the Auditor's own failing check is in its record",
+              "no LocalBusiness markup" in rec, True)
+        check("with the page it is on", "faq.php" in rec, True)
+        check("and the fix it wrote", "Add LocalBusiness JSON-LD" in rec, True)
+        check("the agency-wide counts are labelled as NOT its work",
+              "this is NOT your work" in rec, True)
+
+        # A desk is never handed another desk's output to talk about — that is
+        # how an agent ends up confidently describing work it had no part in.
+        check("the Auditor is not given IT's tickets",
+              "the contact form posts nowhere" in rec, False)
+        it_rec = agent_chat._facts_text(agent_chat.gather("it-watcher"))
+        check("but IT is", "the contact form posts nowhere" in it_rec, True)
+        check("and IT is not given the answer audit",
+              "no LocalBusiness markup" in it_rec, False)
+
+        # With no brain configured the findings must still be read out. An
+        # agency with no API key used to report that it had run and not one
+        # thing it had found.
+        r = agent_chat.ask("seo-answers", "what did you find?")
+        check("the offline reply carries the real finding",
+              "no LocalBusiness markup" in r["reply"], True)
+        check("and it is still marked as coming from the record, not a model",
+              r["offline"], True)
+
+        # A desk with no output table of its own says so rather than filling in.
+        ill = agent_chat._facts_text(agent_chat.gather("content-illustrator"))
+        check("a desk with no output table admits it",
+              "YOU HAVE NO OUTPUT TABLE" in ill, True)
+
+        # The prompt has to demand specifics, or the record is wasted.
+        check("the prompt tells it to name the page, not describe the job",
+              "That is a description of your job" in agent_chat.SYSTEM, True)
+        check("and to say when a question falls outside its record",
+              "Your record has edges" in agent_chat.SYSTEM, True)
+
+        # And a name we cannot place gets NO brain rather than the strongest one
+        # in the building. A wrong refusal costs one answer read off the record;
     finally:
         board.DB = agent_chat.DB = real_b
 
@@ -555,6 +628,7 @@ def _main():
     test_the_bulb_says_powered_working_or_broken()
     test_a_dark_bulb_always_says_why()
     test_the_agent_chat_is_not_canned()
+    test_a_desk_answers_from_its_own_findings()
     test_tracing_never_breaks_the_work()
     test_spend_still_adds_up()
     print()
