@@ -45,7 +45,7 @@ SERVICES = {
                     "interior design", "design studio", "designer"),
         "buyers": ("office", "coworking", "clinic", "bank", "real_estate_agency",
                    "fitout_contractor", "interior_design", "startup",
-                   "clinic_small", "signage"),
+                   "clinic_small", "signage", "garage"),
         "related": ("glass_door", "aluminium_doors", "mirror", "glass_repair"),
     },
     "shopfront": {
@@ -59,7 +59,7 @@ SERVICES = {
         "signals": ("shop", "store", "retail", "boutique", "showroom", "outlet",
                     "pharmacy", "supermarket", "mall", "kiosk", "bakery"),
         "buyers": ("retail", "showroom", "mall", "restaurant", "salon", "pharmacy",
-                   "supermarket", "local_market", "laundry", "food_stall", "signage"),
+                   "supermarket", "local_market", "laundry", "food_stall", "signage", "garage"),
         "related": ("glass_door", "aluminium_doors", "glass_repair", "cladding"),
     },
     "shower_glass": {
@@ -131,7 +131,7 @@ SERVICES = {
                     "developer", "contracting", "school", "warehouse", "labour camp"),
         "buyers": ("developer", "property_management", "construction", "school",
                    "villa_compound", "warehouse",
-                   "builder", "landlord", "holiday_let", "nursery_local"),
+                   "builder", "landlord", "holiday_let", "nursery_local", "garage"),
         "related": ("aluminium_doors", "glass_repair", "cladding", "skylight"),
     },
     "aluminium_doors": {
@@ -143,7 +143,7 @@ SERVICES = {
                     "building", "school", "clinic", "office", "compound"),
         "buyers": ("warehouse", "construction", "school", "office", "facility_management",
                    "property_management",
-                   "builder", "signage"),
+                   "builder", "signage", "garage"),
         "related": ("aluminium_windows", "glass_door", "glass_repair", "cladding"),
     },
     "cladding": {
@@ -273,7 +273,7 @@ SERVICES = {
                     "showroom", "office", "mall", "branding", "advertising"),
         "buyers": ("signage", "retail", "restaurant", "food_stall", "salon",
                    "supermarket", "clinic_small", "gym", "showroom", "startup",
-                   "local_market", "laundry"),
+                   "local_market", "laundry", "garage"),
         "related": ("shopfront", "cladding", "glass_repair"),
     },
     "glass_installation": {
@@ -321,7 +321,7 @@ SERVICES = {
                     "snagging", "building services", "hospital", "school", "hotel"),
         "buyers": ("facility_management", "property_management", "real_estate_agency",
                    "hotel", "hospital", "school", "mall",
-                   "holiday_let", "landlord", "supermarket", "food_stall", "laundry", "local_market", "clinic_small", "nursery_local", "signage", "builder"),
+                   "holiday_let", "landlord", "supermarket", "food_stall", "laundry", "local_market", "clinic_small", "nursery_local", "signage", "builder", "garage"),
         "related": ("glass_partition", "aluminium_windows", "glass_door", "shopfront"),
     },
 }

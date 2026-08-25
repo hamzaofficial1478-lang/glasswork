@@ -210,7 +210,22 @@ SEGMENTS = {
         "why": "Laundries, tailors, key-cutters and the rest of the parade — "
                "small shopfronts, cheap to win, and they talk to each other.",
         "queries": ("laundry", "dry cleaners", "tailor shop", "mobile repair shop",
-                    "key cutting", "car wash"),
+                    "key cutting"),
+    },
+    # ITS OWN SEGMENT, because it was inside 'laundry' and should not have been.
+    # A Sharjah search for laundries came back Wheelocity Garage, Alrehan
+    # Garage, Al Jouda Auto Repairing and eleven more workshops — fourteen of
+    # twenty-six results. They are perfectly good local leads, and lumping them
+    # in with laundries meant the mail would have offered a garage a mirror
+    # wall. What a garage actually buys is the roller-shutter frontage, the
+    # office partition and the toughened glass in the door.
+    "garage": {
+        "why": "Car workshops, spare-part shops and car washes — big aluminium "
+               "frontages, roller doors, and a partitioned office at the front. "
+               "The owner is on site and decides on the spot.",
+        "queries": ("car repair garage", "auto repair", "car workshop",
+                    "spare parts shop", "car wash", "tyre shop",
+                    "auto electrical repair"),
     },
     "clinic_small": {
         "why": "Single-branch clinics — physio, optical, veterinary, dental — "
@@ -354,7 +369,8 @@ SOURCES = [
 # leaving him to count the list himself.
 LOCAL_SEGMENTS = {
     "supermarket", "local_market", "signage", "holiday_let", "landlord",
-    "builder", "laundry", "clinic_small", "nursery_local", "food_stall",
+    "builder", "laundry", "garage", "clinic_small", "nursery_local",
+    "food_stall",
     "salon", "gym", "spa", "restaurant", "retail", "startup", "coworking",
     "villa_compound",
 }

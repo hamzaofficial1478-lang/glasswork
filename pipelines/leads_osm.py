@@ -39,6 +39,7 @@ in a tight loop.
 """
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -96,7 +97,12 @@ OSM_TAGS = {
     "gym":           [("leisure", "fitness_centre")],
     "supermarket":   [("shop", "supermarket"), ("shop", "convenience")],
     "laundry":       [("shop", "laundry"), ("shop", "dry_cleaning"),
-                      ("shop", "tailor"), ("shop", "car_repair")],
+                      ("shop", "tailor")],
+    # NOT under laundry, where it used to be. A Sharjah laundry search came
+    # back fourteen car workshops out of twenty-six — good leads, wrong
+    # segment, and the mail would have offered a garage a mirror wall.
+    "garage":        [("shop", "car_repair"), ("shop", "tyres"),
+                      ("shop", "car_parts"), ("amenity", "car_wash")],
     "clinic_small":  [("amenity", "clinic"), ("amenity", "dentist"),
                       ("amenity", "doctors"), ("shop", "optician"),
                       ("amenity", "veterinary")],
@@ -153,6 +159,20 @@ CHAIN_TAGS = ("brand:wikidata", "operator:wikidata", "brand:wikipedia")
 # a franchise.
 CHAIN_REPEATS = 3
 
+# The wikidata check misses the regional groups. A Dubai clinic search came
+# back with Medcare, Magrabi and Prime Medical — multi-branch outfits with a
+# head office and a procurement department, which is exactly what the owner
+# said he did not want, but no curated brand identifier and no two branches
+# spelled the same ("Medcare Hospital Al Safa", "Medcare Medical Centre
+# Jumeirah"), so neither rule above caught them.
+#
+# What DOES catch them is the mapper's own words: both pins carry
+# operator=Medcare. Two pins the mapper says are run by one company is that
+# company saying it has branches. Lower than CHAIN_REPEATS on purpose — a
+# repeated NAME might be two shops that happen to share one, but a repeated
+# operator tag is a statement of fact about who owns them.
+GROUP_REPEATS = 2
+
 
 def chain_verdict(tags) -> tuple:
     """(is_a_chain, why). Read off the tags, never off a list of brand names."""
@@ -164,21 +184,45 @@ def chain_verdict(tags) -> tuple:
     return False, ""
 
 
-def drop_chains(cands, elements=None, repeats=CHAIN_REPEATS):
+def group_of(tags) -> str:
+    """
+    The parent company the mapper named, if they named one. "" otherwise.
+
+    Ignored when it is just the shop's own name written twice, which is how
+    plenty of independents are tagged and is not evidence of anything.
+    """
+    name = _first(tags, "name:en", "name").strip().lower()
+    for k in ("operator", "brand", "operator:en", "brand:en"):
+        v = (tags.get(k) or "").strip()
+        if v and v.lower() != name:
+            return v
+    return ""
+
+
+def drop_chains(cands, elements=None, repeats=CHAIN_REPEATS,
+                group_repeats=GROUP_REPEATS):
     """
     (locals, dropped). `dropped` carries the reason for each, because a
     collector that silently halves its own output is indistinguishable from a
     broken one.
     """
-    counts = {}
+    counts, groups = {}, {}
     for c in cands:
         counts[c["company"].strip().lower()] = \
             counts.get(c["company"].strip().lower(), 0) + 1
+        g = (c.get("_group") or "").strip().lower()
+        if g:
+            groups[g] = groups.get(g, 0) + 1
     keep, dropped = [], []
     for c in cands:
         why = c.pop("_chain_why", "")
-        if not why and counts.get(c["company"].strip().lower(), 0) >= repeats:
-            why = f"{counts[c['company'].strip().lower()]} branches in one search"
+        g = (c.pop("_group", "") or "").strip()
+        n = counts.get(c["company"].strip().lower(), 0)
+        if not why and n >= repeats:
+            why = f"{n} branches in one search"
+        if not why and g and groups.get(g.lower(), 0) >= group_repeats:
+            why = (f"{groups[g.lower()]} branches of {g} in one search — "
+                   "a group with a head office, not a local")
         if why:
             dropped.append({"company": c["company"], "why": why})
         else:
@@ -250,15 +294,81 @@ def _first(tags, *keys):
 
 
 def _address(tags):
-    bits = [_first(tags, "addr:housenumber"), _first(tags, "addr:street"),
-            _first(tags, "addr:district", "addr:suburb", "addr:neighbourhood"),
-            _first(tags, "addr:city")]
+    bits = [_first(tags, "addr:housenumber"),
+            _first(tags, "addr:street:en", "addr:street"),
+            _first(tags, "addr:district:en", "addr:district",
+                   "addr:suburb:en", "addr:suburb",
+                   "addr:neighbourhood:en", "addr:neighbourhood"),
+            _english_area(_first(tags, "addr:city:en", "addr:city"))]
     return ", ".join(b for b in bits if b)
 
 
+# Half the UAE is mapped in Arabic. A row filed as "دبي" and a row filed as
+# "Dubai" are the same city, but the cabinet groups by string, so they land in
+# two piles and the emirate counts come out wrong. Only the emirates and the
+# few big cities are translated here — those are the names we sort on. A
+# district we do not know is left exactly as the mapper wrote it, because a
+# half-guessed transliteration is worse than honest Arabic.
+_ARABIC_AREAS = {
+    "دبي": "Dubai",
+    "الشارقة": "Sharjah",
+    "ابو ظبي": "Abu Dhabi",
+    "ابوظبي": "Abu Dhabi",
+    "عجمان": "Ajman",
+    "راس الخيمة": "Ras Al Khaimah",
+    "ام القيوين": "Umm Al Quwain",
+    "الفجيرة": "Fujairah",
+    "العين": "Al Ain",
+    "خورفكان": "Khor Fakkan",
+    "دبا الحصن": "Dibba Al Hisn",
+    "الامارات العربية المتحدة": "United Arab Emirates",
+}
+
+# Arabic writes the same letter several ways. Normalise before looking up, or
+# "أبو ظبي" and "ابو ظبي" miss each other by one hamza.
+_ARABIC_FOLD = str.maketrans({
+    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا",
+    "ى": "ي", "ئ": "ي", "ة": "ه", "ؤ": "و",
+    "ـ": "",  # tatweel, the decorative stretch character
+})
+_HARAKAT = re.compile(r"[ً-ْٰ]")  # vowel marks
+
+
+def _fold(s: str) -> str:
+    return " ".join(_HARAKAT.sub("", s).translate(_ARABIC_FOLD).split())
+
+
+# The table above is written the way a mapper would write it; the lookup is
+# folded once, here, so both sides of the comparison went through the same mill.
+_ARABIC_LOOKUP = {_fold(k): v for k, v in _ARABIC_AREAS.items()}
+
+
+def _english_area(name: str) -> str:
+    """'دبي' -> 'Dubai'. Anything we do not know comes back untouched."""
+    if not name:
+        return ""
+    return _ARABIC_LOOKUP.get(_fold(name), name.strip())
+
+
 def _area_of(tags, fallback=""):
-    return _first(tags, "addr:district", "addr:suburb", "addr:neighbourhood",
-                  "addr:city") or fallback
+    return _english_area(
+        _first(tags, "addr:district:en", "addr:district",
+               "addr:suburb:en", "addr:suburb",
+               "addr:neighbourhood:en", "addr:neighbourhood",
+               "addr:city:en", "addr:city")) or fallback
+
+
+def _emirate_of(tags) -> str:
+    """
+    Which emirate the mapper says this is in, or "" if they never said.
+
+    Separate from _area_of on purpose. _area_of answers "where in the city",
+    and prefers the district, so most rows come back "Al Quoz" or "Al Nahda"
+    and never name an emirate at all. This answers the other question, and it
+    is the one that catches the box overshooting its border.
+    """
+    city = _english_area(_first(tags, "addr:city:en", "addr:city"))
+    return city if city in BBOX else ""
 
 
 def to_candidate(el, segment, area="") -> dict:
@@ -288,6 +398,9 @@ def to_candidate(el, segment, area="") -> dict:
         # Carried, not acted on here — drop_chains() decides, so a caller that
         # genuinely wants the chains can have them.
         "_chain_why": chain_why if is_chain else "",
+        "_group": group_of(tags),
+        # Same idea: find() counts these, nothing downstream reads them.
+        "_emirate": _emirate_of(tags),
         "company": name[:120],
         "phone": phone[:40],
         "website": site[:200],
@@ -340,6 +453,7 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
     if chains:
         for c in cands:
             c.pop("_chain_why", None)
+            c.pop("_group", None)
         dropped = []
     else:
         cands, dropped = drop_chains(cands)
@@ -350,16 +464,32 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
                  if c["phone"] or c["website"] or c["address"]]
     no_way_in = len(cands) - len(reachable)
 
+    # A bounding box is a rectangle and an emirate border is not, so a Dubai
+    # search picks up the near edge of Sharjah. These are still real UAE leads
+    # and dropping them would throw away good work, but they are counted and
+    # said out loud so "in Dubai" does not quietly mean "and a bit of Sharjah".
+    spill = sorted({c["_emirate"] for c in reachable
+                    if c.get("_emirate") and c["_emirate"] != area})
+    over_the_border = sum(1 for c in reachable
+                          if c.get("_emirate") and c["_emirate"] != area)
+    for c in reachable:
+        c.pop("_emirate", None)
+
+    head = (f"{named} on the map, {len(dropped)} chain(s) dropped, "
+            f"{no_way_in} with no way to reach them, "
+            f"{len(reachable)} worth having")
+    if over_the_border:
+        head += (f" — {over_the_border} of them actually in "
+                 + ", ".join(spill))
     return {"ok": True, "segment": segment, "area": area, "mirror": r["mirror"],
             "on_the_map": named, "unnamed_skipped": unnamed,
             "chains_dropped": dropped, "no_contact_route": no_way_in,
             "found": len(reachable),
             "with_phone": sum(1 for c in reachable if c["phone"]),
             "with_website": sum(1 for c in reachable if c["website"]),
+            "over_the_border": over_the_border, "spilled_into": spill,
             "candidates": reachable,
-            "head": (f"{named} on the map, {len(dropped)} chain(s) dropped, "
-                     f"{no_way_in} with no way to reach them, "
-                     f"{len(reachable)} worth having")}
+            "head": head}
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +605,8 @@ def main():
     ap.add_argument("--probe", action="store_true",
                     help="can this machine reach OSM? reads only, stores nothing")
     ap.add_argument("--find", metavar="SEGMENT", help="one segment, printed")
+    ap.add_argument("--segments", action="store_true",
+                    help="list what --find and --area will accept")
     ap.add_argument("--area", default="Dubai")
     ap.add_argument("--chains", action="store_true",
                     help="keep the franchises too (dropped by default: they buy "
@@ -483,6 +615,19 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+
+    if a.segments:
+        segs = segments_covered()
+        if a.json:
+            print(json.dumps({"segments": segs, "areas": list(BBOX)}, indent=2))
+        else:
+            print(f"{len(segs)} segments findable on OpenStreetMap:\n")
+            for s in segs:
+                why = (ls.SEGMENTS.get(s) or {}).get("why", "")
+                print(f"   {s:20} {why[:88]}")
+            print("\nAreas: " + ", ".join(BBOX))
+            print("\n   python -m pipelines.leads_osm --find garage --area Sharjah")
+        return 0
 
     if a.probe:
         p = probe()

@@ -348,6 +348,47 @@ def test_the_franchises_are_dropped_and_the_locals_kept():
           len(O.drop_chains(both)[1]), 0)
 
 
+def test_the_regional_groups_are_caught_by_the_mappers_own_words():
+    """
+    A real Dubai clinic run came back Medcare, Magrabi and Prime Medical —
+    multi-branch groups with a head office and a procurement department, which
+    is precisely what the owner said he did not want. None carries
+    brand:wikidata, and no two branches are spelled the same, so both existing
+    rules waved them through. What gives them away is operator=Medcare on each
+    pin: the mapper writing down who runs them.
+    """
+    print("\nTwo pins the mapper says one company runs is a group:")
+    med = [O.to_candidate({"type": "node", "id": 60 + i, "tags": {
+        "name": n, "amenity": "clinic", "operator": "Medcare",
+        "phone": "+9714300000" + str(i)}}, "clinic_small", "Dubai")
+        for i, n in enumerate(["Medcare Hospital Al Safa",
+                               "Medcare Medical Centre Jumeirah"])]
+    keep, dropped = O.drop_chains(med)
+    check("both dropped", len(dropped), 2)
+    check("naming the parent, not a rule number",
+          "Medcare" in dropped[0]["why"], True)
+    check("and saying what it counted", "2 branches" in dropped[0]["why"], True)
+
+    print("\n...one branch of a group is still just one shop, and is kept:")
+    one = [O.to_candidate({"type": "node", "id": 70, "tags": {
+        "name": "Magrabi Eye Centre", "amenity": "clinic",
+        "operator": "Magrabi", "phone": "+97143001111"}}, "clinic_small", "Dubai")]
+    keep, dropped = O.drop_chains(one)
+    check("kept", len(keep), 1)
+    check("nothing dropped", dropped, [])
+
+    print("\n...and an independent tagged with its own name twice is not a group:")
+    same = [O.to_candidate({"type": "node", "id": 80 + i, "tags": {
+        "name": n, "amenity": "cafe", "operator": n,
+        "addr:street": "23rd St"}}, "food_stall", "Dubai")
+        for i, n in enumerate(["Al Noor Cafeteria", "Hunoof Kitchen"])]
+    check("operator that only repeats the name is ignored",
+          O.group_of({"name": "Al Noor Cafeteria", "operator": "Al Noor Cafeteria"}),
+          "")
+    keep, dropped = O.drop_chains(same)
+    check("both kept", len(keep), 2)
+
+
 def test_the_headline_says_what_is_actually_worth_having():
     """
     57 found meant 7 contactable and the rest chains or dots on a map. A count
@@ -395,6 +436,142 @@ def test_a_street_address_is_a_way_in_for_this_trade():
     check("and says what is missing", "not even a street address" in why, True)
 
 
+# ---------------------------------------------------------------------------
+# THE SEGMENT HAS TO BE THE TRUTH, NOT NEARLY
+# ---------------------------------------------------------------------------
+
+def test_a_car_workshop_is_not_a_laundry():
+    """
+    A real Sharjah laundry search came back twenty-six "worth having", and
+    fourteen of them were car workshops — Wheelocity Garage, Alrehan Garage,
+    Top Auto Repairing. Good leads, wrong segment, and the segment is what the
+    mail is written from: the garage would have been offered a mirror wall and
+    the laundry numbers would have been a lie.
+    """
+    print("\nA car workshop is not a laundry:")
+    check("car_repair is off the laundry list",
+          ("shop", "car_repair") in O.OSM_TAGS["laundry"], False)
+    check("so is the car wash it used to drag in",
+          ("amenity", "car_wash") in O.OSM_TAGS["laundry"], False)
+    check("laundry asks for laundries",
+          sorted(v for _, v in O.OSM_TAGS["laundry"]),
+          ["dry_cleaning", "laundry", "tailor"])
+
+    print("\n...it is a segment of its own, because it is a real customer:")
+    check("garage is mapped", "garage" in O.OSM_TAGS, True)
+    check("and the agency knows the segment", "garage" in ls.SEGMENTS, True)
+    check("it is a local, not a major", "garage" in ls.LOCAL_SEGMENTS, True)
+    check("the collector can reach it", "garage" in O.segments_covered(), True)
+
+    print("\n...and we have something to sell it — roller-door frontage, "
+          "an office partition:")
+    from . import services
+    buys = [s for s, d in services.SERVICES.items() if "garage" in d["buyers"]]
+    check("shopfront", "shopfront" in buys, True)
+    check("glass partition for the front office", "glass_partition" in buys, True)
+    check("a sign board", "sign_board" in buys, True)
+    print("  ...so a garage lead gets a service attached, not a blank:")
+    g = O.to_candidate({"type": "node", "id": 40,
+                        "tags": {"name": "Alrehan Garage", "shop": "car_repair",
+                                 "phone": "065551234"}}, "garage", "Sharjah")
+    check("matched", bool(g["service"]), True)
+
+    print("\nEvery segment the collector can find is one we sell to:")
+    orphans = [s for s in O.segments_covered()
+               if not any(s in d["buyers"] for d in services.SERVICES.values())]
+    check("none without a service", orphans, [])
+
+
+# ---------------------------------------------------------------------------
+# HALF THE UAE IS MAPPED IN ARABIC
+# ---------------------------------------------------------------------------
+
+def test_the_map_speaks_arabic_and_the_cabinet_does_not():
+    """
+    A real Dubai clinic run filed "Joseph Qusais Polyclinic ... دبي" and
+    "French Bakery ... دبي". Both are Dubai. The cabinet groups by string, so
+    they were about to sit in a pile of their own and the emirate counts would
+    have been quietly wrong.
+    """
+    print("\nThe emirates come back in English however they were mapped:")
+    check("دبي", O._english_area("دبي"), "Dubai")
+    check("الشارقة", O._english_area("الشارقة"), "Sharjah")
+    check("أبو ظبي, with the hamza", O._english_area("أبو ظبي"), "Abu Dhabi")
+    check("ابوظبي, without it, and run together",
+          O._english_area("ابوظبي"), "Abu Dhabi")
+    check("رأس الخيمة", O._english_area("رأس الخيمة"), "Ras Al Khaimah")
+    check("العين", O._english_area("العين"), "Al Ain")
+
+    print("\n...but a district nobody translated is left as the mapper wrote it:")
+    check("no half-guessed transliteration",
+          O._english_area("القصيص الصناعية الثانية"),
+          "القصيص الصناعية الثانية")
+    check("and English is untouched", O._english_area("Al Quoz"), "Al Quoz")
+    check("empty stays empty", O._english_area(""), "")
+
+    print("\nA point mapped only in Arabic files as Dubai, not as دبي:")
+    c = O.to_candidate({"type": "node", "id": 41, "tags": {
+        "name": "Joseph Qusais Polyclinic", "amenity": "clinic",
+        "phone": "+97142636767", "addr:city": "دبي"}}, "clinic_small", "Dubai")
+    check("the area", c["area"], "Dubai")
+    check("and the address reads in English too", c["address"], "Dubai")
+
+    print("\n...and an English tag beats an Arabic one where both are present:")
+    c = O.to_candidate({"type": "node", "id": 42, "tags": {
+        "name": "X", "amenity": "clinic", "addr:suburb": "القصيص",
+        "addr:suburb:en": "Al Qusais", "addr:city": "دبي"}},
+        "clinic_small", "Dubai")
+    check("the English suburb wins", c["area"], "Al Qusais")
+
+
+def test_the_box_overshoots_the_border_and_says_so():
+    """
+    A bounding box is a rectangle; an emirate border is not. A Dubai clinic
+    search returned Solanki Dental Center with addr:city Sharjah. Those are
+    still real UAE leads and throwing them away would be waste — but "20 in
+    Dubai" has to stop meaning "and a few in Sharjah".
+    """
+    print("\nWhat the box caught over the border is counted, not hidden:")
+    real = O.ask
+    O.ask = lambda q, timeout=0: {
+        "ok": True, "mirror": "test", "tried": [],
+        "elements": [
+            {"type": "node", "id": 50, "tags": {
+                "name": "Al Quoz Dental", "amenity": "dentist",
+                "phone": "+97143001234", "addr:city": "Dubai"}},
+            {"type": "node", "id": 51, "tags": {
+                "name": "Solanki Dental Center", "amenity": "dentist",
+                "phone": "+97165001234", "addr:city": "Sharjah"}},
+            {"type": "node", "id": 52, "tags": {
+                "name": "Nahda Polyclinic", "amenity": "clinic",
+                "phone": "+97165009999", "addr:city": "الشارقة"}}]}
+    try:
+        r = O.find("clinic_small", "Dubai")
+    finally:
+        O.ask = real
+    check("all three are kept — they are real leads", r["found"], 3)
+    check("two of them are not in Dubai", r["over_the_border"], 2)
+    check("and it names where they actually are", r["spilled_into"], ["Sharjah"])
+    check("the Arabic one counted as the same emirate as the English one",
+          len(r["spilled_into"]), 1)
+    check("the headline admits it", "actually in Sharjah" in r["head"], True)
+    check("nothing internal leaks into the stored row",
+          [k for k in r["candidates"][0] if k.startswith("_")], [])
+
+    print("\n...and a clean search says nothing about borders at all:")
+    O.ask = lambda q, timeout=0: {
+        "ok": True, "mirror": "test", "tried": [],
+        "elements": [{"type": "node", "id": 53, "tags": {
+            "name": "Al Quoz Dental", "amenity": "dentist",
+            "phone": "+97143001234", "addr:city": "Dubai"}}]}
+    try:
+        r = O.find("clinic_small", "Dubai")
+    finally:
+        O.ask = real
+    check("no spill", r["over_the_border"], 0)
+    check("and no noise in the headline", "actually in" in r["head"], False)
+
+
 def main():
     for t in (test_the_query_asks_for_what_is_actually_mapped,
               test_an_osm_point_becomes_a_lead,
@@ -404,8 +581,12 @@ def main():
               test_the_collector_feeds_the_same_gate_as_every_other,
               test_leads_is_no_longer_dark_without_a_places_key,
               test_the_franchises_are_dropped_and_the_locals_kept,
+              test_the_regional_groups_are_caught_by_the_mappers_own_words,
               test_the_headline_says_what_is_actually_worth_having,
               test_a_street_address_is_a_way_in_for_this_trade,
+              test_a_car_workshop_is_not_a_laundry,
+              test_the_map_speaks_arabic_and_the_cabinet_does_not,
+              test_the_box_overshoots_the_border_and_says_so,
               test_a_dead_run_does_not_hold_the_door_for_three_hours,
               test_unlock_is_the_escape_hatch_and_says_what_it_did):
         t()
