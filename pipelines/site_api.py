@@ -93,7 +93,8 @@ def why_not_ready(s=None) -> str:
                 "https://www.yoursite.com/agency-api")
     if not s["token"]:
         return ("Full access is chosen but there is no Admin API token. It is "
-                "the line you put in agency-api/token.txt on your server.")
+                "the long random string inside agency-api/token.php on your "
+                "server — just the string, not the <?php or the quotes.")
     return ""
 
 
@@ -110,7 +111,24 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
     why = why_not_ready(s)
     if why:
         return {"ok": False, "error": why, "not_configured": True}
-    url = s["base"] + "/" + path.lstrip("/")
+    # index.php?do=health, NOT /agency-api/health.
+    #
+    # The pretty form needs mod_rewrite and an .htaccess. Apache without one
+    # looks for a FILE called 'health', does not find it, and 404s — so every
+    # call would have failed on his shared host while passing on the PHP test
+    # server, which quietly falls back to index.php. A query string needs no
+    # server configuration anywhere and cannot be switched off by a host.
+    bits = path.lstrip("/").split("/", 1)
+    q = {"do": bits[0]}
+    if len(bits) > 1 and bits[1]:
+        q["page"] = urllib.parse.unquote(bits[1])
+    # He may have renamed the file to index.php or left it as agency-api.php.
+    # Both are fine and both are documented, so accept an address that already
+    # names the script instead of gluing '/index.php' onto the end of it and
+    # asking his server for agency-api.php/index.php.
+    root = s["base"]
+    target = root if root.lower().endswith(".php") else root + "/index.php"
+    url = target + "?" + urllib.parse.urlencode(q)
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", "Bearer " + s["token"])
@@ -128,13 +146,21 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
         try:
             out = json.loads(raw)
         except Exception:
-            out = {"ok": False, "error": f"HTTP {e.code} from your site"}
+            out = None
+        # A bare number or a string is valid JSON and is NOT an answer from
+        # this API. Calling .setdefault on it crashed the whole run — which is
+        # exactly what a misaddressed request produced.
+        if not isinstance(out, dict):
+            out = {"ok": False,
+                   "error": f"HTTP {e.code} from your site"
+                            + (f" — it said: {str(raw)[:120]}" if raw else "")}
         out.setdefault("ok", False)
         out["status"] = e.code
         if e.code == 401:
             out["error"] = ("your site refused the token. Check the Admin API "
-                            "token on /setup matches agency-api/token.txt "
-                            "exactly — no spaces, no line break.")
+                            "token on /setup matches the string inside "
+                            "agency-api/token.php exactly — one trailing space "
+                            "is enough to break it.")
         elif e.code == 404:
             out["error"] = (f"nothing answered at {url}. Check the Admin API "
                             "address, and that agency-api/index.php really is "
@@ -144,14 +170,18 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
         return {"ok": False, "error": f"could not reach your site: "
                                       f"{type(e).__name__}: {e}"}
     try:
-        return json.loads(raw)
+        out = json.loads(raw)
     except Exception:
-        # A PHP notice printed above the JSON is the classic shared-hosting
-        # symptom, and "expecting value: line 1" would send him hunting in the
-        # wrong place entirely.
-        return {"ok": False, "error": "your site did not answer with JSON — "
-                                      "the first 200 characters were: "
-                                      + raw[:200].replace("\n", " ")}
+        out = None
+    if isinstance(out, dict):
+        return out
+    # Not an answer from this API. A PHP notice printed above the JSON is the
+    # classic shared-hosting symptom, and "expecting value: line 1 column 1"
+    # would send him hunting in entirely the wrong place — so show him what
+    # actually came back.
+    return {"ok": False, "error": "your site did not answer with JSON — "
+                                  "the first 200 characters were: "
+                                  + raw[:200].replace("\n", " ")}
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +405,8 @@ def main():
         if r.get("ok"):
             print(f"  ok  your site answered. PHP {r.get('php')}, "
                   f"folder {'writable' if r.get('writable') else 'NOT writable'}")
+            for w in r.get("warnings") or []:
+                print("\n  !!  " + w)
             return 0
         return _say(r)
     if a.pages:

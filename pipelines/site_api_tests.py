@@ -144,8 +144,8 @@ def test_the_two_setup_boxes_finally_lead_somewhere():
     check("no address", "no Admin API address" in S.why_not_ready(s), True)
     s = S.settings({"SITE_MODE": "full", "SITE_API_BASE": "https://x.ae/a"})
     check("no token", "no Admin API token" in S.why_not_ready(s), True)
-    check("and it says where to find it",
-          "token.txt" in S.why_not_ready(s), True)
+    check("and it says where to find it — the SAFE file, not the readable one",
+          "token.php" in S.why_not_ready(s), True)
 
     print("\n...and when both are there, it is ready:")
     s = S.settings({"SITE_MODE": "full", "SITE_API_BASE": "https://x.ae/agency-api/",
@@ -314,7 +314,7 @@ def test_a_website_that_is_down_is_a_tuesday_not_a_crash():
     finally:
         S.urllib.request.urlopen = real
     check("refused", r["ok"], False)
-    check("naming the two things to compare", "token.txt" in r["error"], True)
+    check("naming the two things to compare", "token.php" in r["error"], True)
 
     print("\n...and a PHP notice printed above the JSON is named as such:")
     def noisy(url, **kw):

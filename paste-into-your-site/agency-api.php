@@ -86,6 +86,18 @@ function fail(int $code, string $why): void {
 // ---------------------------------------------------------------------------
 function expected_token(): string {
     $t = getenv('GLASSWORK_TOKEN') ?: '';
+    // token.php is the safe one and the one to use. It is a PHP file, so a
+    // browser asking for it straight — https://yoursite.com/agency-api/token.php
+    // — gets a blank page, because the server RUNS it instead of showing it.
+    //
+    // token.txt would have been handed over in full to anybody who guessed the
+    // address. It sits inside the website folder, so the web server serves it
+    // like any other file, and the careful checks in this script would have
+    // been irrelevant: they would already have the key. Still supported for
+    // anyone who set it up that way, but /health complains until it is gone.
+    if ($t === '' && is_file(__DIR__ . '/token.php')) {
+        $t = trim((string)@include __DIR__ . '/token.php');
+    }
     if ($t === '' && is_file(__DIR__ . '/token.txt')) {
         $t = trim((string)file_get_contents(__DIR__ . '/token.txt'));
     }
@@ -181,18 +193,57 @@ function back_up(string $full): string {
 // ---------------------------------------------------------------------------
 // ROUTING
 // ---------------------------------------------------------------------------
-$path   = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$base   = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
-$route  = '/' . trim(substr($path, strlen($base)), '/');
+//
+// TWO WAYS IN, AND THE SIMPLE ONE IS THE DEFAULT.
+//
+// The first version of this file read the route out of the URL path, so the
+// agency called /agency-api/health. That works on the PHP test server — which
+// quietly falls back to index.php — and it does NOT work on Apache, which is
+// what real hosting runs. Apache looks for a FILE called 'health', does not
+// find one, and returns 404. Every single call would have failed on his
+// server while passing every test on mine.
+//
+// So the route can also arrive as a plain query: index.php?do=health. That
+// needs no .htaccess, no mod_rewrite, no server configuration of any kind,
+// and it cannot be broken by a host that disables rewriting. It is what the
+// agency uses. The tidy path form still works where rewriting is available.
+//
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $body   = json_decode((string)file_get_contents('php://input') ?: '{}', true) ?: [];
 
+$do = trim((string)($_GET['do'] ?? ''), '/');
+if ($do !== '') {
+    $route = '/' . $do;
+} elseif (!empty($_SERVER['PATH_INFO'])) {
+    $route = '/' . trim((string)$_SERVER['PATH_INFO'], '/');
+} else {
+    $path  = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+    $base  = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+    $route = '/' . trim(substr($path, strlen($base)), '/');
+}
+// index.php?do=pages&page=index.php — the page can ride along in the query
+// too, so reading one does not need a path either.
+if (!empty($_GET['page']) && $route === '/pages' && $method === 'GET') {
+    $route = '/pages/' . ltrim((string)$_GET['page'], '/');
+}
+
 // --- is the site answering -------------------------------------------------
 if ($route === '/health' && $method === 'GET') {
+    $warn = [];
+    if (is_file(__DIR__ . '/token.txt')) {
+        $warn[] = 'Your token is in token.txt, which the web server will hand '
+                . 'to anybody who asks for /agency-api/token.txt. Move it: put '
+                . "the same line into token.php as  <?php return 'YOURTOKEN';  "
+                . 'and delete token.txt.';
+    }
+    if (!is_file(__DIR__ . '/.htaccess')) {
+        $warn[] = 'No .htaccess in the agency-api folder, so the folder may be '
+                . 'browsable. Not urgent if you use token.php.';
+    }
     reply(['ok' => true, 'status' => 'up', 'time' => time(),
            'site_root' => SITE_ROOT, 'php' => PHP_VERSION,
            'writable' => is_writable(SITE_ROOT),
-           'mode' => 'full-access']);
+           'mode' => 'full-access', 'warnings' => $warn]);
 }
 
 // --- what pages are there --------------------------------------------------
