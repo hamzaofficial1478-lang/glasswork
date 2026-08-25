@@ -296,6 +296,33 @@ SERVICES = {
         "related": ("glass_partition", "glass_railing", "shower_glass",
                     "glass_repair"),
     },
+    # Off his own site, which sold it under two names the agency did not know:
+    # "Aluminum Interior Designs" and "Aluminum Interior". Until a service is
+    # catalogued the agency cannot target a segment with it or write about it,
+    # so a line he actually sells was invisible to every sector.
+    "aluminium_interior": {
+        "label": "aluminium interior fit-out and cladding",
+        "names": ("aluminium interior",
+                  "aluminum interior",
+                  "aluminium interior design",
+                  "aluminum interior design",
+                  "aluminium interior designs",
+                  "aluminum interior designs",
+                  "aluminium cladding",
+                  "aluminum cladding",
+                  "aluminium false ceiling",
+                  "aluminum false ceiling",
+                  "aluminium interior work",
+                  "aluminum interior work"),
+        "signals": ("interior", "cladding", "ceiling", "fit-out", "fitout",
+                    "office", "villa", "lobby", "reception", "refurb"),
+        "buyers": ("office", "coworking", "hotel", "retail", "showroom",
+                   "mall", "restaurant", "clinic_small", "bank", "developer",
+                   "fitout_contractor", "interior_design", "property_management",
+                   "villa_compound", "landlord", "startup"),
+        "related": ("glass_partition", "aluminium_windows", "glass_installation",
+                    "wooden_doors"),
+    },
     "skylight": {
         "label": "skylights and glass roofs",
         "names": ("skylight",

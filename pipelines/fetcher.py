@@ -405,6 +405,23 @@ def _fetch_uncached(url, render, timeout, allow_paid, min_chars) -> dict:
                         "retried": True}
             html, err, status = (html2 or html), (err2 or err), (status2 or status)
 
+        # A PAGE THAT IS NOT THERE IS NOT A PAGE THAT NEEDS RENDERING.
+        #
+        # The owner's site indexed 2 of its 9 pages and reported the other 7 as
+        # "built by JavaScript". They were not. They were guessed URLs —
+        # /services, /about, /products — that his .php site answers with a 404,
+        # and a 404 body is short, so the shell test fired. The remedy that
+        # diagnosis points at is switching on paid rendering, so he would have
+        # paid Zyte, per page, to render pages that do not exist.
+        #
+        # Rendering cannot conjure a page the server does not have. Say what it
+        # is, and never put it on the "would have cost" list.
+        if status in (404, 410):
+            return {"ok": False, "html": "", "how": "plain", "cost": 0.0,
+                    "status": status, "switched": "",
+                    "error": (f"HTTP {status} — there is no page at this "
+                              "address. Nothing to render.")}
+
         challenged = bool(html) and looks_like_challenge(html)
         shell = bool(html) and looks_unrendered(html, min_chars)
         if challenged:

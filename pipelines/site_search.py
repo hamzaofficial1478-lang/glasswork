@@ -50,9 +50,10 @@ import urllib.request
 from coordination import board, site
 
 try:
-    from . import fetcher, services, site_services
+    from . import fetcher, harvest, services, site_services
 except ImportError:  # pragma: no cover
     import fetcher
+    import harvest
     import services
     import site_services
 
@@ -148,6 +149,95 @@ _LAST = {"cost": 0.0, "rendered": 0, "skipped": [], "would_cost": 0.0,
          "switched": []}
 
 
+# Not a page: a picture, a stylesheet, a download. site_services' link reader
+# is deliberately narrow — it wants the pages that describe what we sell — but
+# a search index wants the whole site, so this one takes everything except the
+# things that are not pages at all.
+_NOT_A_PAGE = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
+               ".css", ".js", ".pdf", ".zip", ".mp4", ".webm", ".woff",
+               ".woff2", ".ttf", ".xml", ".json", ".txt")
+
+
+def _unescape(s):
+    """'Glass &amp; Aluminium' is not what anybody typed into a search box."""
+    import html as _htmlmod
+    return _htmlmod.unescape(s or "")
+
+
+def _headline(title):
+    """
+    The part of a page title that is about THIS page.
+
+    A trade site puts the whole business in every title — 'FAQ | Glass,
+    Aluminium, Sign Board & Wooden Work Dubai | World Deal Technical Services'.
+    Only the first segment says what the page is.
+    """
+    for sep in ("|", "–", "—", " - ", "::"):
+        if sep in (title or ""):
+            head = title.split(sep)[0].strip()
+            if len(head) >= 3:
+                return head
+    return title or ""
+
+
+def _repeated_headings(read, share=0.6):
+    """
+    The headings that belong to the template rather than to any one page.
+
+    A nav block, a footer service list, a 'Color Switcher' widget. Judged by
+    how many pages carry them, not by a list of words to ignore — his site's
+    boilerplate is '01. Glass Installation', which is a perfectly good heading
+    on the page that is actually about it.
+
+    Needs three pages before it will call anything boilerplate. On two pages
+    "appears on both" is as likely to mean "they are both about glass".
+    """
+    if len(read) < 3:
+        return set()
+    counts = {}
+    for _u, _h, _t, heads in read:
+        for h in {x.strip().lower() for x in heads if x.strip()}:
+            counts[h] = counts.get(h, 0) + 1
+    need = max(2, int(len(read) * share))
+    return {h for h, n in counts.items() if n >= need}
+
+
+def _fingerprint(html):
+    """
+    What this page SAYS, ignoring how it was reached.
+
+    '/' and '/index.php' are one page served under two addresses, and indexing
+    both puts the home page in every result list twice.
+    """
+    import hashlib
+    return hashlib.sha1(_text(html)[:4000].encode("utf-8", "replace")).hexdigest()
+
+
+def own_pages(html, base, limit=40):
+    """
+    Every page of his own site the home page links to, in nav order.
+
+    Uses harvest.links, which reads the href attribute rather than pattern-
+    matching whitespace-delimited text — the same reader that found the
+    /contact.php no guess list contained.
+    """
+    host = urllib.parse.urlparse(base).netloc.lower()
+    out = []
+    for u, _text_ in harvest.links(html or "", base):
+        p = urllib.parse.urlparse(u)
+        if p.netloc.lower() != host:
+            continue
+        path = (p.path or "/").lower()
+        if path.endswith(_NOT_A_PAGE):
+            continue
+        clean = f"{p.scheme}://{p.netloc}{p.path}"
+        if clean.rstrip("/") == base.rstrip("/"):
+            continue                       # the home page is already read
+        if clean not in out:
+            out.append(clean)
+    return out[:limit]
+
+
 def build_records(url, max_pages=40, timeout=15):
     """
     One search record per page of the site.
@@ -168,39 +258,79 @@ def build_records(url, max_pages=40, timeout=15):
     if not home:
         return [], f"could not read {base} — {err or 'no response'}"
 
+    # THE SITE'S OWN LINKS FIRST, GUESSES ONLY IF IT LINKED NOWHERE.
+    #
+    # This read the guess list first and appended the real links after it. On
+    # the owner's own site that indexed /services, /our-services, /what-we-do,
+    # /products, /solutions, /about and /about-us — seven 404s — and ran out of
+    # page budget before it reached /service.php, /about.php, /gallery.php,
+    # /blog.php, /faq.php and /contact.php, which are the pages he actually
+    # has and which his home page links to in the navigation bar.
+    #
+    # Two of nine pages were indexed and the other seven were reported as
+    # JavaScript. The site had told us where everything was; we were not
+    # listening. Same fix as harvest.py, which stopped guessing for the same
+    # reason and found the /contact.php no guess list contained.
     seen = [base]
-    queue = [base + p for p in getattr(site_services, "LIKELY_PATHS", ())]
-    try:
-        queue += site_services._internal_links(home, base)
-    except Exception:
-        pass
+    queue = own_pages(home, base)
+    linked = len(queue)
+    queue += [base + p for p in getattr(site_services, "LIKELY_PATHS", ())
+              if base + p not in queue]
 
-    records, pages = [], [(base, home)]
+    records, pages, bodies = [], [(base, home)], {_fingerprint(home)}
     for u in queue:
         if u in seen or len(seen) >= max_pages:
             continue
         html, _e = _fetch(u, timeout)
         if not html:
             continue
+        # '/' and '/index.php' are the same page served twice, and indexing
+        # both puts the home page into every result list twice. Judged on the
+        # text, not on a list of filenames, so it also catches /home.html and
+        # whatever else his host decides to alias.
+        fp = _fingerprint(html)
+        if fp in bodies:
+            continue
+        bodies.add(fp)
         seen.append(u)
         pages.append((u, html))
         time.sleep(0.25)                   # his own server, but still be polite
 
+    read = []
     for u, html in pages:
         t = _TITLE.search(html)
         title = _text(t.group(1)) if t else u.rsplit("/", 1)[-1].replace("-", " ").title()
-        heads = [_text(m.group(2)) for m in _H.finditer(html)][:12]
+        heads = [_unescape(_text(m.group(2))) for m in _H.finditer(html)][:12]
+        read.append((u, html, _unescape(title), heads))
+
+    # A HEADING ON EVERY PAGE DESCRIBES THE SITE, NOT THE PAGE.
+    #
+    # His site carries the same service list — '01. Glass Installation',
+    # '02. Aluminum Installation' — in a block on every single page, so the
+    # contact page, the gallery and the FAQ all matched 'glass installation'
+    # and the service field said the same thing seven times. That field exists
+    # so a search for 'pergola' ranks the pergola page above a passing mention
+    # on the home page, and identical values make it worth nothing.
+    boilerplate = _repeated_headings(read)
+
+    for u, html, title, heads in read:
+        own = [h for h in heads if h.strip().lower() not in boilerplate]
         body = _text(html)
-        # Which of our own services this page is about, so a search for
-        # "pergola" ranks the pergola page over a mention on the home page.
-        svc, _why = services.match_by_name(" ".join([title] + heads)) or ("", "")
+        # Matched on the DISTINCTIVE part of the title and this page's OWN
+        # headings. Nothing left to match on means no service, which is the
+        # honest answer for a contact page.
+        svc, _why = services.match_by_name(
+            " ".join([_headline(title)] + own)) or ("", "")
         path = urllib.parse.urlparse(u).path or "/"
         records.append({
             "objectID": path,
             "url": u,
             "path": path,
             "title": title[:200],
-            "headings": heads,
+            # This page's own headings, not the navigation repeated seven
+            # times. Algolia ranks on these, so the site-wide block being in
+            # every record would have made every record look alike.
+            "headings": own or heads,
             "service": svc or "",
             "service_label": services.label(svc) if svc else "",
             # Enough to match on and to show a snippet. The whole page would

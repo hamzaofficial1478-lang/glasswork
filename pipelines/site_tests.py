@@ -404,18 +404,19 @@ def test_site_search_never_publishes_the_write_key():
 
     print("\nRecords are stable, so a re-index updates rather than duplicates:")
     # base is rstrip("/")-ed inside build_records, so the home key has no slash
-    pages = [("https://x.ae", "<title>Home</title><h1>Glass</h1><p>" + "a" * 200 + "</p>"),
+    # The home page LINKS to the pergola page, the way a real site does. It
+    # used to be reached by stubbing site_services._internal_links; the indexer
+    # now reads the site's own anchors, which is the whole point of the fix.
+    pages = [("https://x.ae", '<title>Home</title><h1>Glass</h1>'
+              '<a href="/pergolas">Pergolas</a><p>' + "a" * 200 + "</p>"),
              ("https://x.ae/pergolas", "<title>Pergolas</title><h1>Aluminium pergolas</h1>"
               "<p>" + "b" * 200 + "</p>")]
     real_fetch = search._fetch
-    search._fetch = lambda u, timeout=15: (dict(pages).get(u, ""), "")
-    real_links = ss._internal_links
-    ss._internal_links = lambda html, base: ["https://x.ae/pergolas"]
+    search._fetch = lambda u, timeout=15, allow_paid=None: (dict(pages).get(u, ""), "")
     try:
         recs, err = search.build_records("https://x.ae", max_pages=10)
     finally:
         search._fetch = real_fetch
-        ss._internal_links = real_links
 
     check("both pages became records", len(recs), 2)
     check("the objectID is the path, not a counter",
@@ -614,6 +615,176 @@ def test_the_fetcher_pays_only_when_it_has_to():
         srv.shutdown()
 
 
+# ---------------------------------------------------------------------------
+# THE SITE TELLS YOU WHERE ITS PAGES ARE. LISTEN BEFORE GUESSING.
+# ---------------------------------------------------------------------------
+
+# The owner's real site, in miniature. Every page carries the same navigation
+# block and the same service list, which is how a trade site is built and is
+# exactly what fooled the indexer.
+_NAV = ('<nav><a href="/index.php">Home</a><a href="/service.php">Services</a>'
+        '<a href="/about.php">About</a><a href="/gallery.php">Gallery</a>'
+        '<a href="/blog.php">Blog</a><a href="/faq.php">FAQ</a>'
+        '<a href="/contact.php">Contact</a>'
+        '<a href="/assets/img/hero.jpg">pic</a>'
+        '<a href="/assets/css/main.css">css</a></nav>')
+_BLOCK = ("<h3>01. Glass Installation</h3><h3>02. Aluminum Installation</h3>"
+          "<h3>Color Switcher</h3>")
+
+
+def _php(title, h1, extra=""):
+    return (f"<html><head><title>{title} | Glass, Aluminium &amp; Wooden Work "
+            f"Dubai</title></head><body>{_NAV}<h1>{h1}</h1>{extra}{_BLOCK}"
+            "<p>" + ("World Deal Technical Services, Dubai. " * 40) + "</p>"
+            "</body></html>")
+
+
+def test_the_indexer_reads_the_pages_he_has_not_the_ones_it_imagined():
+    """
+    His site indexed 2 of its 9 pages. The other 7 were reported as "built by
+    JavaScript" — they were /services, /our-services, /what-we-do, /products,
+    /solutions, /about and /about-us, none of which exist on a .php site. The
+    guess list was queued FIRST and used up the page budget before the real
+    links in his navigation bar were reached.
+    """
+    from . import site_search as search
+    print("\nThe navigation bar is a list of the pages that exist:")
+    home = _php("World Deal Technical Services", "Best Aluminium Glass Company")
+    got = search.own_pages(home, "https://wd.example")
+    check("every real page is found",
+          [u.rsplit("/", 1)[-1] for u in got],
+          ["index.php", "service.php", "about.php", "gallery.php", "blog.php",
+           "faq.php", "contact.php"])
+    check("a jpg is not a page", any("hero.jpg" in u for u in got), False)
+    check("nor is a stylesheet", any(".css" in u for u in got), False)
+    check("and the home page is not queued twice",
+          any(u.rstrip("/") == "https://wd.example" for u in got), False)
+
+    print("\n...and they are read before anything is guessed at:")
+    real = search._fetch
+    pages = {
+        "https://wd.example": home,
+        "https://wd.example/service.php": _php("Services", "Services",
+                                               "<h2>Glass Partition</h2>"),
+        "https://wd.example/faq.php": _php("FAQ", "Frequently Asked Questions"),
+        "https://wd.example/contact.php": _php("Contact", "Contact Us"),
+    }
+    asked = []
+
+    def fake(url, timeout=15, allow_paid=None):
+        asked.append(url)
+        return pages.get(url, ""), "" if url in pages else "HTTP 404"
+
+    search._fetch = fake
+    try:
+        recs, err = search.build_records("https://wd.example", max_pages=4)
+    finally:
+        search._fetch = real
+    check("no error", err, "")
+    check("the first page asked for after the home page is a real one",
+          asked[1], "https://wd.example/index.php")
+    check("nothing invented was reached before the real pages ran out",
+          [a for a in asked[:4] if a.endswith((".php", "example"))], asked[:4])
+
+
+def test_the_same_page_under_two_names_is_indexed_once():
+    """
+    '/' and '/index.php' are one page. Indexed twice, the home page appears in
+    every result list twice.
+    """
+    from . import site_search as search
+    print("\nOne page, one record, whatever address it answers on:")
+    home = _php("World Deal Technical Services", "Best Aluminium Glass Company")
+    real = search._fetch
+    pages = {"https://wd.example": home,
+             "https://wd.example/index.php": home,      # byte-identical
+             "https://wd.example/faq.php": _php("FAQ", "Frequently Asked")}
+    search._fetch = lambda u, timeout=15, allow_paid=None: (
+        pages.get(u, ""), "" if u in pages else "HTTP 404")
+    try:
+        recs, _e = search.build_records("https://wd.example", max_pages=8)
+    finally:
+        search._fetch = real
+    paths = sorted(r["path"] for r in recs)
+    check("the duplicate is dropped", paths, ["/", "/faq.php"])
+    check("and the one kept is the canonical one", recs[0]["path"], "/")
+
+
+def test_a_heading_on_every_page_describes_the_site_not_the_page():
+    """
+    His site repeats its service list on all seven pages, so the contact page,
+    the gallery and the FAQ all matched 'glass installation' and the service
+    field said the same thing seven times. That field exists so a search for
+    'pergola' outranks a passing mention on the home page.
+    """
+    from . import site_search as search
+    print("\nThe repeated block is recognised as template, not content:")
+    read = [("u1", "", "Home", ["Welcome", "01. Glass Installation", "Color Switcher"]),
+            ("u2", "", "FAQ", ["Frequently Asked", "01. Glass Installation", "Color Switcher"]),
+            ("u3", "", "Contact", ["Contact Us", "01. Glass Installation", "Color Switcher"])]
+    boiler = search._repeated_headings(read)
+    check("the repeated service heading is template",
+          "01. glass installation" in boiler, True)
+    check("so is the widget", "color switcher" in boiler, True)
+    check("the page's own heading is not", "frequently asked" in boiler, False)
+
+    print("\n...but two pages is not enough to call anything boilerplate:")
+    check("no verdict on two", search._repeated_headings(read[:2]), set())
+
+    print("\n...so each page gets its own service, or honestly none:")
+    real = search._fetch
+    pages = {
+        "https://wd.example": _php("Home", "Best Aluminium Glass Company"),
+        "https://wd.example/service.php":
+            _php("Services", "Services", "<h2>Pergola and Shades</h2>"),
+        "https://wd.example/contact.php": _php("Contact", "Contact Us"),
+    }
+    search._fetch = lambda u, timeout=15, allow_paid=None: (
+        pages.get(u, ""), "" if u in pages else "HTTP 404")
+    try:
+        recs, _e = search.build_records("https://wd.example", max_pages=8)
+    finally:
+        search._fetch = real
+    by = {r["path"]: r["service"] for r in recs}
+    check("the services page is the pergola page", by.get("/service.php"),
+          "pergola")
+    check("the contact page claims no service at all", by.get("/contact.php"), "")
+    check("and the nav block is out of the indexed headings",
+          any("Color Switcher" in h
+              for r in recs for h in r["headings"]), False)
+
+    print("\n...and the title is readable, not HTML:")
+    check("entities decoded",
+          all("&amp;" not in r["title"] for r in recs), True)
+
+
+def test_a_404_is_not_a_javascript_page():
+    """
+    A missing page has a short body, so the shell test fired and reported
+    "built by JavaScript". The remedy that points at is switching on paid
+    rendering — so he would have paid Zyte, per page, to render pages that do
+    not exist. Rendering cannot conjure a page the server does not have.
+    """
+    from . import fetcher
+    print("\nA page that is not there is not a page that needs rendering:")
+    # A host that really resolves, because safe_url checks DNS before anything
+    # else — and nothing leaves the machine, since _plain is replaced.
+    real = fetcher._plain
+    fetcher._plain = lambda url, timeout: (
+        "<html><body><h1>404 Not Found</h1></body></html>", "", 404)
+    try:
+        r = fetcher.fetch("https://example.com/services-that-are-not-there",
+                          allow_paid=False)
+    finally:
+        fetcher._plain = real
+    check("not ok", r["ok"], False)
+    check("it says what it is", "404" in r["error"], True)
+    check("and that there is nothing to render",
+          "Nothing to render" in r["error"], True)
+    check("so it never lands on the 'would have cost' list",
+          "declined" in r, False)
+
+
 def main():
     test_the_site_address_survives_a_fresh_clone()
     test_only_service_looking_text_is_taken()
@@ -626,6 +797,10 @@ def main():
     test_site_search_never_publishes_the_write_key()
     test_the_fetcher_pays_only_when_it_has_to()
     test_the_owners_own_site_is_read_for_free()
+    test_the_indexer_reads_the_pages_he_has_not_the_ones_it_imagined()
+    test_the_same_page_under_two_names_is_indexed_once()
+    test_a_heading_on_every_page_describes_the_site_not_the_page()
+    test_a_404_is_not_a_javascript_page()
 
     print()
     if _fail:
