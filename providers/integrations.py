@@ -64,6 +64,11 @@ ENV_KEYS = {
     "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
     "CRAWLER_ON_OWN_SITE", "LEADS_ALLOW_INDIVIDUALS",
     "SEO_SEEDS", "SEO_AREAS", "SEO_STRIKING_TO", "SEO_W_AREA", "SEO_W_ENQUIRIES",
+    # The workshop address. Never scraped — it is nowhere on the site — and a
+    # wrong one costs the map-pack ranking, because Google cross-checks it
+    # against the Google Business Profile. Saved once, read every time the
+    # LocalBusiness markup is rebuilt, so it survives a regeneration.
+    "BUSINESS_ADDRESS", "BUSINESS_CITY", "BUSINESS_EMIRATE",
     "PORT",
 }
 
@@ -108,6 +113,54 @@ def read_env(path=None) -> dict:
         if v is not None and str(v).strip():
             env[k] = str(v).strip()
     return env
+
+
+def write_env(values: dict, path=None) -> dict:
+    """
+    Save settings into .env, leaving every other line exactly as it was.
+
+    Writing .env from Python at all is new: until now only server.js could,
+    which meant a command-line fix for a setting had to be done through the
+    browser or by hand-editing the file. Keys already present are updated in
+    place — order, comments and blank lines are preserved, because a settings
+    file the program reshuffles is one the owner stops recognising.
+
+    Mirrors server.js's updateEnv. Same file, same format, same key rule.
+    """
+    p = Path(path) if path else ENV_PATH
+    values = {k: str(v) for k, v in (values or {}).items()
+              if k and str(v).strip()}
+    if not values:
+        return {"ok": False, "error": "nothing to save"}
+    bad = [k for k in values if not re.fullmatch(r"[A-Z0-9_]+", k)]
+    if bad:
+        return {"ok": False, "error": "not a setting name: " + ", ".join(bad)}
+    # A newline in a value would write a second, bogus setting on the next
+    # line — and a value that fakes a key is how a settings file gets a key
+    # nobody put there.
+    for k, v in values.items():
+        if "\n" in v or "\r" in v:
+            return {"ok": False, "error": f"{k} cannot contain a line break"}
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
+    except Exception as e:
+        return {"ok": False, "error": f"could not read {p}: {e}"}
+    left = dict(values)
+    out = []
+    for line in lines:
+        m = re.match(r"^([A-Z0-9_]+)=", line.strip())
+        if m and m.group(1) in left:
+            out.append(f"{m.group(1)}={left.pop(m.group(1))}")
+        else:
+            out.append(line)
+    for k, v in left.items():
+        out.append(f"{k}={v}")
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+    except Exception as e:
+        return {"ok": False, "error": f"could not write {p}: {e}"}
+    return {"ok": True, "saved": sorted(values), "path": str(p)}
 
 
 def _missing(env, keys):

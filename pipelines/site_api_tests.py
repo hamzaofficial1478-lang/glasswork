@@ -224,9 +224,10 @@ def test_it_refuses_to_publish_the_placeholder_address():
     r = _with_site(site, lambda: _with_drafts(
         unfilled, FAQ, lambda: S.apply_schema(s=FULL)))
     check("refused", r["ok"], False)
-    check("saying exactly what to fix", "placeholder" in r["error"], True)
-    check("and it names the file to edit",
-          "1-localbusiness-every-page.html" in r["error"], True)
+    check("saying it will not guess an address",
+          "will not guess" in r["error"], True)
+    check("and naming the one command that fixes it, not a file to hand-edit",
+          "--set-address" in r["error"], True)
     check("nothing was written", [c for c in site.calls if c[0] == "POST"], [])
 
     print("\n...and a missing draft is named, not guessed around:")

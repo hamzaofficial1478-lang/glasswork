@@ -271,6 +271,53 @@ def test_enquiry_path(s=None) -> dict:
 # THE FIRST REAL JOB: THE MARKUP THAT IS FAILING HIS AUDIT
 # ---------------------------------------------------------------------------
 
+def save_address(street, city="") -> dict:
+    """
+    Write the workshop address into .env, and rebuild the drafts that use it.
+
+    Saved rather than hand-edited into the generated file, because a hand-edit
+    is undone the next time the draft is regenerated — and then --apply-schema
+    refuses again with no obvious reason why.
+    """
+    street = (street or "").strip()
+    city = (city or "").strip()
+    if len(street) < 6:
+        return {"ok": False, "error": "that is too short to be an address"}
+    if street.upper().startswith("YOUR "):
+        return {"ok": False, "error": "that is still the placeholder"}
+    try:
+        from providers import integrations
+        integrations.write_env({"BUSINESS_ADDRESS": street,
+                                **({"BUSINESS_CITY": city} if city else {})})
+    except Exception as e:
+        return {"ok": False, "error": f"could not save it: {e}"}
+    # Rebuild the LocalBusiness draft straight away, so the very next
+    # --apply-schema uses the real address instead of asking again.
+    rebuilt = ""
+    try:
+        from . import seo_answers
+        from coordination import site as site_cfg
+        base = site_cfg.site_url()
+        snippet, _missing = seo_answers.localbusiness_jsonld(base, [])
+        p = _drafts_dir() / "1-localbusiness-every-page.html"
+        if p.exists() and snippet:
+            old = p.read_text(encoding="utf-8")
+            import re
+            new = re.sub(r'<script type="application/ld\+json">.*?</script>',
+                         snippet, old, count=1, flags=re.S)
+            p.write_text(new, encoding="utf-8")
+            rebuilt = p.name
+    except Exception as e:
+        return {"ok": True, "saved": street,
+                "head": f"saved '{street}', but the draft could not be "
+                        f"rebuilt ({e}). Run: python -m pipelines.seo_answers "
+                        "--localbusiness"}
+    return {"ok": True, "saved": street, "city": city,
+            "head": (f"saved: {street}" + (f", {city}" if city else "")
+                     + (f" — and rebuilt {rebuilt}" if rebuilt else "")
+                     + ". Now run: python -m pipelines.site_api --apply-schema")}
+
+
 def _drafts_dir():
     from pathlib import Path
     return Path(__file__).parents[1] / "paste-into-your-site"
@@ -309,10 +356,13 @@ def schema_plan(s=None) -> dict:
     # wrong address costs the map-pack ranking the block exists to win, so it
     # is better to refuse than to publish "YOUR STREET / UNIT" to the world.
     if lb and ("YOUR STREET" in lb or "YOUR EMIRATE" in lb):
-        problems.append("the address in the LocalBusiness draft is still the "
-                        "placeholder. Edit paste-into-your-site/"
-                        "1-localbusiness-every-page.html and put the real "
-                        "workshop address in before this goes on the site.")
+        problems.append(
+            "your workshop address is not saved yet, and it is nowhere on your "
+            "website for the agency to read. A wrong address here costs the "
+            "map ranking this markup exists to win, so it will not guess. "
+            "Save it once with:  python -m pipelines.site_api --set-address "
+            '"Warehouse 12, Al Quoz Industrial 3" --city Dubai   '
+            "then run --apply-schema again.")
     p = pages(s=s)
     known = [x["page"] for x in (p.get("pages") or [])] if p.get("ok") else []
     if not p.get("ok"):
@@ -379,10 +429,20 @@ def main():
                     help="put the markup on the site (Releaser)")
     ap.add_argument("--backups", action="store_true")
     ap.add_argument("--undo", metavar="PAGE", help="restore a page's last version")
+    ap.add_argument("--set-address", metavar="STREET",
+                    help="save your workshop address, once, so every rebuild "
+                         "of the markup carries it")
+    ap.add_argument("--city", default="", help="the emirate, e.g. Dubai")
     ap.add_argument("--test-enquiry", action="store_true")
     ap.add_argument("--as", dest="agent", default=AGENT)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+
+    # Before the mode banner: saving an address needs no site access at all,
+    # and refusing it because full access is not configured would be silly.
+    if a.set_address:
+        r = save_address(a.set_address, a.city)
+        return _say(r)
 
     s = settings()
     why = why_not_ready(s)

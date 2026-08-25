@@ -51,7 +51,13 @@ CREATE TABLE IF NOT EXISTS requests (
   subject     TEXT,
   status      TEXT DEFAULT 'open',     -- open | claimed | answered | closed
   handler     TEXT,
-  created_at  INTEGER
+  created_at  INTEGER,
+  -- WHEN it was claimed, so a claim can be told apart from a dead one. A
+  -- request stuck at 'claimed' is invisible to the sector that owes the
+  -- answer (its inbox lists 'open') while the Overseer counts it as that
+  -- sector ignoring the question — which is exactly what ran for nineteen
+  -- days. See board.release_dead_request_claims.
+  claimed_at  INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS request_msgs (

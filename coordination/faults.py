@@ -798,6 +798,34 @@ def scan(now=None) -> dict:
             if _free_dead_claim(c, fresh, now):
                 freed += 1
 
+        # A REQUEST claimed and never answered is put back in the sector's
+        # inbox, the same way a dead task claim is. Until this existed, such a
+        # request was invisible to the sector that owed the answer — its inbox
+        # lists 'open' and the request was stuck at 'claimed' — while staying
+        # permanently visible to the check above as that sector ignoring it.
+        # The owner watched exactly that for nineteen days.
+        try:
+            unstuck = board.release_dead_request_claims()
+        except Exception:
+            unstuck = []
+        if unstuck:
+            try:
+                from . import activity as _activity
+            except Exception:
+                _activity = None
+            for u in unstuck:
+                if not _activity:
+                    break
+                try:
+                    _activity.log(
+                        "overseer", "coordination",
+                        f"Put request {u['id']} back on {u['sector']}'s desk — "
+                        f"{u['was'] or 'an agent'} claimed it "
+                        f"{_ago(u['stuck_for'])} ago and never answered: "
+                        f"{(u['subject'] or '')[:60]}")
+                except Exception:
+                    pass                     # a logging fault is not a scan fault
+
         counts = {}
         for row in _rows(c, "SELECT lower(sector) s, count(*) n FROM faults"
                             " WHERE status!='resolved' AND kind!='sector'"

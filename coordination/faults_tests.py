@@ -218,6 +218,85 @@ def test_an_unanswered_request_says_which_command_answers_it():
     check("nor for an empty one", F.how_to_run(""), "")
 
 
+def test_a_request_claimed_and_never_answered_goes_back_in_the_inbox():
+    """
+    THE NINETEEN-DAY BUG, and it was worse than a slow sector.
+
+    claim_request moves a request to 'claimed'. The receiving sector's own
+    inbox, open_requests_for, lists status='open' only. The unanswered check
+    counts 'open' AND 'claimed'. So the moment an agent claimed a request and
+    died before replying, the request became INVISIBLE to the sector that owed
+    the answer and permanently visible to the Overseer as that sector ignoring
+    it.
+
+    The owner watched both halves at once: "Content has not answered SEO in 19
+    days" on his phone every morning, and content_briefs reporting — correctly,
+    from what it could see — that there was nothing to claim. Neither was
+    lying. Tasks were given a way out of this long ago; requests never were.
+    """
+    print("\nA request stuck at 'claimed' is invisible to the sector that owes it:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - 19 * 86400
+        cab.write("INSERT INTO requests(id,from_sector,to_sector,subject,status,"
+                  "handler,created_at) VALUES('rq1','SEO','Content',"
+                  "'Keyword-gap list ready','claimed','content-writer',?)", (old,))
+        check("Content's inbox is empty",
+              [r["id"] for r in board.open_requests_for("Content")], [])
+        check("while the Overseer counts it against Content",
+              any(f["kind"] == "unanswered" and f["sector"] == "Content"
+                  for f in F.detect()), True)
+
+        print("  ...so the Overseer puts it back where the sector can see it:")
+        freed = board.release_dead_request_claims()
+        check("one released", len(freed), 1)
+        check("named", freed[0]["id"], "rq1")
+        check("with how long it sat", freed[0]["stuck_for"] >= 19 * 86400, True)
+        check("and Content can finally see it",
+              [r["id"] for r in board.open_requests_for("Content")], ["rq1"])
+
+    print("\n...but a handler that ANSWERED and left the thread open is finished:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - 19 * 86400
+        cab.write("INSERT INTO requests(id,from_sector,to_sector,subject,status,"
+                  "handler,created_at) VALUES('rq2','SEO','Content','Done one',"
+                  "'claimed','content-writer',?)", (old,))
+        cab.write("INSERT INTO request_msgs(request_id,author,body,at)"
+                  " VALUES('rq2','content-writer','here you go',?)",
+                  (int(time.time()),))
+        check("not yanked back off him", board.release_dead_request_claims(), [])
+
+    print("\n...and an agent genuinely working right now is left alone:")
+    with _Cabinet() as cab:
+        cab.write("INSERT INTO requests(id,from_sector,to_sector,subject,status,"
+                  "created_at) VALUES('rq3','SEO','Content','Fresh','open',?)",
+                  (int(time.time()),))
+        check("claimed just now", board.claim_request("rq3", "content-writer"), True)
+        check("nothing released", board.release_dead_request_claims(), [])
+        check("and it is still theirs",
+              cab.sql("SELECT handler FROM requests WHERE id='rq3'")[0]["handler"],
+              "content-writer")
+
+    print("\n...the claim is timestamped, which is what makes any of this possible:")
+    with _Cabinet() as cab:
+        cab.write("INSERT INTO requests(id,from_sector,to_sector,subject,status,"
+                  "created_at) VALUES('rq4','SEO','Content','X','open',?)",
+                  (int(time.time()),))
+        board.claim_request("rq4", "content-writer")
+        row = cab.sql("SELECT claimed_at FROM requests WHERE id='rq4'")[0]
+        check("recorded", bool(row["claimed_at"]), True)
+
+    print("\n...and a cabinet older than the column still gets its rows back:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - 19 * 86400
+        # No claimed_at at all — which is exactly what every row claimed
+        # before the column existed looks like after the migration.
+        cab.write("INSERT INTO requests(id,from_sector,to_sector,subject,status,"
+                  "handler,created_at) VALUES('rq5','SEO','Content',"
+                  "'Old cabinet','claimed','content-writer',?)", (old,))
+        check("falls back to when it was created",
+              len(board.release_dead_request_claims()), 1)
+
+
 def test_a_sector_falling_apart_is_raised_once():
     print("\nA sector with several faults gets ONE message about the pattern:")
     with _Cabinet() as cab:
@@ -487,6 +566,7 @@ def main():
               test_a_degraded_fault_waits_before_escalating,
               test_one_silent_sector_is_one_message,
               test_an_unanswered_request_says_which_command_answers_it,
+              test_a_request_claimed_and_never_answered_goes_back_in_the_inbox,
               test_a_sector_falling_apart_is_raised_once,
               test_a_fault_that_fixes_itself_closes_what_it_opened,
               test_a_claimed_ticket_is_never_yanked,

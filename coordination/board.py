@@ -578,6 +578,15 @@ _ADDED_COLUMNS = (
     # name "leads-outreach" and ranked a stalled-agent notice as a customer
     # waiting for a reply.
     ("requests",     "about",        "TEXT"),
+    # WHEN it was claimed. Without this a request could be claimed and never
+    # answered, and nothing could tell the difference between "an agent is
+    # working on it right now" and "an agent took it three weeks ago and
+    # died". The sector's own inbox only lists status='open', so a stuck claim
+    # made the request invisible to the very sector being blamed for ignoring
+    # it — the Overseer counted it as unanswered for nineteen days while
+    # Content, asked to answer it, correctly reported there was nothing to
+    # claim. Tasks were given a way out of this; requests never were.
+    ("requests",     "claimed_at",   "INTEGER"),
     # The same two ideas, one table over. Tasks were handed out in arrival
     # order with no notion of what they were about or who they were for, so an
     # urgent one queued behind a trivial one and any desk could claim any task
@@ -1028,13 +1037,68 @@ def post_request(from_sector, to_sector, subject, body,
 def claim_request(request_id, agent):
     """The receiving sector claims the request so two agents don't both answer."""
     with _conn() as c:
+        _migrate(c)
         c.execute("BEGIN IMMEDIATE;")
         cur = c.execute(
-            "UPDATE requests SET status='claimed', handler=? WHERE id=? AND status='open'",
-            (agent, request_id),
+            "UPDATE requests SET status='claimed', handler=?, claimed_at=?"
+            " WHERE id=? AND status='open'",
+            (agent, _now(), request_id),
         )
         c.execute("COMMIT;")
         return cur.rowcount == 1
+
+
+# How long a claimed-but-unanswered request may sit before the claim is treated
+# as dead and the request goes back in the sector's inbox. Generous: a real
+# agent answers in seconds, so an hour is already far past "still working".
+DEAD_REQUEST_CLAIM_SECS = 3600
+
+
+def release_dead_request_claims(older_than=DEAD_REQUEST_CLAIM_SECS) -> list:
+    """
+    Put back requests an agent claimed and then never answered.
+
+    THE NINETEEN-DAY BUG. claim_request moves a request to 'claimed'. The
+    sector's own inbox, open_requests_for, lists status='open' only. The
+    Overseer's unanswered check counts 'open' AND 'claimed'. So the moment an
+    agent claimed a request and died before replying, the request became
+    invisible to the sector that owed the answer, and permanently visible to
+    the Overseer as that sector ignoring it.
+
+    The owner watched the result for nineteen days: "Content has not answered
+    SEO" on his phone every morning, and content_briefs reporting — correctly,
+    from what it could see — that there was nothing to claim.
+
+    Only claims with NO reply on the thread are released. A handler that
+    answered and left the thread open is finished, not stuck, and yanking that
+    back would hand the same work to a second agent.
+    """
+    now = _now()
+    out = []
+    with _conn() as c:
+        _migrate(c)
+        rows = c.execute(
+            "SELECT r.id, r.to_sector, r.from_sector, r.handler, r.subject,"
+            "       r.claimed_at, r.created_at,"
+            "       (SELECT count(*) FROM request_msgs m"
+            "          WHERE m.request_id = r.id AND m.author = r.handler) AS replies"
+            "  FROM requests r WHERE r.status='claimed'").fetchall()
+        for r in rows:
+            if r["replies"]:
+                continue                       # answered, just not closed
+            # An old cabinet has claims made before claimed_at existed. Fall
+            # back to created_at rather than skipping them for ever, which
+            # would leave exactly the rows this was written to rescue stuck.
+            since = int(r["claimed_at"] or r["created_at"] or now)
+            if now - since < older_than:
+                continue                       # genuinely still working
+            c.execute("UPDATE requests SET status='open', handler=NULL,"
+                      " claimed_at=NULL WHERE id=? AND status='claimed'",
+                      (r["id"],))
+            out.append({"id": r["id"], "sector": r["to_sector"],
+                        "from": r["from_sector"], "was": r["handler"],
+                        "subject": r["subject"], "stuck_for": now - since})
+    return out
 
 
 def reply_request(request_id, agent, body, close=False):

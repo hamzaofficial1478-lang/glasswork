@@ -769,6 +769,31 @@ _MAILTO = re.compile(r'href=["\']mailto:([^"\'?]+)', re.I)
 _WA = re.compile(r'wa\.me/(\d{6,})', re.I)
 
 
+def _saved_address() -> tuple:
+    """
+    (street, city) as the owner saved them, or ("", "") if he has not.
+
+    BUSINESS_ADDRESS and BUSINESS_CITY in .env — one place, read every time the
+    markup is rebuilt, so putting the real address in is a thing you do once
+    rather than a hand-edit that a regeneration silently reverts.
+    """
+    import os
+    try:
+        from providers import integrations
+        env = integrations.read_env()
+    except Exception:
+        env = {}
+    g = lambda k: (os.environ.get(k) or env.get(k) or "").strip()
+    street = g("BUSINESS_ADDRESS")
+    city = g("BUSINESS_CITY") or g("BUSINESS_EMIRATE")
+    # A placeholder someone pasted back in is not an address.
+    if street.upper().startswith("YOUR "):
+        street = ""
+    if city.upper().startswith("YOUR "):
+        city = ""
+    return street, city
+
+
 def localbusiness_jsonld(base, pages) -> tuple:
     """
     Draft LocalBusiness markup from the details ALREADY on the site.
@@ -814,7 +839,20 @@ def localbusiness_jsonld(base, pages) -> tuple:
     if not email:
         email = "YOUR EMAIL"
         missing.append("email")
-    missing.append("address")          # never scraped: too easy to get wrong
+    # THE ADDRESS IS A SETTING, NOT A HAND-EDIT.
+    #
+    # It is never scraped: it is nowhere on his site, and a wrong address costs
+    # the map-pack ranking this whole block exists to win, because Google
+    # cross-checks it against the Business Profile.
+    #
+    # But leaving a placeholder for him to edit into the generated file was the
+    # wrong answer too. He edits it, the draft is regenerated next week, and
+    # the placeholder is back — so the apply step refuses again and he has to
+    # remember why. Saved once on /setup (or in .env) it survives every rebuild.
+    street, city = _saved_address()
+    if not street:
+        street, city = "YOUR STREET / UNIT", city or "YOUR EMIRATE e.g. Dubai"
+        missing.append("address")
 
     doc = {
         "@context": "https://schema.org",
@@ -825,8 +863,8 @@ def localbusiness_jsonld(base, pages) -> tuple:
         "email": email,
         "address": {
             "@type": "PostalAddress",
-            "streetAddress": "YOUR STREET / UNIT",
-            "addressLocality": "YOUR EMIRATE e.g. Dubai",
+            "streetAddress": street,
+            "addressLocality": city or "Dubai",
             "addressCountry": "AE",
         },
         "areaServed": ["Dubai", "Abu Dhabi", "Sharjah"],
