@@ -483,6 +483,32 @@ def _one_block(text) -> str:
 
 
 def _draft(name) -> str:
+    """
+    The block to put on the site, built fresh where it can be.
+
+    THE FILE IS A SAMPLE; .env IS THE TRUTH.
+
+    --set-address used to write the real address into this tracked file, and
+    that was a trap of my own making: run.py refuses to pull while anything is
+    modified, so saving his address quietly blocked every future update — the
+    same accident npm caused with package-lock.json, which this program
+    already had to learn once.
+
+    Rebuilding from BUSINESS_ADDRESS at the moment of use means the file can be
+    reverted by any pull, at any time, and the right address still goes on the
+    site. Falls back to the file when the live build cannot run, so a broken
+    import degrades to yesterday's answer rather than to nothing.
+    """
+    if "localbusiness" in name.lower():
+        try:
+            from . import seo_answers
+            from coordination import site as site_cfg
+            snippet, _missing = seo_answers.localbusiness_jsonld(
+                site_cfg.site_url(), [])
+            if snippet and "YOUR STREET" not in snippet:
+                return _one_block(snippet)
+        except Exception:
+            pass
     p = _drafts_dir() / name
     return _one_block(p.read_text(encoding="utf-8")) if p.exists() else ""
 
@@ -626,6 +652,29 @@ def head_holder(candidates, s=None) -> str:
                             got.get("html") or "", re.I):
             seen.add(m.lstrip("./"))
     for name in sorted(seen):
+        got = read_page(name, s=s)
+        if got.get("ok") and "</head" in (got.get("html") or "").lower():
+            return name
+
+    # NOTHING NAMED AN INCLUDE WE COULD READ, SO GO AND LOOK.
+    #
+    # An include can be written a dozen ways — a constant, a variable, a
+    # front controller, a path built at run time — and a regex will miss most
+    # of them. Rather than give up and refuse every page again, ask the server
+    # for its files and read the ones that are plausibly a header. Cheap: a
+    # handful of reads, and only when the regex has already come up empty.
+    p = pages(s=s)
+    if not p.get("ok"):
+        return ""
+    likely, rest = [], []
+    for row in p.get("pages") or []:
+        n = row["page"]
+        if n in candidates:
+            continue
+        (likely if any(w in n.lower() for w in
+                       ("head", "header", "top", "meta", "layout", "template"))
+         else rest).append(n)
+    for name in likely + rest[:12]:
         got = read_page(name, s=s)
         if got.get("ok") and "</head" in (got.get("html") or "").lower():
             return name

@@ -124,7 +124,17 @@ def npm_install(timeout=600):
 # Two halves to the fix. `npm ci` below installs from the lockfile without
 # rewriting it, which stops the churn at source. This list handles the copies
 # already dirtied on machines that have been running the old command for weeks.
-SELF_WRITTEN = ("package-lock.json", "package.json.lock", "npm-shrinkwrap.json")
+SELF_WRITTEN = ("package-lock.json", "package.json.lock", "npm-shrinkwrap.json",
+                # Drafts the agency GENERATES from his own site and settings.
+                # --set-address rewrote the first of these, and that one save
+                # blocked every later `git pull` — the identical accident npm
+                # caused above, made by this program's own code the second
+                # time round. They are output, not his work: the address lives
+                # in .env and the block is rebuilt from it whenever it is
+                # used, so restoring these costs nothing at all.
+                "paste-into-your-site/1-localbusiness-every-page.html",
+                "paste-into-your-site/2-faq-schema-faq-page.html",
+                "paste-into-your-site/HEAD-BLOCK-paste-once.php")
 
 
 def _only_self_written(dirty: str) -> list:

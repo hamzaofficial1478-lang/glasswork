@@ -530,6 +530,77 @@ def test_the_canonical_is_pointed_back_at_the_real_site():
     check("the page untouched", site.pages["about.php"], src)
 
 
+def test_the_header_is_found_even_when_no_page_names_it():
+    """
+    His pages were refused twice with "no </head> to insert before". The first
+    time the code did not look for an include at all. The second time it looked
+    for `include 'header.php'` — and an include can be written a dozen ways: a
+    constant, a variable, a path built at run time. A regex misses most of
+    them, and missing it means refusing every page again.
+    """
+    from . import site_api as S
+    print("\nWhen no page spells out its include, go and look:")
+    incl = "<html><head><title>t</title>\n</head><body>"
+    pg = "<?php require_once TEMPLATE_DIR . $tpl; ?><h1>hi</h1>"
+    site = _Site({"index.php": pg, "about.php": pg,
+                  "inc/site-header.php": incl, "footer.php": "<footer>x"})
+    check("found by looking, not by parsing",
+          _with_site(site, lambda: S.head_holder(["index.php", "about.php"], FULL)),
+          "inc/site-header.php")
+
+    print("\n...a file NAMED like a header is tried before the rest:")
+    site = _Site({"index.php": pg, "zz-other.php": incl, "header.php": incl})
+    check("the obvious one wins",
+          _with_site(site, lambda: S.head_holder(["index.php"], FULL)),
+          "header.php")
+
+    print("\n...and a site with no head anywhere says so rather than guessing:")
+    site = _Site({"index.php": pg, "footer.php": "<footer>x</footer>"})
+    check("nothing found", _with_site(site, lambda: S.head_holder(["index.php"], FULL)), "")
+
+
+def test_the_address_survives_a_git_pull():
+    """
+    --set-address wrote the real address into a TRACKED file, so saving it
+    quietly blocked every future `git pull` — run.py refuses to update while
+    anything is modified. Exactly the accident npm caused with
+    package-lock.json, repeated by this program's own code.
+
+    Two halves. The block is rebuilt from .env when it is used, so the file
+    can be reverted at any time with nothing lost; and the updater knows these
+    drafts are its own output, not his work.
+    """
+    import os
+    from . import site_api as S
+    print("\nThe address comes from the setting, not from the file:")
+    old_a = os.environ.get("BUSINESS_ADDRESS")
+    old_c = os.environ.get("BUSINESS_CITY")
+    os.environ["BUSINESS_ADDRESS"] = "Warehouse 12, Al Quoz Industrial 3"
+    os.environ["BUSINESS_CITY"] = "Dubai"
+    try:
+        block = S._draft("1-localbusiness-every-page.html")
+    finally:
+        for k, v in (("BUSINESS_ADDRESS", old_a), ("BUSINESS_CITY", old_c)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    check("the saved address is in it", "Al Quoz Industrial 3" in block, True)
+    check("and the placeholder is not", "YOUR STREET" in block, False)
+
+    print("\n...and the updater treats those drafts as its own output:")
+    import run as R
+    for f in ("paste-into-your-site/1-localbusiness-every-page.html",
+              "paste-into-your-site/2-faq-schema-faq-page.html"):
+        check(f"{f.split('/')[-1]} is restorable", f in R.SELF_WRITTEN, True)
+    check("so a pull is not blocked by it",
+          R._only_self_written(" M paste-into-your-site/1-localbusiness-every-page.html"),
+          ["paste-into-your-site/1-localbusiness-every-page.html"])
+    print("  ...but a file HE edited still stops the pull:")
+    check("his own work is never thrown away",
+          R._only_self_written(" M pipelines/services.py"), [])
+
+
 def main():
     for t in (test_the_two_setup_boxes_finally_lead_somewhere,
               test_only_the_releaser_may_change_the_site,
@@ -541,7 +612,9 @@ def main():
               test_it_writes_only_to_pages_the_site_actually_serves,
               test_a_shared_header_gets_the_block_once,
               test_the_markup_can_be_taken_straight_back_off,
-              test_the_canonical_is_pointed_back_at_the_real_site):
+              test_the_canonical_is_pointed_back_at_the_real_site,
+              test_the_header_is_found_even_when_no_page_names_it,
+              test_the_address_survives_a_git_pull):
         t()
     print()
     if _fail:
