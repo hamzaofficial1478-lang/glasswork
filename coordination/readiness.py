@@ -114,7 +114,15 @@ SHELVES = {
     # send because a shelf he does not need was empty. The shelf exists for its
     # LOCK (turn-taking and the outreach cap) and for an optional second
     # provider, and readiness reads .env for the route it actually uses.
-    "leads": {"maps": True, "email": False},
+    # maps is OPTIONAL now, and that is a real change rather than a softening.
+    # It was required because search_places was the only way the Hunter found
+    # anybody — no key, no leads, and the room went dark honestly. There is now
+    # a second collector, pipelines/leads_osm.py, which finds UAE businesses on
+    # OpenStreetMap with no key and no charge. It is thinner than Google in the
+    # UAE and does not pretend otherwise; both collectors feed the same dedup
+    # gate, so a Places key still buys real coverage. What it no longer buys is
+    # the difference between a working sector and a dark one.
+    "leads": {"maps": False, "email": False},
     # Pexels (and whatever second stock provider sits under it) is Content's
     # only picture source now — image generation was dropped. Still optional at
     # SECTOR level, and that is deliberate: content_briefs.py writes briefs and

@@ -127,6 +127,10 @@ STEPS = [
 
     ("Leads maps its sources", "pipelines.leads_sources", "Leads", "leads"),
     ("Leads collects", "pipelines.leads_hunt", "Leads", "leads"),
+    # The keyless collector, alongside the Places one rather than instead
+    # of it. Two partial lists through one dedup gate beat one partial
+    # list, and this one runs whether or not a Places key exists.
+    ("Leads collects from OpenStreetMap", "pipelines.leads_osm", "Leads", "leads"),
     # LAST in the Leads lane, and only after Security has had its pass — see
     # the 'outreach' lane below. Collecting a lead and writing to it in the
     # same breath is how an unscreened one gets contacted.
@@ -524,9 +528,25 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
                         + ". Fix these, or press Run again with 'run anyway'.")}
 
     if not board.acquire_lock(LOCK, LOCK_HOLDER, wait=False, ttl=3 * 3600):
-        return {"ok": False, "ran": False, "busy": True,
-                "why": "A day is already running. Wait for it to finish — two "
-                       "runs at once means two MDs planning the same day."}
+        # IS THE HOLDER ACTUALLY ALIVE? Asking status() runs the reaper, which
+        # settles it from progress and clears the lock if the run is a corpse.
+        # Without this the owner is told "a day is already running" by a day
+        # that died hours ago, and his only options are waiting out a
+        # three-hour lease or editing the database.
+        st = status()
+        stale = (st.get("run") or {}).get("status") in ("stalled", None)
+        if stale and board.acquire_lock(LOCK, LOCK_HOLDER, wait=False, ttl=3 * 3600):
+            pass                          # took it over; the last run was dead
+        else:
+            live = (st.get("run") or {}).get("id", "")
+            return {"ok": False, "ran": False, "busy": True,
+                    "why": ("A day is already running"
+                            + (f" ({st.get('head')})" if st.get("head") else "")
+                            + ". Wait for it to finish — two runs at once means "
+                              "two MDs planning the same day. If you are sure "
+                              "nothing is running, clear it with: "
+                              "python -m pipelines.day_run --unlock"),
+                    "run_id": live}
 
     # The owner's words go on the board FIRST, so the MD plans around them
     # rather than over them. An order for a sector that does not exist is
@@ -592,27 +612,35 @@ def _reap(c, run, steps) -> bool:
     away. Left alone, the office shows "running" for ever, the Run button
     stays greyed out, and the owner has no way back except deleting rows.
 
-    Two signals, and either is enough. The lock is the strong one: the run
-    holds 'day_run' for its whole life, so if nobody holds it the process is
-    gone. Progress is the backstop for the window where the lock has expired
-    under a genuinely long run — no step has moved in longer than a step is
-    allowed to take, and that is not slow, that is dead.
+    PROGRESS IS THE SIGNAL, AND IT USED TO BE THE BACKSTOP TO ONE THAT DEADLOCKED.
+
+    This used to treat the lock as the strong signal: nobody holding 'day_run'
+    means the process is gone. True, and useless, because the lock outlives the
+    process by its own three-hour TTL. So a run killed at 09:00 left the lock
+    held until noon; the reaper refused to reap because the lock was held, and
+    start() refused to start because the lock was held. The owner pressed Run
+    and was told "a day is already running" by a day that had died hours
+    earlier, with no way out but waiting.
+
+    Progress alone settles it. A live run moves a step — and now that lanes run
+    side by side, several at once — so nothing having moved in longer than a
+    single step is allowed to take is not slow, it is dead. The lock is then a
+    thing to CLEAN UP rather than a thing to consult.
     """
     now = _now()
     last = max([run["started_at"] or 0]
                + [s["ended_at"] or s["started_at"] or 0 for s in steps])
     if now - last <= STEP_TIMEOUT + 120:
         return False
-    holder = c.execute("SELECT holder, expires_at FROM locks WHERE resource=?",
-                       (LOCK,)).fetchone()
-    held = bool(holder) and (holder["expires_at"] or 0) > now
-    if held:
-        return False
     c.execute("UPDATE day_runs SET status='stalled', ended_at=? WHERE id=? AND status='running'",
               (last, run["id"]))
     c.execute("UPDATE day_steps SET status='failed', ended_at=?,"
               " summary=COALESCE(summary,'the run was killed before this step finished')"
               " WHERE run_id=? AND status='running'", (last, run["id"]))
+    # And let go of the door on the way out. The run held 'day_run' for its
+    # whole life and died without releasing it; leaving it there is what locked
+    # the owner out of his own agency for the rest of the lease.
+    c.execute("DELETE FROM locks WHERE resource=? AND holder=?", (LOCK, LOCK_HOLDER))
     return True
 
 
@@ -674,6 +702,36 @@ def status(run_id=None) -> dict:
             "head": head}
 
 
+def unlock() -> dict:
+    """
+    Let go of the day lock by hand, and close off whatever was holding it.
+
+    The reaper settles almost every case on its own. This is for the one it
+    cannot: a run genuinely still moving that the owner nonetheless wants
+    stopped — a machine he has just rebooted, a container that went away
+    mid-step. It is deliberately explicit and deliberately loud, because
+    releasing a lock somebody is legitimately holding is how two MDs end up
+    planning the same day.
+    """
+    board.ensure_schema()
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        c.row_factory = sqlite3.Row
+        held = c.execute("SELECT holder, expires_at FROM locks WHERE resource=?",
+                         (LOCK,)).fetchone()
+        c.execute("DELETE FROM locks WHERE resource=?", (LOCK,))
+        n = c.execute("SELECT count(*) FROM day_runs WHERE status='running'").fetchone()[0]
+        c.execute("UPDATE day_runs SET status='stalled', ended_at=?"
+                  " WHERE status='running'", (_now(),))
+        c.execute("UPDATE day_steps SET status='failed', ended_at=?,"
+                  " summary=COALESCE(summary,'cleared by hand with --unlock')"
+                  " WHERE status='running'", (_now(),))
+    return {"ok": True, "was_held_by": (dict(held)["holder"] if held else ""),
+            "runs_closed": n,
+            "why": ("The day lock is clear"
+                    + (f"; {n} run(s) marked stalled" if n else "")
+                    + ". Press Run again.")}
+
+
 def _print_check(p):
     print(f"PREFLIGHT — {p['head']}  ({p['took_ms']}ms)")
     print(f"  {'ok ' if p['cabinet']['ok'] else 'BAD'} {p['cabinet']['name']}: {p['cabinet']['says']}")
@@ -698,6 +756,8 @@ def main():
     ap.add_argument("--check", action="store_true", help="preflight only, run nothing")
     ap.add_argument("--start", action="store_true", help="preflight, then run the day")
     ap.add_argument("--status", action="store_true", help="what the last run did")
+    ap.add_argument("--unlock", action="store_true",
+                    help="clear a stuck day lock when nothing is really running")
     ap.add_argument("--force", action="store_true", help="run even if something is broken")
     ap.add_argument("--quick", action="store_true", help="skip the live API calls")
     ap.add_argument("--skip-check", action="store_true", help="run without checking first")
@@ -716,6 +776,11 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "error": f"bad input: {e}"}))
             return 2
+
+    if a.unlock:
+        r = unlock()
+        print(json.dumps(r) if a.json else r["why"])
+        return 0
 
     if a.status:
         print(json.dumps(status()) if a.json else json.dumps(status(), indent=2))

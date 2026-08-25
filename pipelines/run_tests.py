@@ -49,6 +49,15 @@ def _fresh_db():
     return db
 
 
+def _rows(q, args=()):
+    """Read from the throwaway cabinet. Used by the assertions, not the code."""
+    c = sqlite3.connect(board.DB)
+    try:
+        return c.execute(q, args).fetchall()
+    finally:
+        c.close()
+
+
 def _now():
     return int(time.time())
 
@@ -94,12 +103,35 @@ def _readiness_tests():
 
         print("\nA required shelf outranks everything else:")
         readiness._brains = lambda task: proven
+        # THIS USED TO ASSERT THAT AN EMPTY MAPS SHELF BLOCKS LEADS, and that
+        # was right for as long as search_places was the only way the Hunter
+        # found anybody. pipelines/leads_osm.py finds UAE businesses on
+        # OpenStreetMap with no key, so a missing Places key is now a coverage
+        # note rather than a dead room — and a lamp saying BLOCKED over a
+        # sector that can work would be the lamp lying.
         r = readiness.sector("leads", "leads",
                              env={"SMTP_HOST": "h", "OUTREACH_DOMAIN": "d"},
                              shelf={"maps": {"items": 0, "working": 0},
                                     "email": {"items": 2, "working": 2}})
-        check("empty maps shelf blocks Leads", r["state"], "blocked")
-        check("and names the shelf", any("maps" in b for b in r["blocking"]), True)
+        check("no Places key is no longer a blackout", r["state"] != "blocked", True)
+        check("and nothing claims the shelf stops it",
+              any("maps" in b for b in r["blocking"]), False)
+        # ...but a shelf that IS required still outranks everything, which is
+        # what this section is actually here to protect. Assert it against the
+        # declaration rather than one sector's current list, so the rule keeps
+        # being tested after the next sector changes its mind.
+        required = [(s, k) for s, sh in readiness.SHELVES.items()
+                    for k, need in sh.items() if need]
+        if required:
+            sec, shelf_name = required[0]
+            r = readiness.sector(sec, sec, env={},
+                                 shelf={shelf_name: {"items": 0, "working": 0}})
+            check(f"an empty REQUIRED shelf still blocks ({sec}/{shelf_name})",
+                  r["state"], "blocked")
+            check("and names it",
+                  any(shelf_name in b for b in r["blocking"]), True)
+        else:
+            check("no shelf is required of any sector any more — noted", True, True)
 
         r = readiness.sector("content", "content", env={},
                              shelf={"stock_images": {"items": 0, "working": 0},
@@ -351,21 +383,48 @@ def _day_run_tests():
     check("the head tells the owner to press Run again",
           "Press Run again" in st["head"], True)
 
-    print("\n...but a slow run holding its lock is left alone:")
+    print("\n...but a run that is actually MOVING is left alone:")
+    # THIS USED TO ASSERT THAT HOLDING THE LOCK PROTECTED A RUN, and the owner
+    # paid for it: a run killed hours earlier still held the lock for its
+    # three-hour lease, the reaper refused to reap because the lock was held,
+    # and start() refused to start because the lock was held. Each waited for
+    # the other and he was told "a day is already running" by a corpse.
+    #
+    # Progress is the signal now, and the lock is a thing to clean up. So the
+    # fixture here has to be a run that is genuinely moving — because that is
+    # the thing that must be protected, and a lock is not evidence of life.
+    now = _now()
     con = sqlite3.connect(board.DB)
     con.execute("INSERT INTO day_runs(id,started_at,status,started_by,steps_total)"
-                " VALUES('slow',?,'running','owner',1)", (long_ago,))
+                " VALUES('slow',?,'running','owner',1)", (now - 60,))
     con.execute("INSERT INTO day_steps(run_id,seq,label,module,status,started_at)"
                 " VALUES('slow',0,'SEO watches','pipelines.competitors','running',?)",
-                (long_ago,))
+                (now - 30,))
     con.commit(); con.close()
     board.acquire_lock(day_run.LOCK, day_run.LOCK_HOLDER, wait=False, ttl=600)
     try:
         st = day_run.status("slow")
-        check("still running, because somebody still holds the lock",
+        check("still running, because a step moved a moment ago",
               st["run"]["status"], "running")
+        check("and it keeps its lock",
+              bool(_rows("SELECT 1 FROM locks WHERE resource=?", (day_run.LOCK,))),
+              True)
     finally:
         board.release_lock(day_run.LOCK, day_run.LOCK_HOLDER)
+
+    print("\n...and a dead one lets go of the lock, so the button works again:")
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO day_runs(id,started_at,status,started_by,steps_total)"
+                " VALUES('gone',?,'running','owner',1)", (long_ago,))
+    con.execute("INSERT INTO day_steps(run_id,seq,label,module,status,started_at)"
+                " VALUES('gone',0,'SEO watches','pipelines.competitors','running',?)",
+                (long_ago,))
+    con.commit(); con.close()
+    board.acquire_lock(day_run.LOCK, day_run.LOCK_HOLDER, wait=False, ttl=3 * 3600)
+    st = day_run.status("gone")
+    check("reaped despite the lease having hours left", st["run"]["status"], "stalled")
+    check("and the lock is released with it",
+          _rows("SELECT 1 FROM locks WHERE resource=?", (day_run.LOCK,)), [])
 
     print("\nThe same complaint from two checks is one problem:")
     check("deduplicated, order kept",
