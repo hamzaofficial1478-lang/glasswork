@@ -126,6 +126,67 @@ def segments_covered():
 
 
 # ---------------------------------------------------------------------------
+# CHAINS ARE NOT LOCALS
+# ---------------------------------------------------------------------------
+#
+# The first real run in Dubai came back with Krispy Kreme, McDonald's, Burger
+# King, Subway, Costa Coffee, KFC, Starbucks, Five Guys and Papa John's. Every
+# one is a franchise with procurement in another country, and the owner had
+# already said, about Google: "most of the data is related to agencies,
+# businesses and majors, while what I want is the locals."
+#
+# Swapping Google for OSM and keeping the chains would have reproduced his
+# complaint with a different data source. A shopfront job is won by walking
+# into a cafeteria and talking to the man who owns it; nobody wins one by
+# emailing a global brand's info@ address.
+#
+# OSM makes this checkable rather than guessable. Mappers tag a recognised
+# brand with `brand:wikidata` — a curated identifier for a specific company —
+# and the same for `operator:wikidata`. A one-room cafeteria in Al Quoz has
+# neither. That is evidence in the data, not a list of names somebody has to
+# maintain and will forget to update.
+
+CHAIN_TAGS = ("brand:wikidata", "operator:wikidata", "brand:wikipedia")
+
+# How many times one name has to appear in a single result set before it is a
+# chain whatever its tags say. Two branches is a local success story; four is
+# a franchise.
+CHAIN_REPEATS = 3
+
+
+def chain_verdict(tags) -> tuple:
+    """(is_a_chain, why). Read off the tags, never off a list of brand names."""
+    for t in CHAIN_TAGS:
+        if (tags.get(t) or "").strip():
+            brand = (tags.get("brand") or tags.get("operator") or "").strip()
+            return True, (f"a recognised brand ({brand})" if brand
+                          else f"tagged {t}")
+    return False, ""
+
+
+def drop_chains(cands, elements=None, repeats=CHAIN_REPEATS):
+    """
+    (locals, dropped). `dropped` carries the reason for each, because a
+    collector that silently halves its own output is indistinguishable from a
+    broken one.
+    """
+    counts = {}
+    for c in cands:
+        counts[c["company"].strip().lower()] = \
+            counts.get(c["company"].strip().lower(), 0) + 1
+    keep, dropped = [], []
+    for c in cands:
+        why = c.pop("_chain_why", "")
+        if not why and counts.get(c["company"].strip().lower(), 0) >= repeats:
+            why = f"{counts[c['company'].strip().lower()]} branches in one search"
+        if why:
+            dropped.append({"company": c["company"], "why": why})
+        else:
+            keep.append(c)
+    return keep, dropped
+
+
+# ---------------------------------------------------------------------------
 # THE QUERY
 # ---------------------------------------------------------------------------
 
@@ -222,7 +283,11 @@ def to_candidate(el, segment, area="") -> dict:
         site = "https://" + site.lstrip("/")
     svc, why = services.match_service(name, _first(tags, "cuisine", "shop", "amenity"),
                                       segment=segment)
+    is_chain, chain_why = chain_verdict(tags)
     return {
+        # Carried, not acted on here — drop_chains() decides, so a caller that
+        # genuinely wants the chains can have them.
+        "_chain_why": chain_why if is_chain else "",
         "company": name[:120],
         "phone": phone[:40],
         "website": site[:200],
@@ -238,8 +303,20 @@ def to_candidate(el, segment, area="") -> dict:
     }
 
 
-def find(segment, area="Dubai", limit=MAX_RESULTS) -> dict:
-    """Every named business of one segment in one emirate. Reads only."""
+def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
+    """
+    Every named LOCAL business of one segment in one emirate. Reads only.
+
+    Two things are filtered and both are counted out loud, because the gap
+    between "57 found" and what is actually worth having is the whole story:
+
+      chains        franchises with procurement abroad. See chain_verdict.
+      no way in     OSM knows the shop exists but carries no phone, no
+                    website and no address. There is nothing to do with that
+                    but count it — screen_lead would refuse it downstream
+                    anyway, and filing it would pad the lead list with rows
+                    nobody can ever contact.
+    """
     tags = OSM_TAGS.get(segment)
     if not tags:
         return {"ok": False, "error": f"no OSM tags mapped for '{segment}'. "
@@ -258,25 +335,46 @@ def find(segment, area="Dubai", limit=MAX_RESULTS) -> dict:
             cands.append(c)
         else:
             unnamed += 1
+
+    named = len(cands)
+    if chains:
+        for c in cands:
+            c.pop("_chain_why", None)
+        dropped = []
+    else:
+        cands, dropped = drop_chains(cands)
+
+    # A business with no phone, no site and no address cannot be reached by
+    # anyone, today or later. Counted, not filed.
+    reachable = [c for c in cands
+                 if c["phone"] or c["website"] or c["address"]]
+    no_way_in = len(cands) - len(reachable)
+
     return {"ok": True, "segment": segment, "area": area, "mirror": r["mirror"],
-            "found": len(cands), "unnamed_skipped": unnamed,
-            "with_phone": sum(1 for c in cands if c["phone"]),
-            "with_website": sum(1 for c in cands if c["website"]),
-            "candidates": cands}
+            "on_the_map": named, "unnamed_skipped": unnamed,
+            "chains_dropped": dropped, "no_contact_route": no_way_in,
+            "found": len(reachable),
+            "with_phone": sum(1 for c in reachable if c["phone"]),
+            "with_website": sum(1 for c in reachable if c["website"]),
+            "candidates": reachable,
+            "head": (f"{named} on the map, {len(dropped)} chain(s) dropped, "
+                     f"{no_way_in} with no way to reach them, "
+                     f"{len(reachable)} worth having")}
 
 
 # ---------------------------------------------------------------------------
 # THE PASS
 # ---------------------------------------------------------------------------
 
-def run(agent=AGENT, segment=None, area=None, per_segment=1, dry_run=False):
+def run(agent=AGENT, segment=None, area=None, per_segment=1, dry_run=False,
+        chains=False):
     with board.agent_run(agent) as row:
-        out = _run(agent, segment, area, per_segment, dry_run)
+        out = _run(agent, segment, area, per_segment, dry_run, chains)
         row.note(out.get("head") or out.get("error") or "nothing collected")
         return out
 
 
-def _run(agent, segment, area, per_segment, dry_run):
+def _run(agent, segment, area, per_segment, dry_run, chains=False):
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off."}
     task = board.next_open_task(SECTOR, agent)
@@ -288,7 +386,7 @@ def _run(agent, segment, area, per_segment, dry_run):
     collected, errors = [], []
     for s in segs:
         for a in areas:
-            r = find(s, a)
+            r = find(s, a, chains=chains)
             if not r.get("ok"):
                 errors.append(f"{s}/{a}: {r.get('error')}")
                 continue
@@ -378,6 +476,9 @@ def main():
                     help="can this machine reach OSM? reads only, stores nothing")
     ap.add_argument("--find", metavar="SEGMENT", help="one segment, printed")
     ap.add_argument("--area", default="Dubai")
+    ap.add_argument("--chains", action="store_true",
+                    help="keep the franchises too (dropped by default: they buy "
+                         "centrally, usually abroad)")
     ap.add_argument("--per-segment", type=int, default=1)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -392,14 +493,19 @@ def main():
         return 0 if p.get("ok") else 1
 
     if a.find:
-        r = find(a.find, a.area)
+        r = find(a.find, a.area, chains=a.chains)
         if a.json:
             print(json.dumps(r, indent=2))
         elif not r.get("ok"):
             print("could not: " + str(r.get("error")))
         else:
-            print(f"{r['found']} {a.find} in {a.area} via {r['mirror']} "
-                  f"({r['with_phone']} with a phone, {r['with_website']} with a site)")
+            print(f"{a.find} in {a.area} via {r['mirror']} — {r['head']}")
+            print(f"   {r['with_phone']} with a phone, {r['with_website']} with a site")
+            if r["chains_dropped"]:
+                names = ", ".join(d["company"] for d in r["chains_dropped"][:6])
+                print(f"   dropped as chains: {names}"
+                      + (" ..." if len(r["chains_dropped"]) > 6 else ""))
+            print()
             for c in r["candidates"][:25]:
                 print(f"   {c['company'][:34]:36} {c['phone'][:16]:17} "
                       f"{c['area'][:18]:20} {c['website'][:30]}")

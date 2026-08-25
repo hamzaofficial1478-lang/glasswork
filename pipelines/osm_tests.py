@@ -176,7 +176,7 @@ def test_the_collector_feeds_the_same_gate_as_every_other():
         board.post_task("Leads", "Collect today's leads across the mapped segments",
                         "work the source map")
         real = O.find
-        O.find = lambda seg, area, limit=0: {
+        O.find = lambda seg, area, limit=0, chains=False: {
             "ok": True, "segment": seg, "area": area, "mirror": "test",
             "found": 1, "unnamed_skipped": 0, "with_phone": 1, "with_website": 1,
             "candidates": [O.to_candidate(CAFE, seg, area)]}
@@ -290,6 +290,111 @@ def test_unlock_is_the_escape_hatch_and_says_what_it_did():
         check("and tells him what to do next", "Press Run again" in r["why"], True)
 
 
+
+# ---------------------------------------------------------------------------
+# CHAINS ARE NOT LOCALS
+# ---------------------------------------------------------------------------
+
+CHAIN = {"type": "node", "id": 10, "tags": {
+    "name": "McDonald's", "amenity": "fast_food", "brand": "McDonald's",
+    "brand:wikidata": "Q38076", "phone": "+971600588885",
+    "website": "https://www.mcdelivery.ae/"}}
+LOCAL = {"type": "node", "id": 11, "tags": {
+    "name": "Al Hunoof Public Kitchen", "amenity": "fast_food",
+    "addr:street": "Al Quoz 3"}}
+
+
+def test_the_franchises_are_dropped_and_the_locals_kept():
+    """
+    The first real Dubai run came back Krispy Kreme, McDonald's, Burger King,
+    Subway, Costa Coffee, KFC, Starbucks, Five Guys, Papa John's — every one a
+    franchise buying centrally, usually abroad. The owner had already said,
+    about Google, that he wanted the locals and not the majors. Swapping the
+    data source and keeping the chains would have handed him his own complaint
+    back with a different logo on it.
+    """
+    print("\nA franchise is not a local business:")
+    hit, why = O.chain_verdict(CHAIN["tags"])
+    check("a brand:wikidata tag settles it", hit, True)
+    check("and it names the brand rather than a rule number",
+          "McDonald's" in why, True)
+    check("a one-room kitchen has no such tag",
+          O.chain_verdict(LOCAL["tags"])[0], False)
+
+    print("\n...and four branches of one name is a chain whatever the tags say:")
+    costas = [O.to_candidate({"type": "node", "id": 20 + i,
+                              "tags": {"name": "Costa Coffee", "amenity": "cafe"}},
+                             "food_stall", "Dubai") for i in range(4)]
+    keep, dropped = O.drop_chains(costas)
+    check("all four dropped", len(dropped), 4)
+    check("on the evidence in the data, not a list of names",
+          "branches in one search" in dropped[0]["why"], True)
+
+    print("\n...but two branches is a local success story, not a franchise:")
+    two = [O.to_candidate({"type": "node", "id": 30 + i,
+                           "tags": {"name": "Al Noor Cafeteria", "amenity": "cafe",
+                                    "addr:street": "23rd St"}},
+                          "food_stall", "Dubai") for i in range(2)]
+    keep, dropped = O.drop_chains(two)
+    check("both kept", len(keep), 2)
+    check("nothing dropped", dropped, [])
+
+    print("\n...and the owner can ask for the chains if he ever wants them:")
+    both = [O.to_candidate(CHAIN, "food_stall", "Dubai"),
+            O.to_candidate(LOCAL, "food_stall", "Dubai")]
+    for c in both:
+        c.pop("_chain_why", None)
+    check("nothing is dropped when they are not filtered",
+          len(O.drop_chains(both)[1]), 0)
+
+
+def test_the_headline_says_what_is_actually_worth_having():
+    """
+    57 found meant 7 contactable and the rest chains or dots on a map. A count
+    that hides that is a count that sets him up to think the Hunter is broken.
+    """
+    print("\nThe count separates 'on the map' from 'worth having':")
+    real = O.ask
+    O.ask = lambda q, timeout=0: {
+        "ok": True, "mirror": "test", "tried": [],
+        "elements": [CHAIN, LOCAL,
+                     {"type": "node", "id": 12, "tags": {"amenity": "cafe"}},
+                     {"type": "node", "id": 13,
+                      "tags": {"name": "Nowhere Snacks", "amenity": "cafe"}}]}
+    try:
+        r = O.find("food_stall", "Dubai")
+    finally:
+        O.ask = real
+    check("three had names", r["on_the_map"], 3)
+    check("the unnamed pin was skipped", r["unnamed_skipped"], 1)
+    check("the franchise was dropped", len(r["chains_dropped"]), 1)
+    check("the one with no way in was counted, not filed",
+          r["no_contact_route"], 1)
+    check("leaving the one worth having", r["found"], 1)
+    check("and it is the local", r["candidates"][0]["company"],
+          "Al Hunoof Public Kitchen")
+    check("the headline says all of it", "worth having" in r["head"], True)
+
+
+def test_a_street_address_is_a_way_in_for_this_trade():
+    """
+    Most small UAE businesses on OSM carry a name and an address and no phone.
+    The intake gate demanded an email or a phone, which would have thrown away
+    the majority of exactly the local leads he asked for — and for a glass
+    workshop, an address IS the contact route: you walk in.
+    """
+    print("\nA name and a street is a lead you can walk into:")
+    ok, why = ls.screen_lead({"company": "Al Hunoof Public Kitchen",
+                              "area": "Al Quoz", "address": "Al Quoz 3",
+                              "segment": "food_stall"})
+    check("accepted", ok, True)
+    print("  ...but nothing at all is still nothing:")
+    ok, why = ls.screen_lead({"company": "Ghost Cafeteria", "area": "Dubai",
+                              "segment": "food_stall"})
+    check("refused", ok, False)
+    check("and says what is missing", "not even a street address" in why, True)
+
+
 def main():
     for t in (test_the_query_asks_for_what_is_actually_mapped,
               test_an_osm_point_becomes_a_lead,
@@ -298,6 +403,9 @@ def main():
               test_every_mirror_refusing_is_a_reported_fact,
               test_the_collector_feeds_the_same_gate_as_every_other,
               test_leads_is_no_longer_dark_without_a_places_key,
+              test_the_franchises_are_dropped_and_the_locals_kept,
+              test_the_headline_says_what_is_actually_worth_having,
+              test_a_street_address_is_a_way_in_for_this_trade,
               test_a_dead_run_does_not_hold_the_door_for_three_hours,
               test_unlock_is_the_escape_hatch_and_says_what_it_did):
         t()

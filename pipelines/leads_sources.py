@@ -489,8 +489,24 @@ def screen_lead(c: dict) -> tuple:
         return (False, "outside the UAE — not a market this business serves")
     if not any(r in blob.lower() for r in RELEVANT):
         return (False, "no connection to glass, aluminium or the trades that buy it")
-    if not ((c.get("email") or "").strip() or (c.get("phone") or "").strip()):
-        return (False, "no business contact route recorded")
+    # A STREET ADDRESS IS A CONTACT ROUTE FOR THIS BUSINESS.
+    #
+    # This used to demand an email or a phone, which is right for an agency
+    # that only ever writes. It is wrong for a glass and aluminium workshop in
+    # Dubai: a shopfront job is won by walking into the cafeteria and talking
+    # to the man behind the counter, and "Al Hunoof Public Kitchen, Al Quoz 3"
+    # is everything the owner needs to do that.
+    #
+    # It mattered the moment the OSM collector arrived. Most small UAE
+    # businesses on the map carry a name and an address and no phone at all, so
+    # this line would have thrown away the majority of exactly the local leads
+    # he asked for. Nothing downstream is loosened: outreach still refuses a
+    # lead with no address to write to, and a visit-only lead simply is not
+    # mailed.
+    if not ((c.get("email") or "").strip() or (c.get("phone") or "").strip()
+            or (c.get("address") or "").strip()):
+        return (False, "no way to reach them at all — no email, no phone, "
+                       "not even a street address")
     kind = contact_kind(c)
     if kind == "personal":
         # Allowed, but it is personal data and must not be filed as if it were

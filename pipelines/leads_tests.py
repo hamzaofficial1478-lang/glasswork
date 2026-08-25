@@ -182,8 +182,18 @@ def test_scope_screens():
                                 "segment": seg, "email": "a@b.ae"})
         check(f"{company} is in scope now", ok, True)
 
-    ok, why = ls.screen_lead({**BIZ, "email": "", "phone": ""})
-    check("no contact route refused", (ok, "contact route" in why), (False, True))
+    # A STREET ADDRESS IS A CONTACT ROUTE FOR THIS TRADE, and this used to say
+    # otherwise. Demanding an email or a phone is right for an agency that only
+    # writes; a glass workshop wins a shopfront job by walking in. Most small
+    # UAE businesses on OpenStreetMap carry a name and an address and no phone,
+    # so the old rule would have thrown away the majority of exactly the local
+    # leads the owner asked for.
+    ok, _ = ls.screen_lead({**BIZ, "email": "", "phone": "",
+                            "address": "Al Quoz 3, Dubai"})
+    check("an address with no phone is still a lead you can walk into", ok, True)
+    ok, why = ls.screen_lead({**BIZ, "email": "", "phone": "", "address": ""})
+    check("but nothing at all is refused",
+          (ok, "not even a street address" in why), (False, True))
     ok, _ = ls.screen_lead({**BIZ, "company": ""})
     check("no company name refused", ok, False)
     ok, _ = ls.screen_lead(BIZ)
