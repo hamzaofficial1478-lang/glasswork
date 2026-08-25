@@ -178,13 +178,74 @@ def test_it_only_ever_reads():
           [p for _s, p, _w, _y in S.CHECKS if "?" in p or "=" in p], [])
 
 
+def test_the_check_is_part_of_the_standing_site_report():
+    """
+    Run by hand once, this found his API token published on his website. The
+    leak that matters is not that one — it is the one introduced next week by
+    a file somebody uploads and forgets. A check you have to remember is a
+    check that stops happening.
+    """
+    from . import site_check as C
+    print("\nIt is one of the standing checks, not a command to remember:")
+    real = S.scan
+    S.scan = lambda url=None, **kw: {
+        "ok": True, "checked": 13, "exposed": [], "serious": [], "burned": [],
+        "unreachable": 0, "rows": [], "head": "clean"}
+    try:
+        step = C.step_secure("https://x.ae")
+    finally:
+        S.scan = real
+    check("it has a name he will understand", step["name"], "Private files")
+    check("clean is clean", step["state"], C.OK)
+    check("and it says how many things it looked at",
+          "13 known leak points" in step["says"], True)
+
+    print("\n...a leaked secret fails the whole report, not warns:")
+    S.scan = lambda url=None, **kw: {
+        "ok": False, "checked": 13,
+        "exposed": [{"path": "/agency-api/token.php.txt", "severity": "red"}],
+        "serious": [{"path": "/agency-api/token.php.txt", "severity": "red"}],
+        "burned": [{"path": "/agency-api/token.php.txt", "severity": "red"}],
+        "unreachable": 0, "rows": [], "head": "1 thing"}
+    try:
+        step = C.step_secure("https://x.ae")
+    finally:
+        S.scan = real
+    check("FAIL, not a warning", step["state"], C.FAIL)
+    check("it names the file", "/agency-api/token.php.txt" in step["says"], True)
+    check("and says the token is burned",
+          "compromised" in step["says"], True)
+
+    print("\n...and something merely browsable is a warning, not a failure:")
+    S.scan = lambda url=None, **kw: {
+        "ok": False, "checked": 13,
+        "exposed": [{"path": "/composer.json", "severity": "amber"}],
+        "serious": [], "burned": [], "unreachable": 0, "rows": [], "head": "1"}
+    try:
+        step = C.step_secure("https://x.ae")
+    finally:
+        S.scan = real
+    check("warn", step["state"], C.WARN)
+
+    print("\n...and unreachable is reported, never counted as safe:")
+    S.scan = lambda url=None, **kw: {
+        "ok": True, "checked": 13, "exposed": [], "serious": [], "burned": [],
+        "unreachable": 4, "rows": [], "head": "clean"}
+    try:
+        step = C.step_secure("https://x.ae")
+    finally:
+        S.scan = real
+    check("said out loud", "not the same as safe" in step["says"], True)
+
+
 def main():
     for t in (test_an_empty_php_file_is_the_right_answer_not_a_finding,
               test_refusals_are_recognised_however_they_are_dressed,
               test_unreachable_is_never_filed_as_safe,
               test_a_leaked_token_is_called_burned_not_noted,
               test_a_clean_site_says_so_plainly,
-              test_it_only_ever_reads):
+              test_it_only_ever_reads,
+              test_the_check_is_part_of_the_standing_site_report):
         t()
     print()
     if _fail:

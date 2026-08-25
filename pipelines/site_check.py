@@ -231,6 +231,44 @@ def step_answers(url, max_pages):
                  score=score, worst=worst, blocked=blocked)
 
 
+def step_secure(url):
+    """
+    What of his a stranger can download today.
+
+    Part of the standing check rather than a command he has to remember,
+    because the one time it was run by hand it found his API token published
+    on the website as a text file. A one-off check finds a leak once; the leak
+    that matters is the one introduced next week by a file somebody uploaded
+    and forgot.
+    """
+    from . import site_secure
+    try:
+        out = site_secure.scan(url)
+    except Exception as e:
+        return _step("Private files", FAIL, f"the check would not run: {e}")
+    if out.get("error"):
+        return _step("Private files", FAIL, out["error"])
+    bad, red, burned = out["exposed"], out["serious"], out["burned"]
+    if burned:
+        return _step("Private files", FAIL,
+                     "A SECRET OF YOURS IS PUBLICLY READABLE: "
+                     + ", ".join(b["path"] for b in burned)
+                     + ". Treat that token as compromised — replace it, then "
+                       "delete the file. Run: python -m pipelines.site_secure",
+                     exposed=[b["path"] for b in bad], burned=True)
+    if bad:
+        return _step("Private files",
+                     FAIL if red else WARN,
+                     f"{len(bad)} thing(s) a stranger can download: "
+                     + ", ".join(b["path"] for b in bad)
+                     + ". Run: python -m pipelines.site_secure",
+                     exposed=[b["path"] for b in bad])
+    note = f"{out['checked']} known leak points checked, none readable"
+    if out["unreachable"]:
+        note += f" ({out['unreachable']} could not be reached — not the same as safe)"
+    return _step("Private files", OK, note + ".")
+
+
 def step_console():
     from . import seo_intel
     ok, why = seo_intel.gsc_ready()
@@ -335,6 +373,7 @@ def _steps(url, do_index, max_pages) -> dict:
                lambda: step_services(url),
                lambda: step_search(url, do_index, max_pages),
                lambda: step_answers(url, max_pages),
+               lambda: step_secure(url),
                step_console):
         try:
             steps.append(fn())
