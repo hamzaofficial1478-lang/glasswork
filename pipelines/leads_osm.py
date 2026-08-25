@@ -70,6 +70,12 @@ TIMEOUT = 60
 PAUSE = 2.0          # between calls, deliberately generous
 MAX_RESULTS = 60     # per query; a bigger number is a heavier load on a gift
 
+# How many business websites one pass will read looking for an email address.
+# Each one is up to four page fetches through the metered fetcher, so this is
+# the difference between a lead run and an afternoon. What it does not get to
+# is reported as "left for the next pass", never silently dropped.
+ENRICH_MAX = 12
+
 # Where to look. Emirate-level boxes, because they are well known and stable —
 # a district box would be a guess, and the district is read off the address the
 # POI carries rather than inferred from where we searched.
@@ -109,7 +115,20 @@ OSM_TAGS = {
     "nursery_local": [("amenity", "kindergarten"), ("amenity", "childcare")],
     "school":        [("amenity", "school"), ("amenity", "college")],
     "hospital":      [("amenity", "hospital")],
-    "hotel":         [("tourism", "hotel"), ("tourism", "guest_house")],
+    # Hotel apartments are half the Dubai market and they are tagged
+    # tourism=apartment, not tourism=hotel. Asking only for hotels missed the
+    # segment that refurbishes most often.
+    "hotel":         [("tourism", "hotel"), ("tourism", "guest_house"),
+                      ("tourism", "hostel"), ("tourism", "motel"),
+                      ("tourism", "resort")],
+    # The nearest thing to "rental owners" that exists as a business on a map:
+    # holiday-home and short-let operators. They turn units over constantly,
+    # which means shower glass, mirrors and balcony railings on a short cycle.
+    "holiday_let":   [("tourism", "apartment"), ("tourism", "chalet")],
+    # Who actually holds the keys to other people's villas.
+    "property_management": [("office", "property_management"),
+                            ("office", "estate_agent"),
+                            ("shop", "estate_agent")],
     "retail":        [("shop", "clothes"), ("shop", "furniture"),
                       ("shop", "mobile_phone"), ("shop", "jewelry")],
     "showroom":      [("shop", "car"), ("shop", "furniture")],
@@ -119,8 +138,15 @@ OSM_TAGS = {
     "warehouse":     [("building", "warehouse"), ("industrial", "warehouse")],
     "office":        [("office", "company"), ("office", "estate_agent")],
     "coworking":     [("amenity", "coworking_space"), ("office", "coworking")],
-    "real_estate_agency": [("office", "estate_agent")],
-    "signage":       [("craft", "signmaker"), ("shop", "copyshop")],
+    "real_estate_agency": [("office", "estate_agent"),
+                           ("shop", "estate_agent"),
+                           ("office", "property_management")],
+    # The billboard and display trade he asked for. office=advertising_agency
+    # is the one that finds the companies that put up hoardings — they
+    # subcontract the aluminium framing and the acrylic, which is us.
+    "signage":       [("craft", "signmaker"), ("shop", "copyshop"),
+                      ("office", "advertising_agency"),
+                      ("shop", "printing")],
     "builder":       [("craft", "builder"), ("craft", "carpenter"),
                       ("shop", "doityourself"), ("shop", "hardware")],
 }
@@ -151,6 +177,51 @@ def segments_covered():
 # and the same for `operator:wikidata`. A one-room cafeteria in Al Quoz has
 # neither. That is evidence in the data, not a list of names somebody has to
 # maintain and will forget to update.
+
+# ---------------------------------------------------------------------------
+#
+# THE SEGMENTS A MAP CANNOT HOLD, AND WHAT TO DO INSTEAD
+#
+# The owner asked to test villa owners, house owners and rental owners. There
+# is no honest way to do that here and pretending otherwise would waste his
+# week. OpenStreetMap maps *places*: a villa is a building outline with no
+# owner, no name and no telephone number, because the person who lives in it
+# never published one. The only way to get a householder's number is to buy a
+# list somebody else compiled without asking them — which is how you end up
+# blacklisted by every mail provider, and in the UAE it is also illegal.
+#
+# But every villa has people who already have the owner's number and are paid
+# to look after the building. Those ARE on the map, they ARE businesses, and
+# they order glass work by the dozen rather than one door at a time. So the
+# answer to "find me villa owners" is not "no" — it is "here is the door".
+NOT_ON_A_MAP = {
+    "villa_compound": (
+        "A compound is a residential area, so OSM holds its outline and not "
+        "one contact for anybody in it.",
+        "property_management and facility_management — a compound is run by "
+        "one office that decides for every villa on the plot, which is a "
+        "better job than one villa anyway."),
+    "landlord": (
+        "Landlords are private people. OSM has no owner field and no "
+        "telephone number for a home, and the lists that claim to were "
+        "compiled without asking anybody.",
+        "real_estate_agency and property_management — they hold the keys, "
+        "they see every unit before it is let, and they are the ones who "
+        "authorise the work."),
+    "private_individual": (
+        "A home is not a business and has no published contact route.",
+        "builder and real_estate_agency for the work, and the website and "
+        "Google reviews for the householders who come looking for you."),
+    "facility_management": (
+        "OSM has no tag for facilities management, so there is nothing to "
+        "ask it for.",
+        "property_management, which OSM does hold, and office — the FM "
+        "companies are tagged office=company when they are mapped at all."),
+    "startup": (
+        "A young company looks exactly like an old one on a map.",
+        "coworking and office — that is where they sit, and the coworking "
+        "operator re-partitions for every one that moves in."),
+}
 
 CHAIN_TAGS = ("brand:wikidata", "operator:wikidata", "brand:wikipedia")
 
@@ -340,14 +411,36 @@ def _fold(s: str) -> str:
 
 # The table above is written the way a mapper would write it; the lookup is
 # folded once, here, so both sides of the comparison went through the same mill.
+#
+# The English spellings go in the same table, because mappers type them however
+# they feel: a real Dubai run filed "sharjah" in lower case, which then failed
+# to match the emirate list and was counted as a district. Same city, same
+# lesson as the Arabic — compare on a folded key, print the proper spelling.
 _ARABIC_LOOKUP = {_fold(k): v for k, v in _ARABIC_AREAS.items()}
+_ARABIC_LOOKUP.update({v.lower(): v for v in _ARABIC_AREAS.values()})
+_ARABIC_LOOKUP.update({k.lower(): k for k in BBOX})
+_ARABIC_LOOKUP.update({
+    "uae": "United Arab Emirates",
+    "u.a.e.": "United Arab Emirates",
+    "abudhabi": "Abu Dhabi",
+    "abu dabi": "Abu Dhabi",
+    "shajah": "Sharjah",           # a real and common misspelling on OSM
+    "rak": "Ras Al Khaimah",
+    "umm al quwain": "Umm Al Quwain",
+    "umm al qaiwain": "Umm Al Quwain",
+})
 
 
 def _english_area(name: str) -> str:
-    """'دبي' -> 'Dubai'. Anything we do not know comes back untouched."""
+    """
+    'دبي' -> 'Dubai'. 'sharjah' -> 'Sharjah'. Anything we do not know comes
+    back exactly as the mapper wrote it.
+    """
     if not name:
         return ""
-    return _ARABIC_LOOKUP.get(_fold(name), name.strip())
+    folded = _fold(name)
+    return _ARABIC_LOOKUP.get(folded, _ARABIC_LOOKUP.get(folded.lower(),
+                                                         name.strip()))
 
 
 def _area_of(tags, fallback=""):
@@ -432,6 +525,11 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
     """
     tags = OSM_TAGS.get(segment)
     if not tags:
+        if segment in NOT_ON_A_MAP:
+            why, instead = NOT_ON_A_MAP[segment]
+            return {"ok": False, "unmappable": True, "reach_instead": instead,
+                    "error": (f"'{segment}' is not something a map holds. {why} "
+                              f"The way to reach them is: {instead}")}
         return {"ok": False, "error": f"no OSM tags mapped for '{segment}'. "
                                       f"Mapped: {', '.join(segments_covered())}"}
     bbox = BBOX.get(area)
@@ -489,7 +587,123 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
             "with_website": sum(1 for c in reachable if c["website"]),
             "over_the_border": over_the_border, "spilled_into": spill,
             "candidates": reachable,
+            "reach": reach_of(reachable),
             "head": head}
+
+
+# ---------------------------------------------------------------------------
+#
+# FROM A PIN ON A MAP TO AN ADDRESS YOU CAN WRITE TO
+#
+# The owner read a clinic run and asked the question that matters: "as we are
+# getting the leads are we also getting the mails?" The answer was no, and the
+# reason was a comment in this file promising something no code did. A
+# candidate was filed with email="" and the note "harvest gets it" — and
+# nothing ever called harvest. Every OSM lead in the cabinet was unmailable and
+# the run said nothing about it.
+#
+# OSM does not hold email addresses. It very occasionally has contact:email,
+# and almost always has nothing. What it does have, for some of them, is the
+# business's own website — and a business publishes its email on its own site,
+# because it wants to be written to. pipelines/harvest.py already reads a site
+# properly. This is the missing wire between the two.
+#
+# And the count has to be honest, because it decides what he does with his
+# morning. Of twenty clinics in his last Dubai run, four had a website. Four is
+# what the mail runner can work with; the rest are a phone to message by hand
+# or a door to walk through, and calling all twenty "leads" would have him
+# waiting on emails that were never going to exist.
+# ---------------------------------------------------------------------------
+
+def reach_of(cands) -> dict:
+    """
+    How each of these can ACTUALLY be reached, counted honestly.
+
+    Four buckets, in descending order of how little work they cost him:
+
+      mailable    an email address. The mail runner can write to these today.
+      harvestable a website but no email yet — enrich() reads the site.
+      message     a phone and nothing else. He said he would do WhatsApp by
+                  hand, so these are his list, not the agency's.
+      walk_in     an address only. Which for this trade is a real lead: you
+                  drive to Al Quoz and knock.
+    """
+    out = {"mailable": 0, "harvestable": 0, "message": 0, "walk_in": 0}
+    for c in cands:
+        if (c.get("email") or "").strip():
+            out["mailable"] += 1
+        elif (c.get("website") or "").strip():
+            out["harvestable"] += 1
+        elif (c.get("phone") or "").strip():
+            out["message"] += 1
+        elif (c.get("address") or "").strip():
+            out["walk_in"] += 1
+    return out
+
+
+def reach_line(reach) -> str:
+    return (f"{reach['mailable']} mailable now, "
+            f"{reach['harvestable']} with a site to read, "
+            f"{reach['message']} phone-only (WhatsApp by hand), "
+            f"{reach['walk_in']} walk-in only")
+
+
+def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True) -> dict:
+    """
+    Read the websites we found and take the email the business published.
+
+    Only candidates that HAVE a website and do NOT already have an email — a
+    site read is somebody else's bandwidth and possibly our money, and a lead
+    that is already mailable has nothing to gain from it.
+
+    `limit` is a hard stop on how many sites one pass will read, because a
+    segment with sixty websites would otherwise turn a lead run into an
+    afternoon. Everything is reported: read, found, failed.
+    """
+    todo = [c for c in cands
+            if (c.get("website") or "").strip()
+            and not (c.get("email") or "").strip()]
+    attempting = todo[:max(0, int(limit))]
+    read, gained, failed, spend = 0, 0, [], 0.0
+    for c in attempting:
+        try:
+            h = harvest.harvest(c["website"], timeout=timeout,
+                                allow_paid=allow_paid)
+        except Exception as e:                       # a bad site is not a crash
+            failed.append({"company": c.get("company"), "why": f"{type(e).__name__}: {e}"})
+            continue
+        read += 1
+        spend += h.get("spend", 0.0) or 0.0
+        if not h.get("ok"):
+            failed.append({"company": c.get("company"),
+                           "why": h.get("error") or "the site did not read"})
+            continue
+        if h.get("emails"):
+            c["email"] = h["emails"][0]["value"]
+            c["email_where"] = h["emails"][0].get("where", "")
+            gained += 1
+        else:
+            failed.append({"company": c.get("company"),
+                           "why": "site read, no email published on it"})
+        # Everything else the site gave us that the map did not. The map's
+        # phone stands: it is the one the business registered.
+        if h.get("phones") and not (c.get("phone") or "").strip():
+            c["phone"] = h["phones"][0]["value"]
+        if h.get("whatsapp") and not (c.get("whatsapp") or "").strip():
+            c["whatsapp"] = h["whatsapp"][0]["value"]
+        if h.get("address") and not (c.get("address") or "").strip():
+            c["address"] = h["address"]
+        if h.get("socials") and not (c.get("socials") or "").strip():
+            c["socials"] = ", ".join(s["value"] for s in h["socials"][:4])
+    # What the cap kept us from trying — NOT the ones we tried and lost. A site
+    # that was read and had no email is a closed question; one we never got to
+    # is still worth a pass tomorrow, and they must not be counted together.
+    skipped = len(todo) - len(attempting)
+    return {"sites_read": read, "emails_found": gained,
+            "no_email_on_site": failed, "not_reached_this_pass": skipped,
+            "spend": round(spend, 4),
+            "head": (f"read {read} site(s), got {gained} email address(es)"
+                     + (f", {skipped} left for the next pass" if skipped else ""))}
 
 
 # ---------------------------------------------------------------------------
@@ -497,14 +711,15 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
 # ---------------------------------------------------------------------------
 
 def run(agent=AGENT, segment=None, area=None, per_segment=1, dry_run=False,
-        chains=False):
+        chains=False, read_sites=True):
     with board.agent_run(agent) as row:
-        out = _run(agent, segment, area, per_segment, dry_run, chains)
+        out = _run(agent, segment, area, per_segment, dry_run, chains, read_sites)
         row.note(out.get("head") or out.get("error") or "nothing collected")
         return out
 
 
-def _run(agent, segment, area, per_segment, dry_run, chains=False):
+def _run(agent, segment, area, per_segment, dry_run, chains=False,
+         read_sites=True):
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off."}
     task = board.next_open_task(SECTOR, agent)
@@ -537,25 +752,39 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False):
                                               "dry_run": True}, status="done")
         return {"ok": True, "agent": agent, "task": task["id"], "dry_run": True,
                 "candidates": collected[:40], "errors": errors,
+                "reach": reach_of(collected),
                 "head": f"{len(collected)} found, nothing stored (dry run)"}
+
+    # THE STEP THAT WAS MISSING. Without it every OSM lead was filed with an
+    # empty email column and the mail runner had nobody to write to.
+    enriched = ({"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
+                 "not_reached_this_pass": 0, "spend": 0.0,
+                 "head": "sites not read this pass"}
+                if not read_sites else enrich(collected))
 
     # Same gate as every other collector: screened, deduped, never contacted.
     res = ls.intake(collected, agent=agent, sector=SECTOR)
+    reach = reach_of(collected)
     head = (f"{len(res['stored'])} new lead(s) from OpenStreetMap, "
             f"{len(res['duplicates'])} already on file, "
-            f"{len(res['refused'])} refused")
+            f"{len(res['refused'])} refused — " + reach_line(reach))
     board.finish_task(task["id"], agent, {"stored": len(res["stored"]),
+                                          "mailable": reach["mailable"],
                                           "head": head}, status="done")
     board.log_decision(
         "leads-osm",
         reasoning=(f"Collected {len(collected)} POI(s) from OpenStreetMap across "
                    + ", ".join(segs) + " in " + ", ".join(areas)
-                   + " — no Places key needed."),
-        expectation="These enrich to contactable leads once harvest reads their sites.",
+                   + f" — no Places key needed. Read {enriched['sites_read']} "
+                   f"of their websites for a published email address."),
+        expectation=(f"{reach['mailable']} can be written to by the mail runner; "
+                     f"{reach['message']} are a phone only and are the owner's "
+                     f"to message by hand."),
         confidence=0.6,
-        evidence={"stored": [s["id"] for s in res["stored"]]})
+        evidence={"stored": [s["id"] for s in res["stored"]],
+                  "emails_found": enriched["emails_found"]})
     return {"ok": True, "agent": agent, "task": task["id"], "head": head,
-            "errors": errors, **res}
+            "errors": errors, "reach": reach, "enriched": enriched, **res}
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +840,9 @@ def main():
     ap.add_argument("--chains", action="store_true",
                     help="keep the franchises too (dropped by default: they buy "
                          "centrally, usually abroad)")
+    ap.add_argument("--no-read-sites", dest="read_sites", action="store_false",
+                    help="skip reading the businesses' websites for an email "
+                         "address (faster, but the leads stay unmailable)")
     ap.add_argument("--per-segment", type=int, default=1)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -639,6 +871,9 @@ def main():
 
     if a.find:
         r = find(a.find, a.area, chains=a.chains)
+        if r.get("ok") and a.read_sites:
+            e = enrich(r["candidates"])
+            r["enriched"], r["reach"] = e, reach_of(r["candidates"])
         if a.json:
             print(json.dumps(r, indent=2))
         elif not r.get("ok"):
@@ -646,18 +881,23 @@ def main():
         else:
             print(f"{a.find} in {a.area} via {r['mirror']} — {r['head']}")
             print(f"   {r['with_phone']} with a phone, {r['with_website']} with a site")
+            if r.get("enriched"):
+                print(f"   {r['enriched']['head']}")
+            print(f"   HOW WE REACH THEM: {reach_line(r['reach'])}")
             if r["chains_dropped"]:
                 names = ", ".join(d["company"] for d in r["chains_dropped"][:6])
                 print(f"   dropped as chains: {names}"
                       + (" ..." if len(r["chains_dropped"]) > 6 else ""))
             print()
             for c in r["candidates"][:25]:
-                print(f"   {c['company'][:34]:36} {c['phone'][:16]:17} "
-                      f"{c['area'][:18]:20} {c['website'][:30]}")
+                print(f"   {c['company'][:30]:32} {c['phone'][:15]:16} "
+                      f"{(c.get('email') or '')[:30]:32} {c['area'][:14]:16} "
+                      f"{c['website'][:28]}")
         return 0 if r.get("ok") else 1
 
     r = run(segment=None, area=a.area if a.area != "Dubai" else None,
-            per_segment=a.per_segment, dry_run=a.dry_run)
+            per_segment=a.per_segment, dry_run=a.dry_run,
+            read_sites=a.read_sites)
     print(json.dumps(r, indent=2) if a.json else
           (r.get("head") or r.get("error") or "nothing to do"))
     return 0 if r.get("ok") else 1

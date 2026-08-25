@@ -138,7 +138,7 @@ def test_it_only_asks_for_segments_the_agency_has():
               ("food_stall", "salon", "supermarket", "laundry", "clinic_small")),
           True)
     print("\n...and it refuses what it cannot look up, rather than guessing:")
-    r = O.find("private_individual", "Dubai")
+    r = O.find("submarine_dealership", "Dubai")
     check("an unmapped segment is refused", r["ok"], False)
     check("and it lists what IS mapped", "food_stall" in r["error"], True)
     r = O.find("food_stall", "Atlantis")
@@ -572,6 +572,218 @@ def test_the_box_overshoots_the_border_and_says_so():
     check("and no noise in the headline", "actually in" in r["head"], False)
 
 
+# ---------------------------------------------------------------------------
+# A PIN ON A MAP IS NOT AN ADDRESS YOU CAN WRITE TO
+# ---------------------------------------------------------------------------
+
+class _FakeHarvest:
+    """Stands in for pipelines/harvest.py. No network, no fetcher, no spend."""
+
+    def __init__(self, by_site):
+        self.by_site, self.asked = by_site, []
+
+    def __call__(self, url, timeout=20, allow_paid=True):
+        self.asked.append(url)
+        return self.by_site.get(url, {"ok": False, "error": "did not load"})
+
+
+def _with_harvest(fake, fn):
+    real = O.harvest.harvest
+    O.harvest.harvest = fake
+    try:
+        return fn()
+    finally:
+        O.harvest.harvest = real
+
+
+def test_the_leads_actually_get_an_email_address():
+    """
+    The owner read a clinic run and asked "as we are getting the leads are we
+    also getting the mails?". We were not. This file carried a comment saying
+    email came from harvest, and nothing in the OSM path ever called harvest —
+    so every lead it filed had an empty email column and the mail runner had
+    nobody to write to. The comment was the only thing doing the work.
+    """
+    print("\nThe website OSM gave us is read for the email it publishes:")
+    fake = _FakeHarvest({
+        "https://femiclinic.com/": {
+            "ok": True, "spend": 0.0,
+            "emails": [{"value": "info@femiclinic.com", "where": "the contact page",
+                        "how": "a mailto link"}],
+            "phones": [{"value": "+97144542640"}], "whatsapp": [],
+            "address": "Jumeirah 1, Dubai", "socials": []}})
+    cands = [{"company": "Femiclinic", "website": "https://femiclinic.com/",
+              "email": "", "phone": "", "address": ""}]
+    e = _with_harvest(fake, lambda: O.enrich(cands))
+    check("the site was read", e["sites_read"], 1)
+    check("an email came back", e["emails_found"], 1)
+    check("and it is on the lead", cands[0]["email"], "info@femiclinic.com")
+    check("with where it was found, so it is arguable later",
+          cands[0]["email_where"], "the contact page")
+    check("the phone the site gave, since the map had none",
+          cands[0]["phone"], "+97144542640")
+    check("and the address", cands[0]["address"], "Jumeirah 1, Dubai")
+
+    print("\n...and it does not spend a fetch on a lead it cannot help:")
+    already = {"company": "A", "website": "https://a.ae", "email": "a@a.ae"}
+    no_site = {"company": "B", "website": "", "email": ""}
+    fake2 = _FakeHarvest({})
+    e = _with_harvest(fake2, lambda: O.enrich([already, no_site]))
+    check("nothing was read", fake2.asked, [])
+    check("because one is already mailable and the other has no site",
+          e["sites_read"], 0)
+    check("the mailable one is untouched", already["email"], "a@a.ae")
+
+    print("\n...a site with no email on it is reported, not silently dropped:")
+    quiet = [{"company": "Al Amal Medical Center", "website": "https://alamal.ae",
+              "email": "", "phone": "+97141112222"}]
+    fake3 = _FakeHarvest({"https://alamal.ae": {
+        "ok": True, "spend": 0.0, "emails": [], "phones": [], "whatsapp": [],
+        "address": "", "socials": []}})
+    e = _with_harvest(fake3, lambda: O.enrich(quiet))
+    check("read", e["sites_read"], 1)
+    check("no email", e["emails_found"], 0)
+    check("and it says why", "no email published" in e["no_email_on_site"][0]["why"],
+          True)
+
+    print("\n...a site that throws is a failed lead, not a failed run:")
+    def boom(url, timeout=20, allow_paid=True):
+        raise OSError("connection reset by peer")
+    bad = [{"company": "C", "website": "https://c.ae", "email": ""}]
+    e = _with_harvest(boom, lambda: O.enrich(bad))
+    check("the pass survived", e["emails_found"], 0)
+    check("and named the casualty", e["no_email_on_site"][0]["company"], "C")
+
+    print("\n...and one pass will not read sixty websites:")
+    many = [{"company": f"C{i}", "website": f"https://c{i}.ae", "email": ""}
+            for i in range(30)]
+    fake4 = _FakeHarvest({})
+    e = _with_harvest(fake4, lambda: O.enrich(many, limit=5))
+    check("capped", len(fake4.asked), 5)
+    check("and the rest are counted, not forgotten",
+          e["not_reached_this_pass"], 25)
+
+
+def test_the_run_says_how_each_lead_can_be_reached():
+    """
+    Of twenty clinics in his Dubai run, four had a website and six a phone.
+    Calling all twenty "leads" would have him waiting on emails that were never
+    going to exist. The count has to separate what the mail runner can do
+    tonight from what he has to do by hand.
+    """
+    print("\nFour buckets, because they are four different mornings:")
+    r = O.reach_of([
+        {"email": "a@a.ae"},                       # write to it tonight
+        {"email": "", "website": "https://b.ae"},  # read the site first
+        {"email": "", "website": "", "phone": "+97141112222"},   # his WhatsApp
+        {"email": "", "website": "", "phone": "", "address": "Al Quoz 3"},
+    ])
+    check("mailable", r["mailable"], 1)
+    check("a site to read", r["harvestable"], 1)
+    check("phone only — his job, not the agency's", r["message"], 1)
+    check("and a door to knock on", r["walk_in"], 1)
+    check("the line reads plainly",
+          "1 mailable now, 1 with a site to read, 1 phone-only (WhatsApp by "
+          "hand), 1 walk-in only", O.reach_line(r))
+
+    print("\nAnd the pass itself enriches before it files, not after:")
+    with _Cabinet() as cab:
+        board.post_task("Leads", "Collect today's leads across the mapped segments",
+                        "work the source map")
+        real_find, real_pause = O.find, O.PAUSE
+        O.PAUSE = 0
+        O.find = lambda seg, area, limit=0, chains=False: {
+            "ok": True, "segment": seg, "area": area, "mirror": "test",
+            "found": 1, "unnamed_skipped": 0, "with_phone": 0, "with_website": 1,
+            "candidates": [{"company": "Femiclinic", "email": "",
+                            "website": "https://femiclinic.com/", "phone": "",
+                            "address": "Jumeirah 1", "area": "Dubai",
+                            "segment": seg, "source": "openstreetmap:node/9"}]}
+        fake = _FakeHarvest({"https://femiclinic.com/": {
+            "ok": True, "spend": 0.0, "whatsapp": [], "phones": [], "socials": [],
+            "address": "", "emails": [{"value": "info@femiclinic.com",
+                                       "where": "the contact page"}]}})
+        try:
+            r = _with_harvest(fake, lambda: O._run(O.AGENT, "clinic_small",
+                                                   "Dubai", 1, dry_run=False))
+        finally:
+            O.find, O.PAUSE = real_find, real_pause
+        check("it ran", r["ok"], True)
+        check("the site was read during the pass", r["enriched"]["sites_read"], 1)
+        check("the lead is mailable", r["reach"]["mailable"], 1)
+        check("the email reached the cabinet, not just the return value",
+              cab.sql("SELECT email FROM leads")[0]["email"], "info@femiclinic.com")
+        check("and the headline says so, so he is not guessing",
+              "1 mailable now" in r["head"], True)
+        check("still nobody contacted",
+              cab.sql("SELECT count(*) n FROM outreach_log")[0]["n"], 0)
+
+
+# ---------------------------------------------------------------------------
+# WHAT A MAP CANNOT DO, SAID OUT LOUD
+# ---------------------------------------------------------------------------
+
+def test_villa_owners_are_not_on_a_map_and_it_says_where_they_are_instead():
+    """
+    He asked to test villa owners, house owners and rental owners. A villa on
+    OSM is a building outline: no owner, no name, no number, because the person
+    living in it never published one. The only lists that claim otherwise were
+    compiled without asking anybody, which is how a sending domain dies.
+
+    Saying "no" and stopping would waste his week. Every villa has an agency or
+    a management office that holds the keys and authorises the work, and those
+    ARE businesses on the map.
+    """
+    print("\nA private home is not a business, and the refusal says why:")
+    for seg in ("villa_compound", "landlord", "private_individual"):
+        r = O.find(seg, "Dubai")
+        check(f"{seg} is refused", r["ok"], False)
+        check(f"{seg} — flagged as a data limit, not a bug",
+              r.get("unmappable"), True)
+        check(f"{seg} — and it names the way in",
+              bool(r.get("reach_instead")), True)
+
+    print("\n...and the way in is a segment that really is findable:")
+    for seg in ("villa_compound", "landlord"):
+        instead = O.find(seg, "Dubai")["reach_instead"]
+        named = [s for s in O.segments_covered() if s in instead]
+        check(f"{seg} points at something on the map", bool(named), True)
+
+
+def test_the_segments_he_asked_to_test_are_all_findable():
+    print("\nThe segments he named for this test:")
+    for seg in ("hotel", "signage", "real_estate_agency",
+                "property_management", "holiday_let"):
+        check(seg, seg in O.OSM_TAGS, True)
+
+    print("\n...with the tags the UAE actually uses:")
+    check("hotel apartments, which are half the Dubai market",
+          ("tourism", "apartment") in O.OSM_TAGS["holiday_let"], True)
+    check("advertising agencies, for the billboard work",
+          ("office", "advertising_agency") in O.OSM_TAGS["signage"], True)
+    check("property managers, who hold other people's villas",
+          ("office", "property_management") in O.OSM_TAGS["property_management"],
+          True)
+    check("every mapped segment is one the agency knows",
+          [s for s in O.OSM_TAGS if s not in ls.SEGMENTS], [])
+
+
+def test_sharjah_in_lower_case_is_still_sharjah():
+    """
+    His run printed `Solanki Dental Center ... sharjah`. Lower case, so it
+    missed the emirate list, was filed as a district, and was not counted as
+    the border spill it actually was.
+    """
+    print("\nHowever the mapper typed it:")
+    check("sharjah", O._english_area("sharjah"), "Sharjah")
+    check("DUBAI", O._english_area("DUBAI"), "Dubai")
+    check("rak", O._english_area("rak"), "Ras Al Khaimah")
+    check("and it is recognised as an emirate, not a district",
+          O._emirate_of({"addr:city": "sharjah"}), "Sharjah")
+    check("a genuine district is still left alone",
+          O._english_area("al quoz"), "al quoz")
+
+
 def main():
     for t in (test_the_query_asks_for_what_is_actually_mapped,
               test_an_osm_point_becomes_a_lead,
@@ -587,6 +799,11 @@ def main():
               test_a_car_workshop_is_not_a_laundry,
               test_the_map_speaks_arabic_and_the_cabinet_does_not,
               test_the_box_overshoots_the_border_and_says_so,
+              test_sharjah_in_lower_case_is_still_sharjah,
+              test_the_leads_actually_get_an_email_address,
+              test_the_run_says_how_each_lead_can_be_reached,
+              test_villa_owners_are_not_on_a_map_and_it_says_where_they_are_instead,
+              test_the_segments_he_asked_to_test_are_all_findable,
               test_a_dead_run_does_not_hold_the_door_for_three_hours,
               test_unlock_is_the_escape_hatch_and_says_what_it_did):
         t()
