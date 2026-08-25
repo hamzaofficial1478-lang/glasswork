@@ -565,13 +565,34 @@ def schema_plan(s=None) -> dict:
     # to insert before". One block in the include is one block on every page,
     # which is what he wanted in the first place.
     holder = head_holder(known, s=s)
+    # Which of his real pages can actually take a block on their own. Asked
+    # BEFORE choosing targets, so "no page has a head and no include was
+    # found" is a state this can recognise instead of quietly writing
+    # somewhere else.
+    own_head = [pg for pg in known if _has_own_head(pg, s=s)]
     if holder:
         jobs = [{"page": holder, "id": SCHEMA_ID, "what": "LocalBusiness",
                  "bytes": len(lb), "why": "your shared header — one paste, "
                                           "every page"}]
-    else:
+    elif own_head:
         jobs = [{"page": pg, "id": SCHEMA_ID, "what": "LocalBusiness",
-                 "bytes": len(lb)} for pg in known]
+                 "bytes": len(lb)} for pg in own_head]
+    else:
+        # NO TARGET. SAY SO; DO NOT FIND ONE.
+        #
+        # The plan offered to write into default.php — a leftover from his
+        # host, not linked from anywhere, and not part of his site. It was
+        # picked because it contains </head>, which every complete page does.
+        # Writing there would have put the markup somewhere nobody visits and
+        # left every real page without it, while reporting success.
+        jobs = []
+        problems.append(
+            "none of your pages carries its own </head>, and no shared header "
+            "file could be found to put one block in. Rather than guess at a "
+            "file, this is the one to do by hand: open the header your pages "
+            "include and paste paste-into-your-site/HEAD-BLOCK-paste-once.php "
+            "just above </head>. If you tell me what that file is called, the "
+            "agency can take it from there.")
     # The FAQ block is the exception: it must appear on the FAQ page only, so
     # it never goes in a shared header. If the head is in an include there is
     # nowhere page-specific to put it, and saying so beats putting FAQ markup
@@ -676,9 +697,38 @@ def head_holder(candidates, s=None) -> str:
          else rest).append(n)
     for name in likely + rest[:12]:
         got = read_page(name, s=s)
-        if got.get("ok") and "</head" in (got.get("html") or "").lower():
+        if got.get("ok") and _is_a_header_fragment(got.get("html") or ""):
             return name
     return ""
+
+
+def _has_own_head(page, s=None) -> bool:
+    """Can this page take a block directly, without an include?"""
+    got = read_page(page, s=s)
+    return got.get("ok") and "</head" in (got.get("html") or "").lower()
+
+
+def _is_a_header_fragment(html: str) -> bool:
+    """
+    Is this the TOP HALF of a page, or a whole page that happens to have a head?
+
+    A header include opens the document and stops: it has </head> and never
+    closes </html>, because the page that includes it does that. A complete
+    page has both.
+
+    THIS RULE EXISTS BECAUSE THE PLAN OFFERED TO EDIT default.php. Left over
+    from his host, titled "Default page", 17KB, not linked from anywhere — and
+    a complete HTML document, so "contains </head>" was true and it was picked
+    as his header. Home.html would have qualified on the same test. Neither is
+    an include; both are pages nobody visits.
+
+    Getting this wrong is not a near miss. It writes markup into a file that
+    is not part of the site, and leaves every real page without it.
+    """
+    low = (html or "").lower()
+    if "</head" not in low:
+        return False
+    return "</html" not in low and "</body" not in low
 
 
 def apply_schema(agent=AGENT, s=None, dry_run=False) -> dict:

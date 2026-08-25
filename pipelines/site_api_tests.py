@@ -601,6 +601,61 @@ def test_the_address_survives_a_git_pull():
           R._only_self_written(" M pipelines/services.py"), [])
 
 
+def test_a_whole_page_is_never_mistaken_for_a_header_include():
+    """
+    The plan offered to write LocalBusiness into default.php — a leftover from
+    his host, titled "Default page", not linked from anywhere on his site. It
+    was chosen because it contains </head>, which every complete HTML document
+    does. Home.html would have qualified on the same test.
+
+    Writing there puts the markup somewhere nobody visits and leaves every
+    real page without it, while reporting success. That is worse than
+    refusing.
+    """
+    from . import site_api as S
+    print("\nA header include is the TOP HALF of a page and stops there:")
+    frag = "<html><head><title>t</title>\n</head><body>"
+    whole = "<html><head><title>t</title></head><body>hi</body></html>"
+    check("a fragment qualifies", S._is_a_header_fragment(frag), True)
+    check("a complete page does not", S._is_a_header_fragment(whole), False)
+    check("nor does one that merely closes the body",
+          S._is_a_header_fragment("<head></head><body>x</body>"), False)
+    check("and something with no head at all is not one either",
+          S._is_a_header_fragment("<?php echo 1; ?>"), False)
+
+    print("\n...so default.php is not offered as the header:")
+    pg = "<?php require TOP; ?><h1>hi</h1>"
+    site = _Site({"index.php": pg, "about.php": pg,
+                  "default.php": whole, "Home.html": whole})
+    real_live = S.live_pages
+    S.live_pages = lambda s=None: ["index.php", "about.php"]
+    try:
+        holder = _with_site(site, lambda: S.head_holder(
+            ["index.php", "about.php"], FULL))
+        check("nothing found, rather than the wrong thing", holder, "")
+
+        plan = _with_site(site, lambda: _with_drafts(
+            LB, FAQ, lambda: S.schema_plan(FULL)))
+        check("and NO job is invented", plan["jobs"], [])
+        check("it says there is no head to write into",
+              any("no shared header file could be found" in p
+                  for p in plan["problems"]), True)
+        check("and hands him the one file to paste by hand",
+              any("HEAD-BLOCK-paste-once.php" in p for p in plan["problems"]),
+              True)
+        check("default.php is never named as a target",
+              any("default.php" in str(j) for j in plan["jobs"]), False)
+    finally:
+        S.live_pages = real_live
+
+    print("\n...but a real header fragment IS found, past the whole pages:")
+    site = _Site({"index.php": pg, "about.php": pg,
+                  "default.php": whole, "top-of-page.php": frag})
+    check("the fragment wins",
+          _with_site(site, lambda: S.head_holder(["index.php", "about.php"], FULL)),
+          "top-of-page.php")
+
+
 def main():
     for t in (test_the_two_setup_boxes_finally_lead_somewhere,
               test_only_the_releaser_may_change_the_site,
@@ -614,7 +669,8 @@ def main():
               test_the_markup_can_be_taken_straight_back_off,
               test_the_canonical_is_pointed_back_at_the_real_site,
               test_the_header_is_found_even_when_no_page_names_it,
-              test_the_address_survives_a_git_pull):
+              test_the_address_survives_a_git_pull,
+              test_a_whole_page_is_never_mistaken_for_a_header_include):
         t()
     print()
     if _fail:
