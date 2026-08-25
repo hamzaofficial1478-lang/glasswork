@@ -656,6 +656,73 @@ def test_a_whole_page_is_never_mistaken_for_a_header_include():
           "top-of-page.php")
 
 
+def test_a_placeholder_that_reached_the_live_site_is_hunted_down():
+    """
+    He pasted the block into his header BEFORE saving his address, and the
+    markup went live reading streetAddress: "YOUR STREET / UNIT". Google reads
+    that as his address and checks it against his Business Profile, so it is
+    actively worse than no address — the exact harm the placeholder design was
+    meant to prevent, defeated by the order he happened to do two steps in.
+
+    And it landed in includes/header.php, which the /pages listing does not
+    cover: that endpoint globs the top folder only.
+    """
+    from . import site_api as S
+    import os
+    print("\nIt looks past the top folder, where his header actually is:")
+    header = ('<html><head>\n<script type="application/ld+json">'
+              '{"streetAddress":"YOUR STREET / UNIT",'
+              '"addressLocality":"YOUR EMIRATE e.g. Dubai"}</script>\n</head>')
+    site = _Site({"index.php": "<?php require 'includes/header.php'; ?>",
+                  "includes/header.php": header})
+    r = _with_site(site, lambda: S.find_placeholders(FULL))
+    check("found in the subfolder", [f["page"] for f in r["found"]],
+          ["includes/header.php"])
+    check("both fields named", sorted(r["found"][0]["placeholders"]),
+          ["YOUR EMIRATE e.g. Dubai", "YOUR STREET / UNIT"])
+
+    print("\n...and with an address saved, it is replaced in place:")
+    old_a, old_c = os.environ.get("BUSINESS_ADDRESS"), os.environ.get("BUSINESS_CITY")
+    os.environ["BUSINESS_ADDRESS"] = "Warehouse 12, Al Quoz Industrial 3"
+    os.environ["BUSINESS_CITY"] = "Dubai"
+    try:
+        r = _with_site(site, lambda: S.fix_address(agent="it-releaser", s=FULL))
+    finally:
+        for k, v in (("BUSINESS_ADDRESS", old_a), ("BUSINESS_CITY", old_c)):
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    out = site.pages["includes/header.php"]
+    check("the real street is in", "Warehouse 12, Al Quoz Industrial 3" in out, True)
+    check("the emirate too", '"addressLocality":"Dubai"' in out, True)
+    check("no placeholder survives", "YOUR STREET" in out, False)
+    check("and the block is otherwise untouched",
+          "application/ld+json" in out and "</head>" in out, True)
+    check("it says what it did", "Warehouse 12" in r["head"], True)
+
+    print("\n...with no address saved it refuses rather than inventing one:")
+    old_a = os.environ.pop("BUSINESS_ADDRESS", None)
+    try:
+        from . import seo_answers
+        real = seo_answers._saved_address
+        seo_answers._saved_address = lambda: ("", "")
+        try:
+            r = _with_site(_Site({"a.php": header}),
+                           lambda: S.fix_address(agent="it-releaser", s=FULL))
+        finally:
+            seo_answers._saved_address = real
+    finally:
+        if old_a is not None:
+            os.environ["BUSINESS_ADDRESS"] = old_a
+    check("refused", r["ok"], False)
+    check("and names the command", "--set-address" in r["error"], True)
+
+    print("\n...a clean site is reported clean, not silently:")
+    clean = _Site({"index.php": PAGE})
+    r = _with_site(clean, lambda: S.find_placeholders(FULL))
+    check("nothing found", r["found"], [])
+    check("and it says how many it looked at",
+          "file(s) checked" in r["head"], True)
+
+
 def main():
     for t in (test_the_two_setup_boxes_finally_lead_somewhere,
               test_only_the_releaser_may_change_the_site,
@@ -670,7 +737,8 @@ def main():
               test_the_canonical_is_pointed_back_at_the_real_site,
               test_the_header_is_found_even_when_no_page_names_it,
               test_the_address_survives_a_git_pull,
-              test_a_whole_page_is_never_mistaken_for_a_header_include):
+              test_a_whole_page_is_never_mistaken_for_a_header_include,
+              test_a_placeholder_that_reached_the_live_site_is_hunted_down):
         t()
     print()
     if _fail:

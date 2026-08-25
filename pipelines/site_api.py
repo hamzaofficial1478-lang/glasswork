@@ -263,6 +263,114 @@ def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
     return put_page(page, pat.sub("", src), agent=agent, s=s)
 
 
+# The exact strings the generator leaves for him to fill in. Kept here so the
+# fixer and the generator cannot drift apart.
+PLACEHOLDERS = {
+    "YOUR STREET / UNIT": "BUSINESS_ADDRESS",
+    "YOUR EMIRATE e.g. Dubai": "BUSINESS_CITY",
+    "YOUR PHONE, IN FULL INTERNATIONAL FORM e.g. +9715XXXXXXXX": "",
+    "YOUR REGISTERED BUSINESS NAME": "",
+    "YOUR EMAIL": "",
+}
+
+# Where a shared header tends to live when it is not in the top folder. The
+# /pages listing only covers the top level, so a block pasted into
+# includes/header.php is invisible to it — which is exactly where his went.
+LIKELY_INCLUDES = (
+    "includes/header.php", "includes/head.php", "includes/functions.php",
+    "includes/top.php", "includes/meta.php", "includes/layout.php",
+    "inc/header.php", "inc/head.php", "inc/functions.php",
+    "partials/header.php", "template/header.php", "templates/header.php",
+    "header.php", "head.php", "top.php", "common/header.php",
+)
+
+
+def find_placeholders(s=None) -> dict:
+    """
+    Where an unfilled placeholder is sitting on the live site.
+
+    HE PASTED THE BLOCK BEFORE SAVING HIS ADDRESS, and the markup went live
+    reading "YOUR STREET / UNIT". Google reads that as his address and checks
+    it against his Business Profile, so it is actively worse than no address
+    at all — which is the exact thing the whole placeholder design was meant
+    to prevent, defeated by the order he happened to do two steps in.
+
+    Looks in the top-level pages AND in the usual include locations, because
+    the /pages listing only covers the top level and his header is under
+    includes/.
+    """
+    found, looked = [], []
+    p = pages(s=s)
+    names = [x["page"] for x in (p.get("pages") or [])] if p.get("ok") else []
+    for name in list(names) + list(LIKELY_INCLUDES):
+        if name in looked:
+            continue
+        looked.append(name)
+        got = read_page(name, s=s)
+        if not got.get("ok"):
+            continue
+        html = got.get("html") or ""
+        hits = [ph for ph in PLACEHOLDERS if ph in html]
+        if hits:
+            found.append({"page": name, "placeholders": hits})
+    return {"ok": True, "found": found, "looked_in": len(looked),
+            "head": (f"{len(found)} file(s) still carry an unfilled placeholder"
+                     if found else
+                     f"no placeholders left in {len(looked)} file(s) checked")}
+
+
+def fix_address(agent=AGENT, s=None) -> dict:
+    """
+    Replace the placeholder address with the one he saved, wherever it sits.
+
+    Only the exact placeholder strings, and only where they appear. Nothing
+    else in the file is touched — the block he pasted stays exactly as it is
+    apart from the two fields that were never his to begin with.
+    """
+    from . import seo_answers
+    street, city = seo_answers._saved_address()
+    if not street:
+        return {"ok": False, "error":
+                "no address saved yet. Run:  python -m pipelines.site_api "
+                '--set-address "Warehouse 12, Al Quoz Industrial 3" --city Dubai'}
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    where = find_placeholders(s=s)
+    swaps = {"YOUR STREET / UNIT": street,
+             "YOUR EMIRATE e.g. Dubai": city or "Dubai"}
+    changed, failed, left = [], [], []
+    for row in where["found"]:
+        got = read_page(row["page"], s=s)
+        if not got.get("ok"):
+            failed.append({"page": row["page"], "why": got.get("error")})
+            continue
+        html = got["html"]
+        did = []
+        for ph, real in swaps.items():
+            if ph in html:
+                html = html.replace(ph, real)
+                did.append(ph)
+        # Anything left is a field we have no saved value for. Named, not
+        # silently overwritten with a guess.
+        still = [ph for ph in PLACEHOLDERS if ph in html]
+        if still:
+            left.append({"page": row["page"], "placeholders": still})
+        if not did:
+            continue
+        r = put_page(row["page"], html, agent=agent, s=s)
+        if r.get("ok"):
+            changed.append({"page": row["page"], "fixed": did,
+                            "backup": r.get("backup")})
+        else:
+            failed.append({"page": row["page"], "why": r.get("error")})
+    return {"ok": not failed, "changed": changed, "failed": failed,
+            "still_unfilled": left, "address": street, "city": city,
+            "head": (f"put '{street}' into {len(changed)} file(s)"
+                     if changed else
+                     "no placeholder address found to replace")}
+
+
 def canonical_plan(s=None) -> dict:
     """
     Which of his source files name the wrong domain in a canonical tag.
@@ -782,6 +890,10 @@ def main():
                     help="put the markup on the site (Releaser)")
     ap.add_argument("--undo-schema", action="store_true",
                     help="take the agency's markup back off every page")
+    ap.add_argument("--find-placeholders", action="store_true",
+                    help="where an unfilled YOUR-something is still live")
+    ap.add_argument("--fix-address", action="store_true",
+                    help="put your saved address into the block on the site")
     ap.add_argument("--plan-canonical", action="store_true",
                     help="which pages name the wrong domain, changing nothing")
     ap.add_argument("--fix-canonical", action="store_true",
@@ -862,6 +974,26 @@ def main():
             print(f"   {x['action']:10} {x['what']:14} on {x['page']}")
         for x in r.get("failed") or []:
             print(f"   REFUSED    {x['page']}: {x['why']}")
+        return _say(r)
+    if a.find_placeholders:
+        r = find_placeholders(s)
+        if a.json:
+            print(json.dumps(r, indent=2))
+            return 0
+        for f in r["found"]:
+            print(f"   {f['page']:28} {', '.join(f['placeholders'])}")
+        return _say(r)
+    if a.fix_address:
+        r = fix_address(agent=a.agent, s=s)
+        if a.json:
+            print(json.dumps(r, indent=2))
+            return 0 if r.get("ok") else 1
+        for c in r.get("changed") or []:
+            print(f"   fixed {c['page']}")
+        for l in r.get("still_unfilled") or []:
+            print(f"   STILL BLANK in {l['page']}: {', '.join(l['placeholders'])}")
+        for f in r.get("failed") or []:
+            print(f"   REFUSED  {f['page']}: {f['why']}")
         return _say(r)
     if a.plan_canonical:
         r = canonical_plan(s)
