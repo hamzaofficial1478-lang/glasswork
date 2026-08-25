@@ -1,60 +1,43 @@
 # ============================================================================
-#  UPLOAD THIS INTO THE agency-api FOLDER AND RENAME IT TO:   .htaccess
-#  (the name starts with a dot and has no file extension)
+#  OPTIONAL. Your site already passed all 13 security checks without this.
+#  It is a second lock, not the lock.
 #
-#  In cPanel File Manager you may need Settings -> "Show Hidden Files (dotfiles)"
-#  before you can see it afterwards. That is normal.
+#  WHERE IT GOES
+#    cPanel -> File Manager -> public_html -> agency-api    <- THIS folder
+#    NOT in public_html itself. In the wrong folder it affects your whole site.
 #
-#  WHAT IT DOES
+#  WHAT TO NAME IT
+#    .htaccess       (a dot at the start, and NO .txt on the end)
 #
-#  Your agency-api folder sits inside your website, so by default the web
-#  server will hand out anything in it to anybody who guesses the address.
-#  This says: serve index.php and nothing else.
+#  Easiest way, avoiding any renaming trouble:
+#    1. Go into the agency-api folder
+#    2. Click  + File  and type the name:  .htaccess
+#    3. Right-click it -> Edit -> paste everything below the line -> Save
 #
-#  It is a second lock, not the only one. token.php is already safe because a
-#  .php file gets RUN rather than shown. But backups/ holds copies of your
-#  pages, and a folder listing tells a stranger exactly what to try next.
-#  Two locks cost nothing.
-# ============================================================================
+#  You may need  Settings -> Show Hidden Files (dotfiles)  to see it after.
+#
+#  IF ANYTHING BREAKS: delete this file. Everything goes back to how it was,
+#  immediately. Nothing else on your site depends on it.
+#
+#  Then run:  python -m pipelines.site_api --health
+#             python -m pipelines.site_secure
+#  The first should still say "your site answered". If it does not, delete
+#  this file and tell me.
+# ----------------------------------------------------------------------------
+# Copy from HERE down.
 
-# Never show a list of what is in this folder.
+# Never show a list of what is in this folder. A listing tells a stranger
+# exactly which files to try next.
 Options -Indexes
 
-# Refuse everything by default...
-<IfModule mod_authz_core.c>
-    # Apache 2.4 — what almost all hosting runs now
-    <FilesMatch ".">
-        Require all denied
-    </FilesMatch>
-    # ...except the one file that is meant to answer.
-    <Files "index.php">
-        Require all granted
-    </Files>
-    # If you did NOT rename agency-api.php to index.php, this covers that too.
-    <Files "agency-api.php">
-        Require all granted
-    </Files>
-</IfModule>
-
-<IfModule !mod_authz_core.c>
-    # Apache 2.2 — older shared hosting
-    <FilesMatch ".">
-        Order allow,deny
-        Deny from all
-    </FilesMatch>
-    <Files "index.php">
-        Order allow,deny
-        Allow from all
-    </Files>
-    <Files "agency-api.php">
-        Order allow,deny
-        Allow from all
-    </Files>
-</IfModule>
-
-# Belt and braces: never serve a backup, a token or a text file from here,
-# whatever the rules above end up doing on your particular host.
-<FilesMatch "\.(bak|txt|log|sql|zip|tar|gz|json|md|ini|conf)$">
+# Refuse the file types that should never be served out of here: backups of
+# your pages, and any stray text file such as an old token.txt.
+#
+# Note what this does NOT do: it never denies .php. The endpoint keeps working
+# no matter what, which is the whole point of writing it this way round. An
+# .htaccess that denies everything and then re-allows one file is tidier on
+# paper and takes the whole folder down with a 500 on some shared hosts.
+<FilesMatch "\.(bak|txt|log|sql|zip|tar|gz|json|md|ini|conf|old|orig|save)$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
@@ -64,7 +47,7 @@ Options -Indexes
     </IfModule>
 </FilesMatch>
 
-# Keep this whole folder out of Google.
+# Keep this folder out of Google.
 <IfModule mod_headers.c>
     Header set X-Robots-Tag "noindex, nofollow, noarchive"
 </IfModule>
