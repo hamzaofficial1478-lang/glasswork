@@ -176,7 +176,7 @@ def test_the_collector_feeds_the_same_gate_as_every_other():
         board.post_task("Leads", "Collect today's leads across the mapped segments",
                         "work the source map")
         real = O.find
-        O.find = lambda seg, area, limit=0, chains=False: {
+        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False: {
             "ok": True, "segment": seg, "area": area, "mirror": "test",
             "found": 1, "unnamed_skipped": 0, "with_phone": 1, "with_website": 1,
             "candidates": [O.to_candidate(CAFE, seg, area)]}
@@ -692,7 +692,7 @@ def test_the_run_says_how_each_lead_can_be_reached():
                         "work the source map")
         real_find, real_pause = O.find, O.PAUSE
         O.PAUSE = 0
-        O.find = lambda seg, area, limit=0, chains=False: {
+        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False: {
             "ok": True, "segment": seg, "area": area, "mirror": "test",
             "found": 1, "unnamed_skipped": 0, "with_phone": 0, "with_website": 1,
             "candidates": [{"company": "Femiclinic", "email": "",
@@ -784,6 +784,123 @@ def test_sharjah_in_lower_case_is_still_sharjah():
           O._english_area("al quoz"), "al quoz")
 
 
+# ---------------------------------------------------------------------------
+# 60 ON THE MAP, 7 WITH A WAY IN
+# ---------------------------------------------------------------------------
+
+def test_the_email_osm_already_had_is_not_thrown_away():
+    """
+    This line read `"email": ""` with a comment saying harvest would get it.
+    OSM carries contact:email for a good number of UAE businesses, so every
+    one of those was filed unmailable and then had its website fetched to look
+    for the address the map had already handed us.
+    """
+    print("\nWhen the map already has the email, we keep it:")
+    c = O.to_candidate({"type": "node", "id": 90, "tags": {
+        "name": "Star Bay Print Centre", "shop": "copyshop",
+        "contact:email": "Info@StarBayMe.com"}}, "signage", "Dubai")
+    check("taken from contact:email", c["email"], "info@starbayme.com")
+    check("in one case, so it dedupes against the harvested one",
+          c["email"].islower(), True)
+    c = O.to_candidate({"type": "node", "id": 91, "tags": {
+        "name": "X", "shop": "copyshop", "email": "x@x.ae"}}, "signage", "Dubai")
+    check("the plain email tag counts too", c["email"], "x@x.ae")
+    check("and it is mailable without reading anything",
+          O.reach_of([c])["mailable"], 1)
+
+
+def test_it_can_ask_for_only_the_ones_it_can_reach():
+    """
+    A signage search returned 60 and 7 had a contact route. The other 53 were
+    not a failure of the search — they were the search spending its whole
+    allowance on businesses nobody mapped a number for.
+    """
+    print("\nThe query can sieve rather than take the first 60 it meets:")
+    q = O.build_query([("shop", "copyshop")], O.BBOX["Dubai"], 60,
+                      contactable_only=True)
+    check("it filters on having a contact key", O.HAS_CONTACT in q, True)
+    check("website, phone and email all count",
+          all(w in O.HAS_CONTACT for w in ("website", "phone", "email")), True)
+    check("with any value at all", '~"."' in q, True)
+    check("and the plain query is unchanged",
+          "~" in O.build_query([("shop", "copyshop")], O.BBOX["Dubai"], 60),
+          False)
+
+
+def test_exactly_sixty_back_means_there_are_more():
+    """
+    Both his searches returned exactly 60 and neither said so. "60 on the map"
+    reads as "that is all Dubai has" when it means "that is all we asked for",
+    and those are different facts — only one of them is worth searching again.
+    """
+    print("\nA full result set says it is a cap, not a total:")
+    real = O.ask
+    els = [{"type": "node", "id": 100 + i,
+            "tags": {"name": f"Print Shop {i}", "shop": "copyshop",
+                     "phone": f"+9714000{i:04d}"}} for i in range(10)]
+    O.ask = lambda q, timeout=0: {"ok": True, "mirror": "test", "tried": [],
+                                  "elements": els}
+    try:
+        r = O.find("signage", "Dubai", limit=10)
+        check("flagged", r["truncated"], True)
+        check("and said in the headline", "capped at 10" in r["head"], True)
+        check("with what to do about it", "--contactable" in r["head"], True)
+        r = O.find("signage", "Dubai", limit=50)
+        check("a partial result is not flagged", r["truncated"], False)
+        check("and says nothing about caps", "capped" in r["head"], False)
+    finally:
+        O.ask = real
+
+
+def test_a_name_and_nothing_else_still_gets_a_website():
+    """
+    Forty-two of his 49 signage leads had a name and an address. Most of those
+    businesses have a website — what is missing is the volunteer who would have
+    typed it into the map.
+    """
+    print("\nThe pass looks for the websites the map never recorded:")
+    with _Cabinet() as cab:
+        board.post_task("Leads", "Collect today's leads across the mapped segments",
+                        "work the source map")
+        real_find, real_pause = O.find, O.PAUSE
+        O.PAUSE = 0
+        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False: {
+            "ok": True, "segment": seg, "area": area, "mirror": "test",
+            "found": 1, "unnamed_skipped": 0, "with_phone": 0, "with_website": 0,
+            "candidates": [{"company": "Daffodils Advertising LLC", "email": "",
+                            "website": "", "phone": "", "address": "Al Quoz",
+                            "area": "Dubai", "segment": seg,
+                            "source": "openstreetmap:node/9"}]}
+
+        def fake_fill(cands, limit=25, timeout=12):
+            cands[0]["website"] = "https://daffodilsadvertising.ae/"
+            return {"looked_for": 1, "sites_found": 1, "too_generic_to_guess": [],
+                    "no_site_found": [], "not_reached_this_pass": 0,
+                    "head": "looked for 1 missing site(s), found 1"}
+
+        real_fill = O.find_site.fill_in
+        O.find_site.fill_in = fake_fill
+        fake = _FakeHarvest({"https://daffodilsadvertising.ae/": {
+            "ok": True, "spend": 0.0, "whatsapp": [], "phones": [], "socials": [],
+            "address": "", "emails": [{"value": "info@daffodilsadvertising.ae",
+                                       "where": "the contact page"}]}})
+        try:
+            r = _with_harvest(fake, lambda: O._run(O.AGENT, "signage", "Dubai",
+                                                   1, dry_run=False))
+        finally:
+            O.find, O.PAUSE = real_find, real_pause
+            O.find_site.fill_in = real_fill
+        check("a site was found for a lead that had none",
+              r["guessed_sites"]["sites_found"], 1)
+        check("and then read for its email", r["enriched"]["emails_found"], 1)
+        check("a walk-in became a mailable lead", r["reach"]["mailable"], 1)
+        check("and it is in the cabinet",
+              cab.sql("SELECT email FROM leads")[0]["email"],
+              "info@daffodilsadvertising.ae")
+        check("still nobody contacted",
+              cab.sql("SELECT count(*) n FROM outreach_log")[0]["n"], 0)
+
+
 def main():
     for t in (test_the_query_asks_for_what_is_actually_mapped,
               test_an_osm_point_becomes_a_lead,
@@ -804,6 +921,10 @@ def main():
               test_the_run_says_how_each_lead_can_be_reached,
               test_villa_owners_are_not_on_a_map_and_it_says_where_they_are_instead,
               test_the_segments_he_asked_to_test_are_all_findable,
+              test_the_email_osm_already_had_is_not_thrown_away,
+              test_it_can_ask_for_only_the_ones_it_can_reach,
+              test_exactly_sixty_back_means_there_are_more,
+              test_a_name_and_nothing_else_still_gets_a_website,
               test_a_dead_run_does_not_hold_the_door_for_three_hours,
               test_unlock_is_the_escape_hatch_and_says_what_it_did):
         t()

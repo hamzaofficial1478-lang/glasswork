@@ -47,7 +47,7 @@ import urllib.parse
 import urllib.request
 
 from coordination import board, dispatch
-from . import harvest, leads_sources as ls, services
+from . import find_site, harvest, leads_sources as ls, services
 
 AGENT = "leads-hunter"
 SECTOR = "Leads"
@@ -305,15 +305,30 @@ def drop_chains(cands, elements=None, repeats=CHAIN_REPEATS,
 # THE QUERY
 # ---------------------------------------------------------------------------
 
-def build_query(tags, bbox, limit=MAX_RESULTS, timeout=25) -> str:
+# Ask Overpass for POIs that carry ANY key matching this, with any value.
+# The point of the whole thing: a signage search in Dubai returned 60 shops of
+# which 7 had a way in. The other 53 were not a failure of the search, they
+# were the search spending its whole budget on businesses nobody mapped a
+# telephone number for. Overpass can filter on the presence of a key, so we
+# can ask for the 7 directly and use the budget on more of them.
+HAS_CONTACT = "^(contact:)?(website|phone|mobile|email)$"
+
+
+def build_query(tags, bbox, limit=MAX_RESULTS, timeout=25,
+                contactable_only=False) -> str:
     """
     Overpass QL for a set of tags inside one box.
 
     `nwr` rather than `node`: a supermarket is usually mapped as a building
     (a way), not a pin, and asking only for nodes quietly misses most of the
     bigger businesses — which are the ones worth having.
+
+    `contactable_only` adds a has-any-of-these-keys filter, which turns the
+    result cap from a limiter into a sieve: the same 60 slots, filled with
+    businesses that can actually be contacted instead of an arbitrary slice.
     """
-    parts = "".join(f'nwr["{k}"="{v}"]({bbox});' for k, v in tags)
+    filt = f'[~"{HAS_CONTACT}"~"."]' if contactable_only else ""
+    parts = "".join(f'nwr["{k}"="{v}"]{filt}({bbox});' for k, v in tags)
     return (f"[out:json][timeout:{int(timeout)}];({parts});"
             f"out center {int(limit)};")
 
@@ -497,7 +512,12 @@ def to_candidate(el, segment, area="") -> dict:
         "company": name[:120],
         "phone": phone[:40],
         "website": site[:200],
-        "email": "",                       # OSM rarely has one; harvest gets it
+        # OSM DOES carry contact:email, and we were throwing it away. This line
+        # read `"email": ""` with a comment saying harvest would get it — so
+        # every business that had published an address right there in the map
+        # data was filed unmailable and then had its website fetched to look
+        # for the address we already had.
+        "email": _first(tags, "contact:email", "email")[:120].strip().lower(),
         "area": _area_of(tags, area)[:80],
         "address": _address(tags)[:200],
         "segment": segment,
@@ -509,7 +529,8 @@ def to_candidate(el, segment, area="") -> dict:
     }
 
 
-def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
+def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False,
+         contactable_only=False) -> dict:
     """
     Every named LOCAL business of one segment in one emirate. Reads only.
 
@@ -522,6 +543,9 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
                     but count it — screen_lead would refuse it downstream
                     anyway, and filing it would pad the lead list with rows
                     nobody can ever contact.
+
+    `contactable_only` asks Overpass for the ones with a phone, site or email
+    tag and nothing else. Same 60 slots, spent on businesses we can write to.
     """
     tags = OSM_TAGS.get(segment)
     if not tags:
@@ -536,9 +560,15 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
     if not bbox:
         return {"ok": False, "error": f"no box for '{area}'. "
                                       f"Known: {', '.join(BBOX)}"}
-    r = ask(build_query(tags, bbox, limit))
+    r = ask(build_query(tags, bbox, limit, contactable_only=contactable_only))
     if not r["ok"]:
         return {"ok": False, "error": r["error"], "tried": r["tried"]}
+    # Exactly `limit` back means Overpass stopped counting, not that Dubai has
+    # exactly that many. Both his searches returned exactly 60 and neither said
+    # so, which reads as "that is all there is" when it is "that is all we
+    # asked for" — a completely different fact, and the one that decides
+    # whether it is worth searching again.
+    truncated = len(r["elements"]) >= int(limit)
     cands, unnamed = [], 0
     for el in r["elements"]:
         c = to_candidate(el, segment, area)
@@ -579,12 +609,19 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False) -> dict:
     if over_the_border:
         head += (f" — {over_the_border} of them actually in "
                  + ", ".join(spill))
+    if truncated:
+        head += (f" (capped at {int(limit)} — there are more, "
+                 + ("raise --limit" if contactable_only else
+                    "try --contactable to spend the cap on the ones with a "
+                    "phone or a site") + ")")
     return {"ok": True, "segment": segment, "area": area, "mirror": r["mirror"],
             "on_the_map": named, "unnamed_skipped": unnamed,
             "chains_dropped": dropped, "no_contact_route": no_way_in,
-            "found": len(reachable),
+            "found": len(reachable), "truncated": truncated,
+            "contactable_only": contactable_only, "limit": int(limit),
             "with_phone": sum(1 for c in reachable if c["phone"]),
             "with_website": sum(1 for c in reachable if c["website"]),
+            "with_email_from_the_map": sum(1 for c in reachable if c["email"]),
             "over_the_border": over_the_border, "spilled_into": spill,
             "candidates": reachable,
             "reach": reach_of(reachable),
@@ -711,15 +748,17 @@ def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True) -> dict:
 # ---------------------------------------------------------------------------
 
 def run(agent=AGENT, segment=None, area=None, per_segment=1, dry_run=False,
-        chains=False, read_sites=True):
+        chains=False, read_sites=True, contactable_only=False,
+        guess_sites=True):
     with board.agent_run(agent) as row:
-        out = _run(agent, segment, area, per_segment, dry_run, chains, read_sites)
+        out = _run(agent, segment, area, per_segment, dry_run, chains,
+                   read_sites, contactable_only, guess_sites)
         row.note(out.get("head") or out.get("error") or "nothing collected")
         return out
 
 
 def _run(agent, segment, area, per_segment, dry_run, chains=False,
-         read_sites=True):
+         read_sites=True, contactable_only=False, guess_sites=True):
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off."}
     task = board.next_open_task(SECTOR, agent)
@@ -731,7 +770,7 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     collected, errors = [], []
     for s in segs:
         for a in areas:
-            r = find(s, a, chains=chains)
+            r = find(s, a, chains=chains, contactable_only=contactable_only)
             if not r.get("ok"):
                 errors.append(f"{s}/{a}: {r.get('error')}")
                 continue
@@ -755,6 +794,16 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
                 "reach": reach_of(collected),
                 "head": f"{len(collected)} found, nothing stored (dry run)"}
 
+    # Two steps, in this order, and the order matters. A signage run in Dubai
+    # came back 49 worth having and 7 with any way in — the other 42 had a
+    # name and an address and nothing else. Most of those businesses DO have a
+    # website; what is missing is the volunteer who would have typed it into
+    # the map. So: find the missing sites first, then read every site we have.
+    guessed = ({"looked_for": 0, "sites_found": 0, "too_generic_to_guess": [],
+                "no_site_found": [], "not_reached_this_pass": 0,
+                "head": "missing sites not looked for this pass"}
+               if not guess_sites else find_site.fill_in(collected))
+
     # THE STEP THAT WAS MISSING. Without it every OSM lead was filed with an
     # empty email column and the mail runner had nobody to write to.
     enriched = ({"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
@@ -775,16 +824,19 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
         "leads-osm",
         reasoning=(f"Collected {len(collected)} POI(s) from OpenStreetMap across "
                    + ", ".join(segs) + " in " + ", ".join(areas)
-                   + f" — no Places key needed. Read {enriched['sites_read']} "
-                   f"of their websites for a published email address."),
+                   + f" — no Places key needed. Found {guessed['sites_found']} "
+                   f"website(s) the map did not have, and read "
+                   f"{enriched['sites_read']} of them for a published email."),
         expectation=(f"{reach['mailable']} can be written to by the mail runner; "
                      f"{reach['message']} are a phone only and are the owner's "
                      f"to message by hand."),
         confidence=0.6,
         evidence={"stored": [s["id"] for s in res["stored"]],
-                  "emails_found": enriched["emails_found"]})
+                  "emails_found": enriched["emails_found"],
+                  "sites_guessed": guessed["sites_found"]})
     return {"ok": True, "agent": agent, "task": task["id"], "head": head,
-            "errors": errors, "reach": reach, "enriched": enriched, **res}
+            "errors": errors, "reach": reach, "enriched": enriched,
+            "guessed_sites": guessed, **res}
 
 
 # ---------------------------------------------------------------------------
@@ -840,9 +892,18 @@ def main():
     ap.add_argument("--chains", action="store_true",
                     help="keep the franchises too (dropped by default: they buy "
                          "centrally, usually abroad)")
+    ap.add_argument("--contactable", action="store_true",
+                    help="ask OSM only for the ones that have a phone, site or "
+                         "email tag — spends the result cap on businesses we "
+                         "can actually reach")
     ap.add_argument("--no-read-sites", dest="read_sites", action="store_false",
                     help="skip reading the businesses' websites for an email "
                          "address (faster, but the leads stay unmailable)")
+    ap.add_argument("--no-guess-sites", dest="guess_sites", action="store_false",
+                    help="skip looking for the website of a business the map "
+                         "gave no contact for at all")
+    ap.add_argument("--limit", type=int, default=MAX_RESULTS,
+                    help=f"how many POIs to ask OSM for (default {MAX_RESULTS})")
     ap.add_argument("--per-segment", type=int, default=1)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -870,17 +931,25 @@ def main():
         return 0 if p.get("ok") else 1
 
     if a.find:
-        r = find(a.find, a.area, chains=a.chains)
+        r = find(a.find, a.area, limit=a.limit, chains=a.chains,
+                 contactable_only=a.contactable)
+        if r.get("ok") and a.guess_sites:
+            r["guessed_sites"] = find_site.fill_in(r["candidates"])
         if r.get("ok") and a.read_sites:
-            e = enrich(r["candidates"])
-            r["enriched"], r["reach"] = e, reach_of(r["candidates"])
+            r["enriched"] = enrich(r["candidates"])
+        if r.get("ok"):
+            r["reach"] = reach_of(r["candidates"])
         if a.json:
             print(json.dumps(r, indent=2))
         elif not r.get("ok"):
             print("could not: " + str(r.get("error")))
         else:
             print(f"{a.find} in {a.area} via {r['mirror']} — {r['head']}")
-            print(f"   {r['with_phone']} with a phone, {r['with_website']} with a site")
+            print(f"   {r['with_phone']} with a phone, {r['with_website']} "
+                  f"with a site, {r['with_email_from_the_map']} with an email "
+                  f"already on the map")
+            if r.get("guessed_sites"):
+                print(f"   {r['guessed_sites']['head']}")
             if r.get("enriched"):
                 print(f"   {r['enriched']['head']}")
             print(f"   HOW WE REACH THEM: {reach_line(r['reach'])}")
@@ -897,7 +966,8 @@ def main():
 
     r = run(segment=None, area=a.area if a.area != "Dubai" else None,
             per_segment=a.per_segment, dry_run=a.dry_run,
-            read_sites=a.read_sites)
+            read_sites=a.read_sites, contactable_only=a.contactable,
+            guess_sites=a.guess_sites)
     print(json.dumps(r, indent=2) if a.json else
           (r.get("head") or r.get("error") or "nothing to do"))
     return 0 if r.get("ok") else 1
