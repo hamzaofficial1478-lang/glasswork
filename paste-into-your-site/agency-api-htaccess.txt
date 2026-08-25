@@ -1,0 +1,70 @@
+# ============================================================================
+#  UPLOAD THIS INTO THE agency-api FOLDER AND RENAME IT TO:   .htaccess
+#  (the name starts with a dot and has no file extension)
+#
+#  In cPanel File Manager you may need Settings -> "Show Hidden Files (dotfiles)"
+#  before you can see it afterwards. That is normal.
+#
+#  WHAT IT DOES
+#
+#  Your agency-api folder sits inside your website, so by default the web
+#  server will hand out anything in it to anybody who guesses the address.
+#  This says: serve index.php and nothing else.
+#
+#  It is a second lock, not the only one. token.php is already safe because a
+#  .php file gets RUN rather than shown. But backups/ holds copies of your
+#  pages, and a folder listing tells a stranger exactly what to try next.
+#  Two locks cost nothing.
+# ============================================================================
+
+# Never show a list of what is in this folder.
+Options -Indexes
+
+# Refuse everything by default...
+<IfModule mod_authz_core.c>
+    # Apache 2.4 — what almost all hosting runs now
+    <FilesMatch ".">
+        Require all denied
+    </FilesMatch>
+    # ...except the one file that is meant to answer.
+    <Files "index.php">
+        Require all granted
+    </Files>
+    # If you did NOT rename agency-api.php to index.php, this covers that too.
+    <Files "agency-api.php">
+        Require all granted
+    </Files>
+</IfModule>
+
+<IfModule !mod_authz_core.c>
+    # Apache 2.2 — older shared hosting
+    <FilesMatch ".">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+    <Files "index.php">
+        Order allow,deny
+        Allow from all
+    </Files>
+    <Files "agency-api.php">
+        Order allow,deny
+        Allow from all
+    </Files>
+</IfModule>
+
+# Belt and braces: never serve a backup, a token or a text file from here,
+# whatever the rules above end up doing on your particular host.
+<FilesMatch "\.(bak|txt|log|sql|zip|tar|gz|json|md|ini|conf)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Keep this whole folder out of Google.
+<IfModule mod_headers.c>
+    Header set X-Robots-Tag "noindex, nofollow, noarchive"
+</IfModule>

@@ -322,6 +322,7 @@ def tests():
             "pipelines.leads_tests", "pipelines.harvest_tests",
             "pipelines.outreach_tests", "pipelines.osm_tests",
             "pipelines.find_site_tests", "pipelines.site_api_tests",
+            "pipelines.secure_tests",
             "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.site_tests", "pipelines.seo_tests",
             "pipelines.answers_tests", "pipelines.intel_tests",

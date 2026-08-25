@@ -183,6 +183,41 @@ def test_one_silent_sector_is_one_message():
         check("Content is asked once", sum(1 for t in told if t["to_sector"] == "Content"), 1)
 
 
+def test_an_unanswered_request_says_which_command_answers_it():
+    """
+    He watched "Content has not answered SEO in 19 days" arrive on his phone
+    for nineteen days. Every word of it was true. None of it told him what to
+    do — and the answer was one command, which nothing anywhere named.
+
+    A fault the owner cannot act on is not a warning, it is nagging.
+    """
+    print("\nThe fault names the command that clears it:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - F.UNANSWERED_SECS - 600
+        cab.write("INSERT INTO requests(id,from_sector,to_sector,subject,status,"
+                  "created_at) VALUES('rq1','SEO','Content',"
+                  "'Keyword-gap list ready','open',?)", (old,))
+        found = [f for f in F.detect() if f["kind"] == "unanswered"]
+        check("the fault is there", len(found), 1)
+        check("and it carries the command, not just the complaint",
+              "python -m pipelines.content_briefs" in found[0]["detail"], True)
+        check("introduced as something to run",
+              "To answer it now, run:" in found[0]["detail"], True)
+
+    print("\n...and the command comes from the daily run, not a second list:")
+    check("Content", F.how_to_run("Content"),
+          "python -m pipelines.content_briefs")
+    check("Security", F.how_to_run("Security"),
+          "python -m pipelines.security_screen")
+    check("a sector with several steps names them in order",
+          F.how_to_run("SEO").startswith("python -m pipelines.seo_intel"), True)
+    check("case does not matter", F.how_to_run("content"),
+          "python -m pipelines.content_briefs")
+    print("  ...and a sector nobody runs says nothing rather than guessing:")
+    check("no invented command", F.how_to_run("Accounts"), "")
+    check("nor for an empty one", F.how_to_run(""), "")
+
+
 def test_a_sector_falling_apart_is_raised_once():
     print("\nA sector with several faults gets ONE message about the pattern:")
     with _Cabinet() as cab:
@@ -451,6 +486,7 @@ def main():
               test_a_blocking_fault_reaches_the_md,
               test_a_degraded_fault_waits_before_escalating,
               test_one_silent_sector_is_one_message,
+              test_an_unanswered_request_says_which_command_answers_it,
               test_a_sector_falling_apart_is_raised_once,
               test_a_fault_that_fixes_itself_closes_what_it_opened,
               test_a_claimed_ticket_is_never_yanked,

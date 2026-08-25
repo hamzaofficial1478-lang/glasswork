@@ -96,7 +96,11 @@ function expected_token(): string {
     // been irrelevant: they would already have the key. Still supported for
     // anyone who set it up that way, but /health complains until it is gone.
     if ($t === '' && is_file(__DIR__ . '/token.php')) {
-        $t = trim((string)@include __DIR__ . '/token.php');
+        // A PHP file with no `return` statement gives back the integer 1, and
+        // trim((string)1) is "1". Reject that here rather than letting a
+        // one-character token flow on as if it were real.
+        $v = @include __DIR__ . '/token.php';
+        $t = is_string($v) ? trim($v) : '';
     }
     if ($t === '' && is_file(__DIR__ . '/token.txt')) {
         $t = trim((string)file_get_contents(__DIR__ . '/token.txt'));
@@ -104,10 +108,58 @@ function expected_token(): string {
     return $t;
 }
 
+/**
+ * What went wrong with the token, in words that name the actual mistake.
+ *
+ * The old message said "create token.txt" — a file the instructions never
+ * mentioned — while the real problem was usually one of three things, and it
+ * said nothing about any of them. A setup error you cannot see is worse than
+ * one that fails loudly.
+ */
+function token_diagnosis(): string {
+    $here = __DIR__;
+    $bits = [];
+    // The classic. Notepad appends .txt unless you set "Save as type: All
+    // Files", and the result looks completely correct in File Manager until
+    // you notice the extension.
+    foreach (['token.php.txt', 'token.txt.php', 'Token.php', 'token .php'] as $slip) {
+        if (is_file("$here/$slip")) {
+            $bits[] = "There is a file called '$slip' in the agency-api folder. "
+                    . "It has to be named exactly 'token.php'. Notepad adds .txt "
+                    . "unless you set 'Save as type' to 'All Files'. Rename it.";
+        }
+    }
+    if (is_file("$here/token.php")) {
+        $v = @include "$here/token.php";
+        if (!is_string($v)) {
+            $bits[] = "token.php exists but gives nothing back. Its whole "
+                    . "contents must be one line, exactly like this, with the "
+                    . "<?php at the start and the semicolon at the end:  "
+                    . "<?php return 'your-long-token-here';";
+        } elseif (strlen(trim($v)) < 24) {
+            $bits[] = "token.php returns something only " . strlen(trim($v))
+                    . " characters long. The token must be at least 24 "
+                    . "characters. Check nothing was cut off when you pasted.";
+        }
+    } elseif (!is_file("$here/token.txt")) {
+        $bits[] = "There is no token.php in the agency-api folder. Create it "
+                . "with one line:  <?php return 'your-long-token-here';  and "
+                . "upload it next to this file.";
+    }
+    if (!$bits) {
+        $bits[] = "A token file is there but came back empty. Open it and "
+                . "check it reads exactly:  <?php return 'your-token';";
+    }
+    // What IS in the folder, so he can compare against what should be. Names
+    // only — never contents, and token files are named but never opened.
+    $seen = array_values(array_diff((array)scandir($here) ?: [], ['.', '..']));
+    return implode(' ', $bits) . ' | Files currently in agency-api: '
+         . (implode(', ', array_slice($seen, 0, 12)) ?: '(none)');
+}
+
 $expected = expected_token();
 if (strlen($expected) < 24) {
-    fail(500, 'No token set. Create agency-api/token.txt with a long random '
-            . 'line in it, or set GLASSWORK_TOKEN in your server environment.');
+    fail(500, token_diagnosis());
 }
 
 $sent = '';

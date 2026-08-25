@@ -67,6 +67,34 @@ ABANDONED_SECS = 3600
 # A sector asked another sector for something and got nothing back. Requests are
 # how the sectors work at all, so an unanswered one stops real work.
 UNANSWERED_SECS = 3 * 3600
+
+
+def how_to_run(sector: str) -> str:
+    """
+    The command that makes this sector do its work, or "" if we do not know.
+
+    A FAULT THE OWNER CANNOT ACT ON IS JUST NAGGING. He read "Content has not
+    answered SEO in 19 days" on his phone for nineteen days. Everything about
+    that message was true and none of it told him what to do — the answer was
+    one command, and nothing anywhere said which.
+
+    Read out of day_run.STEPS rather than kept as a second list here, because a
+    second list is one that goes stale silently and then confidently prints the
+    wrong command.
+    """
+    try:
+        from pipelines import day_run
+    except Exception:
+        return ""
+    mods = []
+    for step in getattr(day_run, "STEPS", ()):
+        # (label, module, room, lane)
+        if len(step) >= 3 and str(step[2]).lower() == (sector or "").lower():
+            if step[1] not in mods:
+                mods.append(step[1])
+    if not mods:
+        return ""
+    return "  ".join(f"python -m {m}" for m in mods[:3])
 # An open task nobody has claimed at all. A long fuse on purpose: posted this
 # morning and untouched this afternoon is a normal day; still sitting there
 # tomorrow means no desk is ever going to take it.
@@ -311,7 +339,12 @@ def detect(now=None) -> list:
                            "one sector's problem — it is two sectors idle." + again
                            + ("" if not g["claimed"] else
                               f" {g['claimed']} of them were claimed, which means an "
-                              "agent took the question and then did not reply.")),
+                              "agent took the question and then did not reply.")
+                           # The sector answers when it RUNS, and it has not
+                           # run. Say the command, or this is a message that
+                           # repeats for nineteen days and helps with nothing.
+                           + (f" To answer it now, run:  {how_to_run(to_s)}"
+                              if how_to_run(to_s) else "")),
                 "evidence": "requests#" + ",".join(g["ids"][:8]),
             })
 
