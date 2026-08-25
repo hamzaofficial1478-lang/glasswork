@@ -785,6 +785,72 @@ def test_a_404_is_not_a_javascript_page():
           "declined" in r, False)
 
 
+def test_a_canonical_tag_pointing_at_another_domain_is_caught():
+    """
+    THE WORST THING ON HIS SITE, AND NOTHING WAS LOOKING FOR IT.
+
+    All eight of his pages carried
+        <link rel="canonical" href="https://worlddealtechnicalservices.ae/...">
+    while the site he runs is .com. The .ae domain has no DNS record at all.
+
+    A canonical tag is not a hint. It tells Google "the real copy of this page
+    is over there, index that instead of me." Every page was pointing at a
+    domain that does not exist. No amount of markup or content outranks a page
+    asking not to be indexed.
+
+    The first version of this check REPORTED ALL CLEAR on it. It compared
+    harvest.brand(), which strips the TLD on purpose — right for deciding
+    whether a .com site's .ae email belongs to the same business, and exactly
+    wrong here, where .ae and .com are two different websites.
+    """
+    from . import site_check as C
+    print("\nwww and the bare domain are the same site:")
+    check("www stripped", C._bare("www.example.ae"), "example.ae")
+    check("bare left alone", C._bare("example.ae"), "example.ae")
+    check("a trailing dot is not a different host", C._bare("example.ae."),
+          "example.ae")
+    print("  ...but a different TLD is a different website:")
+    check("not equal", C._bare("example.ae") == C._bare("example.com"), False)
+
+    def _page(canon):
+        tag = f'<link rel="canonical" href="{canon}">' if canon else ""
+        return f"<html><head><title>t</title>{tag}</head><body>hi</body></html>"
+
+    def _run(pages, host="https://www.mysite.com"):
+        real_fetch, real_own = C.__dict__.get("_x"), None
+        from . import fetcher, site_search
+        rf, ro = fetcher.fetch, site_search.own_pages
+        fetcher.fetch = lambda u, **kw: {
+            "ok": True, "html": pages.get(u, pages.get(host, "")), "cost": 0.0,
+            "how": "plain", "error": ""}
+        site_search.own_pages = lambda html, base, limit=40: [
+            u for u in pages if u != base]
+        try:
+            return C.step_canonical(host)
+        finally:
+            fetcher.fetch, site_search.own_pages = rf, ro
+
+    print("\nPages pointing at a dead domain are a FAILURE, not a note:")
+    host = "https://www.mysite.com"
+    r = _run({host: _page("https://mysite.ae/"),
+              host + "/about.php": _page("https://mysite.ae/about.php")})
+    check("FAIL", r["state"], C.FAIL)
+    check("it names the domain", "mysite.ae" in r["says"], True)
+    check("and says it does not exist", "does not exist" in r["says"], True)
+    check("and why that matters", "do not rank" in r["says"], True)
+    check("listing the pages", len(r["wrong"]), 2)
+
+    print("\n...pointing at your own site, www or not, is correct:")
+    r = _run({host: _page("https://mysite.com/"),
+              host + "/about.php": _page("https://www.mysite.com/about.php")})
+    check("ok", r["state"], C.OK)
+
+    print("\n...and no canonical at all is fine, not a problem to invent:")
+    r = _run({host: _page(""), host + "/about.php": _page("")})
+    check("ok", r["state"], C.OK)
+    check("but it is mentioned", "no canonical tag" in r["says"], True)
+
+
 def main():
     test_the_site_address_survives_a_fresh_clone()
     test_only_service_looking_text_is_taken()
@@ -801,6 +867,7 @@ def main():
     test_the_same_page_under_two_names_is_indexed_once()
     test_a_heading_on_every_page_describes_the_site_not_the_page()
     test_a_404_is_not_a_javascript_page()
+    test_a_canonical_tag_pointing_at_another_domain_is_caught()
 
     print()
     if _fail:

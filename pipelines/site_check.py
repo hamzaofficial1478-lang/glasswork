@@ -36,6 +36,7 @@ separately, and a step that could not run says why and what would turn it on.
 """
 import argparse
 import json
+import re
 import time
 
 from coordination import board, site as site_cfg
@@ -231,6 +232,100 @@ def step_answers(url, max_pages):
                  score=score, worst=worst, blocked=blocked)
 
 
+def _bare(host: str) -> str:
+    """
+    A hostname with 'www.' taken off and nothing else.
+
+    www and non-www ARE the same site for this purpose — pointing the www
+    version at the bare one is a normal, correct thing to do. A different
+    domain is not.
+    """
+    h = (host or "").strip().lower().rstrip(".")
+    return h[4:] if h.startswith("www.") else h
+
+
+def step_canonical(url, max_pages=10):
+    """
+    Where your pages tell Google their real home is.
+
+    THIS FOUND THE WORST THING ON HIS SITE AND NOTHING WAS LOOKING FOR IT.
+
+    Every one of his eight pages carried
+    <link rel="canonical" href="https://worlddealtechnicalservices.ae/...">
+    while the site he runs is .com. The .ae domain does not resolve — it has
+    no DNS record at all.
+
+    A canonical tag is not a hint. It tells Google "the authoritative copy of
+    this page lives at this address; index that one instead of me." Every page
+    on the site was pointing at a dead domain, which is an instruction to
+    Google to drop the page it is reading. No amount of markup, content or
+    keywords outranks a page asking not to be indexed.
+    """
+    from . import fetcher, harvest, site_search
+    import socket
+    import urllib.parse
+    try:
+        home = fetcher.fetch(url, timeout=20, allow_paid=False)
+        if not home.get("ok") or not home.get("html"):
+            return _step("Where pages say they live", WARN,
+                         "could not read the site to check")
+        base = url.rstrip("/")
+        want = urllib.parse.urlparse(base).netloc.lower()
+        pages_ = [base] + site_search.own_pages(home["html"], base)[:max_pages - 1]
+        rows, missing = [], []
+        for u in pages_:
+            html = home["html"] if u == base else (
+                fetcher.fetch(u, timeout=15, allow_paid=False).get("html") or "")
+            if not html:
+                continue
+            m = (re.search(r'rel=["\']canonical["\'][^>]*href=["\']([^"\']+)', html, re.I)
+                 or re.search(r'href=["\']([^"\']+)["\'][^>]*rel=["\']canonical', html, re.I))
+            if not m:
+                missing.append(u)
+                continue
+            # THE WHOLE HOST, TLD INCLUDED.
+            #
+            # harvest.brand() deliberately ignores the TLD, because a UAE firm
+            # whose site is .com and whose email is .ae is one business, and
+            # treating them as strangers threw away a real lead. Here the
+            # opposite is true and the first version of this check got it
+            # wrong: it compared brands, decided .ae and .com were "the same
+            # site", and reported all clear on the single worst problem on
+            # his site. To Google they are two different websites, and that
+            # is the entire point of a canonical tag.
+            host = _bare(urllib.parse.urlparse(m.group(1)).netloc.lower())
+            if host and host != _bare(want):
+                rows.append({"page": u, "points_at": m.group(1), "host": host})
+        if not rows:
+            note = f"{len(pages_)} page(s) checked, all pointing at your own site"
+            if missing:
+                note += f"; {len(missing)} have no canonical tag, which is fine"
+            return _step("Where pages say they live", OK, note + ".")
+
+        # Does the domain they point at even exist? A live sister domain is a
+        # decision somebody made. A dead one is a catastrophe nobody noticed.
+        hosts = sorted({r["host"] for r in rows})
+        dead = []
+        for h in hosts:
+            try:
+                socket.gethostbyname(h)
+            except Exception:
+                dead.append(h)
+        says = (f"{len(rows)} page(s) tell Google their real home is "
+                + ", ".join(hosts) + ", not this site.")
+        if dead:
+            says += (f" And {', '.join(dead)} does not exist — no DNS record at "
+                     "all. You are telling Google to index a page that is not "
+                     "there instead of the one it is reading, which is why "
+                     "these pages do not rank. Fix the canonical tag in your "
+                     "page template to point at your real address before "
+                     "anything else on this list.")
+        return _step("Where pages say they live", FAIL, says,
+                     wrong=rows[:12], dead_hosts=dead)
+    except Exception as e:
+        return _step("Where pages say they live", WARN, f"could not check: {e}")
+
+
 def step_secure(url):
     """
     What of his a stranger can download today.
@@ -373,6 +468,7 @@ def _steps(url, do_index, max_pages) -> dict:
                lambda: step_services(url),
                lambda: step_search(url, do_index, max_pages),
                lambda: step_answers(url, max_pages),
+               lambda: step_canonical(url),
                lambda: step_secure(url),
                step_console):
         try:
