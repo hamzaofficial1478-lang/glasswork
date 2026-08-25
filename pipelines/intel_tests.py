@@ -659,11 +659,67 @@ def test_it_asks_instead_of_shrugging():
         board.DB = real_db
 
 
+def test_a_403_from_search_console_says_which_of_the_two_causes_it_is():
+    """
+    His report said: "Search Console refused (403). Two causes, and Google
+    uses the same code for both." Both true, and it left him to work out
+    which — with the wrong guess costing a trip through a permissions screen
+    for a property string that was simply written differently.
+
+    Google answers it itself. /sites lists every property the service account
+    can actually see.
+    """
+    from . import seo_intel as I
+    print("\nNo properties at all is a permissions problem, not a typo:")
+
+    class _R:
+        def __init__(self, code, payload): self.status_code, self._p = code, payload
+        def json(self): return self._p
+
+    real_email = I._service_account_email
+    I._service_account_email = lambda: "agency@proj.iam.gserviceaccount.com"
+    C = type("C", (), {"token": "t"})()
+    try:
+        msg = I._which_403(C, "https://h", "https://www.mysite.com/",
+                           get=lambda *a, **k: _R(200, {"siteEntry": []}))
+        check("named as permissions", "can see NO properties" in msg, True)
+        check("and it gives him the address to add",
+              "agency@proj.iam.gserviceaccount.com" in msg, True)
+        check("and where to put it", "Users and permissions" in msg, True)
+
+        print("\n...a property list WITHOUT his string is a typo, and the "
+              "right one is in the list:")
+        msg = I._which_403(C, "https://h", "https://www.mysite.com/",
+                           get=lambda *a, **k: _R(200, {"siteEntry": [
+            {"siteUrl": "https://mysite.com/"}]}))
+        check("it says the string is wrong", "is not one of the" in msg, True)
+        check("it lists what IS there", "https://mysite.com/" in msg, True)
+        check("and spots it is the same site written differently",
+              "same site as yours written differently" in msg, True)
+
+        print("\n...a completely different site is listed without that claim:")
+        msg = I._which_403(C, "https://h", "https://www.mysite.com/",
+                           get=lambda *a, **k: _R(200, {"siteEntry": [
+            {"siteUrl": "sc-domain:someoneelse.ae"}]}))
+        check("no false reassurance",
+              "same site as yours" in msg, False)
+        check("but still actionable", "exactly one of those" in msg, True)
+
+        print("\n...and if the listing itself fails, both causes stay open:")
+        def boom(*a, **k): raise OSError("no network")
+        msg = I._which_403(C, "https://h", "p", get=boom)
+        check("it does not pick one", "both causes are still open" in msg, True)
+        check("and still offers the address", "agency@proj" in msg, True)
+    finally:
+        I._service_account_email = real_email
+
+
 def main():
     test_it_works_with_no_paid_api()
     test_nothing_is_hardcoded()
     test_it_asks_instead_of_shrugging()
     test_search_console_talks_to_the_right_endpoint()
+    test_a_403_from_search_console_says_which_of_the_two_causes_it_is()
     test_no_wins_says_which_link_is_missing()
     test_it_never_claims_to_know_volume()
     test_striking_distance_is_the_free_win()

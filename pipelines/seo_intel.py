@@ -300,6 +300,70 @@ def gsc_ready():
     return True, ""
 
 
+def _service_account_email() -> str:
+    """The address he has to add as a user in Search Console."""
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        p = _Path(__file__).parents[1] / GSC_SA
+        return (_json.loads(p.read_text(encoding="utf-8")).get("client_email")
+                or "") if p.exists() else ""
+    except Exception:
+        return ""
+
+
+def _which_403(creds, host, prop, get=None) -> str:
+    """
+    Ask Google which of the two causes it actually is.
+
+    A 403 from Search Console means either "you are not a user on that
+    property" or "no such property as you typed it", and Google uses the same
+    code for both because a property you cannot see is indistinguishable from
+    one that does not exist.
+
+    But /sites lists every property this service account CAN see, and that
+    settles it. No list at all: it has been added to nothing. A list without
+    GSC_PROPERTY in it: the string is wrong, and the right one is right there.
+    """
+    email = _service_account_email()
+    who = f" The address to add is: {email}" if email else ""
+    try:
+        if get is None:
+            import requests as _rq
+            get = _rq.get
+        r = get(host + "/webmasters/v3/sites", timeout=30,
+                headers={"Authorization": "Bearer " + creds.token})
+        if r.status_code != 200:
+            raise RuntimeError(f"HTTP {r.status_code}")
+        seen = [s.get("siteUrl") for s in (r.json().get("siteEntry") or [])
+                if s.get("siteUrl")]
+    except Exception as e:
+        return ("Could not list what the service account can see "
+                f"({e}), so both causes are still open: it may not be a user "
+                "on the property, or GSC_PROPERTY may not match exactly." + who)
+    if not seen:
+        return ("Google says this service account can see NO properties at "
+                "all, so this is a permissions problem, not a typo. In Search "
+                "Console open Settings, then Users and permissions, and add it "
+                "as a Full or Restricted user." + who)
+    if prop in seen:
+        return ("Odd one: Google lists this property for the service account "
+                "and still refused. Give it a minute — a permission just "
+                "granted takes a moment — then try again.")
+    # The usual case, and the useful one.
+    close = [s for s in seen
+             if s.replace("https://", "").replace("http://", "")
+                 .replace("www.", "").rstrip("/")
+             == prop.replace("https://", "").replace("http://", "")
+                 .replace("www.", "").rstrip("/")]
+    tip = (f" That is the same site as yours written differently — set "
+           f"GSC_PROPERTY to exactly: {close[0]}" if close else
+           " Set GSC_PROPERTY to exactly one of those.")
+    return (f"GSC_PROPERTY is {prop!r}, which is not one of the "
+            f"{len(seen)} property(ies) this service account can see: "
+            + ", ".join(repr(s) for s in seen[:6]) + "." + tip)
+
+
 def gsc_queries(days=90, limit=500):
     """
     Real queries that brought impressions to this site, with position.
@@ -360,11 +424,19 @@ def gsc_queries(days=90, limit=500):
                 f" Note: {prop!r} has no trailing slash. A URL-prefix property "
                 f"must be given exactly as Search Console shows it, "
                 f"'{prop}/' — without it Google does not recognise the property.")
-            return [], (f"Search Console refused (403) for {prop}. Two causes, and "
-                        f"Google uses the same code for both: (1) the service "
-                        f"account is not a user on the property — add its "
-                        f"client_email under Settings, Users and permissions; "
-                        f"(2) the property string does not match exactly." + slash)
+            # DO NOT MAKE HIM GUESS BETWEEN THE TWO CAUSES.
+            #
+            # Google answers this itself: /sites lists every property this
+            # service account can actually see. An empty list means it has
+            # been added to nothing, and the fix is the permissions screen. A
+            # non-empty list that does not contain GSC_PROPERTY means the
+            # string is wrong, and the right one is sitting in that list.
+            #
+            # The old message named both causes and left him to work out
+            # which. On his own site the answer is almost certainly the www:
+            # he verified one form in Search Console and set the other here.
+            return [], (f"Search Console refused (403) for {prop}." + slash + " "
+                        + _which_403(creds, host, prop))
         if r.status_code == 404 and host is hosts[-1]:
             return [], (f"Search Console has no property called {prop!r} (404). It "
                         f"must match exactly: 'sc-domain:yoursite.ae' for a domain "
