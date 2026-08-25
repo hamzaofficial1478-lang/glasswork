@@ -80,9 +80,75 @@ def sh(args, **kw):
         return 124, "timed out"
 
 
+def npm_install(timeout=600):
+    """
+    Install the Node dependencies WITHOUT rewriting the lockfile.
+
+    `npm install` is the command everyone reaches for, and it is the wrong one
+    here: it recomputes package-lock.json against whatever npm version happens
+    to be on the machine and writes it back. Run from inside this program, that
+    left the owner's checkout permanently dirty and made every later `git pull`
+    refuse — over a file he had never opened.
+
+    `npm ci` is the command for "install exactly what the project pins". It
+    reads the lockfile and does not write it. It is stricter, so it fails when
+    the lockfile and package.json genuinely disagree — and THAT is a real
+    problem worth falling back for, and worth saying out loud when it happens.
+    """
+    if (ROOT / "package-lock.json").exists():
+        code, out = sh(["npm", "ci"], timeout=timeout)
+        if code == 0:
+            return True
+        say("  npm ci could not use the lockfile, so falling back to npm install.")
+        say("  (That means package.json and package-lock.json disagree — the "
+            "lockfile will be rewritten and is worth committing.)")
+    code, out = sh(["npm", "install"], timeout=timeout)
+    if code != 0:
+        say("  npm install failed: " + (out.strip().splitlines()[-1][:120]
+                                        if out.strip() else "no detail"))
+    return code == 0
+
+
 # ---------------------------------------------------------------------------
 # 1. UPDATE
 # ---------------------------------------------------------------------------
+
+# Files this program rewrites BY ITSELF and the owner never edits by hand.
+#
+# THE UPDATE THAT BLOCKED ITSELF. run.py runs `npm install`, npm rewrites
+# package-lock.json with whatever npm version is on the machine, the tree is
+# now dirty — and the NEXT run refuses to pull because "you have uncommitted
+# changes". The owner had not changed anything. This program made the mess and
+# then cited it as a reason not to update itself.
+#
+# Two halves to the fix. `npm ci` below installs from the lockfile without
+# rewriting it, which stops the churn at source. This list handles the copies
+# already dirtied on machines that have been running the old command for weeks.
+SELF_WRITTEN = ("package-lock.json", "package.json.lock", "npm-shrinkwrap.json")
+
+
+def _only_self_written(dirty: str) -> list:
+    """
+    The dirty files, if EVERY one of them is a file we wrote ourselves.
+    Returns [] the moment anything is genuinely the owner's, so one hand-edit
+    still stops the pull exactly as before.
+    """
+    names = []
+    for line in (dirty or "").splitlines():
+        if not line.strip():
+            continue
+        # Porcelain is exactly 'XY<space>path'. X and Y are single columns and
+        # either may be a SPACE — ' M package-lock.json' is the common one — so
+        # this reads by position. Splitting on whitespace put the 'M' in the
+        # path and matched nothing, which is the sort of bug that makes a guard
+        # silently never fire.
+        status, path = line[:2], line[3:].strip().strip('"')
+        # '??' is untracked. Never ours to throw away: the owner put it there.
+        if "?" in status or path not in SELF_WRITTEN:
+            return []
+        names.append(path)
+    return names
+
 
 def update():
     """
@@ -97,11 +163,22 @@ def update():
 
     code, dirty = sh(["git", "status", "--porcelain"])
     if dirty.strip():
-        say("  You have uncommitted changes, so nothing was pulled:")
-        for line in dirty.strip().splitlines()[:8]:
-            say("    " + line)
-        say("  Commit or stash them, then run this again to update.")
-        return
+        mine = _only_self_written(dirty)
+        if mine:
+            # Ours, not his. Put them back and carry on rather than making him
+            # run a git command to undo something he did not do.
+            say("  " + ", ".join(mine) + " was rewritten by npm on the last run"
+                " — restoring it and carrying on.")
+            sh(["git", "checkout", "--"] + mine)
+            code, dirty = sh(["git", "status", "--porcelain"])
+        if dirty.strip():
+            say("  You have uncommitted changes, so nothing was pulled:")
+            for line in dirty.strip().splitlines()[:8]:
+                say("    " + line)
+            say("  Commit or stash them, then run this again to update.")
+            say("  (An untracked file you want to keep is fine — pull with"
+                " 'git pull' yourself, git will not touch it.)")
+            return
 
     code, out = sh(["git", "pull", "--ff-only"], timeout=120)
     if code != 0:
@@ -113,7 +190,7 @@ def update():
     if "requirements" in out or "package.json" in out:
         say("  Dependencies changed — installing.")
         sh([PY, "-m", "pip", "install", "-r", "requirements.txt"], timeout=600)
-        sh(["npm", "install"], timeout=600)
+        npm_install(timeout=600)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +344,7 @@ def office():
     head("Starting the office")
     if not (ROOT / "node_modules").exists():
         say("  Installing dependencies (first run only)...")
-        sh(["npm", "install"], timeout=900)
+        npm_install(timeout=900)
     url = f"http://localhost:{PORT}/office.html"
     say(f"  {url}")
     say("  Leave this window open. Press Ctrl+C to stop.")
