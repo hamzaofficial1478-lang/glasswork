@@ -78,6 +78,21 @@ CHECKS = [
     ("amber", "/phpinfo.php",
      "your server's full configuration",
      "delete it. It names every path, module and version on the box."),
+    # Found live on his site, telling him so itself: "Already installed.
+    # Please delete install.php for security." An installer left in place is
+    # a door somebody else may walk through — some will happily reconfigure
+    # the site, or point it at a database of the caller's choosing.
+    ("red", "/install.php",
+     "the installer that set your site up",
+     "delete it. The page says so itself. An installer left on a live site "
+     "is a way in."),
+    ("amber", "/setup.php",
+     "an installer or setup script",
+     "delete it if the site is already set up."),
+    ("amber", "/default.php",
+     "a leftover default page",
+     "delete it if it is not a page you use — it is one more thing to keep "
+     "patched, and it splits your search ranking with the real page."),
     ("amber", "/backup.zip",
      "a zip of the whole site",
      "delete it, or move it off the website."),

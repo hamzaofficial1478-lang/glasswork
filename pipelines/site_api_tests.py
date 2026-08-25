@@ -79,6 +79,15 @@ class _Site:
             return {"ok": True, "pages": [{"page": p, "bytes": len(h),
                                            "changed": "2026-08-25T00:00:00+00:00"}
                                           for p, h in sorted(self.pages.items())]}
+        if path.startswith("/pages/") and method == "GET":
+            name = path.split("/", 2)[2]
+            if name not in self.pages:
+                return {"ok": False, "error": "no such page"}
+            return {"ok": True, "page": name, "html": self.pages[name],
+                    "bytes": len(self.pages[name])}
+        if path == "/pages" and method == "POST":
+            self.pages[body["page"]] = body["html"]
+            return {"ok": True, "page": body["page"], "backup": "b"}
         if path == "/head" and method == "POST":
             page, mark, block = body["page"], body["id"], body["html"]
             src = self.pages.get(page, "")
@@ -334,6 +343,142 @@ def test_a_website_that_is_down_is_a_tuesday_not_a_crash():
           "Notice: undefined index" in r["error"], True)
 
 
+def test_it_writes_only_to_pages_the_site_actually_serves():
+    """
+    THE THIRTEEN WRONG FILES.
+
+    His first real --apply-schema put LocalBusiness markup on Home.html,
+    about.html, blog.html, faq.html, install.php and default.php — an old
+    duplicate copy of the whole site sitting beside the live one, plus the
+    installer — and REFUSED every page he actually serves.
+
+    Two mistakes in one. It read the directory listing and believed it, and
+    the directory is not the site. And when the real pages said "no </head>"
+    it gave up instead of asking why.
+    """
+    print("\nThe disk holds more than the site serves:")
+    site = _Site({"index.php": PAGE, "about.php": PAGE, "faq.php": PAGE,
+                  "Home.html": PAGE, "about.html": PAGE, "faq.html": PAGE,
+                  "install.php": PAGE, "default.php": PAGE})
+    real_live, real_holder = S.live_pages, S.head_holder
+    S.live_pages = lambda s=None: ["index.php", "about.php", "faq.php"]
+    S.head_holder = lambda c, s=None: ""
+    try:
+        plan = _with_site(site, lambda: _with_drafts(
+            LB, FAQ, lambda: S.schema_plan(FULL)))
+    finally:
+        S.live_pages, S.head_holder = real_live, real_holder
+    targets = sorted({j["page"] for j in plan["jobs"]})
+    check("only the pages the site links to",
+          targets, ["about.php", "faq.php", "index.php"])
+    check("the old .html duplicate is left alone",
+          any(t.endswith(".html") for t in targets), False)
+    check("and so is the installer", "install.php" in targets, False)
+    check("what was skipped is counted, not silently dropped",
+          sorted(plan["ignored"]),
+          ["Home.html", "about.html", "default.php", "faq.html", "install.php"])
+    check("and the headline says why", "not pages your site links to"
+          in plan["head"], True)
+
+    print("\n...and if the site cannot be read, it falls back rather than "
+          "doing nothing:")
+    S.live_pages = lambda s=None: []
+    try:
+        plan = _with_site(site, lambda: _with_drafts(
+            LB, FAQ, lambda: S.schema_plan(FULL)))
+    finally:
+        S.live_pages, S.head_holder = real_live, real_holder
+    check("every file on disk is a candidate again",
+          len({j["page"] for j in plan["jobs"]}) >= 8, True)
+
+
+def test_a_shared_header_gets_the_block_once():
+    """
+    Every real page came back "that page has no </head> to insert before",
+    because his seven pages share one header include and that is where the
+    </head> lives. One block in the header is one block on every page — which
+    is what he asked for in the first place.
+    """
+    print("\nWhen the pages have no head of their own, find the file that does:")
+    incl = "<html><head><title>x</title>\n</head><body>"
+    pg = "<?php include 'header.php'; ?><h1>hello</h1>"
+    site = _Site({"index.php": pg, "about.php": pg, "faq.php": pg,
+                  "header.php": incl})
+    holder = _with_site(site, lambda: S.head_holder(
+        ["index.php", "about.php", "faq.php"], FULL))
+    check("the include is found", holder, "header.php")
+
+    real_live = S.live_pages
+    S.live_pages = lambda s=None: ["index.php", "about.php", "faq.php"]
+    try:
+        plan = _with_site(site, lambda: _with_drafts(
+            LB, FAQ, lambda: S.schema_plan(FULL)))
+    finally:
+        S.live_pages = real_live
+    check("one job, not seven", len([j for j in plan["jobs"]
+                                     if j["id"] == S.SCHEMA_ID]), 1)
+    check("and it targets the header", plan["jobs"][0]["page"], "header.php")
+    check("and the plan records which file that is",
+          plan["head_include"], "header.php")
+    # The headline shows the outstanding PROBLEM when there is one — here the
+    # FAQ block, which cannot live in a shared header. That is the right thing
+    # to lead with, so this checks the problem is what surfaces.
+    check("the headline leads with what still needs him",
+          "FAQ markup cannot go in a shared header" in plan["head"], True)
+
+    print("\n...and the FAQ block is NOT put in the shared header:")
+    check("it is not silently added to every page",
+          any(j["id"] == S.FAQ_ID for j in plan["jobs"]), False)
+    check("he is told to place it himself, and why",
+          any("Google may ignore all of it" in p for p in plan["problems"]),
+          True)
+
+    print("\n...while a site whose pages DO have their own head is untouched "
+          "by any of this:")
+    plain = _Site({"index.php": PAGE, "faq.php": PAGE})
+    check("no include hunted for",
+          _with_site(plain, lambda: S.head_holder(["index.php"], FULL)), "")
+
+
+def test_the_markup_can_be_taken_straight_back_off():
+    """
+    Thirteen files were edited that should not have been. Undoing that had to
+    be one command — and a precise one: remove exactly what the agency put
+    there, not roll the page back to whatever the newest backup happens to be.
+    """
+    print("\nOne command takes it all back off:")
+    marked = ("<html><head><title>x</title>\n"
+              "<!-- agency:localbusiness -->\n<script>lb</script>\n"
+              "<!-- /agency:localbusiness -->\n</head><body>hi</body></html>")
+    site = _Site({"Home.html": marked, "install.php": marked,
+                  "index.php": PAGE})
+
+    def call(path, method="GET", body=None, timeout=25, s=None):
+        if path.startswith("/pages/") and method == "GET":
+            name = path.split("/", 2)[2]
+            return {"ok": True, "page": name, "html": site.pages.get(name, "")}
+        if path == "/pages" and method == "POST":
+            site.pages[body["page"]] = body["html"]
+            return {"ok": True, "page": body["page"], "backup": "b"}
+        return site(path, method, body, timeout, s)
+
+    r = _with_site(call, lambda: S.undo_schema(s=FULL))
+    check("both marked files cleaned", len(r["cleaned"]), 2)
+    check("the block is gone",
+          "agency:localbusiness" in site.pages["Home.html"], False)
+    check("and the rest of the page is intact",
+          "<title>x</title>" in site.pages["Home.html"], True)
+    check("the head still closes properly",
+          "</head>" in site.pages["Home.html"], True)
+    check("a page that never had one is untouched",
+          site.pages["index.php"], PAGE)
+
+    print("\n...and running it twice is not an error:")
+    r = _with_site(call, lambda: S.undo_schema(s=FULL))
+    check("nothing left to clean", r["cleaned"], [])
+    check("still ok", r["ok"], True)
+
+
 def main():
     for t in (test_the_two_setup_boxes_finally_lead_somewhere,
               test_only_the_releaser_may_change_the_site,
@@ -341,7 +486,10 @@ def main():
               test_it_refuses_to_publish_the_placeholder_address,
               test_the_faq_markup_goes_on_the_faq_page_only,
               test_undoing_is_never_held_in_a_queue,
-              test_a_website_that_is_down_is_a_tuesday_not_a_crash):
+              test_a_website_that_is_down_is_a_tuesday_not_a_crash,
+              test_it_writes_only_to_pages_the_site_actually_serves,
+              test_a_shared_header_gets_the_block_once,
+              test_the_markup_can_be_taken_straight_back_off):
         t()
     print()
     if _fail:

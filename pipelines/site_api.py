@@ -242,6 +242,63 @@ def put_page(page, html, agent=AGENT, s=None) -> dict:
     return call("/pages", "POST", {"page": page, "html": html}, s=s)
 
 
+def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
+    """
+    Take one marked block back out of a page, leaving everything else alone.
+
+    Read, cut, write — deliberately NOT a rollback. Rollback restores whatever
+    the newest backup happens to be, which is right after a bad edit and wrong
+    a week later when the page has changed for other reasons. This removes
+    exactly what the agency put there and touches nothing else.
+    """
+    got = read_page(page, s=s)
+    if not got.get("ok"):
+        return {"ok": False, "page": page, "error": got.get("error")}
+    src = got.get("html") or ""
+    open_, close = f"<!-- agency:{block_id} -->", f"<!-- /agency:{block_id} -->"
+    import re
+    pat = re.compile(re.escape(open_) + ".*?" + re.escape(close) + r"\s*", re.S)
+    if not pat.search(src):
+        return {"ok": True, "page": page, "action": "nothing there"}
+    return put_page(page, pat.sub("", src), agent=agent, s=s)
+
+
+def blocks_on(page, s=None) -> list:
+    """Which agency blocks a page is currently carrying."""
+    got = read_page(page, s=s)
+    if not got.get("ok"):
+        return []
+    import re
+    return sorted(set(re.findall(r"<!-- agency:([a-z0-9\-]+) -->",
+                                 got.get("html") or "")))
+
+
+def undo_schema(agent=AGENT, s=None) -> dict:
+    """
+    Take the agency's markup back off every page that has it.
+
+    Needed because the first real run put it on the wrong thirteen files: an
+    old duplicate copy of the site in .html, plus install.php and default.php,
+    while refusing every page he actually serves. Undoing that had to be one
+    command, not thirteen.
+    """
+    p = pages(s=s)
+    if not p.get("ok"):
+        return {"ok": False, "error": p.get("error")}
+    cleaned, failed = [], []
+    for row in p.get("pages") or []:
+        name = row["page"]
+        for bid in blocks_on(name, s=s):
+            r = remove_head_block(name, bid, agent=agent, s=s)
+            if r.get("ok") and r.get("action") != "nothing there":
+                cleaned.append({"page": name, "id": bid})
+            elif not r.get("ok"):
+                failed.append({"page": name, "id": bid, "why": r.get("error")})
+    return {"ok": not failed, "cleaned": cleaned, "failed": failed,
+            "head": (f"removed the agency markup from {len(cleaned)} page(s)"
+                     + (f", {len(failed)} refused" if failed else ""))}
+
+
 def undo(page="", backup="", agent=AGENT, s=None) -> dict:
     """
     Put a page back. Deliberately NOT gated behind the Releaser.
@@ -364,18 +421,121 @@ def schema_plan(s=None) -> dict:
             '"Warehouse 12, Al Quoz Industrial 3" --city Dubai   '
             "then run --apply-schema again.")
     p = pages(s=s)
-    known = [x["page"] for x in (p.get("pages") or [])] if p.get("ok") else []
+    on_disk = [x["page"] for x in (p.get("pages") or [])] if p.get("ok") else []
     if not p.get("ok"):
         problems.append("could not list your pages: " + str(p.get("error")))
-    jobs = [{"page": pg, "id": SCHEMA_ID, "what": "LocalBusiness", "bytes": len(lb)}
-            for pg in known]
-    if "faq.php" in known and faq:
-        jobs.append({"page": "faq.php", "id": FAQ_ID, "what": "FAQPage",
+
+    # WHAT IS ON DISK IS NOT WHAT HE SERVES, AND THE FIRST REAL RUN PROVED IT.
+    #
+    # The folder held an old duplicate of the whole site in .html alongside the
+    # live .php, plus install.php and default.php. Working from the directory
+    # listing, this put the markup on thirteen files — the duplicates, the
+    # installer — and refused every page he actually serves.
+    #
+    # The site itself knows which pages are real: they are the ones its own
+    # navigation links to. Ask the site, not the disk.
+    live = live_pages(s=s)
+    known = [pg for pg in on_disk if pg in live] if live else on_disk
+    ignored = [pg for pg in on_disk if pg not in known]
+
+    # AND THE HEAD MAY NOT BE IN THE PAGE AT ALL.
+    #
+    # His pages share one header include, so </head> lives in that file and
+    # nowhere else — which is why every real page was refused with "no </head>
+    # to insert before". One block in the include is one block on every page,
+    # which is what he wanted in the first place.
+    holder = head_holder(known, s=s)
+    if holder:
+        jobs = [{"page": holder, "id": SCHEMA_ID, "what": "LocalBusiness",
+                 "bytes": len(lb), "why": "your shared header — one paste, "
+                                          "every page"}]
+    else:
+        jobs = [{"page": pg, "id": SCHEMA_ID, "what": "LocalBusiness",
+                 "bytes": len(lb)} for pg in known]
+    # The FAQ block is the exception: it must appear on the FAQ page only, so
+    # it never goes in a shared header. If the head is in an include there is
+    # nowhere page-specific to put it, and saying so beats putting FAQ markup
+    # on all seven pages, which can get the lot ignored by Google.
+    faq_page = next((pg for pg in known if pg.startswith("faq.")), "")
+    if faq and faq_page and not holder:
+        jobs.append({"page": faq_page, "id": FAQ_ID, "what": "FAQPage",
                      "bytes": len(faq)})
+    elif faq and faq_page and holder:
+        problems.append(
+            f"the FAQ markup cannot go in a shared header — it belongs on "
+            f"{faq_page} alone, or Google may ignore all of it. Paste "
+            f"paste-into-your-site/2-faq-schema-faq-page.html into {faq_page} "
+            f"by hand, or wrap it in the if-statement in "
+            f"paste-into-your-site/HEAD-BLOCK-paste-once.php.")
+
     return {"ok": not problems, "problems": problems, "jobs": jobs,
-            "pages_seen": known,
-            "head": (f"{len(jobs)} block(s) across {len(known)} page(s)"
+            "pages_seen": known, "ignored": ignored, "head_include": holder,
+            "head": (f"{len(jobs)} block(s)"
+                     + (f" in {holder}, which every page includes" if holder
+                        else f" across {len(known)} page(s)")
+                     + (f" — {len(ignored)} file(s) on the server ignored, "
+                        "they are not pages your site links to" if ignored else "")
                      if not problems else problems[0])}
+
+
+def live_pages(s=None) -> list:
+    """
+    The filenames the SITE links to, as opposed to what is sitting on disk.
+
+    Reads his home page and follows its own navigation, the same way
+    site_search does. Returns [] if the site cannot be read, and the caller
+    then falls back to the directory listing rather than doing nothing.
+    """
+    base = (s or settings())["site"]
+    if not base:
+        return []
+    try:
+        from . import fetcher, site_search
+        r = fetcher.fetch(base, timeout=20, allow_paid=False)
+        if not r.get("ok") or not r.get("html"):
+            return []
+        out = {"index.php"}
+        for u in site_search.own_pages(r["html"], base.rstrip("/")):
+            name = urllib.parse.urlparse(u).path.strip("/")
+            if name:
+                out.add(name)
+        return sorted(out)
+    except Exception:
+        return []
+
+
+def head_holder(candidates, s=None) -> str:
+    """
+    The one file that actually contains </head>, when the pages do not.
+
+    A trade site built with PHP includes has one header file and seven pages
+    that pull it in. The markup belongs in the header, once.
+    """
+    if not candidates:
+        return ""
+    # If a real page has its own </head>, there is no include to find.
+    for pg in candidates[:4]:
+        got = read_page(pg, s=s)
+        if got.get("ok") and "</head" in (got.get("html") or "").lower():
+            return ""
+    # No page has one, so find the file they all include.
+    seen = set()
+    for pg in candidates:
+        got = read_page(pg, s=s)
+        if not got.get("ok"):
+            continue
+        import re
+        for m in re.findall(r"""include(?:_once)?\s*\(?\s*['"]([^'"]+\.php)['"]""",
+                            got.get("html") or "", re.I):
+            seen.add(m.lstrip("./"))
+        for m in re.findall(r"""require(?:_once)?\s*\(?\s*['"]([^'"]+\.php)['"]""",
+                            got.get("html") or "", re.I):
+            seen.add(m.lstrip("./"))
+    for name in sorted(seen):
+        got = read_page(name, s=s)
+        if got.get("ok") and "</head" in (got.get("html") or "").lower():
+            return name
+    return ""
 
 
 def apply_schema(agent=AGENT, s=None, dry_run=False) -> dict:
@@ -427,6 +587,8 @@ def main():
                     help="what would change, changing nothing")
     ap.add_argument("--apply-schema", action="store_true",
                     help="put the markup on the site (Releaser)")
+    ap.add_argument("--undo-schema", action="store_true",
+                    help="take the agency's markup back off every page")
     ap.add_argument("--backups", action="store_true")
     ap.add_argument("--undo", metavar="PAGE", help="restore a page's last version")
     ap.add_argument("--set-address", metavar="STREET",
@@ -503,6 +665,16 @@ def main():
             print(f"   {x['action']:10} {x['what']:14} on {x['page']}")
         for x in r.get("failed") or []:
             print(f"   REFUSED    {x['page']}: {x['why']}")
+        return _say(r)
+    if a.undo_schema:
+        r = undo_schema(agent=a.agent, s=s)
+        if a.json:
+            print(json.dumps(r, indent=2))
+            return 0 if r.get("ok") else 1
+        for x in r.get("cleaned") or []:
+            print(f"   removed  {x['id']:16} from {x['page']}")
+        for x in r.get("failed") or []:
+            print(f"   REFUSED  {x['page']}: {x['why']}")
         return _say(r)
     if a.backups:
         r = backups(s)

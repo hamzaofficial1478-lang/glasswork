@@ -205,6 +205,23 @@ def _brief(agent, max_briefs, draft_allowance):
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
     try:
+        # 0. Anything stuck in our own name, first.
+        #
+        # A request an agent claimed and then died on sits at status='claimed'
+        # for ever. The inbox below lists status='open' only, so the sector
+        # cannot see it — while the Overseer counts it as this sector ignoring
+        # the question. That combination ran for nineteen days: "Content has
+        # not answered SEO" on the owner's phone every morning, and this
+        # function reporting, correctly, that there was nothing to claim.
+        #
+        # Checking here rather than only in the Overseer's pass means the
+        # sector unsticks itself the moment somebody runs it, instead of
+        # needing a second command in the right order.
+        try:
+            board.release_dead_request_claims()
+        except Exception:
+            pass                       # never let housekeeping stop the work
+
         # 1. claim the handoff SEO left on the board (atomic — no grabbing)
         waiting = [r for r in board.open_requests_for("Content")
                    if "keyword" in (r["subject"] or "").lower()]
