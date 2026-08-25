@@ -263,6 +263,100 @@ def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
     return put_page(page, pat.sub("", src), agent=agent, s=s)
 
 
+def canonical_plan(s=None) -> dict:
+    """
+    Which of his source files name the wrong domain in a canonical tag.
+
+    Read from the SOURCE, not from the served page, because a canonical built
+    by PHP shows a finished address in the browser while the file holds the
+    code that made it. Fixing the served output is not something you can do;
+    fixing the file is.
+    """
+    s = s or settings()
+    import urllib.parse
+    want = urllib.parse.urlparse(s["site"]).netloc.lower()
+    want = want[4:] if want.startswith("www.") else want
+    if not want:
+        return {"ok": False, "error": "no website address saved"}
+    p = pages(s=s)
+    if not p.get("ok"):
+        return {"ok": False, "error": p.get("error")}
+    import re
+    jobs = []
+    for row in p.get("pages") or []:
+        got = read_page(row["page"], s=s)
+        if not got.get("ok"):
+            continue
+        for line in (got.get("html") or "").splitlines():
+            if "canonical" not in line.lower():
+                continue
+            for host in re.findall(r'https?://([A-Za-z0-9.\-]+)', line):
+                bare = host[4:] if host.lower().startswith("www.") else host
+                if bare.lower() != want:
+                    jobs.append({"page": row["page"], "wrong_host": host,
+                                 "line": " ".join(line.split())[:120]})
+    return {"ok": True, "want": want, "jobs": jobs,
+            "head": (f"{len(jobs)} canonical tag(s) naming a domain that is not "
+                     f"{want}" if jobs else
+                     f"every canonical already points at {want}")}
+
+
+def fix_canonical(agent=AGENT, s=None, dry_run=False) -> dict:
+    """
+    Point every canonical tag at the site it is actually on.
+
+    THE BIGGEST SINGLE PROBLEM ON HIS SITE. All eight pages said their real
+    home was worlddealtechnicalservices.ae — a domain with no DNS record. A
+    canonical tag tells Google "index that address instead of this one", so
+    every page was asking not to be indexed, in favour of nothing.
+
+    Surgical on purpose: only the hostname, only on lines that mention
+    canonical. A page can legitimately link to another domain elsewhere, and a
+    blanket find-and-replace across the file would rewrite those too.
+    """
+    plan = canonical_plan(s=s)
+    if not plan.get("ok") or not plan["jobs"]:
+        return {**plan, "changed": []}
+    if dry_run:
+        return {**plan, "dry_run": True}
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    import re
+    want = plan["want"]
+    changed, failed = [], []
+    for page in sorted({j["page"] for j in plan["jobs"]}):
+        got = read_page(page, s=s)
+        if not got.get("ok"):
+            failed.append({"page": page, "why": got.get("error")})
+            continue
+        out, hits = [], 0
+        for line in (got.get("html") or "").splitlines():
+            if "canonical" in line.lower():
+                def swap(m):
+                    nonlocal hits
+                    host = m.group(2)
+                    bare = host[4:] if host.lower().startswith("www.") else host
+                    if bare.lower() == want:
+                        return m.group(0)
+                    hits += 1
+                    return f"{m.group(1)}://{want}"
+                line = re.sub(r'(https?)://([A-Za-z0-9.\-]+)', swap, line)
+            out.append(line)
+        if not hits:
+            continue
+        r = put_page(page, "\n".join(out), agent=agent, s=s)
+        if r.get("ok"):
+            changed.append({"page": page, "fixed": hits,
+                            "backup": r.get("backup")})
+        else:
+            failed.append({"page": page, "why": r.get("error")})
+    return {"ok": not failed, "want": want, "changed": changed, "failed": failed,
+            "head": (f"pointed {sum(c['fixed'] for c in changed)} canonical "
+                     f"tag(s) on {len(changed)} page(s) at {want}"
+                     + (f", {len(failed)} refused" if failed else ""))}
+
+
 def blocks_on(page, s=None) -> list:
     """Which agency blocks a page is currently carrying."""
     got = read_page(page, s=s)
@@ -589,6 +683,10 @@ def main():
                     help="put the markup on the site (Releaser)")
     ap.add_argument("--undo-schema", action="store_true",
                     help="take the agency's markup back off every page")
+    ap.add_argument("--plan-canonical", action="store_true",
+                    help="which pages name the wrong domain, changing nothing")
+    ap.add_argument("--fix-canonical", action="store_true",
+                    help="point every canonical tag at this site (Releaser)")
     ap.add_argument("--backups", action="store_true")
     ap.add_argument("--undo", metavar="PAGE", help="restore a page's last version")
     ap.add_argument("--set-address", metavar="STREET",
@@ -665,6 +763,24 @@ def main():
             print(f"   {x['action']:10} {x['what']:14} on {x['page']}")
         for x in r.get("failed") or []:
             print(f"   REFUSED    {x['page']}: {x['why']}")
+        return _say(r)
+    if a.plan_canonical:
+        r = canonical_plan(s)
+        if a.json:
+            print(json.dumps(r, indent=2))
+            return 0 if r.get("ok") else 1
+        for j in r.get("jobs") or []:
+            print(f"   {j['page']:22} says {j['wrong_host']}")
+        return _say(r)
+    if a.fix_canonical:
+        r = fix_canonical(agent=a.agent, s=s)
+        if a.json:
+            print(json.dumps(r, indent=2))
+            return 0 if r.get("ok") else 1
+        for c in r.get("changed") or []:
+            print(f"   fixed {c['fixed']} tag(s) in {c['page']}")
+        for f in r.get("failed") or []:
+            print(f"   REFUSED  {f['page']}: {f['why']}")
         return _say(r)
     if a.undo_schema:
         r = undo_schema(agent=a.agent, s=s)

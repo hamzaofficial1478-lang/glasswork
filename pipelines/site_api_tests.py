@@ -479,6 +479,57 @@ def test_the_markup_can_be_taken_straight_back_off():
     check("still ok", r["ok"], True)
 
 
+def test_the_canonical_is_pointed_back_at_the_real_site():
+    """
+    All eight of his pages said their real home was a .ae domain with no DNS
+    record. A canonical tag tells Google "index that address instead of this
+    one", so every page was asking not to be indexed, in favour of nothing.
+
+    The fix has to be surgical. A page legitimately links to other domains —
+    a supplier, a map, a font — and a blanket find-and-replace across the file
+    would rewrite those too.
+    """
+    from . import site_api as S
+    print("\nOnly the canonical, and only its hostname:")
+    src = ('<html><head>\n'
+           '<link rel="canonical" href="https://mysite.ae/about.php">\n'
+           '<link rel="stylesheet" href="https://fonts.example.com/x.css">\n'
+           '<a href="https://supplier.ae/catalogue">our supplier</a>\n'
+           '</head><body>hi</body></html>')
+    site = _Site({"about.php": src, "index.php": PAGE})
+    cfg = dict(FULL, site="https://www.mysite.com")
+
+    plan = _with_site(site, lambda: S.canonical_plan(cfg))
+    check("the wrong page is found", [j["page"] for j in plan["jobs"]],
+          ["about.php"])
+    check("and the domain named", plan["jobs"][0]["wrong_host"], "mysite.ae")
+
+    r = _with_site(site, lambda: S.fix_canonical(agent="it-releaser", s=cfg))
+    out = site.pages["about.php"]
+    check("the canonical now points home",
+          'href="https://mysite.com/about.php"' in out, True)
+    check("the stylesheet on another domain is untouched",
+          "https://fonts.example.com/x.css" in out, True)
+    check("and so is a link to a supplier",
+          "https://supplier.ae/catalogue" in out, True)
+    check("the page is otherwise intact", "<body>hi</body>" in out, True)
+    check("a page with no canonical was never written",
+          site.pages["index.php"], PAGE)
+    check("it says what it did", "1 canonical" in r["head"], True)
+
+    print("\n...www and the bare domain are the same site, so nothing to do:")
+    site = _Site({"a.php": '<link rel="canonical" href="https://www.mysite.com/a">'})
+    plan = _with_site(site, lambda: S.canonical_plan(cfg))
+    check("no work", plan["jobs"], [])
+    check("and it says so", "already points at" in plan["head"], True)
+
+    print("\n...and only the Releaser may write it:")
+    site = _Site({"about.php": src})
+    r = _with_site(site, lambda: S.fix_canonical(agent="seo-lead", s=cfg))
+    check("refused", r["ok"], False)
+    check("the page untouched", site.pages["about.php"], src)
+
+
 def main():
     for t in (test_the_two_setup_boxes_finally_lead_somewhere,
               test_only_the_releaser_may_change_the_site,
@@ -489,7 +540,8 @@ def main():
               test_a_website_that_is_down_is_a_tuesday_not_a_crash,
               test_it_writes_only_to_pages_the_site_actually_serves,
               test_a_shared_header_gets_the_block_once,
-              test_the_markup_can_be_taken_straight_back_off):
+              test_the_markup_can_be_taken_straight_back_off,
+              test_the_canonical_is_pointed_back_at_the_real_site):
         t()
     print()
     if _fail:
