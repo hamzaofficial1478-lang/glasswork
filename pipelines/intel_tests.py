@@ -448,6 +448,7 @@ def test_search_console_talks_to_the_right_endpoint():
         sa_path.parent.mkdir(parents=True, exist_ok=True)
         sa_path.write_text("{}", encoding="utf-8")
     real_env, real_post = integrations.read_env, requests.post
+    real_get = requests.get
     integrations.read_env = lambda: {"GSC_PROPERTY": "sc-domain:example.ae"}
     try:
         seen = []
@@ -457,6 +458,16 @@ def test_search_console_talks_to_the_right_endpoint():
                 seen.append(url)
                 return fn(url, len(seen))
             requests.post = post
+            # GET too, and NOT counted in `seen`.
+            #
+            # A 403 now asks Google which properties the service account can
+            # actually see, so there is a second call on this path. Patching
+            # only post left that one live: the suite made a real request to
+            # googleapis.com, which is slow, needs a network, and answers
+            # differently depending on where it runs. It is what made this
+            # test flaky. `seen` stays post-only so the host assertions above
+            # still mean what they say.
+            requests.get = lambda url, **kw: _Resp(403, text="forbidden")
 
         responder(lambda u, n: _Resp(200, {"rows": [
             {"keys": ["glass partition dubai"], "impressions": 240,
@@ -488,6 +499,7 @@ def test_search_console_talks_to_the_right_endpoint():
         check("a 404 on the first host falls through to the second", err, "")
     finally:
         integrations.read_env, requests.post = real_env, real_post
+        requests.get = real_get
         if made:
             sa_path.unlink()
 

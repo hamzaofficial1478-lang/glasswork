@@ -339,8 +339,9 @@ def _which_403(creds, host, prop, get=None) -> str:
                 if s.get("siteUrl")]
     except Exception as e:
         return ("Could not list what the service account can see "
-                f"({e}), so both causes are still open: it may not be a user "
-                "on the property, or GSC_PROPERTY may not match exactly." + who)
+                f"({e}), so both causes are still open: either it is "
+                "not a user on the property, or GSC_PROPERTY does not match "
+                "exactly." + who)
     if not seen:
         return ("Google says this service account can see NO properties at "
                 "all, so this is a permissions problem, not a typo. In Search "
