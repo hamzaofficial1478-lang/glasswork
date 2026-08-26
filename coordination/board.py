@@ -88,6 +88,29 @@ def process_alive(pid, host="") -> bool:
             return bool(ok) and code.value == 259
         except Exception:
             return True
+    # A ZOMBIE IS NOT WORKING.
+    #
+    # A process that has exited stays in the table until whoever started it
+    # collects its exit code. os.kill(pid, 0) says "yes, that pid exists" for
+    # one of those exactly as it does for a process doing work — so an agent
+    # whose parent went away can sit there as a zombie and keep its run row
+    # saying 'running' for ever, which is the whole bug this column was added
+    # to kill.
+    #
+    # Linux will tell us plainly if we ask. Nothing else here does, and that is
+    # fine: on Windows there is no such state, and on Mac launchd collects them
+    # within moments. Only a positive read of 'Z' counts — anything unreadable
+    # falls through to the rule above, that unknown means alive.
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            # comm is in brackets and may itself contain spaces or brackets,
+            # so the state is the field after the LAST ')'.
+            after = fh.read().rsplit(b")", 1)[-1].split()
+        if after and after[0] in (b"Z", b"X", b"x"):
+            return False
+    except Exception:
+        pass
+
     try:
         os.kill(pid, 0)            # signal 0 asks "are you there", sends nothing
         return True
@@ -97,6 +120,190 @@ def process_alive(pid, host="") -> bool:
         return True                # exists, owned by someone else
     except Exception:
         return True
+
+
+def _really_gone(pid, host="") -> bool:
+    """
+    Has it actually gone — including the case where it is our own child?
+
+    A killed child does not leave the process table. It sits there as a zombie
+    until its parent collects its exit code, and os.kill(pid, 0) answers "yes,
+    that pid exists" for a zombie exactly as it does for a process doing work.
+    So end_process would TERM a child, KILL it, and then honestly report that it
+    was still running.
+
+    waitpid with WNOHANG collects it if it is ours, and raises ChildProcessError
+    if it is not — which is the answer we want either way, and the only way to
+    tell the two apart without reading /proc.
+    """
+    if os.name != "nt":
+        try:
+            got, _status = os.waitpid(int(pid), os.WNOHANG)
+            if got:
+                return True
+        except ChildProcessError:
+            pass                       # not our child; nothing to collect
+        except Exception:
+            pass
+    return not process_alive(pid, host)
+
+
+def end_process(pid, host="") -> dict:
+    """
+    Ask a process to finish, then insist. Returns what actually happened.
+
+    Only ever called by day_run.stop(), and only after the run has been asked
+    politely and given its grace period. Sending a signal is not like reading a
+    row: get the pid wrong and you kill something that was minding its own
+    business. So the same three "unknown means leave it alone" rules from
+    process_alive apply here in reverse — no pid, another machine, or a process
+    we cannot see means we do not fire.
+
+    TERM first, because a Python process handling SIGTERM can still tidy up.
+    KILL after two seconds, because a wedged one cannot.
+    """
+    try:
+        pid = int(pid or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "why": "no process id was recorded for that run"}
+    if pid <= 0:
+        return {"ok": False, "why": "no process id was recorded for that run"}
+    if host and host != _this_host():
+        return {"ok": False, "why": f"that run is on {host}, not this machine — "
+                                    "stop it there"}
+    if pid == os.getpid():
+        return {"ok": False, "why": "that is this process; it will not kill itself"}
+    if not process_alive(pid, host):
+        return {"ok": True, "already_gone": True,
+                "why": "the process had already gone"}
+
+    if os.name == "nt":
+        try:
+            import ctypes
+            # 1 = PROCESS_TERMINATE. Windows has no polite signal to send, so
+            # this is the only knock on the door there is.
+            h = ctypes.windll.kernel32.OpenProcess(1, False, pid)
+            if not h:
+                return {"ok": False, "why": "the machine would not let us stop it"}
+            ok = ctypes.windll.kernel32.TerminateProcess(h, 1)
+            ctypes.windll.kernel32.CloseHandle(h)
+            return {"ok": bool(ok), "killed": bool(ok),
+                    "why": "the process was ended" if ok
+                           else "Windows would not let us end it"}
+        except Exception as e:
+            return {"ok": False, "why": f"could not end the process: {e}"}
+
+    import signal
+
+    # THE STEPS IT SPAWNED HAVE TO GO WITH IT.
+    #
+    # A run kills nothing on the way out when it is killed itself, so its steps
+    # — each its own `python -m pipelines.x` — would be orphaned and carry on
+    # writing to the cabinet after he had been told the day was stopped.
+    #
+    # Signalling the whole process GROUP takes them too. That is only safe when
+    # the run is the group's leader, which is exactly the case that matters:
+    # the office starts a day detached, and detached means setsid, which makes
+    # it one. Started from a terminal it shares the shell's group, and
+    # signalling that would kill his shell — so there, one process only.
+    group = 0
+    try:
+        if os.getpgid(pid) == pid:
+            group = pid
+    except Exception:
+        group = 0
+
+    def _signal(sig):
+        if group:
+            os.killpg(group, sig)
+        else:
+            os.kill(pid, sig)
+
+    try:
+        _signal(signal.SIGTERM)
+    except ProcessLookupError:
+        return {"ok": True, "already_gone": True,
+                "why": "the process had already gone"}
+    except Exception as e:
+        return {"ok": False, "why": f"could not end the process: {e}"}
+    for _ in range(20):
+        time.sleep(0.1)
+        if _really_gone(pid, host):
+            return {"ok": True, "killed": True, "group": bool(group),
+                    "why": "the process ended on the first signal"
+                           + (" — and the steps it had started with it"
+                              if group else "")}
+    try:
+        _signal(signal.SIGKILL)
+    except Exception:
+        pass
+    time.sleep(0.2)
+    gone = _really_gone(pid, host)
+    return {"ok": gone, "killed": gone, "forced": True, "group": bool(group),
+            "why": ("the process would not go, so it was killed" if gone
+                    else "the process is still there — end it from Task Manager")}
+
+
+# ---------------------------------------------------------------------------
+# THE STOP BUTTON
+# ---------------------------------------------------------------------------
+#
+# "there is no any stop button that makes the agents or overseer to understand
+# that the task is stopped by the user."
+#
+# Closing the window was never stopping — sweep_dead_processes() further down
+# is what clears up after that. This is the deliberate version: a written
+# request that the thing which is running should put its tools down, readable
+# by a process that is still alive to read it.
+#
+# It is a REQUEST and not an order carried out. Nothing here reaches into
+# another process. The run polls for the row, finishes tidily and clears it;
+# day_run.stop() is what loses patience if it does not.
+STOP_SCOPE = "day_run"
+
+
+def request_stop(scope=STOP_SCOPE, by="owner", why="") -> dict:
+    """Ask whatever is running under `scope` to stop. Pressing twice is one stop."""
+    now = _now()
+    with _conn() as c:
+        _migrate(c)
+        c.execute("""INSERT INTO stop_requests (scope, asked_at, asked_by, why, cleared_at)
+                     VALUES (?,?,?,?,NULL)
+                     ON CONFLICT(scope) DO UPDATE SET
+                       asked_at=excluded.asked_at, asked_by=excluded.asked_by,
+                       why=excluded.why, cleared_at=NULL""",
+                  (scope, now, (by or "owner")[:40], (why or "")[:300]))
+    return {"scope": scope, "asked_at": now, "asked_by": by, "why": why}
+
+
+def stop_requested(scope=STOP_SCOPE):
+    """The live stop, or None. A cleared row is history, not an instruction."""
+    with _conn() as c:
+        _migrate(c)
+        try:
+            r = c.execute("SELECT scope, asked_at, asked_by, why FROM stop_requests"
+                          " WHERE scope=? AND cleared_at IS NULL", (scope,)).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        return dict(r) if r else None
+
+
+def clear_stop(scope=STOP_SCOPE) -> None:
+    """
+    The stop has been carried out. Clear it.
+
+    Called when a run actually stops, and again at the start of every new run:
+    a flag left standing by a program that was closed mid-stop would otherwise
+    kill the next day the moment it began, and he would press Run four times
+    and watch nothing happen four times.
+    """
+    with _conn() as c:
+        _migrate(c)
+        try:
+            c.execute("UPDATE stop_requests SET cleared_at=?"
+                      " WHERE scope=? AND cleared_at IS NULL", (_now(), scope))
+        except sqlite3.OperationalError:
+            pass
 
 
 def _now():
@@ -665,6 +872,12 @@ _ADDED_COLUMNS = (
     ("agent_runs",   "pid",          "INTEGER"),
     ("agent_runs",   "host",         "TEXT"),
     ("day_runs",     "pid",          "INTEGER"),
+    # And the machine that pid is on, for the one case where it is about to be
+    # acted on rather than merely read: Stop kills the recorded process if it
+    # will not put its tools down. Pid 8814 on his laptop is a different
+    # program on any other box, so a stop that cannot place the pid does not
+    # get to send a signal to it.
+    ("day_runs",     "host",         "TEXT"),
     ("locks",        "pid",          "INTEGER"),
     # The same two ideas, one table over. Tasks were handed out in arrival
     # order with no notion of what they were about or who they were for, so an
@@ -1180,7 +1393,16 @@ def sweep_dead_processes() -> dict:
                 continue
             c.execute("UPDATE day_runs SET status='stopped', ended_at=?"
                       " WHERE id=? AND status='running'", (now, d["id"]))
+            c.execute("UPDATE day_steps SET status='stopped', ended_at=?,"
+                      " summary=COALESCE(summary,'the program was closed before"
+                      " this step finished') WHERE run_id=? AND status='running'",
+                      (now, d["id"]))
             days.append(d["id"])
+    # A stop that was in flight when the program went away has nothing left to
+    # stop. Leaving the flag standing would kill the next run the moment it
+    # started, which looks exactly like the Run button not working.
+    if days:
+        clear_stop(STOP_SCOPE)
     return {"runs_closed": runs, "locks_freed": locks_freed,
             "days_closed": days,
             "head": (f"{len(runs)} run(s), {len(locks_freed)} lock(s) and "

@@ -15,6 +15,7 @@ Everything runs against a throwaway cabinet and a throwaway provider store. No
 network, no real API call, and nothing touches the owner's real config.
 """
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -488,39 +489,69 @@ def _lane_tests(day_run):
     # it is a fact about the interleaving, not about how fast the machine is.
     slow_running, during = [False], set()
 
-    class _Done:
-        returncode = 0
-        stdout = '{"ok": true, "did": 1}'
-        stderr = ""
+    # A FAKE Popen, NOT A FAKE run(). The step runner used subprocess.run,
+    # which blocks until the child is finished — and that is precisely what
+    # the Stop button could not live with, so it now opens the child and waits
+    # on it in short hops. The stub has to be the same shape, or the test
+    # proves the lanes work in a way the code no longer runs.
+    class _Fake:
+        def __init__(self, mod, sink):
+            self.mod, self.sink, self.returncode = mod, sink, None
+            self.dur = 0.30 if mod == slow else 0.02
+            self.t0 = time.time()
+            with lock:
+                started.append(mod)
+                live[0] += 1
+                peak[0] = max(peak[0], live[0])
+                if mod == slow:
+                    slow_running[0] = True
 
-    def fake_run(cmd, **kw):
-        mod = cmd[-1]
-        with lock:
-            started.append(mod)
-            live[0] += 1
-            peak[0] = max(peak[0], live[0])
-            if mod == slow:
-                slow_running[0] = True
-        time.sleep(0.30 if mod == slow else 0.02)
-        with lock:
-            live[0] -= 1
-            if mod == slow:
-                slow_running[0] = False
-            elif slow_running[0]:
-                during.add(mod)
-        return _Done()
+        def _finish(self, code=0):
+            if self.returncode is not None:
+                return self.returncode
+            self.returncode = code
+            try:
+                self.sink.write(b'{"ok": true, "did": 1}')
+            except Exception:
+                pass
+            with lock:
+                live[0] -= 1
+                if self.mod == slow:
+                    slow_running[0] = False
+                elif slow_running[0]:
+                    during.add(self.mod)
+            return code
+
+        def wait(self, timeout=None):
+            left = self.dur - (time.time() - self.t0)
+            if left <= 0:
+                return self._finish()
+            if timeout is not None and timeout < left:
+                time.sleep(timeout)
+                raise subprocess.TimeoutExpired(self.mod, timeout)
+            time.sleep(left)
+            return self._finish()
+
+        def terminate(self):
+            self._finish(-15)
+
+        def kill(self):
+            self._finish(-9)
+
+    def fake_popen(cmd, cwd=None, stdout=None, stderr=None, **kw):
+        return _Fake(cmd[-1], stdout)
 
     real_sub, day_run.subprocess = day_run.subprocess, types.SimpleNamespace(
-        run=fake_run, TimeoutExpired=real_timeout_error(day_run))
+        Popen=fake_popen, STDOUT=subprocess.STDOUT,
+        TimeoutExpired=subprocess.TimeoutExpired)
     try:
-        t0 = time.time()
         rid = day_run._open_run("lane test", False, [])
-        failed = day_run._run_lanes(rid)
-        took = time.time() - t0
+        failed, was_stopped = day_run._run_lanes(rid)
     finally:
         day_run.subprocess = real_sub
 
     check("nothing failed", failed, 0)
+    check("and nobody stopped it", was_stopped, False)
     check("more than one step ran at once", peak[0] > 1, True)
     check("and never more than the cap", peak[0] <= day_run.MAX_LANES, True)
     # DELIBERATELY NOT A STOPWATCH. The first version asserted the whole run
@@ -565,11 +596,20 @@ def _lane_tests(day_run):
     finally:
         board.release_lock(day_run.LOCK, day_run.LOCK_HOLDER)
 
+    _stop_button_tests(day_run)
 
-def real_timeout_error(day_run):
-    """The genuine TimeoutExpired, so the stub does not change what is caught."""
-    import subprocess as _sp
-    return _sp.TimeoutExpired
+    # EVERYTHING BELOW HERE WAS DEAD CODE.
+    #
+    # A helper called real_timeout_error() was once dropped in at this point,
+    # and the rest of these tests ended up inside it, after its `return`.
+    # Python does not complain about that: the module imported, the suite
+    # printed PASS, and roughly ninety assertions — one press means one day, a
+    # broken day refusing to start, the owner's orders reaching the board
+    # before the MD plans, an order for a sector that does not exist — had
+    # simply not run for as long as the helper had existed.
+    #
+    # The helper itself is gone: the stub now uses the genuine
+    # subprocess.TimeoutExpired directly, which is all it was ever for.
 
     print("\nOne press means one day:")
     check("the lock is free to start with",
@@ -644,6 +684,202 @@ def real_timeout_error(day_run):
         check("and the bad one is reported, not swallowed",
               "Marketing" in r["rejected_orders"], True)
         check("in the sentence the owner reads", "went nowhere" in r["why"], True)
+    finally:
+        day_run.preflight, day_run.STEPS = real_pre, real_steps
+
+
+def _stop_button_tests(day_run):
+    """
+    THE STOP BUTTON.
+
+    "there is no any stop button that makes the agents or overseer to
+    understand that the task is stopped by the user."
+
+    Stopping has to be provable at three levels and each one can fail on its
+    own, so each is tested on its own:
+
+      the flag   is a stop something a running process can actually SEE
+      the run    does a run in flight put its tools down, and does what it
+                 never got to say so instead of sitting on 'waiting' for ever
+      the child  a step is a subprocess that could be seven minutes into a
+                 seven-minute budget. Faking that proves nothing, so this
+                 stops a REAL process and then asks the operating system
+                 whether it is gone.
+    """
+    import os
+    import threading
+    import types
+
+    print("\nA stop is something a running process can see:")
+    board.clear_stop(day_run.LOCK)
+    check("nothing to see when nobody pressed anything",
+          board.stop_requested(day_run.LOCK), None)
+    board.request_stop(day_run.LOCK, by="owner", why="going out")
+    r = board.stop_requested(day_run.LOCK)
+    check("pressed -> a live stop, with his reason", (r or {}).get("why"), "going out")
+    board.request_stop(day_run.LOCK, by="owner", why="again")
+    check("pressing twice is still one stop",
+          len(_rows("SELECT scope FROM stop_requests")), 1)
+    board.clear_stop(day_run.LOCK)
+    check("cleared -> gone, and it is history not an instruction",
+          board.stop_requested(day_run.LOCK), None)
+    check("but the row is kept", len(_rows("SELECT scope FROM stop_requests")), 1)
+
+    print("\nA real process, really stopped:")
+    victim = subprocess.Popen([sys.executable, "-c",
+                               "import time; time.sleep(120)"])
+    try:
+        check("it is running", board.process_alive(victim.pid), True)
+        out = board.end_process(victim.pid)
+        check("end_process says it stopped it", out["ok"], True)
+        check("and the operating system agrees",
+              board.process_alive(victim.pid), False)
+    finally:
+        try:
+            victim.kill()
+        except Exception:
+            pass
+        try:
+            victim.wait(timeout=5)
+        except Exception:
+            pass
+    check("it will not fire at a pid it cannot place",
+          board.end_process(victim.pid, host="some-other-laptop")["ok"], False)
+    check("nor at nothing at all", board.end_process(0)["ok"], False)
+    check("nor at itself", board.end_process(os.getpid())["ok"], False)
+
+    if os.name != "nt":
+        print("\n...and the steps it had started go with it:")
+        # A run killed on its own leaves its steps orphaned and still writing
+        # to the cabinet after he has been told the day stopped. The office
+        # starts a day detached — start_new_session, the same thing Node's
+        # detached:true does — which makes it a process-group leader, and the
+        # whole group is signalled. This is that shape: a leader with a child.
+        leader = subprocess.Popen(
+            [sys.executable, "-c",
+             "import subprocess,sys,time;"
+             "k=subprocess.Popen([sys.executable,'-c','import time;time.sleep(90)']);"
+             "print(k.pid,flush=True);time.sleep(90)"],
+            start_new_session=True, stdout=subprocess.PIPE, text=True,
+            encoding="utf-8", errors="replace")
+        try:
+            kid = int((leader.stdout.readline() or "0").strip())
+            check("both the run and its step are up",
+                  board.process_alive(leader.pid) and board.process_alive(kid), True)
+            out = board.end_process(leader.pid)
+            check("ending the run says it took the group with it",
+                  out.get("group"), True)
+            check("the run is gone", board.process_alive(leader.pid), False)
+            time.sleep(0.3)
+            # An orphaned step that has exited is reparented, and whether it is
+            # collected promptly is up to whatever inherits it — in a container
+            # PID 1 often never bothers, and it sits there as a zombie. That is
+            # a dead process, and process_alive has to say so: a liveness check
+            # that counts zombies as working is the very thing that kept his
+            # Overseer waiting seventeen hours.
+            check("and so is the step it had started",
+                  board.process_alive(kid), False)
+        finally:
+            for p in (leader,):
+                try:
+                    p.kill()
+                    p.wait(timeout=5)
+                except Exception:
+                    pass
+
+    print("\nThe day puts its tools down when he presses Stop:")
+    # A step that would take a minute, so the stop lands DURING one rather
+    # than in the gap between two — the gap is the easy case.
+    long_step = "import time; time.sleep(60)"
+    real_steps = day_run.STEPS
+    real_after = day_run.LANE_AFTER
+    day_run.STEPS = [("A long step", "pipelines._never", "IT", "it"),
+                     ("Another one", "pipelines._never", "IT", "it"),
+                     ("A third", "pipelines._never", "SEO", "seo")]
+    day_run.LANE_AFTER = {"it": (), "seo": ()}
+    kids = []
+
+    def slow_popen(cmd, cwd=None, stdout=None, stderr=None, **kw):
+        p = subprocess.Popen([sys.executable, "-c", long_step],
+                             stdout=stdout, stderr=stderr)
+        kids.append(p)
+        return p
+
+    real_sub = day_run.subprocess
+    day_run.subprocess = types.SimpleNamespace(
+        Popen=slow_popen, STDOUT=subprocess.STDOUT,
+        TimeoutExpired=subprocess.TimeoutExpired)
+    board.clear_stop(day_run.LOCK)
+    try:
+        rid = day_run._open_run("stop test", False, [])
+        held = {}
+
+        def press():
+            time.sleep(1.0)
+            board.request_stop(day_run.LOCK, by="owner", why="lunch")
+
+        threading.Thread(target=press, daemon=True).start()
+        t0 = time.time()
+        with day_run._StopWatch(every=0.2) as watch:
+            failed, stopped = day_run._run_lanes(rid, watch)
+        took = time.time() - t0
+    finally:
+        day_run.subprocess = real_sub
+        for p in kids:
+            try:
+                p.kill()
+                p.wait(timeout=5)
+            except Exception:
+                pass
+        day_run.STEPS, day_run.LANE_AFTER = real_steps, real_after
+        board.clear_stop(day_run.LOCK)
+
+    check("the run reports it was stopped", stopped, True)
+    # The steps sleep for sixty seconds each. Anything under ten means the
+    # children were actually killed rather than waited out — and the assertion
+    # is about the code, not the clock, because the gap is that wide.
+    check("and it did not sit through the step it was in", took < 10, True)
+    st = day_run.status(rid)
+    marks = [s["status"] for s in st["steps"]]
+    check("no step is left claiming to be running", "running" in marks, False)
+    check("nor left waiting for a run that is over", "waiting" in marks, False)
+    check("the step that was cut off says so",
+          any("cut off" in (s["summary"] or "") for s in st["steps"]), True)
+    check("and one that never started says that instead",
+          any("before this started" in (s["summary"] or "") for s in st["steps"]), True)
+    check("his words are on the record",
+          any("lunch" in (s["summary"] or "") for s in st["steps"]), True)
+
+    print("\n...and the run reads as stopped, not as failed:")
+    day_run._close_run(rid, "stopped")
+    st = day_run.status(rid)
+    check("the run is 'stopped'", st["run"]["status"], "stopped")
+    check("the button is pressable again", st["run"]["running"], False)
+    check("the head says he stopped it", "you stopped this run" in st["head"], True)
+    check("the bar is not stuck part-way on a day that is over",
+          st["progress"][0], st["progress"][1])
+    # This is the part the Overseer reads. 'failed' would put a stopped day in
+    # its sights as something to investigate; 'stopped' is a fact about him.
+    check("and it is not recorded as a failure", st["run"]["status"] != "failed", True)
+
+    print("\nStop when nothing is running clears up instead of erroring:")
+    board.acquire_lock(day_run.LOCK, day_run.LOCK_HOLDER, wait=False, ttl=600)
+    r = day_run.stop(by="owner")
+    check("it does not fail", r["ok"], True)
+    check("it says nothing was running", r["was_running"], False)
+    check("and it lets go of the door the last run left held",
+          _rows("SELECT 1 FROM locks WHERE resource=?", (day_run.LOCK,)), [])
+
+    print("\nA stop left over from a closed program does not kill the next day:")
+    board.request_stop(day_run.LOCK, by="owner", why="stale")
+    real_pre, day_run.preflight = day_run.preflight, (
+        lambda quick=False: {"ready": True, "blocking": [], "warnings": []})
+    real_steps, day_run.STEPS = day_run.STEPS, []
+    try:
+        r = day_run.start()
+        check("the next run starts anyway", r.get("ran"), True)
+        check("and is not born stopped", r.get("stopped"), None)
+        check("the stale flag is gone", board.stop_requested(day_run.LOCK), None)
     finally:
         day_run.preflight, day_run.STEPS = real_pre, real_steps
 

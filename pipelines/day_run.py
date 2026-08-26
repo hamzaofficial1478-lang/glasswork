@@ -6,6 +6,7 @@ then work.
     python3 -m pipelines.day_run --start            check, then run the day
     python3 -m pipelines.day_run --start --force    run even though something is broken
     python3 -m pipelines.day_run --status           what the current/last run did
+    python3 -m pipelines.day_run --stop             stop the day that is running
 
 WHAT "CHECK EVERYTHING" ACTUALLY MEANS
 
@@ -50,6 +51,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -187,6 +189,38 @@ MAX_LANES = 3
 
 STEP_TIMEOUT = 420
 
+# ---------------------------------------------------------------------------
+# STOPPING
+# ---------------------------------------------------------------------------
+#
+# "there is no any stop button that makes the agents or overseer to understand
+# that the task is stopped by the user."
+#
+# He is describing two different things and both were missing. Closing the
+# window is handled elsewhere — board.sweep_dead_processes() clears up after a
+# process that has gone. This is the other one: stopping a run that is still
+# alive, on purpose, and having every part of the agency understand that is
+# what happened rather than inferring a crash.
+#
+# The shape is ask-then-insist, because those are genuinely different things:
+#
+#   ASK      board.request_stop() writes a row. One thread in the run watches
+#            for it (STOP_POLL seconds apart) and sets an Event; the lanes read
+#            the Event, which costs nothing, so a stop is noticed within a
+#            second without three lanes hammering the cabinet.
+#   INSIST   stop() waits STOP_GRACE seconds for the run to close itself. A
+#            healthy run takes about as long as it takes to kill one child, so
+#            the grace period is generous. If it is still 'running' after that
+#            the run is not going to answer, and its recorded process is ended.
+#
+# The step in flight is a subprocess, so it is stopped the same way: TERM, then
+# KILL two seconds later. A step's own grandchildren are not chased — nothing
+# in the daily list spawns any, and killing a process tree by guesswork is how
+# you end up killing the wrong tree.
+STOP_POLL = 1.0
+STOP_GRACE = 25
+CHILD_GRACE = 5
+
 
 def _now():
     return int(time.time())
@@ -306,10 +340,11 @@ def _open_run(note, forced, blocking):
     board.ensure_schema()
     with sqlite3.connect(board.DB, timeout=30) as c:
         c.execute("INSERT INTO day_runs(id,started_at,status,started_by,note,forced,"
-                  "blocking,steps_total,steps_done,pid) VALUES(?,?,?,?,?,?,?,?,0,?)",
+                  "blocking,steps_total,steps_done,pid,host)"
+                  " VALUES(?,?,?,?,?,?,?,?,0,?,?)",
                   (rid, _now(), "running", "owner", (note or "")[:2000],
                    1 if forced else 0, json.dumps(blocking or []), len(STEPS),
-                   os.getpid()))
+                   os.getpid(), board._this_host()))
         for i, (label, mod, room, lane) in enumerate(STEPS):
             c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane)"
                       " VALUES(?,?,?,?, 'waiting', ?)", (rid, i, label, mod, lane))
@@ -325,8 +360,12 @@ def _step(rid, seq, **fields):
 
 def _close_run(rid, status):
     with sqlite3.connect(board.DB, timeout=30) as c:
+        # Settled, not 'succeeded' — same count status() shows on the bar. A
+        # step that was skipped or stopped is never going to run again, and
+        # leaving it out left a finished day showing as three-quarters done.
         done = c.execute("SELECT count(*) FROM day_steps WHERE run_id=?"
-                         " AND status IN ('ok','idle')", (rid,)).fetchone()[0]
+                         " AND status NOT IN ('waiting','running')",
+                         (rid,)).fetchone()[0]
         c.execute("UPDATE day_runs SET status=?, ended_at=?, steps_done=? WHERE id=?",
                   (status, _now(), done, rid))
 
@@ -404,7 +443,78 @@ def _verdict(out, code):
     return "ok"
 
 
-def _one_step(rid, seq) -> str:
+class _StopWatch:
+    """
+    One thread asking the cabinet 'has he pressed Stop yet?', so the lanes
+    don't have to.
+
+    Three lanes each polling the database once a second is three times the
+    reads for the same answer, and the answer is the same for all of them. One
+    watcher, one Event, and every other thread reads a boolean in memory.
+
+    is_set() is also what a lane checks before starting its next step, so a
+    stop pressed during a long step takes effect the moment that step ends
+    even if the kill somehow missed.
+    """
+
+    def __init__(self, scope=LOCK, every=STOP_POLL):
+        self.scope, self.every = scope, every
+        self.event = threading.Event()
+        self.by, self.why = "", ""
+        self._quit = threading.Event()
+        self._t = None
+
+    def _loop(self):
+        while not self._quit.wait(self.every):
+            try:
+                r = board.stop_requested(self.scope)
+            except Exception:
+                continue          # a cabinet hiccup must not stop the day
+            if r:
+                self.by = r.get("asked_by") or "owner"
+                self.why = r.get("why") or ""
+                self.event.set()
+                return
+
+    def __enter__(self):
+        self._t = threading.Thread(target=self._loop, name="stop-watch", daemon=True)
+        self._t.start()
+        return self
+
+    def __exit__(self, *_):
+        self._quit.set()
+        if self._t:
+            self._t.join(timeout=2)
+        return False
+
+    def is_set(self):
+        return self.event.is_set()
+
+    def note(self):
+        who = "you" if (self.by or "owner") == "owner" else self.by
+        return f"stopped by {who}" + (f" — {self.why}" if self.why else "")
+
+
+def _end_child(p):
+    """TERM, then KILL. A step that handles the first can tidy up; one that is
+    wedged gets the second, and the run is not held hostage either way."""
+    try:
+        p.terminate()
+    except Exception:
+        return
+    try:
+        p.wait(timeout=CHILD_GRACE)
+        return
+    except Exception:
+        pass
+    try:
+        p.kill()
+        p.wait(timeout=CHILD_GRACE)
+    except Exception:
+        pass
+
+
+def _one_step(rid, seq, stop=None) -> str:
     """
     Run one step and record what it did. Returns its verdict.
 
@@ -412,6 +522,19 @@ def _one_step(rid, seq) -> str:
     only thing it hands back is a verdict — so this is safe to call from
     several threads at once. The two writes it makes are a single-row UPDATE
     and an atomic increment, both of which SQLite serialises for us.
+
+    WHY Popen AND A TEMP FILE, AND NOT subprocess.run.
+
+    subprocess.run blocks until the child is finished, which is exactly what
+    the Stop button cannot afford: a step is allowed seven minutes, and he
+    should not have to wait out the seventh. So the child is opened, then
+    waited on in short hops, checking the stop flag between them.
+
+    Its output goes to a temporary file rather than a pipe on purpose. A pipe
+    holds about 64KB before it fills, and a child writing more than that into a
+    full pipe blocks for ever while we sit in wait() — a deadlock that only
+    appears on the chattiest steps, which is the worst way to find one. A file
+    cannot fill.
     """
     label, mod, room, lane = STEPS[seq]
 
@@ -427,25 +550,74 @@ def _one_step(rid, seq) -> str:
         return "skipped"
 
     _step(rid, seq, status="running", started_at=_now())
-    try:
-        # encoding is named, never left to the machine. text=True decodes with
-        # the locale codepage, which on Windows is cp1252/cp1256 — and every
-        # pipeline in this program prints em-dashes and readiness lamps. A step
-        # that worked perfectly would come back as mojibake, or take the run
-        # down with a UnicodeDecodeError. See coordination/console.py.
-        p = subprocess.run([PY, "-m", mod], cwd=str(ROOT), capture_output=True,
-                           text=True, encoding="utf-8", errors="replace",
-                           timeout=STEP_TIMEOUT)
-        code, out = p.returncode, (p.stdout or "") + (p.stderr or "")
-    except subprocess.TimeoutExpired:
-        code, out = 124, f"timed out after {STEP_TIMEOUT}s"
-    except Exception as e:                               # pragma: no cover
-        code, out = 1, str(e)
+    code, out, cut_short = _run_child(mod, stop)
+    if cut_short:
+        _step(rid, seq, status="stopped", ended_at=_now(), code=code,
+              summary=(stop.note() if stop else "stopped")
+                      + " — this step was cut off part-way through")
+        _tick(rid)
+        return "stopped"
     verdict = _verdict(out, code)
     _step(rid, seq, status=verdict, ended_at=_now(),
           code=code, summary=_summarise(out, code))
     _tick(rid)
     return verdict
+
+
+def _run_child(mod, stop=None):
+    """Start the step, wait on it in short hops, return (code, output, cut_short)."""
+    try:
+        # Output to a file, decoded here rather than by the child pipe. encoding
+        # is named and never left to the machine: the locale codepage on Windows
+        # is cp1252/cp1256, and every pipeline in this program prints em-dashes
+        # and readiness lamps. A step that worked perfectly would come back as
+        # mojibake, or take the run down with a UnicodeDecodeError. See
+        # coordination/console.py.
+        sink = tempfile.TemporaryFile()
+    except Exception as e:                               # pragma: no cover
+        return 1, str(e), False
+    try:
+        try:
+            p = subprocess.Popen([PY, "-m", mod], cwd=str(ROOT),
+                                 stdout=sink, stderr=subprocess.STDOUT)
+        except Exception as e:                           # pragma: no cover
+            return 1, str(e), False
+
+        deadline = time.time() + STEP_TIMEOUT
+        cut_short = False
+        while True:
+            try:
+                code = p.wait(timeout=0.4)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if stop is not None and stop.is_set():
+                _end_child(p)
+                code, cut_short = (p.returncode if p.returncode is not None
+                                   else -1), True
+                break
+            if time.time() >= deadline:
+                _end_child(p)
+                code = 124
+                break
+
+        try:
+            sink.seek(0)
+            out = sink.read().decode("utf-8", "replace")
+        except Exception:                                # pragma: no cover
+            out = ""
+        if code == 124 and not cut_short:
+            # The timeout has to LEAD, or _summarise reads the step's own last
+            # cheerful line and the run panel says it finished.
+            tail = [l for l in out.splitlines() if l.strip()][-1:]
+            out = (f"timed out after {STEP_TIMEOUT}s"
+                   + (f" — last said: {tail[0].strip()[:120]}" if tail else ""))
+        return code, out, cut_short
+    finally:
+        try:
+            sink.close()
+        except Exception:
+            pass
 
 
 def _tick(rid):
@@ -461,7 +633,7 @@ def lanes() -> dict:
     return out
 
 
-def _run_lanes(rid) -> int:
+def _run_lanes(rid, stop=None):
     """
     Run the day. Lanes side by side, steps within a lane one after another.
 
@@ -476,26 +648,59 @@ def _run_lanes(rid) -> int:
     ever starting — a deadlock with a plausible-looking cause, which is the
     worst kind.
 
-    Returns the number of steps that failed.
+    STOPPING. Three places a lane can be when he presses Stop, and all three
+    have to notice:
+
+      waiting on a lane it depends on   the wait is in short hops now, not one
+                                        long one, so it drops out inside a
+                                        second instead of at the seven-minute
+                                        ceiling
+      queued for one of the MAX_LANES   checked again after the slot is taken;
+                                        the step never starts
+      running a step                    _one_step kills the child
+
+    Whatever it was doing, the steps it has not run are written down as
+    'stopped' rather than left as 'waiting'. A waiting row is a promise the run
+    is still going to get to it, and the run is over.
+
+    Returns (steps that failed, was it stopped).
     """
     plan = lanes()
     done = {name: threading.Event() for name in plan}
     slots = threading.Semaphore(max(1, int(MAX_LANES)))
     failed = []
     lock = threading.Lock()
+    stopping = (lambda: bool(stop is not None and stop.is_set()))
 
     def walk(name):
         try:
             for dep in LANE_AFTER.get(name, ()):
                 ev = done.get(dep)
-                if ev is not None:
-                    # Bounded, so a lane that somehow never finishes cannot
-                    # hang the day for ever. The ceiling is what its steps are
-                    # allowed to take, plus room to be queued behind others.
-                    ev.wait(timeout=STEP_TIMEOUT * (len(plan[dep]) + 2))
+                if ev is None:
+                    continue
+                # Bounded, so a lane that somehow never finishes cannot hang
+                # the day for ever. The ceiling is what its steps are allowed
+                # to take, plus room to be queued behind others — but waited
+                # for in short hops, so a Stop is not sat out to the ceiling.
+                until = time.time() + STEP_TIMEOUT * (len(plan[dep]) + 2)
+                while not ev.wait(timeout=0.5):
+                    if stopping() or time.time() >= until:
+                        break
             for seq in plan[name]:
+                if stopping():
+                    _step(rid, seq, status="stopped", ended_at=_now(),
+                          summary=(stop.note() if stop else "stopped")
+                                  + " — the run was stopped before this started")
+                    _tick(rid)
+                    continue
                 with slots:
-                    verdict = _one_step(rid, seq)
+                    if stopping():
+                        _step(rid, seq, status="stopped", ended_at=_now(),
+                              summary=(stop.note() if stop else "stopped")
+                                      + " — the run was stopped before this started")
+                        _tick(rid)
+                        continue
+                    verdict = _one_step(rid, seq, stop)
                 if verdict == "failed":
                     with lock:
                         failed.append(seq)
@@ -511,7 +716,7 @@ def _run_lanes(rid) -> int:
         t.start()
     for t in threads:
         t.join()
-    return len(failed)
+    return len(failed), stopping()
 
 
 def start(orders=None, note="", force=False, quick=False, skip_check=False) -> dict:
@@ -564,18 +769,44 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
         except ValueError as e:
             rejected[str(sec)[:40]] = str(e)
 
+    # A stop left standing by a program that was closed part-way through one
+    # would kill this run in its first second, and he would press Run again and
+    # again and watch nothing happen. The flag means "stop the run that is
+    # going now"; there isn't one yet.
+    board.clear_stop(LOCK)
+
     rid = _open_run(note, force and not pre["ready"], pre.get("blocking"))
+    stopped = False
     try:
-        failed = _run_lanes(rid)
+        with _StopWatch() as watch:
+            failed, stopped = _run_lanes(rid, watch)
+            stopped_note = watch.note() if stopped else ""
         # A step that fails is not a day that failed. IT going down should not
         # stop Report scoring what Leads did — so every step runs, and the
-        # verdict at the end says how many did not.
-        _close_run(rid, "done" if not failed else "partial")
+        # verdict at the end says how many did not. A day he STOPPED is not a
+        # failure either, and calling it one would put it in the Overseer's
+        # sights as something to investigate.
+        _close_run(rid, "stopped" if stopped else ("done" if not failed else "partial"))
     except BaseException:
         _close_run(rid, "failed")
         raise
     finally:
         board.release_lock(LOCK, LOCK_HOLDER)
+        board.clear_stop(LOCK)
+
+    if stopped:
+        # The children were killed mid-task, so their agent_runs rows still say
+        # 'running' and their locks are still held. This is the same tidy-up the
+        # sweep does after a closed program, and the reason the Overseer will
+        # not spend tomorrow morning filing faults about agents that stopped
+        # because he told them to.
+        swept = board.sweep_dead_processes()
+        return {"ok": True, "ran": True, "stopped": True, "run_id": rid,
+                "orders": written, "rejected_orders": rejected,
+                "failed_steps": failed, "swept": swept, "preflight": pre,
+                "why": f"The day was {stopped_note}. "
+                       "Nothing further was started, and what was mid-task has "
+                       "been closed off. Press Run when you want it to go again."}
 
     # Anything the day turned up that the owner has to answer goes to his phone
     # now, not into a table he has to remember to open. Only things that stop
@@ -677,11 +908,34 @@ def status(run_id=None) -> dict:
     # other two, which reads as a slower day than is actually happening.
     now_on = [s for s in steps if s["status"] == "running"]
     live = now_on[0] if now_on else None
-    done = sum(1 for s in steps if s["status"] in ("ok", "idle", "failed"))
+    # SETTLED, not 'succeeded'. A step that was skipped because he switched the
+    # sector off, or stopped because he pressed Stop, is never going to run
+    # again — leaving it out of the count left the progress bar stuck at 80%
+    # on a day that was completely over.
+    done = sum(1 for s in steps
+               if s["status"] not in ("waiting", "running", None, ""))
     bad = sum(1 for s in steps if s["status"] == "failed")
     sat_out = sum(1 for s in steps if s["status"] == "idle")
+    cut = sum(1 for s in steps if s["status"] == "stopped")
+    worked = sum(1 for s in steps if s["status"] == "ok")
     run["running"] = run["status"] == "running"
-    if run["status"] == "stalled":
+    # Has he pressed Stop and is the run still putting its tools down? That is
+    # a state of its own and the button must say so, or he presses it again and
+    # again in the seconds it takes the step in flight to die.
+    pending_stop = None
+    if run["running"]:
+        try:
+            pending_stop = board.stop_requested(LOCK)
+        except Exception:
+            pending_stop = None
+    if run["status"] == "stopped":
+        head = (f"you stopped this run — {worked} step"
+                f"{'s' if worked != 1 else ''} had finished, "
+                f"{cut} did not run.")
+    elif pending_stop:
+        head = ("stopping — waiting for what is mid-task to put its tools down"
+                + (f" ({len(now_on)} still going)" if now_on else ""))
+    elif run["status"] == "stalled":
         head = ("the run was killed part-way through — "
                 f"{done} of {len(steps)} steps finished. Press Run again.")
     elif len(now_on) > 1:
@@ -701,7 +955,109 @@ def status(run_id=None) -> dict:
             "doing": live["label"] if live else None,
             "doing_now": [s["label"] for s in now_on],
             "progress": [done, len(steps)], "idle": sat_out, "failed": bad,
+            "stopped_steps": cut,
+            "stoppable": bool(run["running"]) and not pending_stop,
+            "stopping": bool(pending_stop),
             "head": head}
+
+
+def _drop_day_lock() -> bool:
+    """Let go of the day lock. True if one was actually there."""
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        held = c.execute("SELECT 1 FROM locks WHERE resource=?", (LOCK,)).fetchone()
+        c.execute("DELETE FROM locks WHERE resource=?", (LOCK,))
+    return bool(held)
+
+
+def _run_row(run_id):
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        c.row_factory = sqlite3.Row
+        r = c.execute("SELECT id,status,pid,host,steps_total FROM day_runs"
+                      " WHERE id=?", (run_id,)).fetchone()
+        return dict(r) if r else None
+
+
+def _force_stopped(run_id, why):
+    """Close a run that would not close itself, and let go of everything it held."""
+    now = _now()
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        c.execute("UPDATE day_runs SET status='stopped', ended_at=?"
+                  " WHERE id=? AND status='running'", (now, run_id))
+        c.execute("UPDATE day_steps SET status='stopped', ended_at=?,"
+                  " summary=COALESCE(summary,?)"
+                  " WHERE run_id=? AND status IN ('running','waiting')",
+                  (now, why, run_id))
+        c.execute("DELETE FROM locks WHERE resource=?", (LOCK,))
+
+
+def stop(by="owner", why="", grace=STOP_GRACE) -> dict:
+    """
+    The Stop button. Ask the run to put its tools down; insist if it will not.
+
+    "there is no any stop button that makes the agents or overseer to
+    understand that the task is stopped by the user."
+
+    ASK FIRST, AND MEAN IT. A run told to stop closes its own books: it kills
+    the step in flight, marks the steps behind it as not-run, closes as
+    'stopped' rather than 'failed', releases the day lock and sweeps up after
+    the children it killed. That is a far better outcome than a kill, because
+    everything downstream — the Overseer especially — then knows the difference
+    between work that was stopped and work that died.
+
+    INSIST SECOND. A run that has not answered in `grace` seconds is not going
+    to: it is wedged, or its watcher thread is gone, or the process is a
+    zombie. At that point the recorded process is ended and this closes the
+    books in its place. Only then, and only for a pid on this machine that the
+    run itself wrote down — see board.end_process.
+
+    Pressing Stop when nothing is running is not an error. It clears anything
+    left over from a program that was closed, which is exactly what a person
+    presses Stop for when the screen says something is still going and he knows
+    perfectly well that it is not.
+    """
+    board.ensure_schema()
+    board.sweep_dead_processes()       # first, so we don't chase a corpse
+    st = status()
+    run = st.get("run") or {}
+    if not run or not run.get("running"):
+        board.clear_stop(LOCK)
+        freed = _drop_day_lock()
+        return {"ok": True, "stopped": False, "was_running": False,
+                "why": ("Nothing was running. "
+                        + ("Cleared the door the last run left held. "
+                           if freed else "")
+                        + "Press Run to start a day.")}
+
+    rid = run.get("id")
+    board.request_stop(LOCK, by=by, why=why)
+
+    waited = 0.0
+    while waited < grace:
+        time.sleep(0.5)
+        waited += 0.5
+        r = _run_row(rid)
+        if not r or r["status"] != "running":
+            board.clear_stop(LOCK)
+            after = status(rid)
+            return {"ok": True, "stopped": True, "forced": False,
+                    "run_id": rid, "waited": round(waited, 1),
+                    "progress": after.get("progress"),
+                    "why": "Stopped. " + (after.get("head") or "")}
+
+    # It did not answer.
+    r = _run_row(rid) or {}
+    ended = board.end_process(r.get("pid"), r.get("host") or "")
+    who = "you" if (by or "owner") == "owner" else by
+    _force_stopped(rid, f"stopped by {who} — the run had to be ended by force")
+    board.clear_stop(LOCK)
+    swept = board.sweep_dead_processes()
+    after = status(rid)
+    return {"ok": True, "stopped": True, "forced": True, "run_id": rid,
+            "waited": round(waited, 1), "process": ended, "swept": swept,
+            "progress": after.get("progress"),
+            "why": (f"It did not answer in {int(grace)} seconds, so "
+                    + (ended.get("why") or "the process was ended") + ". "
+                    + (after.get("head") or ""))}
 
 
 def unlock() -> dict:
@@ -758,6 +1114,10 @@ def main():
     ap.add_argument("--check", action="store_true", help="preflight only, run nothing")
     ap.add_argument("--start", action="store_true", help="preflight, then run the day")
     ap.add_argument("--status", action="store_true", help="what the last run did")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop the day that is running — asks it to finish, "
+                         "then ends it if it will not")
+    ap.add_argument("--why", default="", help="why you stopped it, for the record")
     ap.add_argument("--unlock", action="store_true",
                     help="clear a stuck day lock when nothing is really running")
     ap.add_argument("--force", action="store_true", help="run even if something is broken")
@@ -778,6 +1138,12 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "error": f"bad input: {e}"}))
             return 2
+
+    if a.stop:
+        r = stop(by=str(body.get("by") or "owner"),
+                 why=str(body.get("why") or a.why))
+        print(json.dumps(r) if (a.json or a.stdin) else r["why"])
+        return 0
 
     if a.unlock:
         r = unlock()

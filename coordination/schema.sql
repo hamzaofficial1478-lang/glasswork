@@ -380,14 +380,20 @@ CREATE TABLE IF NOT EXISTS day_runs (
   id          TEXT PRIMARY KEY,
   started_at  INTEGER,
   ended_at    INTEGER,
-  status      TEXT,                -- running | done | partial | failed | stalled
+  status      TEXT,                -- running | done | partial | failed
+                                   -- | stalled  (died and was reaped)
+                                   -- | stopped  (he pressed Stop, or the
+                                   --             program was closed on it)
   started_by  TEXT,
   note        TEXT,                -- what the owner wants out of today
   forced      INTEGER DEFAULT 0,   -- started despite a blocking check, in writing
   blocking    TEXT,                -- json: what was wrong when he forced it
   steps_total INTEGER DEFAULT 0,
   steps_done  INTEGER DEFAULT 0,
-  pid         INTEGER              -- the process running it; see locks.pid
+  pid         INTEGER,             -- the process running it; see locks.pid
+  host        TEXT                 -- and which machine that pid is on. Stop
+                                   -- refuses to kill a pid it cannot place —
+                                   -- pid 8814 here is somebody else's there.
 );
 CREATE TABLE IF NOT EXISTS day_steps (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -396,6 +402,11 @@ CREATE TABLE IF NOT EXISTS day_steps (
   label      TEXT,
   module     TEXT,
   status     TEXT,                 -- waiting | running | ok | idle | failed
+                                   -- | skipped (the sector is switched off)
+                                   -- | stopped (he pressed Stop; a step that
+                                   --   never started and a step cut off
+                                   --   mid-way are both this, and the summary
+                                   --   says which)
   started_at INTEGER,
   ended_at   INTEGER,
   code       INTEGER,
@@ -580,6 +591,36 @@ CREATE TABLE IF NOT EXISTS sector_switches (
   enabled    INTEGER NOT NULL DEFAULT 1,
   note       TEXT,                  -- why, in his words, if he gave one
   changed_at INTEGER
+);
+
+-- ---- THE STOP BUTTON --------------------------------------------------------
+-- "there is no any stop button that makes the agents or overseer to understand
+-- that the task is stopped by the user."
+--
+-- Closing the window is not stopping. The process dies, the cabinet goes on
+-- saying five agents are mid-task, and the Overseer files faults about work
+-- nobody is doing. board.sweep_dead_processes() cleans up after that; this
+-- table is the other half — a way to stop a run ON PURPOSE, in writing, while
+-- it is still alive to be told.
+--
+-- A row here is a REQUEST, not an order carried out. The run watches for it and
+-- puts its tools down: the step in flight is cut short, the steps behind it
+-- never start, and the whole thing closes as 'stopped by you' rather than
+-- failed. If the run does not answer within the grace period the button kills
+-- the process it recorded and tidies up in its place — see day_run.stop().
+--
+-- cleared_at is set the moment the run has actually stopped. A row with it
+-- still NULL is a stop in progress; that is the only state that means anything
+-- to a reader. The scope is a primary key so pressing Stop twice is one stop.
+CREATE TABLE IF NOT EXISTS stop_requests (
+  scope      TEXT PRIMARY KEY,      -- 'day_run' today; the column is here so
+                                    -- a second stoppable thing does not need
+                                    -- a second table
+  asked_at   INTEGER,
+  asked_by   TEXT,                  -- 'owner' from the button, an agent name
+                                    -- if the Overseer ever pulls the cord
+  why        TEXT,                  -- his words, shown on the run afterwards
+  cleared_at INTEGER                -- when the run confirmed it had stopped
 );
 
 -- HOW A REQUEST GETS ITS PLACE IN THE QUEUE.

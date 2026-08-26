@@ -932,6 +932,26 @@ app.post("/api/run/check", (req, res) => {
 app.get("/api/run/status", (_q, res) =>
   res.json(pyModule("pipelines.day_run", ["--status", "--json"], 60000)));
 
+// ---- STOP ------------------------------------------------------------------
+// "there is no any stop button that makes the agents or overseer to understand
+// that the task is stopped by the user."
+//
+// The run is a DETACHED process — /api/run/start hands off and answers at once,
+// so there is no child handle here to signal. The stop goes through the cabinet
+// instead: day_run.stop() writes the request, waits for the run to close its
+// own books, and ends the process it recorded if it will not. That means this
+// works on a run started before the server was last restarted, which a child
+// handle would not have.
+//
+// The budget is the grace period plus room to kill and tidy up. It blocks on
+// purpose: he pressed Stop and is owed an answer about whether it stopped, not
+// an "asked it to" that leaves him watching the same screen.
+app.post("/api/run/stop", (req, res) => {
+  const why = String((req.body && req.body.why) || "").slice(0, 300);
+  res.json(pyModule("pipelines.day_run",
+    ["--stop", "--json", ...(why ? ["--why", why] : [])], 120000));
+});
+
 app.post("/api/run/start", (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
