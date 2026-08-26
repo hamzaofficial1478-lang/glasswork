@@ -41,7 +41,11 @@ CREATE TABLE IF NOT EXISTS locks (
   resource    TEXT PRIMARY KEY,        -- live_site | publish_pipeline | page:<slug> ...
   holder      TEXT NOT NULL,
   acquired_at INTEGER,
-  expires_at  INTEGER
+  expires_at  INTEGER,
+  -- Which process is holding it. A lease alone cannot tell "an agent is busy"
+  -- from "the owner closed the program three hours ago", and only the second
+  -- of those actually happens. See board.sweep_dead_processes.
+  pid         INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS requests (
@@ -104,7 +108,14 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   -- since recovered still showed as broken. Reaping it turns an eternal
   -- present tense into something that happened once, at a known time.
   status      TEXT,
-  note        TEXT                     -- one plain line: what it actually did
+  note        TEXT,                    -- one plain line: what it actually did
+  -- WHICH PROCESS. 'running' is a claim about right now, and the commonest
+  -- way it becomes false is the owner closing the window — the process is
+  -- gone in an instant while the row says it is working for hours. A pid
+  -- turns "how long has this been going" into "is this still running", which
+  -- has an answer. See board.sweep_dead_processes.
+  pid         INTEGER,
+  host        TEXT
 );
 
 -- every tool action, from the hooks — nothing happens in the dark
@@ -375,7 +386,8 @@ CREATE TABLE IF NOT EXISTS day_runs (
   forced      INTEGER DEFAULT 0,   -- started despite a blocking check, in writing
   blocking    TEXT,                -- json: what was wrong when he forced it
   steps_total INTEGER DEFAULT 0,
-  steps_done  INTEGER DEFAULT 0
+  steps_done  INTEGER DEFAULT 0,
+  pid         INTEGER              -- the process running it; see locks.pid
 );
 CREATE TABLE IF NOT EXISTS day_steps (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

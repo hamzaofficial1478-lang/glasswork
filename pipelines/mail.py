@@ -58,6 +58,36 @@ _LEVERS = [
 ]
 
 
+def setting(name: str, default: str = "") -> str:
+    """
+    One setting, from the environment first and then from .env.
+
+    THE SENDER COULD NEVER SEE HIS SMTP DETAILS.
+
+    Every SMTP lookup in this file read os.environ and nothing else, and
+    nothing in the whole program loads .env into the process. The settings he
+    saved on /setup → Delivery mail live in that file. So from a terminal —
+    which is how he runs everything — the mail sender was looking somewhere
+    the details had never been, and reported "SMTP not configured" to a man
+    who had configured it. Outreach could not have sent a single mail.
+
+    read_env's own docstring records the mirror image of this bug: it used to
+    ignore the environment while the program told him to set variables there.
+    Same lesson, other direction. Precedence matches it exactly — an exported
+    variable is a deliberate act for one run; the saved file is the standing
+    default.
+    """
+    import os
+    v = (os.environ.get(name) or "").strip()
+    if v:
+        return v
+    try:
+        from providers import integrations
+        return (integrations.read_env().get(name) or "").strip() or default
+    except Exception:
+        return default
+
+
 def email_type(stage: str) -> dict:
     return dict(_TYPES.get((stage or "new").strip().lower(), _TYPES["new"]))
 
@@ -520,20 +550,20 @@ def send_plain(to: str, subject: str, body: str) -> dict:
     to = (to or "").strip()
     if "@" not in to or " " in to:
         return {"ok": False, "error": f"not an email address: {to!r}"}
-    host = os.environ.get("SMTP_HOST", "").strip()
-    user = os.environ.get("SMTP_USER", "").strip()
-    pw = os.environ.get("SMTP_PASS", "")
+    host = setting("SMTP_HOST").strip()
+    user = setting("SMTP_USER").strip()
+    pw = setting("SMTP_PASS")
     if not host or not user:
         return {"ok": False, "error": "SMTP not configured (set it on /setup "
                                       "→ Delivery mail)"}
-    sender = (os.environ.get("SMTP_FROM") or user).strip()
+    sender = (setting("SMTP_FROM") or user).strip()
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject or "(no subject)"
     msg.set_content(body or "")
     try:
-        port = int((os.environ.get("SMTP_PORT") or "587").strip() or 587)
+        port = int((setting("SMTP_PORT") or "587").strip() or 587)
     except ValueError:
         port = 587
     try:
@@ -574,9 +604,9 @@ def _smtp_send(lead: dict, draft: str) -> dict:
     import smtplib
     from email.message import EmailMessage
 
-    host = os.environ.get("SMTP_HOST", "").strip()
-    user = os.environ.get("SMTP_USER", "").strip()
-    pw = os.environ.get("SMTP_PASS", "")
+    host = setting("SMTP_HOST").strip()
+    user = setting("SMTP_USER").strip()
+    pw = setting("SMTP_PASS")
     to = (lead.get("email") or "").strip()
     if not host or not user:
         return {"ok": False, "error": "SMTP not configured (set it on /setup → Integrations)"}
@@ -592,8 +622,8 @@ def _smtp_send(lead: dict, draft: str) -> dict:
                          "Raise it on /setup → Daily orders if you really want more."}
 
     # --- the sending domain, as the handbook requires ------------------------
-    sender = (os.environ.get("SMTP_FROM") or user).strip()
-    domain = os.environ.get("OUTREACH_DOMAIN", "").strip().lower()
+    sender = (setting("SMTP_FROM") or user).strip()
+    domain = setting("OUTREACH_DOMAIN").strip().lower()
     if domain and not sender.lower().endswith("@" + domain):
         return {"ok": False,
                 "error": f"refusing to send: {sender} is not on the approved outreach "
@@ -607,7 +637,7 @@ def _smtp_send(lead: dict, draft: str) -> dict:
     msg.set_content(body or draft)
 
     try:
-        port = int((os.environ.get("SMTP_PORT") or "587").strip() or 587)
+        port = int((setting("SMTP_PORT") or "587").strip() or 587)
     except ValueError:
         port = 587
     try:

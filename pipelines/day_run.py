@@ -44,6 +44,7 @@ the most obvious way to get two MDs planning the same day and two Hunters
 mailing the same lead, and the lock is the primitive the handbook already
 provides for exactly that. Second press is refused, plainly, and told who holds it.
 """
+import os
 import argparse
 import json
 import sqlite3
@@ -305,9 +306,10 @@ def _open_run(note, forced, blocking):
     board.ensure_schema()
     with sqlite3.connect(board.DB, timeout=30) as c:
         c.execute("INSERT INTO day_runs(id,started_at,status,started_by,note,forced,"
-                  "blocking,steps_total,steps_done) VALUES(?,?,?,?,?,?,?,?,0)",
+                  "blocking,steps_total,steps_done,pid) VALUES(?,?,?,?,?,?,?,?,0,?)",
                   (rid, _now(), "running", "owner", (note or "")[:2000],
-                   1 if forced else 0, json.dumps(blocking or []), len(STEPS)))
+                   1 if forced else 0, json.dumps(blocking or []), len(STEPS),
+                   os.getpid()))
         for i, (label, mod, room, lane) in enumerate(STEPS):
             c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane)"
                       " VALUES(?,?,?,?, 'waiting', ?)", (rid, i, label, mod, lane))

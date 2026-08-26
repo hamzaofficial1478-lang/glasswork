@@ -216,6 +216,43 @@ def ensure_cabinet():
     say("  Cabinet built." if code == 0 else "  Could not build it:\n" + out)
 
 
+def sweep_stale():
+    """
+    Close anything left 'running' by a program that is no longer here.
+
+    THE SEVENTEEN-HOUR WAIT. He closed the window; the cabinet went on saying
+    seo-answers was working, that a lock was held, that the Director owed a
+    reply. All of it recorded, none of it true — the processes had gone the
+    instant he shut the program, and nothing wrote that down.
+
+    Every reaper in the agency was time-based: twenty minutes for a run, three
+    hours for a lock lease. That suits an agent stuck on a slow call and does
+    nothing for a process that no longer exists, which is the case that
+    actually happens. Runs now carry the process id that owns them, so this
+    can ask "is that still running" instead of "how long has it been".
+
+    First thing after the cabinet is open, before any of today's work, because
+    the alternative is a fresh run planning its day around yesterday's ghosts.
+    """
+    try:
+        sys.path.insert(0, str(ROOT))
+        from coordination import board
+        out = board.sweep_dead_processes()
+    except Exception as e:
+        say(f"  (could not check for leftovers: {e})")
+        return
+    if not (out["runs_closed"] or out["locks_freed"] or out["days_closed"]):
+        return
+    head("Tidying up after the last time you closed the program")
+    for r in out["runs_closed"]:
+        say(f"  {r['agent']} was marked as still working — its program is gone.")
+    for l in out["locks_freed"]:
+        say(f"  released {l['resource']}, which {l['was']} was holding.")
+    for d in out["days_closed"]:
+        say(f"  closed day run {d}, which never finished.")
+    say("  None of that was really running. The agency starts from the truth.")
+
+
 def check():
     """What is ready and what is not. Honest, and it never guesses."""
     head("Health check")
@@ -401,6 +438,7 @@ def main():
     if not a.no_update:
         update()
     ensure_cabinet()
+    sweep_stale()
 
     if a.tests:
         sys.exit(0 if tests() else 1)

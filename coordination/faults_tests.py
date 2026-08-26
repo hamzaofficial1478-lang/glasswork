@@ -17,6 +17,7 @@ fixes itself closes the conversations it opened.
 Everything runs against a throwaway cabinet with real rows in it.
 """
 import sqlite3
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -297,6 +298,90 @@ def test_a_request_claimed_and_never_answered_goes_back_in_the_inbox():
               len(board.release_dead_request_claims()), 1)
 
 
+def test_closing_the_program_stops_the_agency_believing_it_is_working():
+    """
+    THE SEVENTEEN-HOUR WAIT.
+
+    He closed the window. The Overseer went on reporting that seo-answers had
+    been running for hours, that a lock nobody could take was held, and that
+    the Director had not replied. Every one of those was in the cabinet and
+    none was true in the world — the processes died the instant he shut the
+    program, and nothing wrote that down.
+
+    Every reaper was time-based: twenty minutes for a run, three hours for a
+    lock lease. That is right for an agent stuck on a slow call and useless
+    for a process that no longer exists, which is the case that actually
+    happens. Runs now carry the process that owns them, so the question is "is
+    that still running" rather than "how long has it been".
+    """
+    import os
+    import subprocess
+    print("\nA process that is gone is recognised at once, not in 20 minutes:")
+    with _Cabinet() as cab:
+        # A REAL process, started and then killed. A made-up pid would prove
+        # nothing: the whole risk here is misjudging a pid that is in use.
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+        dead, mine = proc.pid, os.getpid()
+        now = int(time.time())
+        cab.write("INSERT INTO agent_runs(agent,started_at,status,note,pid,host)"
+                  " VALUES('seo-answers',?, 'running','auditing',?,?)",
+                  (now - 120, dead, board._this_host()))
+        cab.write("INSERT INTO agent_runs(agent,started_at,status,note,pid,host)"
+                  " VALUES('leads-hunter',?, 'running','collecting',?,?)",
+                  (now - 30, mine, board._this_host()))
+        cab.write("INSERT INTO locks(resource,holder,acquired_at,expires_at,pid)"
+                  " VALUES('shelf:seo_data','seo-answers',?,?,?)",
+                  (now - 120, now + 9000, dead))
+
+        print("  ...while it is still alive, nothing is touched:")
+        r = board.sweep_dead_processes()
+        check("no run closed", r["runs_closed"], [])
+        check("no lock freed", r["locks_freed"], [])
+
+        proc.kill()
+        proc.wait()
+        time.sleep(0.3)
+
+        print("  ...and the moment it is not, both go:")
+        r = board.sweep_dead_processes()
+        check("the dead run is closed", [x["agent"] for x in r["runs_closed"]],
+              ["seo-answers"])
+        check("its lock is released",
+              [x["resource"] for x in r["locks_freed"]], ["shelf:seo_data"])
+        check("and the note says what happened, not 'stalled'",
+              "the program was closed" in
+              cab.sql("SELECT note FROM agent_runs WHERE agent='seo-answers'")[0]["note"],
+              True)
+
+        print("  ...and the agent that IS running is left alone:")
+        check("still running",
+              cab.sql("SELECT status FROM agent_runs WHERE agent='leads-hunter'")[0]["status"],
+              "running")
+
+    print("\nUnknown always counts as ALIVE — killing live work is the worse error:")
+    check("no pid recorded (an old row)", board.process_alive(None), True)
+    check("a pid on another machine", board.process_alive(1, host="someone-else"), True)
+    check("nonsense in the column", board.process_alive("banana"), True)
+    check("a negative pid", board.process_alive(-1), True)
+    check("but this very process is alive", board.process_alive(os.getpid()), True)
+
+    print("\nAnd the Overseer sweeps before it judges anybody:")
+    with _Cabinet() as cab:
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+        dead = proc.pid
+        proc.kill()
+        proc.wait()
+        time.sleep(0.3)
+        cab.write("INSERT INTO agent_runs(agent,started_at,status,note,pid,host)"
+                  " VALUES('seo-answers',?, 'running','x',?,?)",
+                  (int(time.time()) - 5 * F.STALL_SECS, dead, board._this_host()))
+        F.scan()
+        check("no stall fault against an agent whose program is gone",
+              [f["kind"] for f in cab.sql("SELECT kind FROM faults")], [])
+        check("the run is closed instead",
+              cab.sql("SELECT status FROM agent_runs")[0]["status"], "stopped")
+
+
 def test_a_sector_falling_apart_is_raised_once():
     print("\nA sector with several faults gets ONE message about the pattern:")
     with _Cabinet() as cab:
@@ -567,6 +652,7 @@ def main():
               test_one_silent_sector_is_one_message,
               test_an_unanswered_request_says_which_command_answers_it,
               test_a_request_claimed_and_never_answered_goes_back_in_the_inbox,
+              test_closing_the_program_stops_the_agency_believing_it_is_working,
               test_a_sector_falling_apart_is_raised_once,
               test_a_fault_that_fixes_itself_closes_what_it_opened,
               test_a_claimed_ticket_is_never_yanked,

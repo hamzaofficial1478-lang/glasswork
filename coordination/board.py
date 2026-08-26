@@ -14,6 +14,8 @@ even with several agents running at once. Every agent imports this module and
 goes through it — no agent writes to the tables directly.
 """
 
+import os
+import socket
 import sqlite3
 import time
 import uuid
@@ -34,6 +36,67 @@ def _conn():
         yield con
     finally:
         con.close()
+
+
+def _this_host() -> str:
+    try:
+        return socket.gethostname()[:60]
+    except Exception:
+        return ""
+
+
+def process_alive(pid, host="") -> bool:
+    """
+    Is that process still running on THIS machine?
+
+    Unknown counts as alive, on purpose and in three separate ways:
+
+      no pid        a row written before this column existed. Leave it to the
+                    time-based reaper rather than declaring it dead now.
+      other machine we cannot see another box's process table. Saying "not
+                    alive" would let one machine close another's live work.
+      cannot tell   a permissions error asking about the pid means the process
+                    exists and belongs to somebody else.
+
+    Getting this backwards kills running work, which is far worse than being
+    slow to tidy up after a dead one.
+    """
+    if not pid:
+        return True
+    if host and host != _this_host():
+        return True
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return True
+    if pid <= 0:
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            # 0x1000 = PROCESS_QUERY_LIMITED_INFORMATION. Works without the
+            # rights that the older PROCESS_QUERY_INFORMATION demands, which
+            # matters because the owner runs this as an ordinary user.
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+            ctypes.windll.kernel32.CloseHandle(h)
+            # 259 is STILL_ACTIVE. A handle can outlive the process, so the
+            # handle opening is not on its own proof that it is running.
+            return bool(ok) and code.value == 259
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)            # signal 0 asks "are you there", sends nothing
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                # exists, owned by someone else
+    except Exception:
+        return True
 
 
 def _now():
@@ -587,6 +650,22 @@ _ADDED_COLUMNS = (
     # Content, asked to answer it, correctly reported there was nothing to
     # claim. Tasks were given a way out of this; requests never were.
     ("requests",     "claimed_at",   "INTEGER"),
+    # WHICH PROCESS IS DOING THIS WORK.
+    #
+    # Every reaper in the agency was time-based: a run is dead once it has been
+    # 'running' for twenty minutes, a lock is stale once its three-hour lease
+    # expires. That is right for an agent stuck on a slow call, and completely
+    # wrong for the thing that actually happens — the owner closes the program.
+    # The process is gone in an instant and the cabinet says it is still
+    # working for hours. He watched the Overseer wait seventeen hours for a
+    # reply from a process that no longer existed.
+    #
+    # A process id turns "how long has this been going" into "is this still
+    # running at all", which is a question with a real answer.
+    ("agent_runs",   "pid",          "INTEGER"),
+    ("agent_runs",   "host",         "TEXT"),
+    ("day_runs",     "pid",          "INTEGER"),
+    ("locks",        "pid",          "INTEGER"),
     # The same two ideas, one table over. Tasks were handed out in arrival
     # order with no notion of what they were about or who they were for, so an
     # urgent one queued behind a trivial one and any desk could claim any task
@@ -865,8 +944,9 @@ def agent_run(agent, task_id=None, note=None):
         with _conn() as c:
             _migrate(c)
             cur = c.execute(
-                "INSERT INTO agent_runs(agent,task_id,started_at,status,note)"
-                " VALUES(?,?,?, 'running', ?)", (agent, task_id, _now(), note))
+                "INSERT INTO agent_runs(agent,task_id,started_at,status,note,"
+                "pid,host) VALUES(?,?,?, 'running', ?,?,?)",
+                (agent, task_id, _now(), note, os.getpid(), _this_host()))
             run = _Run(cur.lastrowid)
     except sqlite3.Error:
         # no cabinet yet (python -m coordination.init_db). Let the pipeline run
@@ -940,11 +1020,12 @@ def acquire_lock(resource, agent, wait=True, ttl=600):
             free = (row is None) or (row["expires_at"] < _now())
             if free:
                 c.execute(
-                    "INSERT INTO locks(resource,holder,acquired_at,expires_at)"
-                    " VALUES(?,?,?,?)"
+                    "INSERT INTO locks(resource,holder,acquired_at,expires_at,pid)"
+                    " VALUES(?,?,?,?,?)"
                     " ON CONFLICT(resource) DO UPDATE SET holder=excluded.holder,"
-                    " acquired_at=excluded.acquired_at, expires_at=excluded.expires_at",
-                    (resource, agent, _now(), _now() + ttl),
+                    " acquired_at=excluded.acquired_at, expires_at=excluded.expires_at,"
+                    " pid=excluded.pid",
+                    (resource, agent, _now(), _now() + ttl, os.getpid()),
                 )
                 c.execute("COMMIT;")
                 return True
@@ -1052,6 +1133,60 @@ def claim_request(request_id, agent):
 # as dead and the request goes back in the sector's inbox. Generous: a real
 # agent answers in seconds, so an hour is already far past "still working".
 DEAD_REQUEST_CLAIM_SECS = 3600
+
+
+def sweep_dead_processes() -> dict:
+    """
+    Close everything owned by a process that is no longer running.
+
+    THE SEVENTEEN-HOUR WAIT. He closed the program and the Overseer went on
+    reporting that seo-answers had been working for hours, that a lock was
+    held, that the Director had not replied. All true in the cabinet and none
+    of it true in the world: the process had gone the instant he shut the
+    window, and nothing recorded that.
+
+    Every reaper here was time-based — twenty minutes for a run, three hours
+    for a lock lease. Those thresholds are right for an agent stuck on a slow
+    call and useless for a process that no longer exists, and the second case
+    is the one that actually happens.
+
+    Called at startup and on every Overseer pass, so the first thing a new run
+    does is stop lying about the last one. Time-based reaping stays exactly as
+    it was, for the genuinely-stuck-but-alive case this cannot see.
+    """
+    now = _now()
+    runs, locks_freed, days = [], [], []
+    with _conn() as c:
+        _migrate(c)
+        for r in c.execute("SELECT id, agent, pid, host, started_at, note"
+                           "  FROM agent_runs WHERE status='running'").fetchall():
+            if process_alive(r["pid"], r["host"] or ""):
+                continue
+            c.execute("UPDATE agent_runs SET status='stopped', ended_at=?,"
+                      " note=? WHERE id=? AND status='running'",
+                      (now, ((r["note"] or "") +
+                             " — the program was closed while this was running")
+                       [:400], r["id"]))
+            runs.append({"id": r["id"], "agent": r["agent"],
+                         "ran_for": now - int(r["started_at"] or now)})
+        for l in c.execute("SELECT resource, holder, pid FROM locks").fetchall():
+            if process_alive(l["pid"], ""):
+                continue
+            c.execute("DELETE FROM locks WHERE resource=?", (l["resource"],))
+            locks_freed.append({"resource": l["resource"], "was": l["holder"]})
+        for d in c.execute("SELECT id, pid, started_at FROM day_runs"
+                           " WHERE status='running'").fetchall():
+            if process_alive(d["pid"], ""):
+                continue
+            c.execute("UPDATE day_runs SET status='stopped', ended_at=?"
+                      " WHERE id=? AND status='running'", (now, d["id"]))
+            days.append(d["id"])
+    return {"runs_closed": runs, "locks_freed": locks_freed,
+            "days_closed": days,
+            "head": (f"{len(runs)} run(s), {len(locks_freed)} lock(s) and "
+                     f"{len(days)} day(s) belonged to a process that is gone"
+                     if (runs or locks_freed or days) else
+                     "nothing left over from a closed program")}
 
 
 def release_dead_request_claims(older_than=DEAD_REQUEST_CLAIM_SECS) -> list:

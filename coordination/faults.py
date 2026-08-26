@@ -747,6 +747,18 @@ def scan(now=None) -> dict:
     files nothing twice.
     """
     now = int(now or time.time())
+    # BEFORE looking for anything wrong, find out who is actually still here.
+    #
+    # This has to be the first line of the pass, not a tidy-up at the end.
+    # detect() reads the cabinet, and a run left 'running' by a program the
+    # owner closed reads exactly like a stalled agent — so putting the sweep
+    # after detect() files a stall fault against a process that no longer
+    # exists, and then closes the run a moment later, leaving an unanswerable
+    # ticket behind. He had seventeen hours of those.
+    try:
+        board.sweep_dead_processes()
+    except Exception:
+        pass
     found = detect(now)
     keys = {f["key"] for f in found}
     filed = routed = escalated = resolved = reaped = freed = 0
