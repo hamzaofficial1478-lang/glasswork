@@ -1,0 +1,723 @@
+"""
+it_fix.py — the IT Fixer. Takes the tickets the Watcher filed and writes the
+actual change, in full, ready for the Releaser to apply. It never touches the
+website itself.
+
+    python -m pipelines.it_fix              work the bench
+    python -m pipelines.it_fix --list       what is waiting, and what I'd do
+    python -m pipelines.it_fix --dry-run    write the patches, queue nothing
+    python -m pipelines.it_fix --issue 7    just that one ticket
+
+WHY THIS FILE EXISTS AT ALL
+
+"IT sector's fixer was not working."
+
+It was not working because it did not exist. There is an it-fixer desk in
+coordination/desks.py, an it-fixer agent card, an it-fixer avatar on the office
+floor — and no pipeline that ever ran as it-fixer. So the Watcher filed tickets
+every morning, dispatch correctly routed anything with the word "fix" in it to
+a desk with nobody sitting at it, and the board quietly grew. The agency's own
+Overseer test says this in as many words:
+
+    "Sending a fix to it-fixer is right — the Watcher cannot write one. But if
+     no pipeline runs as it-fixer, that task waits for ever and the board looks
+     calm rather than stuck."
+
+That is the bug. This is the desk.
+
+WHAT A "FIX" IS HERE, AND WHAT IT IS NOT
+
+The website is not a repository on this machine. It is a PHP site reached
+through the admin endpoint the owner pasted onto his server, so "write the
+patch in a branch" has to be translated honestly rather than pretended at. The
+translation is: produce the EXACT change — which page, which marked block, the
+literal HTML going in, and how to take it back out — and hand it on. Nothing
+here calls a write. pipelines/site_api.py refuses this agent by name and queues
+instead, which is the mechanism rather than the manners.
+
+A ticket the Fixer cannot honestly patch is not quietly dropped and not
+padded out with a plausible-looking change. It is handed up with what a person
+would have to decide, because a queue full of confident nonsense is worse than
+a queue with three real items in it.
+
+THE RECIPES ARE DELIBERATELY NARROW
+
+Every recipe below is a change where the right answer is a fact, not a
+judgement: a viewport tag is the same tag on every site in the world, a
+canonical pointing at the wrong hostname has exactly one correct hostname, a
+placeholder the generator left behind has one correct value and it is sitting
+in .env. Those get patched.
+
+Anything where the right answer is a judgement — what a page's title should
+say, whether a slow page needs images shrinking or hosting moving — gets a
+recommendation with the reasoning, and stops. The Fixer is allowed to be
+uncertain out loud. It is not allowed to guess and call it a patch.
+"""
+import argparse
+import json
+import re
+import sqlite3
+import sys
+import time
+
+from coordination import board
+from . import site_api
+
+AGENT = "it-fixer"
+SECTOR = "IT"
+
+# Worst first. A dead enquiry path outranks a cosmetic every time — the site
+# keeps attracting people and quietly drops each one, which is worse than not
+# ranking at all.
+SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+# How many tickets one pass will work. Not "all of them": every queued change
+# is something the owner has to read and decide, and forty at once is a queue
+# he will scroll past rather than a queue he will work.
+MAX_PER_PASS = 6
+
+
+def _now():
+    return int(time.time())
+
+
+# ---------------------------------------------------------------------------
+# THE RECIPES
+# ---------------------------------------------------------------------------
+#
+# A recipe answers one question: given this ticket, what EXACTLY changes?
+#
+# It returns a patch — page, block id, the literal html, and the one-line
+# undo — or it returns advice, which is a plan in words for something only a
+# person can decide. Both are honest outcomes. A recipe that cannot tell which
+# it is returns None and the ticket goes up as unhandled, which is the third
+# honest outcome and the one that must never be silently swallowed.
+
+VIEWPORT_TAG = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+
+
+def _patch(block_id, html, page, why, undoes=""):
+    return {"how": "patch", "block_id": block_id, "html": html, "page": page,
+            "why": why,
+            "undo": undoes or (f"python -m pipelines.site_api --remove-block "
+                               f"{block_id} --page {page}")}
+
+
+def _advice(why, steps, needs=""):
+    return {"how": "advice", "why": why, "steps": list(steps), "needs": needs}
+
+
+def fix_viewport(issue, ctx):
+    """
+    No viewport meta tag.
+
+    The one tag every phone-shaped visitor needs and the one where there is
+    nothing to decide — this is the same line on every site there has ever
+    been. It goes in the head block the agency already owns, so it can be
+    taken back out again without touching anything else on the page.
+    """
+    if issue["kind"] != "bug" or "viewport" not in (issue["detail"] or "").lower():
+        return None
+    page = ctx.get("head_page") or ""
+    if not page:
+        return _advice(
+            "The site has no single file whose <head> the agency can write to, "
+            "so this tag has to go in by hand.",
+            [f"Paste this into the <head> of your header include: {VIEWPORT_TAG}"],
+            needs="somebody with access to the site's files")
+    return _patch("viewport", VIEWPORT_TAG, page,
+                  "Without it a phone renders the page at desktop width and "
+                  "every enquiry button lands off-screen. There is exactly one "
+                  "correct value and this is it.")
+
+
+def fix_canonical(issue, ctx):
+    """
+    A canonical tag pointing at the wrong hostname.
+
+    site_api works the plan out by reading the pages, so this recipe does not
+    invent anything — it asks, and reports what came back. If the plan is empty
+    the ticket is stale and says so rather than queueing a change to nothing.
+    """
+    text = (issue["detail"] or "").lower()
+    if "canonical" not in text:
+        return None
+    try:
+        plan = site_api.canonical_plan()
+    except Exception as e:
+        return _advice(f"Could not read the pages to work out the canonical fix: {e}",
+                       ["Check the Admin API address and token on /setup."])
+    if not plan.get("ok"):
+        return _advice(
+            "Could not read the pages to work out the canonical fix: "
+            + str(plan.get("error") or "no detail"),
+            ["Check the Admin API address and token on /setup."])
+    jobs = plan.get("jobs") or []
+    if not jobs:
+        return {"how": "already_right",
+                "why": "Every canonical already points at the right hostname — "
+                       "this ticket has been overtaken."}
+    return {"how": "call", "call": "fix_canonical",
+            "why": (f"{len(jobs)} page(s) name the wrong hostname in their "
+                    "canonical tag, which tells search engines the real page is "
+                    f"somewhere that does not exist. The right one is "
+                    f"{plan.get('want') or 'your own domain'}."),
+            "pages": sorted({j.get("page") for j in jobs})[:12],
+            "undo": "python -m pipelines.site_api --undo --page <page>"}
+
+
+def fix_placeholders(issue, ctx):
+    """
+    'YOUR STREET / UNIT' and friends, still on the site.
+
+    The generator leaves these deliberately. The correct value is not a guess —
+    it is in .env, put there by the owner on /setup — so this is a patch, not
+    advice. If .env has not been filled in, that is what the ticket needs and
+    the Fixer says so instead of writing the placeholder back.
+    """
+    text = (issue["detail"] or "")
+    if not any(p.lower() in text.lower() for p in site_api.PLACEHOLDERS):
+        return None
+    try:
+        found = site_api.find_placeholders()
+    except Exception as e:
+        return _advice(f"Could not read the pages: {e}",
+                       ["Check the Admin API address and token on /setup."])
+    if not found.get("ok"):
+        return _advice("Could not read the pages: " + str(found.get("error") or ""),
+                       ["Check the Admin API address and token on /setup."])
+    hits = found.get("found") or []
+    if not hits:
+        return {"how": "already_right",
+                "why": "No placeholder text is on the site any more — this "
+                       "ticket has been overtaken."}
+    missing = [k for k in set(site_api.PLACEHOLDERS.values())
+               if not (ctx.get("env") or {}).get(k)]
+    if missing:
+        return _advice(
+            f"{len(hits)} page(s) still show placeholder text, and the real "
+            "value is not saved anywhere yet — so there is nothing to put in "
+            "its place.",
+            [f"Set {', '.join(sorted(missing))} on /setup, or run: "
+             "python -m pipelines.site_api --set-address \"<street>\" --city \"<city>\"",
+             "Then run the Fixer again and it becomes an ordinary patch."],
+            needs="the real address, from you")
+    return {"how": "call", "call": "fix_address",
+            "why": (f"{len(hits)} page(s) still show the placeholder text the "
+                    "generator left. The real value is already saved, so this "
+                    "is a substitution, not a decision."),
+            "pages": [h.get("page") for h in hits][:12],
+            "undo": "python -m pipelines.site_api --undo --page <page>"}
+
+
+def fix_title(issue, ctx):
+    """
+    A page with no <title>.
+
+    A real fix and NOT a patch, on purpose. What the title should say is a
+    claim about the business — which service, which emirate, in what order —
+    and the Fixer inventing one is how a page ends up titled 'Home | Home'.
+    So it drafts a suggestion from what the cabinet actually knows and asks
+    him to approve the words.
+    """
+    text = (issue["detail"] or "").lower()
+    if issue["kind"] != "bug" or "title" not in text:
+        return None
+    suggestion = (ctx.get("business_name") or "").strip()
+    trade = "Glass & Aluminium"
+    where = (ctx.get("emirate") or "").strip()
+    draft = " | ".join([b for b in
+                        [suggestion or None, trade, where or None] if b])
+    return _advice(
+        "The page has no title, so search results and the browser tab show the "
+        "URL. What it should SAY is a claim about your business, not something "
+        "I should invent for you.",
+        [f'Suggested: <title>{draft}</title>' if draft else
+         "Suggested shape: <title>Business name | Glass &amp; Aluminium | Emirate</title>",
+         "Approve the words and the Releaser puts them in, or send me different ones."],
+        needs="your say-so on the wording")
+
+
+def fix_https(issue, ctx):
+    """
+    Not on HTTPS.
+
+    Nothing in a page fixes this — it is a certificate on the server and a
+    redirect in front of it. Pretending otherwise would queue a change that
+    cannot work and waste his time deciding on it.
+    """
+    if issue["kind"] != "ssl":
+        return None
+    return _advice(
+        "Browsers put 'Not secure' next to your address, which costs enquiries "
+        "before anyone reads a word. This is not something in a page — it is a "
+        "certificate on the hosting.",
+        ["In your hosting panel, turn on the AutoSSL / Let's Encrypt certificate "
+         "for the domain (it is normally one button and costs nothing).",
+         "Then set the site to send every http:// request on to https://.",
+         "Tell me when it is on and IT will re-check the same morning."],
+        needs="a change in your hosting panel, not in the site's files")
+
+
+def fix_speed(issue, ctx):
+    """
+    A slow page.
+
+    Speed has many causes and this agency has measured exactly one number. A
+    recipe here would be a guess dressed as a patch, so it is advice ordered by
+    what is usually true of a small PHP site.
+    """
+    if issue["kind"] != "speed":
+        return None
+    ms = re.search(r"(\d{3,6})\s*ms", issue["detail"] or "")
+    took = f"{ms.group(1)}ms" if ms else "too long"
+    return _advice(
+        f"The page took {took}. On UAE mobile that is somebody going back to "
+        "the search results. I can measure it but I cannot tell you WHY from "
+        "one number, so this is what to check, in the order that usually pays.",
+        ["Photos of finished jobs are almost always it: anything over about "
+         "300KB wants resizing to 1600px wide and saving as WebP.",
+         "Turn on caching and gzip in the hosting panel if they are off.",
+         "If it is still slow with small images, the hosting itself is the "
+         "problem and no change to the site will fix it."],
+        needs="a look at the page's images, which I cannot resize from here")
+
+
+def fix_enquiry_route(issue, ctx):
+    """
+    A missing WhatsApp link, click-to-call or contact form.
+
+    The most valuable ticket on the bench and the one the Fixer is least
+    entitled to patch alone: the number it would write in is a number customers
+    ring. Getting it from .env is not the same as him confirming it, and a
+    wrong number is worse than a missing link because it looks like it works.
+
+    So the snippet is written out in full, with his own number already in it,
+    and it waits for a yes.
+    """
+    if issue["kind"] != "form_dead":
+        return None
+    text = (issue["detail"] or "").lower()
+    phone = (ctx.get("phone") or "").strip()
+    digits = re.sub(r"[^\d]", "", phone)
+    if "whatsapp" in text:
+        if not digits:
+            return _advice(
+                "There is no WhatsApp link on the site, and no number saved for "
+                "me to put in one. For this trade that is the main way people "
+                "get in touch.",
+                ["Save your WhatsApp number on /setup (BUSINESS_PHONE).",
+                 "Run the Fixer again and it becomes a one-line change."],
+                needs="your WhatsApp number")
+        snippet = (f'<a href="https://wa.me/{digits}" '
+                   f'aria-label="WhatsApp us">WhatsApp us</a>')
+        return _advice(
+            "There is no WhatsApp link anywhere on the site. For this trade "
+            "that is the main way an enquiry arrives.",
+            [f"The exact link, with your number already in it: {snippet}",
+             "It wants to sit in the header, so it is on every page.",
+             "Say yes and the Releaser puts it in; say the number is wrong and "
+             "I will not touch it."],
+            needs="a yes, because a wrong number looks like it works")
+    if "call" in text or "tel:" in text:
+        if not digits:
+            return _advice(
+                "Nothing on the site is tappable as a phone call, and no number "
+                "is saved for me to use.",
+                ["Save your number on /setup (BUSINESS_PHONE), then run the "
+                 "Fixer again."],
+                needs="your phone number")
+        return _advice(
+            "Your number is on the page as text, so on a phone it cannot be "
+            "tapped — the visitor has to memorise it and switch apps.",
+            [f'Wrap it: <a href="tel:+{digits}">{phone}</a>',
+             "Same number, one tap instead of five."],
+            needs="a yes")
+    return _advice(
+        "There is no way to make an enquiry on this page — no form, no email "
+        "link, nothing to tap. Everything the site earns in rankings is being "
+        "dropped at the last step.",
+        ["Decide the one route you want (WhatsApp is usually right for this "
+         "trade) and I will write it.",
+         "A form is worth having as well, but second — it is slower for the "
+         "customer and it needs somewhere for the mail to go."],
+        needs="which route you want")
+
+
+def fix_unreachable(issue, ctx):
+    """The site did not answer, or answered 500. Nothing in a page fixes that."""
+    text = (issue["detail"] or "").lower()
+    if issue["kind"] != "bug":
+        return None
+    if not ("did not respond" in text or "server error" in text
+            or re.search(r"returned 5\d\d", text)):
+        return None
+    return _advice(
+        "The site did not answer when IT looked. Nothing I can change in a page "
+        "fixes a server that is not answering, and every hour of this is enquiries "
+        "that never happened.",
+        ["Open the site yourself — if it loads for you, it may have been a blip "
+         "and IT will confirm on the next check.",
+         "If it does not load, ring the hosting company. This is theirs.",
+         "Ask them for the error log for the last hour; that is what says why."],
+        needs="the hosting company, urgently")
+
+
+# Order matters: the first recipe that recognises a ticket owns it. The narrow
+# ones come before the broad ones, or 'bug + the word title' would be swallowed
+# by anything matching every bug.
+RECIPES = (
+    fix_unreachable,
+    fix_viewport,
+    fix_canonical,
+    fix_placeholders,
+    fix_title,
+    fix_https,
+    fix_speed,
+    fix_enquiry_route,
+)
+
+
+def plan_for(issue, ctx):
+    """The one plan for this ticket, or None if no recipe recognises it."""
+    for recipe in RECIPES:
+        try:
+            got = recipe(issue, ctx)
+        except Exception as e:                                # pragma: no cover
+            return _advice(f"The recipe for this ticket errored: {e}",
+                           ["This is a bug in the Fixer, not in your site. "
+                            "It has been filed."])
+        if got:
+            got["recipe"] = recipe.__name__
+            return got
+    return None
+
+
+# ---------------------------------------------------------------------------
+# THE BENCH
+# ---------------------------------------------------------------------------
+
+def open_issues(con, limit=MAX_PER_PASS, only=None):
+    """
+    What is waiting, worst first, oldest first within a severity.
+
+    'fixing' is included alongside 'open' deliberately. A ticket this desk
+    picked up and then died on would otherwise be invisible to the only desk
+    that can work it — the same shape as the nineteen-day request bug, one
+    table over. A ticket already in_review has a change waiting on the owner
+    and must NOT be worked twice.
+    """
+    q = ("SELECT id, kind, severity, detail, url, status, found_by, found_at"
+         "  FROM site_issues WHERE status IN ('open','fixing')")
+    args = []
+    if only:
+        q += " AND id=?"
+        args.append(int(only))
+    rows = [dict(r) for r in con.execute(q, args)]
+    rows.sort(key=lambda r: (SEVERITY_ORDER.get(r["severity"], 9),
+                             r["found_at"] or 0, r["id"]))
+    return rows[:limit] if limit else rows
+
+
+def _context():
+    """Everything a recipe might need, read once rather than per ticket."""
+    env = {}
+    try:
+        from providers import integrations
+        env = integrations.read_env()
+    except Exception:
+        env = {}
+    ctx = {"env": env,
+           "business_name": env.get("BUSINESS_NAME") or env.get("AGENCY_NAME") or "",
+           "phone": env.get("BUSINESS_PHONE") or env.get("BUSINESS_WHATSAPP") or "",
+           "emirate": env.get("BUSINESS_EMIRATE") or env.get("BUSINESS_CITY") or "",
+           "head_page": ""}
+    # Which file's <head> the agency may write to. Worked out by reading the
+    # site, not guessed — see site_api.head_holder, which learned the hard way
+    # that any complete page contains a </head> and default.php is not the
+    # header include.
+    try:
+        if not site_api.why_not_ready():
+            ctx["head_page"] = site_api.head_holder(site_api.live_pages()) or ""
+    except Exception:
+        ctx["head_page"] = ""
+    return ctx
+
+
+def critic_check(worked, unhandled):
+    """
+    The Fixer's failure mode is a confident patch nobody asked for.
+
+    Two things get rejected: a patch with no actual content, and a pass that
+    claims to have handled everything while quietly having no recipe for most
+    of it. The second one is the dangerous one — it reads as a working desk.
+    """
+    reasons = []
+    for w in worked:
+        p = w["plan"]
+        if p["how"] == "patch" and not (p.get("html") or "").strip():
+            reasons.append(f"issue {w['issue']['id']}: a patch with nothing in it")
+        if p["how"] == "advice" and not p.get("steps"):
+            reasons.append(f"issue {w['issue']['id']}: advice that says nothing to do")
+    if worked and unhandled and len(unhandled) > 2 * len(worked):
+        reasons.append(
+            f"{len(unhandled)} of {len(worked) + len(unhandled)} tickets have no "
+            "recipe — reporting that as a working bench would be a lie")
+    return (not reasons, reasons)
+
+
+# ---------------------------------------------------------------------------
+# THE PASS
+# ---------------------------------------------------------------------------
+
+def run(agent=AGENT, limit=MAX_PER_PASS, only=None, dry_run=False):
+    with board.agent_run(agent) as run_row:
+        out = _work(agent, limit, only, dry_run)
+        run_row.note(out.get("summary") or out.get("error") or "nothing on the bench")
+        return out
+
+
+def _work(agent, limit, only, dry_run):
+    # Anything stuck in our own name first — the lesson from Content's nineteen
+    # days. A desk that cannot see its own abandoned work reports an empty
+    # bench while the Overseer reports it as ignoring the board.
+    try:
+        board.release_dead_request_claims()
+    except Exception:
+        pass
+
+    con = sqlite3.connect(board.DB)
+    con.row_factory = sqlite3.Row
+    try:
+        # Claim the board task if the MD or the Watcher posted one for this
+        # desk. Not required to work — the tickets are the real bench — but
+        # claiming it is what clears the Overseer's 'nobody is picking this up'
+        # fault, and leaving that standing while actually doing the work would
+        # be the dashboard lying in the opposite direction.
+        task = board.next_open_task(SECTOR, agent)
+
+        issues = open_issues(con, limit=limit, only=only)
+        if not issues:
+            total = con.execute("SELECT count(*) FROM site_issues").fetchone()[0]
+            waiting = con.execute("SELECT count(*) FROM site_issues"
+                                  " WHERE status='in_review'").fetchone()[0]
+            why = ("nothing is filed against the site yet — run the Watcher first:"
+                   "  python -m pipelines.it_health" if not total else
+                   f"every ticket is already dealt with ({waiting} waiting on you"
+                   " to approve)" if waiting else
+                   "every ticket is closed")
+            if task:
+                board.finish_task(task["id"], agent,
+                                  f"Nothing to patch — {why}", status="done")
+            return {"ok": False, "agent": agent, "error": f"Nothing to patch — {why}.",
+                    "tickets_total": total, "waiting_on_you": waiting,
+                    "claimed_task": (task or {}).get("id")}
+
+        ctx = _context()
+        worked, unhandled = [], []
+        for issue in issues:
+            plan = plan_for(issue, ctx)
+            if plan is None:
+                unhandled.append(issue)
+                continue
+            worked.append({"issue": issue, "plan": plan})
+
+        ok, reasons = critic_check(worked, unhandled)
+        if not ok:
+            if task:
+                board.finish_task(task["id"], agent,
+                                  "Critic rejected: " + "; ".join(reasons),
+                                  status="blocked")
+            return {"ok": False, "agent": agent, "critic": "rejected",
+                    "critic_reasons": reasons,
+                    "error": "The Critic stopped this pass: " + "; ".join(reasons),
+                    "claimed_task": (task or {}).get("id")}
+
+        queued, overtaken, blocked_by_lock = [], [], []
+        if not dry_run:
+            for w in worked:
+                r = _hand_on(agent, w["issue"], w["plan"], con)
+                if r["state"] == "queued":
+                    queued.append(r)
+                elif r["state"] == "overtaken":
+                    overtaken.append(r)
+                else:
+                    blocked_by_lock.append(r)
+
+        result = {
+            "ok": True, "agent": agent, "dry_run": bool(dry_run),
+            "claimed_task": (task or {}).get("id"),
+            "critic": "passed",
+            "tickets_read": len(issues),
+            "patched": sum(1 for w in worked
+                           if w["plan"]["how"] in ("patch", "call")),
+            "advised": sum(1 for w in worked if w["plan"]["how"] == "advice"),
+            "overtaken": len(overtaken),
+            "no_recipe": len(unhandled),
+            "queued_for_you": len(queued),
+            "held_by_someone_else": len(blocked_by_lock),
+            "plans": [{"issue": w["issue"]["id"], "severity": w["issue"]["severity"],
+                       "how": w["plan"]["how"], "recipe": w["plan"]["recipe"],
+                       "why": w["plan"]["why"]} for w in worked],
+            "unhandled": [{"issue": i["id"], "kind": i["kind"],
+                           "detail": (i["detail"] or "")[:120]} for i in unhandled],
+        }
+
+        if unhandled and not dry_run:
+            _say_what_it_could_not_do(agent, unhandled)
+
+        if task and not dry_run:
+            board.finish_task(task["id"], agent, {
+                "tickets_read": len(issues),
+                "queued_for_owner": len(queued),
+                "no_recipe": len(unhandled)}, status="done")
+
+        if not dry_run:
+            result["decision_id"] = board.log_decision(
+                "it-fix",
+                reasoning=(f"Worked {len(issues)} open ticket(s): "
+                           f"{result['patched']} had an exact fix, "
+                           f"{result['advised']} needed the owner to decide, "
+                           f"{len(unhandled)} had no recipe."),
+                expectation=("The tickets the Watcher files stop piling up, and "
+                             "each one reaches the owner as a decision he can "
+                             "answer rather than a problem he has to diagnose."),
+                confidence=0.7,
+                evidence={"site_issue_ids": [w["issue"]["id"] for w in worked],
+                          "site_queue_ids": [q["change_id"] for q in queued]})
+
+        result["summary"] = (
+            f"{len(issues)} ticket(s) worked — {result['patched']} with an exact fix, "
+            f"{result['advised']} needing your call, {len(queued)} queued for you"
+            + (f", {len(unhandled)} I have no recipe for" if unhandled else "")
+            + (" (dry run — nothing queued)" if dry_run else ""))
+        return result
+    finally:
+        con.close()
+
+
+def _hand_on(agent, issue, plan, con):
+    """
+    Queue one change and move the ticket on. Nothing here writes to the site.
+
+    THE LOCK. Two agents editing the same page is the thing coordination exists
+    to stop, and the Fixer holds the page it is patching for as long as it takes
+    to write the change down. Short lease on purpose: this is a database write,
+    not an edit session, and a long one would block the Releaser behind a desk
+    that has already finished.
+    """
+    if plan["how"] == "already_right":
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE site_issues SET status='closed' WHERE id=?",
+                      (issue["id"],))
+        return {"state": "overtaken", "issue": issue["id"], "why": plan["why"]}
+
+    page = plan.get("page") or (plan.get("pages") or [""])[0] or "site"
+    resource = f"page:{page}"
+    if not board.acquire_lock(resource, agent, wait=False, ttl=120):
+        return {"state": "held", "issue": issue["id"], "resource": resource}
+    try:
+        detail = _for_the_owner(issue, plan)
+        change_id = board.queue_site_change(agent, "fix_" + (issue["kind"] or "site"),
+                                            detail)
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE site_issues SET status='in_review' WHERE id=?",
+                      (issue["id"],))
+        return {"state": "queued", "issue": issue["id"], "change_id": change_id,
+                "how": plan["how"]}
+    finally:
+        board.release_lock(resource, agent)
+
+
+def _for_the_owner(issue, plan):
+    """
+    What he actually reads in the approval queue.
+
+    Written as a sentence he can answer, not a diff. He is a glazier with ten
+    years in the trade and no interest in HTML, so the shape is: what is wrong,
+    what I would do, and what happens if you say no. The literal change is
+    carried underneath for the Releaser, which is the only reader that needs it.
+    """
+    head = {"patch": "I can fix this exactly",
+            "call": "I can fix this exactly",
+            "advice": "This one needs you"}.get(plan["how"], "")
+    body = {
+        "issue_id": issue["id"],
+        "severity": issue["severity"],
+        "found": (issue["detail"] or "")[:400],
+        "url": issue["url"] or "",
+        "verdict": head,
+        "why": plan["why"],
+    }
+    if plan["how"] == "patch":
+        body["change"] = {"page": plan["page"], "block": plan["block_id"],
+                          "html": plan["html"]}
+        body["undo"] = plan["undo"]
+    elif plan["how"] == "call":
+        body["change"] = {"run": plan["call"], "pages": plan.get("pages") or []}
+        body["undo"] = plan.get("undo") or ""
+    else:
+        body["what_to_do"] = plan["steps"]
+        body["needs"] = plan.get("needs") or ""
+    return body
+
+
+def _say_what_it_could_not_do(agent, unhandled):
+    """
+    Tickets with no recipe go UP, not into a corner.
+
+    The whole reason this desk was missing for so long is that nobody was told
+    when work stopped moving. A Fixer that silently skips what it does not
+    understand rebuilds that hole one level down, so it says so, once, naming
+    the tickets.
+    """
+    lines = "\n".join(f"  #{i['id']} [{i['severity']}] {(i['detail'] or '')[:120]}"
+                      for i in unhandled[:10])
+    try:
+        board.post_request(
+            SECTOR, SECTOR,
+            f"{len(unhandled)} ticket(s) I have no fix for",
+            "These are open against the site and I have no recipe that "
+            "recognises them, so nothing has been queued for them:\n\n" + lines
+            + "\n\nThey are not lost and they are not being worked. Either they "
+              "need a person, or the Fixer needs a recipe for this shape of "
+              "ticket — which is a job for IT, not a job for the owner.",
+            urgency="normal")
+    except Exception:
+        pass                       # saying so must never stop the work
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _as_text(r):
+    if not r.get("ok"):
+        return "IT FIXER — " + (r.get("error") or "nothing to do")
+    lines = ["IT FIXER — " + (r.get("summary") or "")]
+    for p in r.get("plans") or []:
+        mark = {"patch": "fix ", "call": "fix ", "advice": "ask ",
+                "already_right": "gone"}.get(p["how"], "    ")
+        lines.append(f"  {mark} #{p['issue']:<4} [{p['severity']}] {p['why'][:100]}")
+    for u in r.get("unhandled") or []:
+        lines.append(f"  ??   #{u['issue']:<4} no recipe — {u['detail'][:80]}")
+    return "\n".join(lines)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="The IT Fixer: patch what the Watcher filed.")
+    ap.add_argument("--list", action="store_true", help="what is waiting, change nothing")
+    ap.add_argument("--dry-run", action="store_true", help="work it out, queue nothing")
+    ap.add_argument("--issue", type=int, default=0, help="just this one ticket")
+    ap.add_argument("--limit", type=int, default=MAX_PER_PASS)
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+
+    r = run(limit=a.limit, only=a.issue or None,
+            dry_run=bool(a.dry_run or a.list))
+    print(json.dumps(r, indent=2) if a.json else _as_text(r))
+    return 0 if r.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

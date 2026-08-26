@@ -126,6 +126,12 @@ STEPS = [
 
     # ---- three lanes that need nothing from each other --------------------
     ("IT checks the site", "pipelines.it_health", "IT", "it"),
+    # AFTER the check, in the same lane, because it works the tickets the check
+    # just filed. It was missing entirely: there was an it-fixer desk, an
+    # it-fixer agent card and an it-fixer light on the office floor, and no
+    # pipeline that ever ran under that name — so every ticket the Watcher
+    # filed sat open for ever and the board looked calm rather than stuck.
+    ("IT patches what it found", "pipelines.it_fix", "IT", "it"),
     ("IT reindexes site search", "pipelines.site_search", "IT", "it"),
 
     ("Leads maps its sources", "pipelines.leads_sources", "Leads", "leads"),

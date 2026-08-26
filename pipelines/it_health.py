@@ -288,16 +288,27 @@ def _check(agent, url, timeout, run_row):
         issue_ids = file_issues(findings, site, agent)
         filed = len(issue_ids)
 
-        # anything worth changing goes to the owner's queue. The Watcher does not
-        # get to touch the site, and this is the only route a change may travel.
+        # THE WATCHER NO LONGER QUEUES ANYTHING, AND THAT IS THE FIX.
+        #
+        # It used to put every critical and high finding straight into the
+        # owner's approval queue, with a note saying it "needs the Fixer in a
+        # branch, then the Releaser". That was honest at the time and it was a
+        # workaround: there was an it-fixer desk in the routing table and no
+        # pipeline that ever ran under that name, so the Watcher was standing
+        # in for a desk that did not exist.
+        #
+        # pipelines/it_fix.py is that desk now. It reads these tickets, works
+        # out the actual change, and puts THAT to the owner — a decision he can
+        # answer rather than a problem he has to diagnose. Leaving the line
+        # below in place meant he got both: seven items in the queue for four
+        # problems, half of them saying nothing more than "something is wrong".
+        #
+        # So the split is the one the handbook describes and nothing more: the
+        # Watcher finds and files, the Fixer decides and queues, the Releaser
+        # is the only one who acts. A finding with no ticket behind it is the
+        # thing to worry about, and file_issues above is what guarantees there
+        # is always one.
         queued = []
-        for f in findings:
-            if f["severity"] in ("critical", "high"):
-                cid = board.queue_site_change(
-                    agent, kind="fix_" + f["kind"],
-                    detail=f'{f["detail"]}  (found on {site}; needs the Fixer in a branch, '
-                           f'then the Releaser)')
-                queued.append(cid)
 
         worst = next((s for s in ("critical", "high", "medium", "low")
                       if any(f["severity"] == s for f in findings)), None)
@@ -321,9 +332,11 @@ def _check(agent, url, timeout, run_row):
                 "enquiry_routes_found": [k for k, _ in found],
                 "issues_filed": filed, "worst_severity": worst,
                 "changes_queued_for_owner": len(queued),
+                "for_the_fixer": sum(1 for f in findings
+                                     if f["severity"] in ("critical", "high")),
                 "changes_applied": 0, "decision_id": did,
                 "summary": (f"checked {site} — HTTP {status} in {ms}ms, "
-                            f"{filed} ticket(s) filed, {len(queued)} queued for you"),
+                            f"{filed} ticket(s) filed for the Fixer"),
                 "findings": findings}
     finally:
         con.close()

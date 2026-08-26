@@ -479,6 +479,55 @@ def test_the_markup_can_be_taken_straight_back_off():
     check("still ok", r["ok"], True)
 
 
+def test_one_block_can_be_taken_out_without_touching_the_rest():
+    """
+    The undo the Fixer prints next to every block it proposes.
+
+    undo_schema above clears the agency's markup off every page; this is the
+    surgical one — a named block, on a named page, leaving everything else
+    exactly as it was. It is the line printed in the owner's approval queue,
+    so it has to work: an undo he only discovers is broken at the moment he
+    needs it is worse than no undo at all.
+    """
+    print("\nOne named block comes out, and nothing else moves:")
+    page = ("<html><head><title>x</title>\n"
+            "<!-- agency:viewport -->\n"
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            "<!-- /agency:viewport -->\n"
+            "<!-- agency:localbusiness -->\n<script>lb</script>\n"
+            "<!-- /agency:localbusiness -->\n</head><body>hi</body></html>")
+    site = _Site({"includes/header.php": page})
+
+    def call(path, method="GET", body=None, timeout=25, s=None):
+        if path.startswith("/pages/") and method == "GET":
+            name = path.split("/", 2)[2]
+            return {"ok": True, "page": name, "html": site.pages.get(name, "")}
+        if path == "/pages" and method == "POST":
+            site.pages[body["page"]] = body["html"]
+            return {"ok": True, "page": body["page"], "backup": "b"}
+        return site(path, method, body, timeout, s)
+
+    r = _with_site(call, lambda: S.remove_head_block(
+        "includes/header.php", "viewport", s=FULL))
+    left = site.pages["includes/header.php"]
+    check("it reports ok", r.get("ok"), True)
+    check("the named block is gone", "agency:viewport" in left, False)
+    check("and so is what was inside it", "width=device-width" in left, False)
+    check("the OTHER block is untouched", "agency:localbusiness" in left, True)
+    check("and the page still closes properly", "</head>" in left, True)
+
+    print("\n...and asking twice is not an error:")
+    r2 = _with_site(call, lambda: S.remove_head_block(
+        "includes/header.php", "viewport", s=FULL))
+    check("it says there was nothing there", r2["action"], "nothing there")
+    check("rather than failing", r2["ok"], True)
+
+    print("\n...and the Fixer's undo line names a flag that exists:")
+    src = (Path(__file__).parent / "site_api.py").read_text(encoding="utf-8")
+    check("--remove-block is a real flag", '"--remove-block"' in src, True)
+    check("and it takes a page", 'a.remove_block' in src, True)
+
+
 def test_the_canonical_is_pointed_back_at_the_real_site():
     """
     All eight of his pages said their real home was a .ae domain with no DNS
@@ -734,6 +783,7 @@ def main():
               test_it_writes_only_to_pages_the_site_actually_serves,
               test_a_shared_header_gets_the_block_once,
               test_the_markup_can_be_taken_straight_back_off,
+              test_one_block_can_be_taken_out_without_touching_the_rest,
               test_the_canonical_is_pointed_back_at_the_real_site,
               test_the_header_is_found_even_when_no_page_names_it,
               test_the_address_survives_a_git_pull,

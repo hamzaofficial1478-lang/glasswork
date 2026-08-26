@@ -900,6 +900,14 @@ def main():
                     help="point every canonical tag at this site (Releaser)")
     ap.add_argument("--backups", action="store_true")
     ap.add_argument("--undo", metavar="PAGE", help="restore a page's last version")
+    # The undo for one block the agency put in, as opposed to --undo, which
+    # restores whatever the newest backup happens to be. The Fixer prints this
+    # command alongside every block it proposes, so it has to exist: an undo
+    # line that names a flag nobody implemented is worse than no undo line,
+    # because he only finds out at the moment he needs it.
+    ap.add_argument("--remove-block", metavar="ID", dest="remove_block",
+                    help="take one block the agency added back out of a page")
+    ap.add_argument("--page", default="", help="which page --remove-block acts on")
     ap.add_argument("--set-address", metavar="STREET",
                     help="save your workshop address, once, so every rebuild "
                          "of the markup carries it")
@@ -1034,6 +1042,12 @@ def main():
         return 0
     if a.undo:
         return _say(undo(page=a.undo, s=s))
+    if a.remove_block:
+        if not a.page:
+            print("  --  which page? Add --page <file>, e.g. "
+                  "--remove-block viewport --page includes/header.php")
+            return 1
+        return _say(remove_head_block(a.page, a.remove_block, agent=a.agent, s=s))
     if a.test_enquiry:
         return _say(test_enquiry_path(s))
 
