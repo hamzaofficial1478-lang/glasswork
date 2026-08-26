@@ -61,9 +61,34 @@ BUY_SIGNALS = ("price", "cost", "installation", "install", "repair", "supplier",
 # a UAE business — the Strategist drops these so the gap list stays local.
 NON_UAE = ("sri lanka", "india", "indian", "pakistan", "bangladesh", "nepal",
            "philippines", "kerala", "delhi", "mumbai", "karachi", "lahore",
+           # Islamabad reached his real gap list — "aluminium work in
+           # islamabad" — because the list had Karachi and Lahore and not the
+           # capital. Every city big enough for Google to suggest it.
+           "islamabad", "rawalpindi", "peshawar", "faisalabad", "multan",
+           "chennai", "bangalore", "hyderabad", "pune", "kolkata", "ahmedabad",
+           "colombo", "dhaka", "kathmandu", "manila", "cebu",
            "uk", "u.k", "usa", "u.s", "canada", "australia", "kenya", "nigeria",
            "south africa", "london", "qatar", "saudi", "oman", "bahrain",
-           "kuwait", "egypt", "riyadh", "doha", "singapore", "malaysia")
+           "kuwait", "egypt", "riyadh", "doha", "singapore", "malaysia",
+           "jeddah", "muscat", "manama", "kuwait city", "beirut", "amman")
+
+# SOMEBODY ELSE'S BUSINESS IS NOT A KEYWORD.
+#
+# His real gap list came back with "febtech glass works dubai reviews",
+# "febtech glass works dubai photos", "fairoozi aluminium & glass works abu
+# dhabi". Every one is a person looking for a named competitor by name. They
+# are not looking for a glazier; they are looking for THAT glazier. Ranking
+# for them is close to impossible and worthless if you manage it — nobody
+# searching "febtech reviews" is going to hire him instead.
+#
+# The tell is a navigational suffix on a branded phrase. That is a shape, not
+# a list of competitor names to maintain, which is what makes it hold up when
+# a new company opens next year.
+BRAND_LOOKUP = ("reviews", "review", "photos", "contact number", "careers",
+                "jobs", "vacancy", "salary", "owner", "address", "timings",
+                "opening hours", "location map", "whatsapp number")
+_BRAND_RE = re.compile(r"\b(" + "|".join(re.escape(b) for b in BRAND_LOOKUP)
+                       + r")\b")
 _NON_UAE_RE = re.compile(r"\b(" + "|".join(re.escape(g) for g in NON_UAE) + r")\b")
 
 
@@ -94,11 +119,60 @@ def _area_of(phrase):
     return ""
 
 
+def _rival_names():
+    """
+    Competitor names the agency already tracks, as lowercase words.
+
+    "fairoozi aluminium & glass works abu dhabi" survived the suffix rule
+    above, because it is a branded search with no navigational tell — just a
+    company name and a city. There is no shape to catch that on, and keeping a
+    hand-written list of rivals here would go stale the week it was written.
+
+    But the SEO sector already maintains a competitors table. Reading it means
+    the filter improves every time the Rival Watcher runs, and never says
+    anything this agency has not independently recorded.
+    """
+    try:
+        from coordination import board
+        import sqlite3
+        c = sqlite3.connect(board.DB)
+        try:
+            rows = c.execute("SELECT name FROM competitors").fetchall()
+        finally:
+            c.close()
+    except Exception:
+        return set()
+    out = set()
+    for (name,) in rows:
+        for w in re.split(r"[^a-z0-9]+", (name or "").lower()):
+            # Only distinctive words. 'glass', 'dubai' and 'works' appear in
+            # half the trade's names and would empty the gap list.
+            if len(w) >= 5 and w not in _TRADE_WORDS:
+                out.add(w)
+    return out
+
+
+# Words too common in this trade to identify anybody.
+_TRADE_WORDS = {"glass", "aluminium", "aluminum", "works", "dubai", "sharjah",
+                "technical", "services", "contracting", "trading", "company",
+                "industries", "emirates", "national", "general", "decor"}
+
+
 def _in_scope(phrase):
     p = phrase.lower()
+    # A search for a named rival is somebody looking for THAT firm, not for a
+    # glazier. Read from the competitors table so it stays current.
+    words = set(re.split(r"[^a-z0-9]+", p))
+    if words & _rival_names():
+        return False
     # drop other-country/other-city noise. Whole-word match only: a substring test
     # would wrongly kill 'sukkari'/'lukman' on "uk" (same trap as the red-line hook).
     if _NON_UAE_RE.search(p):
+        return False
+    # Somebody hunting a named competitor is not a customer we can win. See
+    # BRAND_LOOKUP: it is the navigational suffix that gives it away, not the
+    # company name, so this keeps working as new firms open.
+    if _BRAND_RE.search(p):
         return False
     return ("glass" in p or "aluminium" in p or "aluminum" in p
             or "pergola" in p or "door" in p or "window" in p or "partition" in p

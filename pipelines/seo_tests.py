@@ -138,6 +138,52 @@ def _scope_tests():
     check("a real UAE phrase with no such modifier survives",
           seo._in_scope("glass balustrade dubai marina"), True)
 
+    # HIS REAL GAP LIST. Forty phrases came back and these were in it.
+    print("\nOther Pakistani cities, not just the two that were listed:")
+    check("Islamabad — this one reached his live gap list",
+          seo._in_scope("aluminium work in islamabad"), False)
+    for city in ("rawalpindi", "faisalabad", "chennai", "colombo", "jeddah"):
+        check(f"{city} dropped", seo._in_scope(f"glass work {city}"), False)
+
+    print("\nSomebody hunting a named rival is not a customer:")
+    check("a reviews search is navigational",
+          seo._in_scope("febtech glass works dubai reviews"), False)
+    check("so is a photos search",
+          seo._in_scope("febtech glass works dubai photos"), False)
+    check("and a contact-number search",
+          seo._in_scope("al noor glass contact number"), False)
+    print("  ...but the suffix alone must not kill an honest phrase:")
+    check("'glass door photos' is somebody browsing designs",
+          seo._in_scope("frameless glass door dubai"), True)
+
+    print("\nA rival's NAME is learned from the competitors table, not a list:")
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+    from coordination import board
+    real_db = board.DB
+    db = Path(tempfile.mkdtemp()) / "a.db"
+    con = sqlite3.connect(db)
+    con.executescript(Path("coordination/schema.sql").read_text(encoding="utf-8"))
+    con.execute("INSERT INTO competitors(name,domain) VALUES"
+                "('Fairoozi Aluminium & Glass Works','fairoozi.ae')")
+    con.commit()
+    con.close()
+    board.DB = str(db)
+    try:
+        check("only the distinctive word is learned",
+              sorted(seo._rival_names()), ["fairoozi"])
+        check("so the rival's own phrase is dropped",
+              seo._in_scope("fairoozi aluminium & glass works abu dhabi"), False)
+        print("  ...and the trade's common words are NOT learned, or the whole")
+        print("     gap list would empty itself:")
+        for w in ("glass", "aluminium", "works", "dubai"):
+            check(f"'{w}' is not a rival name", w in seo._rival_names(), False)
+        check("an ordinary phrase still passes",
+              seo._in_scope("glass partition abu dhabi"), True)
+    finally:
+        board.DB = real_db
+
 
 def _critic_tests():
     print("Critic (grounding, dedup, scope):")

@@ -362,13 +362,101 @@ def as_text(r) -> str:
     return "\n".join(L)
 
 
+def preview(to_email="", lead=None, company=None) -> dict:
+    """
+    Write ONE mail so the owner can read it before a single real one goes out.
+
+    He asked for exactly this: "send me a mail from the sending agent... i want
+    to see how will it write the mail". Fair, and it should never have needed
+    asking — he was being invited to arm a system whose output he had never
+    read.
+
+    Two things this deliberately does NOT do. It does not count against the
+    daily cap or the arming gate, because it goes to him and nobody else; and
+    it refuses any address that is not one he typed on the command line, so
+    "preview" can never quietly become "send to a lead".
+    """
+    company = company or _company()
+    lead = lead or {
+        # A realistic lead, not a lorem-ipsum one: the mail is only judgeable
+        # if the reader can picture the business it is going to.
+        "company": "Al Noor Cafeteria", "email": to_email or "preview@example.ae",
+        "area": "Al Quoz", "segment": "food_stall", "service": "shopfront",
+        "website": "", "address": "Al Quoz Industrial Area 3, Dubai",
+    }
+    d = draft_for(lead, company)
+    if not d.get("ok"):
+        return {"ok": False, "error": d.get("error"),
+                "hint": ("the mail is written by your model, so this needs a "
+                         "working LLM key on the shelf. Check: python run.py "
+                         "--check")}
+    out = {"ok": True, "subject": d["subject"], "body": d["body"],
+           "service": d["service"], "audit": d.get("audit"),
+           "written_by": d.get("used"), "to": to_email or "(not sent)"}
+    if not to_email:
+        return out
+    # Sent as a plain mail, NOT through the outreach boundary: no cap, no
+    # arming, no outreach_log row. This is not outreach — it is him reading
+    # his own agency's work.
+    r = mail.send_plain(to_email, "[PREVIEW] " + d["subject"],
+                        _preview_wrapper(d, lead))
+    out["sent"] = bool(r.get("ok"))
+    out["send_error"] = r.get("error", "")
+    return out
+
+
+def _preview_wrapper(d, lead) -> str:
+    """The draft, with a short note saying what it is and who it was for."""
+    return (
+        "This is a PREVIEW of the mail your agency would send to a lead.\n"
+        "Nobody else received it. It is not counted against your daily cap.\n\n"
+        f"Written for : {lead['company']} — {lead.get('segment','')} in "
+        f"{lead.get('area','')}\n"
+        f"About       : {d['service']}\n"
+        f"Written by  : {d.get('used') or 'your model'}\n"
+        + "=" * 62 + "\n\n"
+        f"Subject: {d['subject']}\n\n{d['body']}\n\n"
+        + "=" * 62 + "\n"
+        "If the tone is wrong, tell the agency what to change and it will be\n"
+        "written differently — the wording is not fixed in the code.\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Write and send the outreach.")
     ap.add_argument("--dry-run", action="store_true", help="draft, send nothing")
     ap.add_argument("--queue", action="store_true", help="what is waiting on the owner")
+    ap.add_argument("--preview", action="store_true",
+                    help="write one mail and print it — sends nothing")
+    ap.add_argument("--to", default="",
+                    help="with --preview, also send that one mail to this "
+                         "address (yours) so you can see it in an inbox")
     ap.add_argument("--limit", type=int, default=BATCH)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+
+    if a.preview:
+        r = preview(a.to)
+        if a.json:
+            print(json.dumps(r, indent=2))
+            return 0 if r.get("ok") else 1
+        if not r.get("ok"):
+            print("  --  " + str(r.get("error")))
+            if r.get("hint"):
+                print("      " + r["hint"])
+            return 1
+        print(f"\nWritten by {r.get('written_by') or 'your model'}, "
+              f"about {r['service']}\n" + "=" * 62)
+        print(f"Subject: {r['subject']}\n")
+        print(r["body"])
+        print("=" * 62)
+        v = r.get("audit") or {}
+        print(f"Auditor: {'passed' if v.get('ok', True) else 'REFUSED — ' + str(v.get('why'))}")
+        if a.to:
+            print(f"\nSent to {a.to}: "
+                  + ("yes" if r.get("sent") else "no — " + str(r.get("send_error"))))
+        else:
+            print("\nNothing was sent. Add --to your@email to get it in an inbox.")
+        return 0
 
     if a.queue:
         rows = board.pending_outreach()

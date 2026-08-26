@@ -496,6 +496,63 @@ def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=N
         return None
 
 
+def send_plain(to: str, subject: str, body: str) -> dict:
+    """
+    One mail to an address the OWNER typed. Not outreach, and never treated as
+    outreach.
+
+    Kept apart from _smtp_send on purpose, and the difference is the point.
+    _smtp_send is the outreach boundary: it checks the daily cap, enforces the
+    sending domain, and writes an outreach_log row, because everything going
+    through it is a stranger being contacted.
+
+    A preview to his own inbox is none of those things. Counting it against
+    the cap would mean reading his own agency's work costs him a real lead;
+    logging it as outreach would put a row in the cabinet saying he was
+    contacted as a prospect. So this does neither — and in exchange it may
+    only send to an address passed in by hand, never to anything read out of
+    the leads table.
+    """
+    import os
+    import smtplib
+    from email.message import EmailMessage
+
+    to = (to or "").strip()
+    if "@" not in to or " " in to:
+        return {"ok": False, "error": f"not an email address: {to!r}"}
+    host = os.environ.get("SMTP_HOST", "").strip()
+    user = os.environ.get("SMTP_USER", "").strip()
+    pw = os.environ.get("SMTP_PASS", "")
+    if not host or not user:
+        return {"ok": False, "error": "SMTP not configured (set it on /setup "
+                                      "→ Delivery mail)"}
+    sender = (os.environ.get("SMTP_FROM") or user).strip()
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = to
+    msg["Subject"] = subject or "(no subject)"
+    msg.set_content(body or "")
+    try:
+        port = int((os.environ.get("SMTP_PORT") or "587").strip() or 587)
+    except ValueError:
+        port = 587
+    try:
+        srv = (smtplib.SMTP_SSL(host, port, timeout=30) if port == 465
+               else smtplib.SMTP(host, port, timeout=30))
+        with srv:
+            if port != 465:
+                try:
+                    srv.starttls()
+                except Exception:
+                    pass
+            if pw:
+                srv.login(user, pw)
+            srv.send_message(msg)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": True, "to": to, "from": sender}
+
+
 def _smtp_send(lead: dict, draft: str) -> dict:
     """
     Deliver via SMTP using the credentials saved on /setup (env: SMTP_*). Kept as
