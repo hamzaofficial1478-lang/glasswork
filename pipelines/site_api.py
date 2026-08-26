@@ -216,6 +216,87 @@ def _may_write(agent) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# EVERY WRITE IS RECORDED, AT THE MOMENT IT HAPPENS
+# ---------------------------------------------------------------------------
+#
+# "there should be a section in program where i can see whats changed in
+#  website... that's totally blind."
+#
+# He was, and the reason is here: three functions below are the ONLY way
+# anything in this agency reaches his files, and none of them wrote anything
+# down. A change left a .bak file on the server with a timestamp in the name
+# and nothing else — no record of what it was, who did it, or how to reverse it.
+#
+# Recording is done at the choke point rather than in each of the callers.
+# fix_address, fix_canonical, apply_schema and undo_schema all funnel through
+# put_page or put_head_block, so a new caller added next year is logged without
+# anybody remembering to log it. That is the whole reason to have a choke point.
+#
+# A REFUSED write is recorded too. "The Fixer tried to change the header and was
+# not allowed" is exactly the sort of thing that is invisible until you go
+# looking for why nothing happened.
+
+def _log_write(action, page, agent, r, html=None, block_id="", summary="",
+               undo_cmd=""):
+    """Write one line of the change log, and refresh what we think the page is."""
+    try:
+        from coordination import changelog
+    except Exception:                                        # pragma: no cover
+        return r
+    ok = bool(r.get("ok"))
+    unchanged = (r.get("action") == "unchanged" or r.get("changed") is False)
+    if ok and unchanged:
+        # The nightly run putting back a block that is already there is not a
+        # change, and logging it every night would bury the real ones.
+        return r
+    changelog.record(
+        action, page=page, agent=agent, block_id=block_id,
+        summary=summary or _plain(action, page, block_id, ok, r),
+        bytes_after=(len(html) if html is not None else r.get("bytes")),
+        backup=r.get("backup") or "", undo_cmd=undo_cmd if ok else "",
+        ok=ok, error="" if ok else str(r.get("error") or "")[:300])
+    if ok and html is not None:
+        changelog.note_page(page, html=html)
+    elif ok:
+        # We changed it but do not hold the result. Read it back rather than
+        # storing a digest of something we are guessing at — otherwise the next
+        # sweep reports our own edit as somebody tampering with the site.
+        try:
+            got = read_page(page)
+            if got.get("ok"):
+                changelog.note_page(page, html=got.get("html") or "")
+        except Exception:
+            pass
+    return r
+
+
+def _plain(action, page, block_id, ok, r):
+    """
+    One line, in his language, not the API's.
+
+    A FAILED WRITE MUST SAY WHY IT FAILED. The first version said "tried to
+    change index.php and was not allowed" for every unsuccessful write, which
+    was true for a refused agent and a lie for everything else — the first real
+    run of this logged a plain 400 from the server ("that page has no </head>")
+    as a permissions problem, which would have sent him looking in exactly the
+    wrong place.
+    """
+    if not ok:
+        if r.get("queued"):
+            return (f"wanted to change {page} and is not allowed to — "
+                    "it is in your approval queue instead")
+        why = str(r.get("error") or "no reason given")
+        return f"tried to change {page} and could not: {why}"
+    if action == "head_block":
+        return f"added the {block_id} block to the top of {page}"
+    if action == "remove_block":
+        return f"took the {block_id} block back out of {page}"
+    if action == "restore":
+        return f"put {page} back to how it was before"
+    return f"rewrote {page}"
+
+
 def put_head_block(page, block_id, html, agent=AGENT, s=None) -> dict:
     """
     Put one marked block into a page's <head>, replacing any earlier copy.
@@ -228,18 +309,35 @@ def put_head_block(page, block_id, html, agent=AGENT, s=None) -> dict:
         cid = board.queue_site_change(agent, "head_block",
                                       {"page": page, "id": block_id,
                                        "bytes": len(html)})
-        return {"ok": False, "queued": cid, "error": refused}
-    return call("/head", "POST",
-                {"page": page, "id": block_id, "html": html}, s=s)
+        return _log_write("head_block", page, agent,
+                          {"ok": False, "queued": cid, "error": refused},
+                          block_id=block_id)
+    r = call("/head", "POST",
+             {"page": page, "id": block_id, "html": html}, s=s)
+    return _log_write("head_block", page, agent, r, block_id=block_id,
+                      undo_cmd=(f"python -m pipelines.site_api "
+                                f"--remove-block {block_id} --page {page}"))
 
 
-def put_page(page, html, agent=AGENT, s=None) -> dict:
+def put_page(page, html, agent=AGENT, s=None, _action="page", _block="") -> dict:
+    """
+    Write a whole page.
+
+    _action and _block are for the log only, so a caller that knows WHY it is
+    rewriting the file — taking one block out, say — can have the change log
+    read "took the viewport block back out of header.php" instead of the
+    literally-true but useless "rewrote header.php".
+    """
     refused = _may_write(agent)
     if refused:
         cid = board.queue_site_change(agent, "page",
                                       {"page": page, "bytes": len(html)})
-        return {"ok": False, "queued": cid, "error": refused}
-    return call("/pages", "POST", {"page": page, "html": html}, s=s)
+        return _log_write(_action, page, agent,
+                          {"ok": False, "queued": cid, "error": refused},
+                          block_id=_block)
+    r = call("/pages", "POST", {"page": page, "html": html}, s=s)
+    return _log_write(_action, page, agent, r, html=html, block_id=_block,
+                      undo_cmd=f"python -m pipelines.site_api --undo {page}")
 
 
 def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
@@ -260,7 +358,8 @@ def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
     pat = re.compile(re.escape(open_) + ".*?" + re.escape(close) + r"\s*", re.S)
     if not pat.search(src):
         return {"ok": True, "page": page, "action": "nothing there"}
-    return put_page(page, pat.sub("", src), agent=agent, s=s)
+    return put_page(page, pat.sub("", src), agent=agent, s=s,
+                    _action="remove_block", _block=block_id)
 
 
 # The exact strings the generator leaves for him to fill in. Kept here so the
@@ -518,7 +617,14 @@ def undo(page="", backup="", agent=AGENT, s=None) -> dict:
         body["page"] = page
     if not body:
         return {"ok": False, "error": "which page, or which backup?"}
-    return call("/rollback", "POST", body, s=s)
+    r = call("/rollback", "POST", body, s=s)
+    # Recorded like any other change, because it IS one. A log that shows the
+    # edit and not the reversal is a log that tells him the wrong thing is
+    # still on his site.
+    return _log_write("restore", page or r.get("page") or "", agent, r,
+                      summary=(f"put {page or r.get('page') or 'a page'} back "
+                               "to how it was before"
+                               + (f" (from {backup})" if backup else "")))
 
 
 def test_enquiry_path(s=None) -> dict:

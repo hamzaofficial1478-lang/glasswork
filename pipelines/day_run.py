@@ -133,6 +133,11 @@ STEPS = [
     # filed sat open for ever and the board looked calm rather than stuck.
     ("IT patches what it found", "pipelines.it_fix", "IT", "it"),
     ("IT reindexes site search", "pipelines.site_search", "IT", "it"),
+    # LAST in the IT lane, after anything the agency itself might have changed,
+    # so its own edits are already in the log and this reports only what moved
+    # without us. That is the half he asked for: "there should be a section in
+    # program where i can see whats changed in website".
+    ("IT looks for changes to the site", "pipelines.site_watch", "IT", "it"),
 
     ("Leads maps its sources", "pipelines.leads_sources", "Leads", "leads"),
     ("Leads collects", "pipelines.leads_hunt", "Leads", "leads"),

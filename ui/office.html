@@ -276,6 +276,10 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   font-size:11.5px;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
 .actbtn:hover:not(:disabled){border-color:var(--glass);color:var(--glass)}
 .actbtn:disabled{opacity:.4;cursor:default}
+/* Which filter is showing. Without it the three buttons on the website-changes
+   panel look identical whichever list is on screen, and 'Everything' vs 'Not
+   the agency' becomes guesswork. */
+.actbtn.on{border-color:var(--glass);color:var(--glass)}
 .pgroup{padding:16px 20px;border-bottom:1px solid var(--line)}.pgroup .gh{margin-bottom:12px}
 .conn{display:flex;align-items:center;gap:12px;padding:10px 0}
 .conn .ic{width:32px;height:32px;border-radius:8px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none}
@@ -425,6 +429,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   <button class="htab on">Office</button>
   <button class="htab" onclick="openActivity()">Activity <span id="actBadge"></span></button>
   <button class="htab" onclick="openComms()">Sector traffic <span id="commBadge"></span></button>
+  <button class="htab" onclick="openChanges()">Website changes</button>
   <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
   <button class="htab" onclick="openPanel('connPanel')">Connections</button>
   <div class="spacer"></div>
@@ -514,6 +519,29 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   <h2><span>Sector traffic <small id="commHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
       <button class="x" onclick="closeAll()">×</button></h2>
   <div class="pgroup" id="commBody"></div>
+</div>
+
+<!-- WHAT CHANGED ON THE WEBSITE.
+     "there should be a section in program where i can see whats changed in
+      website... that's totally blind."
+
+     He was, and it was worse than he thought: nothing anywhere recorded a
+     change to his site. Two kinds of line show here. What the agency did —
+     written down at the moment of the write, with the command that reverses
+     it. And what somebody else did — found by fingerprinting every page, so
+     it catches him editing in the file manager, a designer, a plugin, and a
+     hosting company restoring last week by mistake. The second kind is the
+     half he actually asked for. -->
+<div class="panel wide full" id="chgPanel">
+  <h2><span>Website changes <small id="chgHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" id="chgAllBtn" onclick="openChanges('all')">Everything</button>
+        <button class="actbtn" id="chgOutBtn" onclick="openChanges('outside')">Not the agency</button>
+        <!-- A GET per page, so it is a button and never a poll. -->
+        <button class="actbtn" id="chgLook" onclick="lookNow()">Check the site now</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="chgBody"></div>
 </div>
 
 <!-- THE RUN BUTTON. Three beats: check everything, take the owner's orders,
@@ -1443,6 +1471,93 @@ async function openLeads(scope){
         <td style="color:var(--muted)">${esc(l.found)}</td>
       </tr>`).join('')
     + `</tbody></table>`;
+}
+
+/* ---- WHAT CHANGED ON THE WEBSITE -------------------------------------------
+   "there should be a section in program where i can see whats changed in
+    website... that's totally blind."
+
+   Two kinds of line, drawn differently on purpose. A change the agency made
+   carries the command that reverses it. A change somebody ELSE made is the one
+   worth his attention — that is his own edit, or a designer's, or a hosting
+   company overwriting the fix the agency put in on Tuesday — so it is drawn in
+   amber and it leads the eye.
+
+   Reading the log is a database read and happens on open. LOOKING at the site
+   is a GET per page, so it is a button and the daily run, never a poll. ----- */
+let CHG = {view:'recent', data:null, busy:false, said:''};
+
+async function openChanges(view){
+  CHG.view = view || 'recent';
+  openPanel('chgPanel');
+  renderChanges();
+  const qs = CHG.view==='all' ? '?all=1' : CHG.view==='outside' ? '?outside=1' : '';
+  try{
+    const r = await fetch('/api/site/changes'+qs,{cache:'no-store'});
+    CHG.data = await r.json();
+  }catch(e){ CHG.data = {ok:false, error:String(e)}; }
+  renderChanges();
+}
+
+async function lookNow(){
+  CHG.busy = true; CHG.said=''; renderChanges();
+  let j = null;
+  try{
+    const r = await fetch('/api/site/look',{method:'POST'});
+    j = await r.json();
+  }catch(e){ j = {ok:false, why:String(e)}; }
+  CHG.busy = false;
+  CHG.said = (j && (j.head || j.why || j.error)) || 'No answer from the server.';
+  await openChanges(CHG.view);
+}
+
+function renderChanges(){
+  const B = $('#chgBody'), d = CHG.data;
+  $('#chgAllBtn').classList.toggle('on', CHG.view==='all');
+  $('#chgOutBtn').classList.toggle('on', CHG.view==='outside');
+  $('#chgLook').textContent = CHG.busy ? 'Looking…' : 'Check the site now';
+
+  if(!d){ B.innerHTML = `<p style="color:var(--muted);font-size:12.5px">Reading the log…</p>`; return; }
+  $('#chgHead').textContent = d.ok && d.head ? '· '+d.head : '';
+
+  let H = '';
+  if(CHG.said) H += `<div class="warnbox" style="margin-bottom:14px">${esc(CHG.said)}</div>`;
+  if(!d.ok){
+    B.innerHTML = H + `<div class="warnbox"><b>Could not read the log.</b><br>${esc(d.error||'no detail')}</div>`;
+    return;
+  }
+  const rows = d.changes || [];
+  if(!rows.length){
+    B.innerHTML = H + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+      + esc(d.head || '') + `<br><br>`
+      + `Every page is fingerprinted, so from here on anything that moves shows up — `
+      + `whether the agency did it, you did it in the file manager, or your hosting `
+      + `company did it without telling you.</p>`;
+    return;
+  }
+  H += rows.map(c=>{
+    const theirs = c.source !== 'agency';
+    const edge = !c.ok ? 'var(--danger)' : theirs ? 'var(--amber)' : 'var(--ok)';
+    const tag  = !c.ok ? 'refused' : theirs ? 'not the agency' : 'the agency';
+    return `<div style="border-left:2px solid ${edge};padding:2px 0 10px 12px;margin-bottom:14px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+        <b style="font-size:13px;font-weight:600">${esc(c.page||'the site')}</b>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;
+              text-transform:uppercase;color:${edge}">${esc(tag)}</span>
+        <span style="font-size:10.5px;color:var(--faint)">${esc(c.when||'')}</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-top:4px">
+        ${esc(c.summary || c.action || '')}</div>`
+      + (c.error?`<div style="font-size:11.5px;color:var(--danger);margin-top:4px">${esc(c.error)}</div>`:'')
+      + (c.undo_cmd?`<div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+              color:var(--faint);margin-top:6px;overflow-x:auto;white-space:nowrap">
+              undo &nbsp;${esc(c.undo_cmd)}</div>`:'')
+      + `</div>`;
+  }).join('');
+  if(CHG.view!=='all' && d.total > rows.length){
+    H += `<button class="pbtn" onclick="openChanges('all')">Show all ${d.total} &rarr;</button>`;
+  }
+  B.innerHTML = H;
 }
 
 /* ---- READING THE TRAFFIC ---------------------------------------------------

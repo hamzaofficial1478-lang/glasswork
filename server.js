@@ -1009,6 +1009,25 @@ app.post("/api/run/start", (req, res) => {
     why: "Running. Watch the office floor — the lamps come on as each sector picks up." });
 });
 
+// ---- WHAT CHANGED ON THE WEBSITE --------------------------------------------
+// "there should be a section in program where i can see whats changed in
+//  website... that's totally blind."
+//
+// Two endpoints because they cost very different amounts. Reading the log is a
+// database read and the panel does it on open. Looking at the site is a GET per
+// page, so it happens on the daily run and when he presses the button — never
+// on a poll.
+app.get("/api/site/changes", (q, res) => {
+  const args = ["--json"];
+  if (q.query.all) args.push("--all");
+  if (q.query.outside) args.push("--outside");
+  if (q.query.page) args.push("--page", String(q.query.page).slice(0, 200));
+  res.json(pyModule("coordination.changelog", args, 30000));
+});
+
+app.post("/api/site/look", (_q, res) =>
+  res.json(pyModule("pipelines.site_watch", ["--json"], 180000)));
+
 // ---- the owner's yes or no on one amber item --------------------------------
 // The Control Room's Approve button used to change an opacity and say "sent to
 // the agent". This is where it now actually goes.

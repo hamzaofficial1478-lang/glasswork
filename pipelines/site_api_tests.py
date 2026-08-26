@@ -773,6 +773,23 @@ def test_a_placeholder_that_reached_the_live_site_is_hunted_down():
 
 
 def main():
+    # EVERY test runs against a throwaway cabinet, not only the ones that
+    # remembered to ask for one.
+    #
+    # _Cabinet was used per-test, and the tests that did not use it were
+    # harmless for as long as site_api wrote nothing to the database. It writes
+    # a change-log line on every write now, so the moment that shipped, running
+    # this suite started dropping rows about a fake website into the owner's
+    # real filing cabinet — 'rewrote includes/header.php', backup 'b'. Caught
+    # by reading his change log after a test run and finding a test in it.
+    #
+    # Wrapping the whole suite means a test added next year cannot make the
+    # same mistake by forgetting.
+    with _Cabinet():
+        _run_all()
+
+
+def _run_all():
     for t in (test_the_two_setup_boxes_finally_lead_somewhere,
               test_only_the_releaser_may_change_the_site,
               test_running_it_every_night_leaves_one_copy,

@@ -364,6 +364,7 @@ def tests():
             "coordination.switch_tests", "coordination.gate_tests",
             "coordination.ask_tests", "coordination.triage_tests",
             "coordination.dispatch_tests",
+            "coordination.changelog_tests",
             "providers.tests", "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",
             "pipelines.leads_tests", "pipelines.harvest_tests",

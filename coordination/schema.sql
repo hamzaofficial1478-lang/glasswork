@@ -219,6 +219,64 @@ CREATE TABLE IF NOT EXISTS site_issues (
   status TEXT DEFAULT 'open',          -- open | fixing | in_review | deployed | closed
   found_by TEXT, found_at INTEGER
 );
+-- ---- WHAT ACTUALLY CHANGED ON THE WEBSITE ----------------------------------
+-- "there should be a section in program where i can see whats changed in
+--  website... that's totally blind."
+--
+-- He was right and it was worse than he thought. Nothing anywhere recorded a
+-- change to his site. site_queue held what an agent PROPOSED; site_issues held
+-- what was WRONG; neither said a word about what had actually been written,
+-- when, by whom, or how to put it back. The only trace was a .bak file on his
+-- server with a timestamp in its name.
+--
+-- TWO KINDS OF ENTRY, AND THE SECOND ONE IS THE USEFUL ONE.
+--
+--   'agency'   we wrote this. Recorded at the moment of the write, so it is
+--              exact: the file, the block, the sizes either side, the backup
+--              the server made, and the command that undoes it.
+--   'outside'  the file changed and it was not us. Found by fingerprinting
+--              every page and noticing the digest moved — so it catches him
+--              editing in the file manager, his web designer, a plugin, and a
+--              hosting company restoring last week by mistake. He asked to see
+--              what changed on his website, not what the agency did to it.
+--
+-- Append-only, like everything else on the board. A row is never rewritten;
+-- undoing a change adds a row saying so.
+CREATE TABLE IF NOT EXISTS site_changes (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  at           INTEGER,
+  source       TEXT,                 -- agency | outside
+  agent        TEXT,                 -- who, when it was us
+  action       TEXT,                 -- head_block | page | remove_block | restore
+                                     -- | address | canonical | schema
+                                     -- | edited | added | gone   (outside)
+  page         TEXT,
+  block_id     TEXT,
+  summary      TEXT,                 -- one plain line, in his language
+  bytes_before INTEGER,
+  bytes_after  INTEGER,
+  backup       TEXT,                 -- the server's own copy of what was there
+  undo_cmd     TEXT,                 -- the exact command, or '' if there isn't one
+  issue_id     INTEGER,              -- the ticket it came from, when there is one
+  ok           INTEGER DEFAULT 1,    -- a refused write is still worth recording
+  error        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_site_changes_at ON site_changes(at);
+
+-- The last thing we saw each page look like. One row per page, overwritten —
+-- this is a comparison point, not a history, and the history is site_changes.
+-- Keeping snapshots instead would grow by nine rows a day for ever to answer a
+-- question that only ever needs 'is it different from last time'.
+CREATE TABLE IF NOT EXISTS site_fingerprints (
+  page    TEXT PRIMARY KEY,
+  bytes   INTEGER,
+  changed TEXT,                      -- the server's own mtime, as it reports it
+  digest  TEXT,                      -- sha1 of the content; mtime alone lies,
+                                     -- because a touch moves it and a rewrite
+                                     -- with the same length does not move bytes
+  seen_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS lighthouse (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   url TEXT, perf INTEGER, seo INTEGER, a11y INTEGER, best INTEGER, at INTEGER
