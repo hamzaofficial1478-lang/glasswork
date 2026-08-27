@@ -177,6 +177,145 @@ def check_outreach(draft, lead=None, company=None, service_label="") -> dict:
                 "why": "the Auditor errored, so nothing goes out"}
 
 
+# ---------------------------------------------------------------------------
+# THE SAME GATE, FOR A PAGE
+# ---------------------------------------------------------------------------
+#
+# The docstring above says a bad page can be edited and a bad email has been
+# read, and that was the right priority — until Content could actually publish.
+# A page on his own domain is his shopfront, it is what Google indexes, and it
+# is the thing a customer decides from. It gets a gate too.
+#
+# The failure modes are not the same as an email's, so the checks are not
+# either. What actually goes wrong with a model-written service page:
+#
+#   an invented credential            "ISO 9001 certified", "500+ projects
+#                                     delivered". He has ten years in the trade
+#                                     and no certificate to point at, and a
+#                                     claim like that on his own site is the
+#                                     kind of thing a customer checks
+#   a price                           handbook red line, same as an email
+#   no way to enquire                 a service page with no phone, no WhatsApp
+#                                     and no link to the contact page is a
+#                                     leaflet, not a page that wins a job
+#   script tags                       an agent writing executable code into his
+#                                     website is not a content decision, and
+#                                     nothing here has any business doing it
+#   a stock-photo promise             the brief says real photographs of real
+#                                     finished jobs. A page that ships with an
+#                                     <img> pointing at somewhere else is worse
+#                                     than a page with a gap where one goes
+#   thin                              350 words of padding around one keyword
+#                                     is what everyone else's page already is
+
+MIN_PAGE_WORDS = 220
+MAX_PAGE_WORDS = 1400
+
+# Anything that executes, embeds, or reaches off the page for code. A content
+# agent writes prose and markup; it does not write behaviour.
+CODE_IN_A_PAGE = (
+    r"<script\b", r"<iframe\b", r"<object\b", r"<embed\b", r"<form\b",
+    r"\bon(?:click|load|error|mouseover)\s*=", r"javascript\s*:",
+    r"<link\b[^>]*stylesheet", r"<style\b",
+)
+
+# A way for a reader to get in touch, which is the entire point of the page.
+ENQUIRY = (
+    r"\bwhatsapp\b", r"wa\.me/", r"\btel:", r"\bhref\s*=\s*[\"']?/?contact",
+    r"(?:\+?971|0)\s?\d[\d\s\-()]{6,13}\d",
+    r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
+)
+
+# An image the agency has gone and found somewhere. His own finished work is
+# the only photography that belongs on these pages — see the brief's do_not.
+FOREIGN_IMAGE = (
+    r"<img\b[^>]*src\s*=\s*[\"']https?://(?!(?:www\.)?%s)",
+)
+
+
+def _page_text(html):
+    """The words a visitor reads, markup and code out of the way."""
+    no_code = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>", " ", html or "",
+                     flags=re.S | re.I)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", no_code)).strip()
+
+
+def check_page(html, brief=None, site_host="") -> dict:
+    """
+    Is this page fit to go on his website?
+
+    Same contract as check_outreach — {pass, blocking[], warnings[], ...} — and
+    the same two rules behind it: every check is a fact about the text rather
+    than a judgement, and a check that errors is a FAIL. An auditor that waves
+    things through when it breaks is worse than no auditor.
+    """
+    brief = brief or {}
+    try:
+        text = _page_text(html)
+        words = len(re.findall(r"\b[\w'’-]+\b", text))
+        blocking, warnings = [], []
+
+        for h in _hits(html, PLACEHOLDER):
+            blocking.append(f"an unfilled placeholder is still in it: {h!r}")
+        for h in _hits(text, CONCESSION):
+            blocking.append(f"it names a price or a concession ({h!r}) — that is "
+                            "the owner's call, not an agent's")
+        for h in _hits(text, UNBACKED):
+            blocking.append(f"it claims something nobody can stand behind: {h!r}. "
+                            "Ten years of real finished jobs is the edge here; an "
+                            "invented credential is how you lose it")
+        for h in _hits(html, CODE_IN_A_PAGE):
+            blocking.append(f"it contains code, not content ({h!r}). A writing desk "
+                            "does not put behaviour on his website")
+        if not re.search(r"<h1\b", html or "", re.I):
+            blocking.append("no <h1> — the page never says what it is")
+        if not _hits(html, ENQUIRY):
+            blocking.append("nothing on it to enquire with. No number, no WhatsApp, "
+                            "no link to the contact page — that is a leaflet")
+        if words < MIN_PAGE_WORDS:
+            blocking.append(f"{words} words. Under {MIN_PAGE_WORDS} it is a stub, "
+                            "and a stub on his own domain competes with his real pages")
+
+        host = re.escape(site_host) if site_host else r"$^"
+        for p in FOREIGN_IMAGE:
+            m = re.search(p % host, html or "", re.I)
+            if m:
+                blocking.append("it links a photograph from somebody else's site. "
+                                "Only his own finished work goes on these pages")
+                break
+
+        if words > MAX_PAGE_WORDS:
+            warnings.append(f"{words} words — long for a service page; the ones "
+                            "that win jobs are short and specific")
+        heads = len(re.findall(r"<h[23]\b", html or "", re.I))
+        if heads < 2:
+            warnings.append(f"{heads} subheading(s) — a page a person scans needs "
+                            "more than that")
+        primary = str(brief.get("primary_keyword") or "").strip().lower()
+        if primary and primary not in text.lower():
+            warnings.append(f"it never says {primary!r}, which is the phrase this "
+                            "page was briefed for")
+        area = str(brief.get("area") or "").strip()
+        if area and area.lower() not in ("uae-wide", "") and area.lower() not in text.lower():
+            warnings.append(f"it never mentions {area}, and the page is meant to be "
+                            "the one that ranks there")
+        if not re.search(r"<img\b", html or "", re.I):
+            warnings.append("no photographs. Real finished work is the whole edge — "
+                            "this page needs his own pictures before it earns anything")
+
+        ok = not blocking
+        return {"pass": ok, "blocking": blocking, "warnings": warnings,
+                "words": words, "headings": heads,
+                "why": ("fit to publish" if ok else
+                        f"{len(blocking)} thing(s) stop it: " + blocking[0])}
+    except Exception as e:
+        return {"pass": False,
+                "blocking": [f"the Auditor could not read this page ({e}) — "
+                             "refusing rather than guessing"],
+                "warnings": [], "words": 0, "headings": 0,
+                "why": "the Auditor errored, so nothing is published"}
+
+
 def as_text(v) -> str:
     L = [("PASS — " if v["pass"] else "HELD — ") + v["why"]]
     for b in v["blocking"]:

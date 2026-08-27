@@ -206,14 +206,19 @@ def test_an_unanswered_request_says_which_command_answers_it():
               "To answer it now, run:" in found[0]["detail"], True)
 
     print("\n...and the command comes from the daily run, not a second list:")
-    check("Content", F.how_to_run("Content"),
-          "python -m pipelines.content_briefs")
+    # Content is two steps now — content_briefs turns keywords into briefs and
+    # content_write turns briefs into pages. Both belong in the answer: telling
+    # him to run only the first would leave the pages unwritten.
+    check("Content", F.how_to_run("Content").startswith(
+        "python -m pipelines.content_briefs"), True)
+    check("and it names the writer too",
+          "pipelines.content_write" in F.how_to_run("Content"), True)
     check("Security", F.how_to_run("Security"),
           "python -m pipelines.security_screen")
     check("a sector with several steps names them in order",
           F.how_to_run("SEO").startswith("python -m pipelines.seo_intel"), True)
     check("case does not matter", F.how_to_run("content"),
-          "python -m pipelines.content_briefs")
+          F.how_to_run("Content"))
     print("  ...and a sector nobody runs says nothing rather than guessing:")
     check("no invented command", F.how_to_run("Accounts"), "")
     check("nor for an empty one", F.how_to_run(""), "")

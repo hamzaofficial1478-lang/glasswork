@@ -54,6 +54,7 @@ and leaves it alone rather than doing something nearby that looks similar.
 """
 import argparse
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -162,6 +163,24 @@ def plan_of(row) -> dict:
 
     issue = d.get("issue_id")
     change = d.get("change") or {}
+
+    # A WHOLE NEW PAGE, written by Content and passed by the Auditor.
+    #
+    # The last link in the publishing chain, and it was the missing one in the
+    # same way the whole of this file was: Content could brief a page, nothing
+    # could write one, and nothing could have put one on the site if it had.
+    #
+    # Deliberately its own shape rather than reusing 'page'. Writing a file
+    # that does not exist yet is a different act from editing one that does —
+    # there is no backup to fall back to, nothing links to it yet, and the
+    # confirmation has to be "the page is now there" rather than "the change
+    # is in it". Reading the row as a plain page edit would have been quietly
+    # wrong on all three.
+    if isinstance(change, dict) and change.get("html") and change.get("page") \
+            and str(row.get("kind") or "") == "new_page":
+        return {"do": "new_page", "page": change["page"], "html": change["html"],
+                "content_id": change.get("content_id"),
+                "issue_id": issue, "why": d.get("why") or "", "row": row}
 
     if isinstance(change, dict) and change.get("html") and change.get("page"):
         return {"do": "head_block", "page": change["page"],
@@ -318,7 +337,8 @@ def _work(agent, limit, dry_run, skip_tests):
                 }
 
     plans = [plan_of(r) for r in waiting]
-    doable = [p for p in plans if p["do"] in ("head_block", "call", "replace")]
+    doable = [p for p in plans
+              if p["do"] in ("head_block", "call", "replace", "new_page")]
     noted = [p for p in plans if p["do"] == "noted"]
     refused = [p for p in plans if p["do"] == "refuse"]
 
@@ -438,6 +458,38 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 
+        if plan["do"] == "new_page":
+            # A PAGE THAT DOES NOT EXIST YET HAS NOTHING TO ROLL BACK TO, so
+            # the checks run in the other order: make sure we are not about to
+            # write over something first, then write, then read it back.
+            already = site_api.read_page(plan["page"])
+            if already.get("ok") and (already.get("html") or "").strip():
+                return _could_not(
+                    plan, f"{plan['page']} already exists on your website. A new "
+                          "page must not quietly overwrite one you have — if it "
+                          "is meant to replace it, that is a different decision.")
+            r = site_api.put_page(plan["page"], plan["html"], agent=agent,
+                                  _action="new_page")
+            if not r.get("ok"):
+                return _could_not(plan, str(r.get("error") or "the write failed"))
+            # Confirm on something specific to THIS page rather than on the
+            # whole body: a needle out of the middle of it, so a server that
+            # wrote an empty file or a cached copy of something else fails the
+            # check instead of passing it.
+            if not confirm(plan["page"], _needle(plan["html"])):
+                site_api.undo(page=plan["page"], agent=agent)
+                return _could_not(
+                    plan,
+                    "the website accepted the page and then did not serve it "
+                    "back, so it was undone. Nothing has been left half-done.")
+            _mark_published(plan.get("content_id"), plan["page"])
+            _close_ticket(plan.get("issue_id"))
+            board.mark_site_change(
+                row["id"], "applied",
+                f"{plan['page']} is now on your website"
+                + (" (tests were skipped at your request)" if skipped_tests else ""))
+            return True
+
         if plan["do"] == "replace":
             r = site_api.replace_text(plan["find"], plan["to"], agent=agent)
             if not r.get("ok"):
@@ -475,6 +527,36 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
         return _could_not(plan, f"it errored: {e}")
     finally:
         board.release_lock(resource, agent)
+
+
+def _needle(html, want=60) -> str:
+    """
+    A distinctive line out of the middle of a page, to read back afterwards.
+
+    Confirming on the whole body is fragile — a server that re-indents, adds a
+    trailing newline or gzips differently would report a good write as failed.
+    Confirming on nothing at all is worse. One real sentence is the middle
+    ground: specific enough that a cached copy of a different page fails it,
+    short enough to survive the server touching the whitespace around it.
+    """
+    text = re.sub(r"<[^>]+>", "\n", html or "")
+    for line in text.splitlines():
+        line = line.strip()
+        if len(line) >= want and "agency:" not in line:
+            return line[:want]
+    return (html or "").strip()[:want]
+
+
+def _mark_published(content_id, page):
+    """Close the loop back to Content, so the brief stops looking unfinished."""
+    if not content_id:
+        return
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE content_queue SET status='published' WHERE id=?",
+                      (int(content_id),))
+    except Exception:
+        pass
 
 
 def _close_ticket(issue_id):

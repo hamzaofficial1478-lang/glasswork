@@ -1930,6 +1930,12 @@ def request_verification(from_sector, to_sector, subject, body, blocking=True, t
 # SITE QUEUE — read-only mode: record a change instead of making it
 # ----------------------------------------------------------------------------
 
+# How big one queued change may be. A service page is 5-20KB of markup; this
+# is generous enough for any real page and small enough that a runaway caller
+# cannot fill his cabinet with one row.
+MAX_CHANGE_BYTES = 200_000
+
+
 def queue_site_change(agent, kind, detail):
     """
     In read-only mode a site-touching agent records what it WOULD change here,
@@ -1947,7 +1953,23 @@ def queue_site_change(agent, kind, detail):
     decided it — approved or refused — a later identical change is a genuinely
     new proposal and does queue.
     """
-    body = json.dumps(detail)[:2000]
+    body = json.dumps(detail)
+    if len(body) > MAX_CHANGE_BYTES:
+        # REFUSE, DO NOT TRUNCATE. This used to be `json.dumps(detail)[:2000]`,
+        # which was fine for as long as every queued change was a sentence and
+        # a page name. The moment Content could queue a whole page it became a
+        # trap: 2000 characters cuts a page off mid-tag, the cut leaves invalid
+        # JSON, plan_of cannot parse it and refuses — so the page would simply
+        # never publish and the reason would read as the proposal being
+        # malformed rather than as this line having eaten it.
+        #
+        # An oversized payload is a bug in the caller. Saying so is recoverable;
+        # writing three quarters of a page to his website is not.
+        raise ValueError(
+            f"that change is {len(body)} characters and the queue holds "
+            f"{MAX_CHANGE_BYTES}. Nothing was queued. A change this size is "
+            "not one decision — split it, or write it to a file and queue the "
+            "path.")
     with _conn() as c:
         dup = c.execute(
             "SELECT id FROM site_queue WHERE agent=? AND kind=? AND detail=?"

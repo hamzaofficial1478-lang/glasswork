@@ -167,6 +167,12 @@ STEPS = [
     # ---- two that genuinely wait on one of the three above ----------------
     ("Security screens what came in", "pipelines.security_screen", "Security", "security"),
     ("Content briefs the pages", "pipelines.content_briefs", "Content", "content"),
+    # AFTER the briefs, in the same lane, because it writes what they
+    # briefed. It was the missing link the owner asked about: "how the
+    # articles will get published?" — they were briefed and nothing on this
+    # machine ever turned a brief into words. This writes them; the Auditor
+    # checks them; he approves them; the Releaser puts them up.
+    ("Content writes the pages", "pipelines.content_write", "Content", "content"),
 
     # ---- 'close': after everything, because it is about everything --------
     # The Overseer AGAIN. The first pass catches what broke yesterday; this one

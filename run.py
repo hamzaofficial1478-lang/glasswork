@@ -371,6 +371,7 @@ def tests():
             "coordination.uae_tests",
             "providers.tests", "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",
+            "pipelines.write_tests",
             "pipelines.leads_tests", "pipelines.harvest_tests",
             "pipelines.outreach_tests", "pipelines.osm_tests",
             "pipelines.offer_tests",

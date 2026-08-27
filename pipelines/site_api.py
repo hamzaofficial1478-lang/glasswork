@@ -81,6 +81,28 @@ def settings(env=None) -> dict:
             "site": g("SITE_URL").rstrip("/")}
 
 
+def why_cannot_read(s=None) -> str:
+    """
+    '' when the agency can READ his site through the endpoint.
+
+    Separate from why_not_ready on purpose. Read-only mode is a decision about
+    WRITING — he is saying agents may not change his site — and it says nothing
+    about looking. Conflating the two made a reader refuse to read: the Writer
+    checks whether his site has a header include so a new page comes out
+    looking like the rest of it, and in read-only mode it was told the agency
+    could not reach the site at all. It then produced a standalone page that
+    would have looked foreign, for a reason that had nothing to do with the
+    question it asked.
+    """
+    s = s or settings()
+    if not s["base"]:
+        return ("there is no Admin API address saved. It is your site plus "
+                "/agency-api, e.g. https://www.yoursite.com/agency-api")
+    if not s["token"]:
+        return "there is no Admin API token saved"
+    return ""
+
+
 def why_not_ready(s=None) -> str:
     """'' when full access is usable, otherwise the one thing missing."""
     s = s or settings()
@@ -294,6 +316,11 @@ def _plain(action, page, block_id, ok, r):
         return f"took the {block_id} block back out of {page}"
     if action == "restore":
         return f"put {page} back to how it was before"
+    if action == "new_page":
+        # A page that did not exist before is not a rewrite, and calling it one
+        # on his change screen would hide the single most significant thing the
+        # agency does to his website.
+        return f"published a new page: {page}"
     return f"rewrote {page}"
 
 

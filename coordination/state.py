@@ -381,6 +381,52 @@ BANDS = [
 ]
 
 
+def _change_json(detail):
+    try:
+        d = json.loads(detail or "{}")
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _change_title(kind, detail):
+    """
+    What he is being asked to approve, in a line.
+
+    'Apply queued change: new_page' is the table's word for it, not his. Once
+    Content could queue a whole page, the difference between "add a block to
+    the head of index.php" and "put a new page on my website" stopped being a
+    detail — it is the biggest thing the agency does — and the card said
+    neither.
+    """
+    d = _change_json(detail)
+    page = ((d.get("change") or {}).get("page") if isinstance(d.get("change"), dict)
+            else "") or ""
+    if str(kind) == "new_page":
+        title = str(d.get("title") or "").strip()
+        return (f"Publish a new page: {page}" + (f" — “{title}”" if title else ""))
+    if page:
+        return f"Change {page}"
+    return f"Apply queued change: {kind}"
+
+
+def _change_why(detail):
+    """
+    The reason, not the payload.
+
+    This used to be the first 150 characters of the row's JSON, which for a
+    queued page is `{"change": {"page": "...", "html": "<?php include ...` — a
+    wall of escaped markup, and a decision he cannot read is not a decision he
+    can make. Every queuing caller writes a plain 'why'; use it when it is
+    there and fall back to the raw text when it is not.
+    """
+    d = _change_json(detail)
+    why = str(d.get("why") or "").strip()
+    if why:
+        return why[:400]
+    return (detail or "")[:150]
+
+
 def band(score, why=None):
     """
     (word, meaning) for a score — and when the reasons are handed in, the
@@ -660,8 +706,10 @@ def build():
         for s in c.execute("SELECT id,agent,kind,detail FROM site_queue WHERE status='pending'"
                            " ORDER BY queued_at DESC LIMIT 3"):
             approvals.append({"kind": "site_change", "id": s["id"],
-                              "lvl": "amber · IT", "text": f"Apply queued change: {s['kind']}",
-                              "why": ((s["detail"] or "")[:150] + " — queued by " + (s["agent"] or "IT"))})
+                              "lvl": "amber · IT",
+                              "text": _change_title(s["kind"], s["detail"]),
+                              "why": _change_why(s["detail"])
+                                     + " — queued by " + (s["agent"] or "IT")})
     except Exception:
         pass
     # Drafted mail, held until he has read one. The whole draft goes in `why`,
