@@ -153,6 +153,31 @@ def sweep_shelf(quick=False) -> list:
     return out
 
 
+def _why_down(r) -> str:
+    """
+    WHICH brain, and what the provider actually said.
+
+    "sector 'md' has no working brain" is true and useless. It is a live call
+    that failed, so there is always a real answer underneath — an expired key,
+    a model name the provider does not recognise, no credit left — and the
+    owner cannot act on any of it without being told which one. He read that
+    line three times over about three sectors and had nothing to go on.
+
+    The detail is already in the chain; it was simply never carried up.
+    """
+    if r.get("error"):
+        return f" — {r['error']}"
+    bits = []
+    for link in r.get("chain") or []:
+        why = (link.get("cause") or "").strip()
+        if link.get("status"):
+            why = f"HTTP {link['status']}" + (f" — {why}" if why else "")
+        bits.append(f"{link.get('name', '?')}: {why or 'no answer'}")
+    if not bits:
+        return " — nothing is routed to it. Set a model for it on /setup."
+    return " — " + "; ".join(bits[:2])
+
+
 def sweep(quick=False, notify=False) -> dict:
     cache = _ModelCache(quick=quick)
     brains = sweep_brains(cache)
@@ -163,7 +188,8 @@ def sweep(quick=False, notify=False) -> dict:
     blocking = []
     for r in route:
         if r["cover"] == DOWN:
-            blocking.append(f"sector '{r['task']}' has no working brain")
+            blocking.append(f"sector '{r['task']}' has no working brain"
+                            + _why_down(r))
     # Approvals need ONE working route to the owner, not a specific one. ntfy is
     # the route now and Telegram is the fallback an owner mid-switch still has,
     # so this asks "can he be reached at all" rather than naming a product —

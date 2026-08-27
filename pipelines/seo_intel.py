@@ -463,20 +463,28 @@ def _bing_suggest(q):
     url = "https://api.bing.com/osjson.aspx?" + urllib.parse.urlencode({"query": q})
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA})
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=SUGGEST_TIMEOUT) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
         return [s.strip().lower() for s in (d[1] if len(d) > 1 else []) if s.strip()]
     except Exception:
         return []
 
 
-def _suggest(q):
-    """Both engines, deduped. seo_gap owns the Google one; do not duplicate it."""
+def _suggest(q, deadline=None):
+    """
+    Both engines, deduped. seo_gap owns the Google one; do not duplicate it.
+
+    The clock is checked BETWEEN the two, not only between probes. Each is a
+    network call, and a probe that starts a tick inside the deadline used to be
+    allowed to spend both of its timeouts running past it.
+    """
     out = []
     try:
         out += seo_gap._suggest(q)
     except Exception:
         pass
+    if deadline and time.time() > deadline:
+        return out
     out += _bing_suggest(q)
     seen, uniq = set(), []
     for s in out:
@@ -486,20 +494,80 @@ def _suggest(q):
     return uniq
 
 
-# The daily runner kills a step at 420 seconds. Twelve seeds times twenty probes
-# times two engines is comfortably inside that on a good line and comfortably
-# outside it on a bad one, and a step that dies at 419 seconds throws away every
-# phrase it gathered. So the pass works to a clock: when the budget is spent it
-# stops, keeps what it has, and says how far it got. Partial and honest beats
-# complete and killed.
-TIME_BUDGET = 300      # the daily runner's ceiling; --budget and .env override
+# THE CLOCK, AND WHY IT RAN OUT ANYWAY.
+#
+# The daily runner kills a step at 420 seconds. This pass works to a budget so
+# that a step dying at 419 does not throw away every phrase it gathered —
+# partial and honest beats complete and killed.
+#
+# It timed out anyway, on his machine, at 420 seconds. Three reasons, and the
+# budget was only guarding against one of them:
+#
+#   THE BUDGET ONLY COVERED THE GATHERING LOOP. Everything before it — taking
+#   the shelf lock, reading Search Console — and everything after it — scoring,
+#   writing to the cabinet, posting the task, handing pages to Content — ran on
+#   no clock at all. 300 seconds of gathering plus all of that does not fit in
+#   420.
+#
+#   TAKING THE SHELF LOCK COULD BLOCK FOR 120 SECONDS on its own, before a
+#   single phrase was gathered. 120 + 300 is 420 exactly, with nothing left for
+#   the work.
+#
+#   ONE PROBE COULD TAKE 22 SECONDS. Google's autocomplete had a 12-second
+#   timeout and Bing's 10, and the clock was only checked BETWEEN probes — so
+#   the last probe of the pass could start a tick inside the deadline and run
+#   22 seconds past it. Four seconds each now: an autocomplete endpoint that has
+#   not answered in four seconds is not going to say anything useful, and this
+#   makes hundreds of the calls.
+#
+# So: one clock for the whole pass, started before anything else, derived from
+# the runner's own ceiling rather than from a number typed here that can drift
+# away from it.
+SUGGEST_TIMEOUT = 4     # per autocomplete call, per engine
+
+# What fraction of the step's ceiling this pass will use. The rest is headroom
+# for the process to start, the cabinet to open and the step to be recorded.
+OF_THE_CEILING = 0.80
+
+# Held back from gathering for the write-up: scoring every phrase, the cabinet
+# writes, the task, the handover to Content. Measured at about eight seconds on
+# a normal pass; thirty is room for a bad one.
+WRITE_RESERVE = 30
+
+# The longest this will wait for the SEO shelf before giving up. Waiting two
+# minutes and then having no time left to work is worse than saying the shelf
+# was busy and coming back tomorrow.
+BORROW_WAIT = 30
+
+TIME_BUDGET = 300      # only used if the runner's ceiling cannot be read
+
+
+def step_ceiling() -> int:
+    """
+    The runner's own step timeout, read from the runner.
+
+    Not copied. A second copy of that number is a second thing to forget when
+    the first one changes, and this file has the scars: the budget said 300
+    against a ceiling of 420 and nobody noticed the sum did not work.
+    """
+    try:
+        from . import day_run
+        return int(getattr(day_run, "STEP_TIMEOUT", 0)) or TIME_BUDGET
+    except Exception:
+        return TIME_BUDGET
 
 
 def time_budget(explicit=None):
-    return int(explicit or _num("SEO_TIME_BUDGET", TIME_BUDGET))
+    """How long the WHOLE pass gets, gathering and writing up together."""
+    if explicit:
+        return int(explicit)
+    env = _num("SEO_TIME_BUDGET", 0)
+    if env:
+        return int(env)
+    return max(60, int(step_ceiling() * OF_THE_CEILING))
 
 
-def expand(seed, areas=None, deep=False, pause=0.2, deadline=None):
+def expand(seed, areas=None, deep=False, pause=0.1, deadline=None):
     """
     One seed, worked from every angle a customer would type it.
 
@@ -521,10 +589,14 @@ def expand(seed, areas=None, deep=False, pause=0.2, deadline=None):
         if deadline and time.time() > deadline:
             stopped = True
             break
-        for s in _suggest(p):
+        for s in _suggest(p, deadline=deadline):
             found.setdefault(s, 0)
             found[s] += 1
-        time.sleep(pause)                 # free endpoints, so be a good guest
+        # Free endpoints, so be a good guest — but nineteen seeds at twenty
+        # probes each spent seventy-six seconds of a three-hundred-second
+        # budget doing nothing but sleeping. A tenth of a second is still
+        # polite and buys back half a seed.
+        time.sleep(pause)
     return found, stopped
 
 
@@ -715,7 +787,8 @@ def _cursor(con, value=None):
     return value
 
 
-def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
+def build(con, seeds=None, deep=False, our_paths=(), budget=None,
+          deadline=None) -> dict:
     seeds = list(seeds or seeds_from_catalogue(con))
     gsc, gsc_why = gsc_queries()
     _lo, _hi = striking_band()
@@ -752,13 +825,20 @@ def build(con, seeds=None, deep=False, our_paths=(), budget=None) -> dict:
     # whole list gets covered over as many passes as it takes.
     start = _cursor(con)
     seeds = seeds[start:] + seeds[:start]
-    deadline = time.time() + time_budget(budget)
+    # THE DEADLINE COMES FROM THE CALLER NOW. It used to be worked out here,
+    # which meant the gathering loop got the whole budget and the write-up that
+    # follows it got none — see the note on time_budget. Called on its own, it
+    # still gets a sensible clock of its own.
+    if deadline is None:
+        deadline = time.time() + time_budget(budget)
+    # And gathering stops early enough to write down what it gathered.
+    gather_until = deadline - WRITE_RESERVE
     seeds_done, ran_out = 0, False
     for seed in seeds:
-        if time.time() > deadline:
+        if time.time() > gather_until:
             ran_out = True
             break
-        got, stopped = expand(seed, deep=deep, deadline=deadline)
+        got, stopped = expand(seed, deep=deep, deadline=gather_until)
         seeds_done += 1
         ran_out = ran_out or stopped
         for phrase, hits in got.items():
@@ -959,10 +1039,22 @@ def run(agent=AGENT, deep=False, budget=None) -> dict:
 
 def _work(agent, deep, budget=None) -> dict:
     board.ensure_schema()
+    # THE CLOCK STARTS HERE, BEFORE ANYTHING ELSE — including the shelf lock.
+    # It used to start inside build(), so taking the lock could burn two
+    # minutes and the gathering would still believe it had its full budget.
+    deadline = time.time() + time_budget(budget)
+
     b = cabinet.borrow("seo_data", agent, "SEO",
                        reason="free keyword intelligence pass (no paid API)",
-                       data_class="external", wait=True)
+                       data_class="external", wait=True, timeout=BORROW_WAIT)
     borrow_id = b.get("borrow_id")
+    if not borrow_id:
+        # Busy is not broken. Saying so and coming back tomorrow beats waiting
+        # out the lock and then being killed with nothing gathered.
+        return {"ok": False, "agent": agent,
+                "error": ("the SEO shelf was busy — another agent is using it. "
+                          "Nothing was gathered; the next pass picks it up."),
+                "shelf_busy": True}
     try:
         con = sqlite3.connect(board.DB, timeout=30)
         con.row_factory = sqlite3.Row
@@ -974,7 +1066,8 @@ def _work(agent, deep, budget=None) -> dict:
         except sqlite3.Error:
             pass
 
-        built = build(con, deep=deep, our_paths=our_paths, budget=budget)
+        built = build(con, deep=deep, our_paths=our_paths, budget=budget,
+                      deadline=deadline)
         top = [dict(r) for r in con.execute(
             "SELECT * FROM keyword_intel ORDER BY score DESC LIMIT 20")]
         ok, reasons = critic_check(built, top)
@@ -1038,9 +1131,12 @@ def _work(agent, deep, budget=None) -> dict:
         partial = ("" if not built.get("ran_out_of_time") else
                    f" (stopped at {built['seeds_done']} of {built['seeds_total']} "
                    f"seeds — out of time, the rest go on tomorrow's pass)")
+        left = int(deadline - time.time())
+        result["seconds_left"] = left
         result["summary"] = (
             f"{built['phrases']} phrases from free sources, {built['striking']} in "
-            f"striking distance, {len(writeable)} pages handed to Content" + partial)
+            f"striking distance, {len(writeable)} pages handed to Content" + partial
+            + f" ({left}s of the budget unspent)")
         return result
     finally:
         if borrow_id:
