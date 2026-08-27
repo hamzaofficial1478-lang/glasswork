@@ -36,7 +36,7 @@ import argparse
 import json
 import sys
 
-from coordination import board, changelog
+from coordination import board, changelog, deskwork
 from . import site_api
 
 AGENT = "it-watcher"
@@ -105,7 +105,22 @@ def look(s=None) -> dict:
 
 def run(agent=AGENT) -> dict:
     with board.agent_run(agent) as run_row:
-        r = look()
+        # it-watcher is two pipelines: it_health checks the site is up and
+        # working, this one watches for files being changed underneath us.
+        # Only take the jobs this pass can actually answer.
+        with deskwork.at_the_desk(
+                "IT", agent, run_row,
+                takes=lambda j: j.wants("change", "changed", "changes", "watch",
+                                        "overwritten", "overwrote", "edited",
+                                        "modified", "change log", "changelog",
+                                        "diff", "tamper", "tampered")) as job:
+            r = look()
+            moved = len((r.get("added") or []) + (r.get("edited") or [])
+                        + (r.get("gone") or []))
+            deskwork.settle(job, {"ok": r.get("ok", True),
+                                  "error": r.get("why"),
+                                  "summary": r.get("head") or ""},
+                            made=moved, what="change to the site|changes to the site")
         run_row.note(r.get("head") or r.get("why") or "could not look")
         return r
 

@@ -51,7 +51,7 @@ import sqlite3
 import time
 from urllib.parse import urlparse
 
-from coordination import board, cabinet
+from coordination import board, cabinet, deskwork
 
 try:
     from . import services
@@ -293,7 +293,10 @@ def critic_check(built, short, gaps, waiting=()):
 
 def run(agent=AGENT) -> dict:
     with board.agent_run(agent) as run_row:
-        out = _work(agent)
+        with deskwork.at_the_desk("SEO", agent, run_row) as job:
+            out = _work(agent)
+            deskwork.settle(job, out, made=out.get("added"),
+                            what="new link opportunity")
         run_row.note(out.get("summary") or out.get("error") or "backlink pass")
         return out
 

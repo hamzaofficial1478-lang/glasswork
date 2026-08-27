@@ -60,7 +60,7 @@ import sys
 import time
 from pathlib import Path
 
-from coordination import board, changelog
+from coordination import board, changelog, deskwork
 from . import site_api
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -267,7 +267,13 @@ def confirm(page, needle, s=None) -> bool:
 
 def run(agent=AGENT, limit=MAX_PER_PASS, dry_run=False, skip_tests=False) -> dict:
     with board.agent_run(agent) as run_row:
-        out = _work(agent, limit, dry_run, skip_tests)
+        with deskwork.at_the_desk(SECTOR, agent, run_row) as job:
+            out = _work(agent, limit, dry_run, skip_tests)
+            # "Nothing approved" comes back ok=False, and blocking the job on it
+            # is right: the thing holding a release up is his own yes, and that
+            # sentence says so by name rather than "something is holding it back".
+            deskwork.settle(job, out, made=out.get("applied"),
+                            what="change put on the site|changes put on the site")
         run_row.note(out.get("summary") or out.get("error") or "nothing approved")
         return out
 

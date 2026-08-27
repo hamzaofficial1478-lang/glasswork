@@ -27,7 +27,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from coordination import cabinet, board
+from coordination import cabinet, board, deskwork
 from providers import store
 
 
@@ -195,14 +195,51 @@ def critic_check(gaps, seeds_used):
 
 
 def run(agent="seo-strategist", max_seeds=18, cost_ceiling=0.0):
+    """
+    Find keyword gaps — and look first at the ones the MD asked about.
+
+    The seed list used to be every service crossed with every core area, every
+    day, regardless of what was on the board. A job saying "find the gaps for
+    pergolas in Sharjah" produced the same eighteen seeds as a job saying
+    nothing, and then closed as though it had answered.
+    """
     with board.agent_run(agent) as run_row:
-        out = _gap(agent, max_seeds, cost_ceiling)
+        with deskwork.at_the_desk("SEO", agent, run_row) as job:
+            out = _gap(agent, max_seeds, cost_ceiling, job)
+            deskwork.settle(job, out, made=out.get("stored"),
+                            what="keyword gap")
         run_row.note(f"found {out['stored']} new keyword gaps" if out.get("stored")
                      else out.get("error", "no new gaps found"))
         return out
 
 
-def _gap(agent, max_seeds, cost_ceiling):
+def seeds_for(job, max_seeds):
+    """
+    The seed phrases to expand, with anything the job named put first.
+
+    Not *only* what the job named — a pass that finds nothing for "pergola"
+    should still come back with the day's other gaps rather than empty-handed.
+    The job decides the order and therefore what survives the max_seeds cut.
+    """
+    base = list(SERVICES)
+    for svc in SERVICES:
+        for area in CORE_AREAS:
+            base.append(f"{svc} {area}")
+    if not job:
+        return base[:max_seeds]
+    words = job.words()
+    if not words:
+        return base[:max_seeds]
+    wanted = [s for s in base if any(w in s.lower() for w in words)]
+    # A subject we do not sell yet is still worth one look: expand it as typed
+    # rather than silently substituting the catalogue.
+    named = [w for w in words
+             if not any(w in s.lower() for s in base)][:2]
+    rest = [s for s in base if s not in wanted]
+    return (named + wanted + rest)[:max_seeds]
+
+
+def _gap(agent, max_seeds, cost_ceiling, job=None):
     b = cabinet.borrow("seo_data", agent, "SEO",
                        reason="keyword-gap pull for UAE glass & aluminium",
                        data_class="external", cost_ceiling=cost_ceiling, wait=True)
@@ -221,11 +258,7 @@ def _gap(agent, max_seeds, cost_ceiling):
         existing = {r[0].strip().lower()
                     for r in con.execute("SELECT phrase FROM keywords").fetchall() if r[0]}
 
-        seeds = list(SERVICES)
-        for svc in SERVICES:
-            for area in CORE_AREAS:
-                seeds.append(f"{svc} {area}")
-        seeds = seeds[:max_seeds]
+        seeds = seeds_for(job, max_seeds)
 
         fetched, seeds_used = [], []
         for q in seeds:

@@ -367,6 +367,7 @@ def tests():
             "coordination.changelog_tests",
             "coordination.results_tests",
             "coordination.purge_tests",
+            "coordination.deskwork_tests",
             "providers.tests", "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",
             "pipelines.leads_tests", "pipelines.harvest_tests",

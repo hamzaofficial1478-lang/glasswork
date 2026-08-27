@@ -33,7 +33,7 @@ import re
 import sqlite3
 import time
 
-from coordination import board
+from coordination import board, deskwork
 
 # The service taxonomy, same grounding the SEO Strategist used. A phrase has to
 # name a service we actually sell, or it cannot become a page.
@@ -190,8 +190,25 @@ def critic_check(briefs, gap_count, already=()):
 
 
 def run(agent="content-writer", max_briefs=6, draft_allowance=1):
+    """
+    Brief the next pages — from SEO's handoff, or from a job the MD posted.
+
+    CONTENT USED TO WORK FROM ONE DOOR ONLY: a keyword handoff request from
+    SEO. Everything else it refused, on the honest grounds that Content does
+    not invent work nobody asked for. The flaw was that a task on the Content
+    board IS somebody asking. He posted "write a case study about the Marina
+    pergola", it sat open for days, and Content reported — correctly, and
+    uselessly — that there was nothing to claim.
+
+    A board task is now the second door. It cannot mint work on its own, and
+    the Critic and the no-drafting-spree gate are unchanged; it just stops the
+    desk walking past a job addressed to it.
+    """
     with board.agent_run(agent) as run_row:
-        out = _brief(agent, max_briefs, draft_allowance)
+        with deskwork.at_the_desk("Content", agent, run_row) as job:
+            out = _brief(agent, max_briefs, draft_allowance, job)
+            deskwork.settle(job, out, made=out.get("stored"),
+                            what="page brief")
         if out.get("ok"):
             run_row.note(f"briefed {out.get('stored', 0)} page(s)"
                          + (f", {out['already_briefed']} already done"
@@ -201,7 +218,21 @@ def run(agent="content-writer", max_briefs=6, draft_allowance=1):
         return out
 
 
-def _brief(agent, max_briefs, draft_allowance):
+def _reply(claimed, agent, body, close=False):
+    """
+    Answer the request this work came from — if it came from one.
+
+    Work off a board task has no request behind it, and there is nothing to
+    reply to. Saying so here once beats three `if claimed:` guards buried in
+    the flow, where the next person to add a fourth reply forgets one and
+    Content silently stops answering SEO.
+    """
+    if not claimed:
+        return None
+    return board.reply_request(claimed["id"], agent, body, close=close)
+
+
+def _brief(agent, max_briefs, draft_allowance, job=None):
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
     try:
@@ -230,7 +261,7 @@ def _brief(agent, max_briefs, draft_allowance):
             if board.claim_request(r["id"], agent):
                 claimed = r
                 break
-        if not claimed:
+        if not claimed and not job:
             # Not a fault: Content is refusing to invent work nobody asked for.
             # Say WHY, and what the cabinet actually holds, so the fix is obvious.
             kw = con.execute("SELECT count(*) FROM keywords").fetchone()[0]
@@ -252,6 +283,20 @@ def _brief(agent, max_briefs, draft_allowance):
                 for r in con.execute(
                     "SELECT phrase, area, intent FROM keywords ORDER BY id DESC LIMIT 200")]
 
+        # If the MD named a subject, brief THAT subject. Reading two hundred
+        # phrases and returning whatever clustered largest is how "write a case
+        # study about the Marina pergola" turned into six shower-glass pages.
+        asked_about, narrowed = [], []
+        if job:
+            asked_about = job.words()
+            narrowed = [r for r in rows
+                        if any(w in r[0].lower() for w in asked_about)]
+            # Only narrow when the job actually matches something we track. A
+            # subject with no phrases behind it is a reason to say so, not a
+            # reason to brief nothing.
+            if narrowed:
+                rows = narrowed
+
         # 3. cluster into page candidates, then drop any page already briefed.
         #    Re-running must not mint a second /glass-partition-dubai to compete
         #    with the first one.
@@ -265,18 +310,26 @@ def _brief(agent, max_briefs, draft_allowance):
                 break
         briefs = fresh
 
-        result = {"ok": True, "agent": agent, "claimed_request": claimed["id"],
+        result = {"ok": True, "agent": agent,
+                  "claimed_request": claimed["id"] if claimed else None,
+                  "from_task": job.id if job else None,
+                  "asked_about": asked_about,
+                  "narrowed_to_subject": bool(narrowed),
                   "keywords_read": len(rows), "clusters": len(groups),
                   "briefs": len(briefs), "already_briefed": len(skipped)}
 
         if not briefs:
-            board.reply_request(
-                claimed["id"], agent,
-                f"Nothing new to brief — all {len(skipped)} page candidates from this gap "
-                "list are already in the content queue. Send fresh gaps and I'll pick them up.",
-                close=True)
-            result.update({"stored": 0, "critic": "skipped",
-                           "note": "every candidate page was already briefed"})
+            why = (f"Nothing new to brief — all {len(skipped)} page candidates from this "
+                   "gap list are already in the content queue. Send fresh gaps and I'll "
+                   "pick them up.")
+            if job and asked_about and not narrowed:
+                why = (f"Nothing to brief on that subject: no tracked phrase mentions "
+                       + ", ".join(asked_about[:4])
+                       + ". SEO has to find the phrases before Content can build a page "
+                         "on them — or say it plainly and I will write it from the job "
+                         "itself rather than from search data.")
+            _reply(claimed, agent, why, close=True)
+            result.update({"stored": 0, "critic": "skipped", "note": why})
             return result
 
         # 5. the MD's gate: exactly one template brief, the rest wait on SEO
@@ -286,9 +339,9 @@ def _brief(agent, max_briefs, draft_allowance):
         # 6. critic
         ok, reasons = critic_check(briefs, len(rows), already)
         if not ok:
-            board.reply_request(claimed["id"], agent,
-                                "Could not brief this yet — the Critic rejected it: "
-                                + "; ".join(reasons))
+            _reply(claimed, agent,
+                   "Could not brief this yet — the Critic rejected it: "
+                   + "; ".join(reasons))
             result.update({"stored": 0, "critic": "rejected", "critic_reasons": reasons})
             return result
 
@@ -321,8 +374,8 @@ def _brief(agent, max_briefs, draft_allowance):
         con.commit()
 
         ready_one = next((s for s in stored if s["status"] == "briefed"), None)
-        board.reply_request(
-            claimed["id"], agent,
+        _reply(
+            claimed, agent,
             f"Briefed. {len(stored)} page candidates from {len(rows)} tracked phrases.\n"
             f"Ready to draft (1, per the MD's gate): {ready_one['title'] if ready_one else '—'}\n"
             f"Held for your volume/difficulty call: {len(stored) - 1}\n"

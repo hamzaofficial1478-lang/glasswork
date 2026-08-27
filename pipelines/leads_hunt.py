@@ -49,6 +49,7 @@ import urllib.parse
 import urllib.request
 
 from coordination import board
+from coordination import deskwork
 from . import harvest
 from . import leads_sources as ls
 from . import services
@@ -448,11 +449,107 @@ def critic_check(candidates, searched, errors):
 
 def run(agent="leads-hunter", segment=None, area=None, limit=20, per_segment=1,
         max_searches=6, dry_run=False, enrich_sites=True, service=None):
+    """
+    Collect leads — and, first, read the board to find out which leads.
+
+    THE HUNTER USED TO IGNORE THE BOARD ENTIRELY. It ran the same sweep every
+    day whatever the MD had posted, so "find 20 leads in Dubai" sat open while
+    the desk that could do it ran past it. Now the job steers the pass: how
+    many, which emirate, which service. Anything the job does not say keeps the
+    caller's default, so a plain scheduled run behaves exactly as before.
+    """
     with board.agent_run(agent) as run_row:
-        out = _hunt(agent, segment, area, limit, per_segment, max_searches,
-                    dry_run, enrich_sites, run_row, service)
+        with deskwork.at_the_desk("Leads", agent, run_row) as job:
+            if job:
+                limit, max_searches = _sized(job.how_many(None),
+                                             limit, max_searches)
+                area = job.first_mention(ls.DISTRICTS, area)
+                # resolve_service already forgives our internal spelling —
+                # "frameless shower" and "shower_glass" land on the same job
+                service = services.resolve_service(job.text) or service
+                # a job naming an emirate but no district still means that
+                # emirate — search it wide rather than not at all
+                if area is None:
+                    area = job.first_mention(EMIRATES, None)
+            out = _hunt(agent, segment, area, limit, per_segment, max_searches,
+                        dry_run, enrich_sites, run_row, service)
+            _answer(job, out, area, service)
         run_row.note(out.get("summary") or out.get("error") or "hunted")
         return out
+
+
+# Google Places returns at most 20 results for one search, so a job asking for
+# more than that is asking for more searches, not a bigger page.
+PLACES_PAGE = 20
+MOST_SEARCHES = 12
+
+
+def _sized(wanted, limit, max_searches):
+    """
+    Turn "find 20 leads" into a page size and a number of searches.
+
+    Twenty is one page. Sixty is three. Not every result becomes a stored lead
+    — most are duplicates or get screened out — so the searches are rounded up
+    rather than down, and capped, because a job typed as "500" is a typo and
+    not a mandate to spend the month's Places budget in one pass.
+    """
+    if not wanted:
+        return limit, max_searches
+    wanted = max(1, int(wanted))
+    page = min(PLACES_PAGE, wanted)
+    searches = min(MOST_SEARCHES, -(-wanted // PLACES_PAGE))
+    return page, max(max_searches if wanted <= PLACES_PAGE else 1, searches)
+
+
+EMIRATES = ("Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Ras Al Khaimah",
+            "Fujairah", "Umm Al Quwain")
+
+
+def _answer(job, out, area, service):
+    """
+    Close the job the way the hunt actually went — and only the way it went.
+
+    The distinction that matters to him: a pass that could not run (no key on
+    the maps shelf) is BLOCKED with that sentence, because there is something
+    to fix. A pass that ran and found only firms already in the cabinet is
+    DONE, because the desk did its job and the answer was 'nobody new'. A pass
+    that found nothing and cannot say why hands the job back rather than
+    claiming either.
+    """
+    if not job:
+        return
+    where = f" in {area}" if area else ""
+    what = f" for {services.label(service)}" if service else ""
+    if not out.get("ok"):
+        job.cannot(out.get("error") or "the hunt did not complete and gave no reason.")
+        return
+    if out.get("dry_run"):
+        job.cannot("This was a planning pass only — nothing was collected, so "
+                   "the job is not done.")
+        return
+    if out.get("critic") == "rejected":
+        job.cannot("The Critic rejected the batch: "
+                   + "; ".join(out.get("critic_reasons") or ["no reason given"]))
+        return
+    stored, dupes = out.get("stored", 0), out.get("duplicates", 0)
+    if stored:
+        job.did(f"Collected {stored} new lead(s){what}{where} from "
+                f"{len(out.get('searches') or [])} searches"
+                + (f"; {dupes} were already in the cabinet." if dupes else "."),
+                stored=stored, duplicates=dupes)
+    elif dupes:
+        job.did(f"Searched{where}{what} and found {dupes} firm(s) — every one of "
+                "them already in the cabinet, so nothing new was collected. "
+                "This source is worked out; a different area or segment would "
+                "be a better ask.", stored=0, duplicates=dupes)
+    else:
+        errs = [s.get("error") for s in (out.get("searches") or []) if s.get("error")]
+        if errs:
+            job.cannot("Every search failed: " + "; ".join(sorted(set(errs))[:3]))
+        else:
+            job.did(f"Searched{where}{what} across "
+                    f"{len(out.get('searches') or [])} queries and found no "
+                    "businesses at all matching them.", stored=0)
 
 
 def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,

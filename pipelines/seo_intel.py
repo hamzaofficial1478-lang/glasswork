@@ -118,7 +118,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from coordination import board, cabinet
+from coordination import board, cabinet, deskwork
 
 try:
     from . import seo_gap, services
@@ -1032,7 +1032,10 @@ def critic_check(built, top):
 
 def run(agent=AGENT, deep=False, budget=None) -> dict:
     with board.agent_run(agent) as run_row:
-        out = _work(agent, deep, budget)
+        with deskwork.at_the_desk("SEO", agent, run_row) as job:
+            out = _work(agent, deep, budget)
+            deskwork.settle(job, out, made=out.get("phrases"),
+                            what="phrase scored|phrases scored")
         run_row.note(out.get("summary") or out.get("error") or "keyword intel pass")
         return out
 

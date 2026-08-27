@@ -620,8 +620,26 @@ def build():
     else:
         health_why = (f"The average of all {len(scored_rooms)} sectors. Open any "
                       "room in the control room to see exactly what it scored and why.")
+    # "Director · 24 tasks on the board" read as though the Director were
+    # sitting on twenty-four jobs itself. It is the whole agency's board — work
+    # the Director POSTED, waiting at other sectors' desks. Naming where they
+    # are turns a number he could do nothing with into a place to look.
     open_all = _one(c, "SELECT count(*) FROM tasks WHERE status IN ('open','in_progress')")
-    md_state = f"{open_all} tasks on the board" if open_all else "idle — board clear"
+    try:
+        where = [(r[0], r[1]) for r in c.execute(
+            "SELECT sector, count(*) FROM tasks"
+            " WHERE status IN ('open','in_progress') AND sector <> 'Director'"
+            " GROUP BY sector ORDER BY 2 DESC, 1").fetchall()]
+    except Exception:
+        where = []
+    if not open_all:
+        md_state = "idle — board clear"
+    elif where:
+        md_state = (f"{open_all} posted, waiting at "
+                    + ", ".join(f"{s} ({n})" for s, n in where[:4])
+                    + (f" and {len(where) - 4} more" if len(where) > 4 else ""))
+    else:
+        md_state = f"{open_all} tasks on the board"
 
     # ---- approvals waiting on the owner (amber/red tasks + queued site changes) ----
     # Each item carries the id and kind it was read from. Without them the

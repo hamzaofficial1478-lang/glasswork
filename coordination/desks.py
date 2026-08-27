@@ -87,9 +87,16 @@ DESKS = {
     "it-watcher": {
         "sector": "IT",
         "job": "watches the site and files tickets — fixes nothing",
+        # "changed", not "change". Past tense and nouns only, deliberately:
+        # pipelines/site_watch runs at this desk and reports what MOVED on the
+        # site, which is observing. "Change the domain to .com" is a job for the
+        # Fixer, and a desk that files tickets must never be able to claim it —
+        # so the imperative is left out of this list on purpose.
         "does": ("check", "health", "uptime", "speed", "monitor", "watch",
                  "observe", "measure", "lighthouse", "probe", "contact form",
-                 "enquiry form", "error", "downtime", "status", "diagnostic"),
+                 "enquiry form", "error", "downtime", "status", "diagnostic",
+                 "changed", "change log", "changelog", "overwritten",
+                 "tampered", "what moved"),
         "never": ("fix", "patch", "repair", "deploy", "release", "ship",
                   "roll back", "rollback", "merge", "hotfix", "publish", "push"),
         "never_why": "the desk that finds a fault must not be the desk that "

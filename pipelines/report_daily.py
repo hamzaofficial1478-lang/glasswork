@@ -40,7 +40,7 @@ import json
 import sqlite3
 import time
 
-from coordination import board, scorecard as _scorecard, state as _state
+from coordination import board, deskwork, scorecard as _scorecard, state as _state
 from providers import integrations
 
 GRACE = {
@@ -460,7 +460,9 @@ def critic_check(state, summary=None):
 
 def run(agent="reporter"):
     with board.agent_run(agent) as run_row:
-        out = _report(agent)
+        with deskwork.at_the_desk("Report", agent, run_row) as job:
+            out = _report(agent)
+            deskwork.settle(job, out)
         run_row.note(out.get("summary") or out.get("error") or "produced the daily digest")
         return out
 

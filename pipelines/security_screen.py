@@ -35,7 +35,7 @@ import re
 import sqlite3
 import time
 
-from coordination import board
+from coordination import board, deskwork
 
 # Phrases whose only purpose is to redirect an agent that is reading text it
 # did not write. Ordinary business copy does not contain these.
@@ -225,19 +225,34 @@ def _screen_request(req, body):
 
 def run(agent="security-screener"):
     with board.agent_run(agent) as run_row:
-        out = _screen(agent)
+        with deskwork.at_the_desk("Security", agent, run_row) as job:
+            out = _screen(agent, job)
+            deskwork.settle(job, out, made=len(out.get("answered") or []),
+                            what="clearance")
         run_row.note(f"screened {len(out['answered'])} request(s), "
                      f"{out.get('findings_logged', 0)} finding(s)"
                      if out.get("answered") else out.get("error", "nothing to screen"))
         return out
 
 
-def _screen(agent):
+def _screen(agent, job=None):
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
     try:
         waiting = board.open_requests_for("Security")
         if not waiting:
+            # Two different empty-handed cases, and saying the wrong one reads
+            # as the program contradicting itself. If a job IS in this desk's
+            # hand — "screen the new leads" — then "nothing addressed to
+            # Security" is plainly false to the man who posted it. What is
+            # actually true is that nobody has asked for a clearance, because
+            # nothing has been collected to clear.
+            if job:
+                return {"ok": False, "error":
+                        "Nothing is waiting for clearance. Security clears what other "
+                        "sectors send it — a lead before Outreach writes to it, a page "
+                        "before it goes live — and no sector has sent anything. Collect "
+                        "the leads first and the clearance queues itself."}
             return {"ok": False, "error":
                     "Nothing addressed to Security on the board. Security screens what other "
                     "sectors ask it about; it does not go looking for work. Run "

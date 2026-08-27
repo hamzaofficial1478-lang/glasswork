@@ -57,7 +57,7 @@ import time
 import urllib.parse
 from html import unescape as _unescape
 
-from coordination import board, cabinet
+from coordination import board, cabinet, deskwork
 
 try:
     from . import fetcher, services, site_services
@@ -949,7 +949,10 @@ def critic_check(pages, robots):
 
 def run(agent=AGENT, url=None, max_pages=12) -> dict:
     with board.agent_run(agent) as run_row:
-        out = _work(agent, url, max_pages)
+        with deskwork.at_the_desk("SEO", agent, run_row) as job:
+            out = _work(agent, url, max_pages)
+            deskwork.settle(job, out, made=len(out.get("pages") or []),
+                            what="page audited|pages audited")
         run_row.note(out.get("summary") or out.get("error") or "AEO/GEO pass")
         return out
 

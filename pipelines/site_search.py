@@ -47,7 +47,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from coordination import board, site
+from coordination import board, deskwork, site
 
 try:
     from . import fetcher, harvest, services, site_services
@@ -525,7 +525,10 @@ def critic_check(records, cfg):
 
 def run(agent=AGENT, dry_run=False, max_pages=40, url=None) -> dict:
     with board.agent_run(agent) as run_row:
-        out = _work(agent, dry_run, max_pages, url)
+        with deskwork.at_the_desk("IT", agent, run_row) as job:
+            out = _work(agent, dry_run, max_pages, url)
+            deskwork.settle(job, out, made=out.get("pages_indexed"),
+                            what="page indexed|pages indexed")
         run_row.note(out.get("summary") or out.get("error") or "site search pass")
         return out
 
