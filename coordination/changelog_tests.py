@@ -272,6 +272,78 @@ def test_recording_never_breaks_the_work():
         board.DB = was
 
 
+def test_it_says_what_changed_not_only_that_it_changed():
+    """
+    "there is section about website changes but it did not gave the detailed
+     berief about that ... either what is changed is any article is posted on
+     webiste is any code is changed"
+
+    A summary saying "home.html was changed, 340 bytes bigger" is a smoke alarm.
+    He asked for a fire report. The sweep keeps a snapshot of each page so the
+    next one can say what actually moved.
+    """
+    print("\nWhat actually changed on the page:")
+    _fresh_db()
+    before = ("<html><head><title>Glass Works Dubai</title></head><body>"
+              "<h1>Glass and aluminium</h1>"
+              "<p>Call +971 4 123 4567 or email info@example.ae.</p>"
+              "<img src='a.jpg'>"
+              "<script src='https://cdn.example.com/app.js'></script>"
+              "</body></html>")
+    after = ("<html><head><title>Glass Works Dubai | Pergolas</title></head><body>"
+             "<h1>Glass and aluminium</h1>"
+             "<p>Call +971 4 999 0000 or email team@example.ae.</p>"
+             "<img src='a.jpg'><img src='b.jpg'>"
+             "<script src='https://cdn.example.com/app.js'></script>"
+             "<script src='https://tracker.unknown.ru/t.js'></script>"
+             "<h2>Aluminium pergolas in Sharjah</h2><p>"
+             + ("A pergola here has to survive the sun and the shamal. " * 30)
+             + "</p></body></html>")
+
+    CL.sweep([{"page": "index.php", "bytes": len(before), "html": before}])
+    CL.sweep([{"page": "index.php", "bytes": len(after), "html": after}])
+    lines = CL.recent(5)["changes"][0]["detail"]
+    joined = " | ".join(lines)
+
+    check("it spots writing being published",
+          any("new writing was published" in l for l in lines), True)
+    check("and names the new heading", "Aluminium pergolas in Sharjah" in joined, True)
+    check("it spots the title changing",
+          any("title changed" in l for l in lines), True)
+    check("it spots a phone number being swapped",
+          any("phone number was added" in l for l in lines), True)
+    check("and the old one going",
+          any("phone number was removed" in l for l in lines), True)
+    check("it spots the email being changed",
+          any("email address was added" in l for l in lines), True)
+    check("it spots code being added",
+          any("Code was added" in l for l in lines), True)
+    check("and names the host it came from", "tracker.unknown.ru" in joined, True)
+    check("it counts the images", any("1 image(s) added" in l for l in lines), True)
+    check("and the summary leads with the biggest thing",
+          "new writing was published" in CL.recent(5)["changes"][0]["summary"],
+          True)
+
+
+def test_a_file_that_moved_without_the_page_changing_says_so():
+    """
+    Touching a file, or an editor re-escaping an entity, moves the bytes and
+    changes nothing a visitor would see. Reporting that as "your page was
+    changed" with no detail is how a panel teaches somebody to ignore it.
+    """
+    print("\nThe file moved and the page did not:")
+    _fresh_db()
+    a = "<html><head><title>Glass &amp; Aluminium</title></head><body><p>Hello</p></body></html>"
+    b = "<html><head><title>Glass & Aluminium</title></head>\n<body><p>Hello</p></body></html>"
+    CL.sweep([{"page": "index.php", "bytes": len(a), "html": a}])
+    CL.sweep([{"page": "index.php", "bytes": len(b), "html": b}])
+    row = CL.recent(5)["changes"][0]
+    check("still recorded — something did move", row["action"], "edited")
+    check("but nothing is claimed about the page", row["detail"], [])
+    check("and it says as much",
+          "reads the same" in (row["summary"] or ""), True)
+
+
 def main():
     real = board.DB
     _fresh_db()
@@ -285,6 +357,8 @@ def main():
         test_the_headline_says_something_useful_when_there_is_nothing()
         test_the_log_can_be_narrowed()
         test_recording_never_breaks_the_work()
+        test_it_says_what_changed_not_only_that_it_changed()
+        test_a_file_that_moved_without_the_page_changing_says_so()
     finally:
         board.DB = real
 

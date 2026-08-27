@@ -109,6 +109,7 @@ def main():
     _classify_tests()
     _critic_tests()
     _cycle_tests()
+    _suggestion_tests()
 
     if _fail:
         print(f"\n{len(_fail)} FAILED: {_fail}")
@@ -259,6 +260,89 @@ def _cycle_tests():
         comp._get = real_get
         board.DB = real_db
 
+
+
+def _suggestion_tests():
+    """
+    "SEO watches the rivals — No competitors on file, and this pipeline will
+     not invent any"
+
+    The principle was right and the consequence was a step of the day that
+    could never do anything until he opened a terminal and typed a command he
+    had no reason to know about. Suggesting is not inventing: the SEO desk sees
+    people searching for a firm BY NAME alongside the glass work he sells, and
+    puts it forward with the searches attached. Nothing is crawled until he
+    says yes.
+    """
+    from . import seo_gap
+    real_db = board.DB
+    # _fresh_db only BUILDS a cabinet; pointing board at it is the caller's job,
+    # and forgetting means these assertions run against his real one.
+    board.DB = _fresh_db()
+    try:
+        print("\nA name is read out of a branded search, and only out of one:")
+        for phrase, want in (("febtech glass works dubai reviews", "febtech"),
+                             ("al reef aluminium contact number", "al reef"),
+                             ("glass partition dubai price", ""),
+                             ("shower glass installation cost", ""),
+                             ("aluminium windows near me", "")):
+            check(f"{phrase!r}", seo_gap.rival_name_in(phrase), want)
+
+        print("\nPut forward, with the reason attached:")
+        comp.suggest_rival("febtech", evidence="febtech glass works dubai reviews")
+        comp.suggest_rival("febtech", evidence="febtech glass works dubai photos")
+        comp.suggest_rival("al reef", evidence="al reef aluminium contact number")
+        waiting = comp.suggested()
+        check("two firms, not three", len(waiting), 2)
+        check("the second sighting strengthened the first rather than duplicating it",
+              len(waiting[0]["evidence"]), 2)
+        check("and nothing is a confirmed rival yet", comp.list_competitors(), [])
+
+        print("\nThe watcher asks him instead of dead-ending:")
+        out = comp._watch("seo-rival", _Row(), 5)
+        check("it did not fail", out.get("idle"), True)
+        check("it names them", "febtech" in out["error"], True)
+        check("and says nothing is crawled yet",
+              "until you approve" in out["error"], True)
+
+        with sqlite3.connect(board.DB) as c:
+            c.row_factory = sqlite3.Row
+            task = c.execute("SELECT id,title,risk FROM tasks").fetchone()
+        check("an amber task is waiting for him", task["risk"], "amber")
+        check("no desk can take it before he answers",
+              board.claim_task(task["id"], "seo-rival"), False)
+
+        print("\nHe presses Approve:")
+        board.decide_approval("task", task["id"], "approved")
+        comp._watch("seo-rival", _Row(), 5)
+        check("they are rivals now",
+              sorted(r["name"] for r in comp.list_competitors()),
+              ["al reef", "febtech"])
+        check("and none are still waiting", comp.suggested(), [])
+
+        print("\n...and one he says is not a rival goes for good:")
+        comp.suggest_rival("crystal", evidence="crystal glass sharjah timings")
+        ids = [r["id"] for r in comp.suggested()]
+        check("dropped", comp.drop_suggested(ids), 1)
+        check("gone", comp.suggested(), [])
+        check("and it was never added to the watch list",
+              [r["name"] for r in comp.list_competitors() if r["name"] == "crystal"], [])
+    finally:
+        board.DB = real_db
+
+
+class _Row:
+    """Stands in for the agent_run record. The watcher only ever stamps a task
+    id on it."""
+
+    def task(self, _id):
+        pass
+
+    def spent(self, _usd):
+        pass
+
+    def note(self, _text):
+        pass
 
 if __name__ == "__main__":
     main()

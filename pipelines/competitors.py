@@ -303,10 +303,130 @@ def add_competitor(name, domain, db=None):
 
 
 def list_competitors(db=None):
+    """
+    The rivals he has actually confirmed. These are the only ones crawled.
+
+    NULL status means confirmed: every row that existed before suggestions were
+    added is one he typed in himself.
+    """
     con = sqlite3.connect(db or board.DB)
     try:
+        board.ensure_schema(con)
         return [{"id": r[0], "name": r[1], "domain": r[2]}
-                for r in con.execute("SELECT id,name,domain FROM competitors ORDER BY id")]
+                for r in con.execute(
+                    "SELECT id,name,domain FROM competitors"
+                    " WHERE COALESCE(status,'confirmed') <> 'suggested'"
+                    " ORDER BY id")]
+    finally:
+        con.close()
+
+
+def suggest_rival(name, evidence="", domain="", db=None):
+    """
+    Put a firm forward as a possible rival, on evidence, for him to confirm.
+
+    THE DEAD END THIS REPLACES:
+
+        "No competitors on file, and this pipeline will not invent any — who
+         actually bids against you is your call. Add one with: python -m
+         pipelines.competitors --add ..."
+
+    The principle was right — the agency must not decide who his competitors
+    are — but the consequence was a step of the day that could never do
+    anything until he opened a terminal and typed a command he had no reason to
+    know about. It had produced nothing for as long as the agency had existed.
+
+    Suggesting is not inventing. The SEO desk sees people typing a firm's name
+    followed by "reviews" or "contact number" while searching for glass work in
+    his areas. That is not a guess about the market, it is an observation of it,
+    and it comes with the searches attached so he can see what put it there.
+    Nothing is crawled until he says yes.
+    """
+    nm = (name or "").strip()
+    if len(nm) < 3:
+        return None
+    host = _normalise(domain) if domain else ""
+    con = sqlite3.connect(db or board.DB)
+    try:
+        board.ensure_schema(con)
+        row = con.execute(
+            "SELECT id, evidence FROM competitors WHERE lower(name)=?"
+            + (" OR (domain<>'' AND lower(domain)=?)" if host else ""),
+            ((nm.lower(), host) if host else (nm.lower(),))).fetchone()
+        if row:
+            # Already known — add the new search to the evidence rather than
+            # making a second row. More searches for the same firm is a
+            # stronger case, not a duplicate.
+            try:
+                seen = json.loads(row[1] or "[]")
+            except Exception:
+                seen = []
+            if evidence and evidence not in seen:
+                seen.append(evidence)
+                con.execute("UPDATE competitors SET evidence=? WHERE id=?",
+                            (json.dumps(seen[:12]), row[0]))
+                con.commit()
+            return None
+        cur = con.execute(
+            "INSERT INTO competitors(name,domain,status,evidence,first_seen)"
+            " VALUES(?,?, 'suggested', ?, ?)",
+            (nm, host, json.dumps([evidence] if evidence else []), int(time.time())))
+        con.commit()
+        return cur.lastrowid
+    finally:
+        con.close()
+
+
+def suggested(db=None):
+    """Firms waiting for him to say whether they are rivals."""
+    con = sqlite3.connect(db or board.DB)
+    try:
+        board.ensure_schema(con)
+        out = []
+        for r in con.execute("SELECT id,name,domain,evidence FROM competitors"
+                             " WHERE status='suggested' ORDER BY id"):
+            try:
+                ev = json.loads(r[3] or "[]")
+            except Exception:
+                ev = []
+            out.append({"id": r[0], "name": r[1], "domain": r[2], "evidence": ev})
+        return out
+    finally:
+        con.close()
+
+
+def confirm_suggested(ids=None, db=None) -> int:
+    """He said yes. Returns how many became real rivals."""
+    con = sqlite3.connect(db or board.DB)
+    try:
+        board.ensure_schema(con)
+        if ids:
+            marks = ",".join("?" * len(ids))
+            cur = con.execute(f"UPDATE competitors SET status='confirmed'"
+                              f" WHERE status='suggested' AND id IN ({marks})",
+                              tuple(ids))
+        else:
+            cur = con.execute("UPDATE competitors SET status='confirmed'"
+                              " WHERE status='suggested'")
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
+
+
+def drop_suggested(ids=None, db=None) -> int:
+    """He said no. They go, rather than being asked about again every day."""
+    con = sqlite3.connect(db or board.DB)
+    try:
+        board.ensure_schema(con)
+        if ids:
+            marks = ",".join("?" * len(ids))
+            cur = con.execute(f"DELETE FROM competitors WHERE status='suggested'"
+                              f" AND id IN ({marks})", tuple(ids))
+        else:
+            cur = con.execute("DELETE FROM competitors WHERE status='suggested'")
+        con.commit()
+        return cur.rowcount
     finally:
         con.close()
 
@@ -381,14 +501,76 @@ def run(agent="seo-rival", timeout=15):
         return out
 
 
+CONFIRM_TITLE = "Confirm who your competitors are"
+
+
+def _ask_him_to_confirm(waiting):
+    """
+    Put the suggested rivals in front of him as an amber task, once.
+
+    Amber is the right colour and the existing machinery does the rest: an
+    amber task cannot be claimed until he approves it, approving drops it to
+    green, and the next pass of this desk picks it up and confirms them. He
+    never has to open a terminal, and the agency never decides on its own who
+    he is competing against.
+    """
+    lines = []
+    for r in waiting[:12]:
+        ev = "; ".join(r["evidence"][:3]) or "seen in search"
+        lines.append(f"- {r['name']}" + (f"  ({r['domain']})" if r["domain"] else "")
+                     + f"\n    because people searched: {ev}")
+    body = (
+        "People are searching for these firms by name alongside the glass and "
+        "aluminium searches you want to win. That usually means they are who you "
+        "are up against.\n\n"
+        + "\n".join(lines)
+        + "\n\nApprove this and the agency starts watching their sitemaps — which "
+          "pages they add, what they are pushing this month. Nothing is crawled "
+          "until you say yes. If any of them are not really rivals, say so and "
+          "they will not be suggested again:\n"
+          "  python -m pipelines.competitors --not-a-rival \"Their Name\"")
+    try:
+        return board.try_post_task("SEO", CONFIRM_TITLE, body,
+                                   risk="amber", created_by="seo-rival")
+    except Exception:
+        return None
+
+
 def _watch(agent, run_row, timeout):
     rivals = list_competitors()
     if not rivals:
-        return {"ok": False, "error":
-                "No competitors on file, and this pipeline will not invent any — who "
-                "actually bids against you is your call. Add one with:\n"
-                "  python -m pipelines.competitors --add \"Their Name\" theirdomain.ae\n"
-                "Then run this again."}
+        # HE MAY HAVE ALREADY SAID YES. The confirm task is amber, so it can
+        # only be claimed once he has approved it — claiming it IS the yes.
+        task = board.next_open_task("SEO", agent)
+        if task and CONFIRM_TITLE.lower() in (task.get("title") or "").lower():
+            n = confirm_suggested()
+            board.finish_task(task["id"], agent,
+                              {"did": f"{n} firm(s) confirmed as competitors and "
+                                      "added to the watch list."}, status="done")
+            rivals = list_competitors()
+        elif task:
+            # Not the confirm job — put it straight back for whoever it is for.
+            board.release_claim(task["id"], by=agent,
+                                reason="the rival watcher has no rivals to watch yet")
+
+    if not rivals:
+        waiting = suggested()
+        if waiting:
+            qid = _ask_him_to_confirm(waiting)
+            return {"ok": False, "idle": True,
+                    "suggested": [r["name"] for r in waiting],
+                    "asked": qid,
+                    "error": (f"{len(waiting)} firm(s) look like competitors and are "
+                              "waiting for your yes in the office: "
+                              + ", ".join(r["name"] for r in waiting[:5])
+                              + (f" and {len(waiting) - 5} more" if len(waiting) > 5 else "")
+                              + ". Nothing is crawled until you approve them.")}
+        return {"ok": False, "idle": True, "error":
+                "No competitors on file yet, and this pipeline will not invent any — "
+                "who actually bids against you is your call. The SEO strategist puts "
+                "firms forward here as it sees people searching for them by name, so "
+                "this usually fills itself in within a run or two. To add one now:\n"
+                "  python -m pipelines.competitors --add \"Their Name\" theirdomain.ae"}
 
     # Rival sitemaps are OUTSIDE data, so the borrow is flagged for escalation and
     # Security is told what was read. Same treatment seo_gap gives Google Suggest:
@@ -538,6 +720,12 @@ def main():
     ap.add_argument("--add", nargs=2, metavar=("NAME", "DOMAIN"),
                     help='register a rival, e.g. --add "Al Noor Glass" alnoorglass.ae')
     ap.add_argument("--list", action="store_true", help="show the rivals on file")
+    ap.add_argument("--suggested", action="store_true",
+                    help="firms the SEO desk has put forward, and why")
+    ap.add_argument("--confirm-all", action="store_true",
+                    help="accept every suggested firm as a real competitor")
+    ap.add_argument("--not-a-rival", metavar="NAME",
+                    help="reject one suggested firm so it stops being asked about")
     a = ap.parse_args()
 
     if a.add:
@@ -545,10 +733,38 @@ def main():
         print(f"added #{rid}: {a.add[0]} ({_normalise(a.add[1])})" if rid
               else f"already on file: {_normalise(a.add[1])}")
         return
+    if a.suggested:
+        waiting = suggested()
+        if not waiting:
+            print("Nothing waiting. The SEO strategist puts firms forward here "
+                  "as it sees people searching for them by name.")
+            return
+        for r in waiting:
+            print(f'#{r["id"]}  {r["name"]}' + (f'  {r["domain"]}' if r["domain"] else ""))
+            for ev in r["evidence"][:3]:
+                print(f'        because people searched: {ev}')
+        print("\nAccept them all with --confirm-all, or reject one with "
+              '--not-a-rival "Their Name".')
+        return
+    if a.confirm_all:
+        print(f"{confirm_suggested()} firm(s) are now on the watch list.")
+        return
+    if a.not_a_rival:
+        want = a.not_a_rival.strip().lower()
+        ids = [r["id"] for r in suggested() if r["name"].strip().lower() == want]
+        if not ids:
+            print(f'"{a.not_a_rival}" is not among the suggested firms. '
+                  "See --suggested.")
+            return
+        print(f"{drop_suggested(ids)} removed — it will not be suggested again.")
+        return
     if a.list:
         rivals = list_competitors()
+        waiting = suggested()
         print("\n".join(f'#{r["id"]}  {r["name"]}  {r["domain"]}' for r in rivals)
-              if rivals else "No rivals on file. Add one with --add.")
+              if rivals else "No confirmed rivals on file. Add one with --add.")
+        if waiting:
+            print(f"\n{len(waiting)} waiting for your yes — see --suggested.")
         return
     print(json.dumps(run(), indent=2))
 

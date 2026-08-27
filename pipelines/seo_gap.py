@@ -166,6 +166,51 @@ _TRADE_WORDS = {"glass", "aluminium", "aluminum", "works", "dubai", "sharjah",
                 "industries", "emirates", "national", "general", "decor"}
 
 
+def rival_name_in(phrase) -> str:
+    """
+    The firm's name out of a branded lookup, or "" if there is not one.
+
+    "febtech glass works dubai reviews"  ->  "febtech"
+    "al reef aluminium contact number"   ->  "al reef"
+    "glass partition dubai price"        ->  ""
+
+    THE SEO DESK WAS ALREADY SEEING THESE AND THROWING THEM AWAY. A phrase like
+    the first one is dropped from the gap list, correctly — nobody searching
+    "febtech reviews" is going to hire him instead. But it is also the single
+    best free evidence there is of who he is actually up against, and it went
+    in the bin. It now goes to the Rival Watcher as a suggestion for him to
+    confirm, which is what stops that step being dead until he types a command.
+
+    What is left after the navigational suffix, the place names and the trade
+    words come off is the part that identifies the firm. If nothing is left,
+    there was no brand in it.
+    """
+    p = " " + re.sub(r"[^a-z0-9 &]+", " ", (phrase or "").lower()) + " "
+    if not _BRAND_RE.search(p):
+        return ""
+    for suffix in sorted(BRAND_LOOKUP, key=len, reverse=True):
+        p = p.replace(" " + suffix + " ", " ")
+    words = [w for w in p.split() if w and w != "&"]
+    # Trim from the RIGHT: the brand comes first in every one of these phrases
+    # ("febtech glass works dubai"), so the trade and place words to strip are
+    # the tail. Stopping at the first word that is neither keeps a two-word
+    # brand like "al reef" intact.
+    while words:
+        last = words[-1]
+        if last in _TRADE_WORDS or uae.place_in(last) or last in {"in", "near", "the"}:
+            words.pop()
+            continue
+        break
+    name = " ".join(words).strip()
+    # One bare word that is itself generic is not a brand, and neither is a
+    # phrase so long it is clearly a sentence rather than a company.
+    if not name or len(name) < 3 or len(words) > 4:
+        return ""
+    if all(w in _TRADE_WORDS for w in words):
+        return ""
+    return name
+
+
 def _in_scope(phrase):
     p = phrase.lower()
     # A search for a named rival is somebody looking for THAT firm, not for a
@@ -279,19 +324,39 @@ def _gap(agent, max_seeds, cost_ceiling, job=None):
                 fetched.extend(sug)
             time.sleep(0.3)  # be polite to the source
 
-        seen, gaps = set(), []
+        seen, gaps, rivals_seen = set(), [], {}
         for ph in fetched:
             if ph in existing or ph in seen or not _in_scope(ph):
+                # A dropped phrase is not always worthless. A branded lookup is
+                # somebody searching for a named firm alongside the work he
+                # does, which is the best free evidence there is of who he
+                # competes with — and it used to go straight in the bin. See
+                # rival_name_in.
+                who = rival_name_in(ph)
+                if who:
+                    rivals_seen.setdefault(who, []).append(ph)
                 continue
             seen.add(ph)
             gaps.append({"phrase": ph, "intent": _intent(ph), "area": _area_of(ph)})
         gaps.sort(key=lambda g: (g["intent"] != "buy", g["phrase"]))
 
+        # Suggestions only. Nothing is crawled until he confirms them in the
+        # office — see pipelines/competitors.suggest_rival.
+        put_forward = []
+        for who, why in sorted(rivals_seen.items()):
+            try:
+                from . import competitors as _rivals
+                if _rivals.suggest_rival(who, evidence=why[0]):
+                    put_forward.append(who)
+            except Exception:
+                break
+
         ok, reasons = critic_check(gaps, seeds_used)
         result = {"ok": True, "agent": agent, "source": source, "source_kind": source_kind,
                   "borrow_approval": approval, "seeds_tried": len(seeds),
                   "seeds_answered": len(seeds_used), "suggestions_seen": len(fetched),
-                  "gaps_found": len(gaps)}
+                  "gaps_found": len(gaps),
+                  "rivals_put_forward": put_forward}
         if not ok:
             result.update({"posted": False, "critic": "rejected", "critic_reasons": reasons})
             return result

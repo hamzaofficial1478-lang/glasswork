@@ -144,7 +144,13 @@ CREATE TABLE IF NOT EXISTS rankings (
 
 CREATE TABLE IF NOT EXISTS competitors (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT, domain TEXT, gbp_reviews INTEGER
+  name TEXT, domain TEXT, gbp_reviews INTEGER,
+  -- 'suggested' = the SEO desk saw people searching for this firm by name and
+  -- is asking whether it counts as a rival. NULL or 'confirmed' = he said yes,
+  -- or he added it himself. Only confirmed rivals are ever crawled.
+  status TEXT,
+  evidence TEXT,                       -- the searches that put it here
+  first_seen INTEGER
 );
 CREATE TABLE IF NOT EXISTS competitor_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -267,7 +273,9 @@ CREATE TABLE IF NOT EXISTS site_changes (
   undo_cmd     TEXT,                 -- the exact command, or '' if there isn't one
   issue_id     INTEGER,              -- the ticket it came from, when there is one
   ok           INTEGER DEFAULT 1,    -- a refused write is still worth recording
-  error        TEXT
+  error        TEXT,
+  detail       TEXT                  -- JSON list of plain lines: what actually
+                                     -- changed on the page, item by item
 );
 CREATE INDEX IF NOT EXISTS idx_site_changes_at ON site_changes(at);
 
@@ -282,7 +290,13 @@ CREATE TABLE IF NOT EXISTS site_fingerprints (
   digest  TEXT,                      -- sha1 of the content; mtime alone lies,
                                      -- because a touch moves it and a rewrite
                                      -- with the same length does not move bytes
-  seen_at INTEGER
+  seen_at INTEGER,
+  -- WHAT THE PAGE SAID LAST TIME. A digest tells you a page moved; it cannot
+  -- tell you what moved, and "home.html was changed by somebody, 340 bytes
+  -- bigger" is not an answer to "was an article posted, was the code changed".
+  -- Keeping the last snapshot is what lets the next sweep say. Text and markup
+  -- shape only, capped — this is a comparison aid, not a backup.
+  snapshot TEXT
 );
 
 CREATE TABLE IF NOT EXISTS lighthouse (

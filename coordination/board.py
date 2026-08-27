@@ -1001,6 +1001,20 @@ _ADDED_COLUMNS = (
     # registered domain of the website, and the company name with its legal
     # suffixes and punctuation stripped. Existing rows are backfilled once, so
     # a cabinet that already holds duplicates stops adding to them.
+    # A rival the SEO desk has SEEN people search for by name, waiting for him
+    # to say whether it is actually a competitor. See pipelines/competitors.py:
+    # "who actually bids against you is your call" was right and left the whole
+    # step dead until he typed a command, which he never had reason to do.
+    # NULL means confirmed — every row that existed before this was one he
+    # added by hand.
+    # What actually changed on a page, and the snapshot that lets the next
+    # sweep work it out. "there is section about website changes but it did not
+    # gave the detailed berief about that".
+    ("site_changes",   "detail",     "TEXT"),
+    ("site_fingerprints", "snapshot", "TEXT"),
+    ("competitors",  "status",       "TEXT"),
+    ("competitors",  "evidence",     "TEXT"),
+    ("competitors",  "first_seen",   "INTEGER"),
     ("leads",        "phone_key",    "TEXT"),
     ("leads",        "domain_key",   "TEXT"),
     ("leads",        "company_key",  "TEXT"),

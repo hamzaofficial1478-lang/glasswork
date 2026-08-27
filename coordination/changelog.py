@@ -34,6 +34,8 @@ that something got overwritten.
 """
 import argparse
 import hashlib
+import re
+from html import unescape as _unescape
 import json
 import sqlite3
 import sys
@@ -51,6 +53,158 @@ OUTSIDE = "outside"
 OURS_WINDOW = 900
 
 
+# ---------------------------------------------------------------------------
+# WHAT ACTUALLY CHANGED
+# ---------------------------------------------------------------------------
+#
+# "there is section about website changes but it did not gave the detailed
+#  berief about that ... either what is changed is any article is posted on
+#  webiste is any code is changed"
+#
+# The log knew a page had moved and how many bytes by. That is the difference
+# between a smoke alarm and a fire report. "home.html was changed by somebody
+# other than the agency, 340 bytes bigger" tells him something happened and
+# nothing about what, so he still has to go and open the file — which is the
+# job the panel existed to save him.
+#
+# Answering it properly needs the OLD page, so the sweep now keeps a snapshot
+# of each page beside its digest. Two passes later it can say: the title
+# changed from this to that, two headings appeared, a script from a new host
+# was added, the phone number in the footer is different.
+#
+# Deliberately shape and text, not a diff. A unified diff of minified HTML is
+# unreadable and he would never look at it twice.
+
+_SNAP_CHARS = 200_000     # a page far bigger than this is not a page
+
+_TAG = re.compile(r"<[^>]+>")
+_SCRIPTY = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1\s*>", re.S | re.I)
+_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
+_HEADING = re.compile(r"<h([1-3])[^>]*>(.*?)</h\1\s*>", re.S | re.I)
+_IMG = re.compile(r"<img\b[^>]*>", re.I)
+_SRC = re.compile(r"<script\b[^>]*\bsrc\s*=\s*[\"']([^\"']+)", re.I)
+_HREF = re.compile(r"<a\b[^>]*\bhref\s*=\s*[\"']([^\"']+)", re.I)
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_PHONE = re.compile(r"(?:\+?971|0)\s?\d[\d\s\-()]{6,13}\d")
+_WS = re.compile(r"\s+")
+
+
+def _plain(s) -> str:
+    """Markup off and entities decoded. A title written &amp; is an ampersand;
+    comparing the raw source would report a change every time somebody's editor
+    re-escaped it."""
+    return _WS.sub(" ", _unescape(_TAG.sub(" ", s or ""))).strip()
+
+
+def _visible(html) -> str:
+    """The words a visitor reads, with the markup and the code taken out."""
+    return _plain(_SCRIPTY.sub(" ", html or ""))
+
+
+def shape_of(html) -> dict:
+    """
+    A page reduced to the handful of things worth comparing.
+
+    Small enough to store beside the fingerprint, specific enough that the
+    difference between two of them reads as a sentence.
+    """
+    h = (html or "")[:_SNAP_CHARS]
+    title = _TITLE.search(h)
+    return {
+        "title": _plain(title.group(1)) if title else "",
+        "headings": [_plain(m.group(2)) for m in _HEADING.finditer(h)][:60],
+        "images": len(_IMG.findall(h)),
+        "scripts": sorted({s.strip() for s in _SRC.findall(h)})[:40],
+        "links": sorted({l.strip() for l in _HREF.findall(h)
+                         if l.strip().startswith("http")})[:80],
+        "emails": sorted({e.lower() for e in _EMAIL.findall(_visible(h))})[:20],
+        "phones": sorted({re.sub(r"\D", "", p)[-9:] for p in _PHONE.findall(_visible(h))})[:20],
+        "words": len(_visible(h).split()),
+        "code_bytes": sum(len(m.group(0)) for m in _SCRIPTY.finditer(h)),
+    }
+
+
+def _named(items, limit=3):
+    got = [i for i in items if i][:limit]
+    more = len(items) - len(got)
+    return ", ".join(f"“{g[:60]}”" for g in got) + (f" and {more} more" if more > 0 else "")
+
+
+def describe(before, after) -> list:
+    """
+    What changed between two shapes, in plain lines he can read at a glance.
+
+    Ordered by what he would care about: the words on the page first, then the
+    things that break trust (a changed phone number, a new script), then the
+    cosmetic. Returns [] when the shapes are the same, which is itself an
+    answer — "the file moved but the page did not".
+    """
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return []
+    out = []
+
+    b_h, a_h = list(before.get("headings") or []), list(after.get("headings") or [])
+    gained = [h for h in a_h if h not in b_h]
+    lost = [h for h in b_h if h not in a_h]
+    words = (after.get("words") or 0) - (before.get("words") or 0)
+
+    # An article looks like this: new headings and a big block of new words.
+    if gained and words >= 120:
+        out.append(f"Looks like new writing was published — {len(gained)} new "
+                   f"heading(s) and about {words} more words. New: {_named(gained)}")
+    else:
+        if gained:
+            out.append(f"{len(gained)} heading(s) added: {_named(gained)}")
+        if abs(words) >= 25:
+            out.append(f"About {abs(words)} words {'added' if words > 0 else 'removed'}.")
+    if lost:
+        out.append(f"{len(lost)} heading(s) removed: {_named(lost)}")
+
+    if (before.get("title") or "") != (after.get("title") or ""):
+        out.append(f"Page title changed from “{before.get('title') or '(none)'}” "
+                   f"to “{after.get('title') or '(none)'}”.")
+
+    b_p, a_p = set(before.get("phones") or []), set(after.get("phones") or [])
+    if b_p - a_p:
+        out.append(f"A phone number was removed: ...{', ...'.join(sorted(b_p - a_p))}")
+    if a_p - b_p:
+        out.append(f"A phone number was added: ...{', ...'.join(sorted(a_p - b_p))}")
+    b_e, a_e = set(before.get("emails") or []), set(after.get("emails") or [])
+    if b_e - a_e:
+        out.append(f"An email address was removed: {', '.join(sorted(b_e - a_e))}")
+    if a_e - b_e:
+        out.append(f"An email address was added: {', '.join(sorted(a_e - b_e))}")
+
+    b_s, a_s = set(before.get("scripts") or []), set(after.get("scripts") or [])
+    if a_s - b_s:
+        out.append("Code was added — new script(s): " + _named(sorted(a_s - b_s)))
+    if b_s - a_s:
+        out.append("Code was removed — script(s) gone: " + _named(sorted(b_s - a_s)))
+    inline = (after.get("code_bytes") or 0) - (before.get("code_bytes") or 0)
+    if abs(inline) >= 200 and not (a_s - b_s) and not (b_s - a_s):
+        out.append(f"About {abs(inline)} bytes of inline code "
+                   f"{'added' if inline > 0 else 'removed'}.")
+
+    imgs = (after.get("images") or 0) - (before.get("images") or 0)
+    if imgs:
+        out.append(f"{abs(imgs)} image(s) {'added' if imgs > 0 else 'removed'}.")
+
+    b_l, a_l = set(before.get("links") or []), set(after.get("links") or [])
+    if a_l - b_l:
+        out.append(f"{len(a_l - b_l)} outgoing link(s) added: "
+                   + _named([_host(u) for u in sorted(a_l - b_l)]))
+    if b_l - a_l:
+        out.append(f"{len(b_l - a_l)} outgoing link(s) removed.")
+
+    return out
+
+
+def _host(url):
+    s = str(url or "")
+    s = re.sub(r"^[a-z]+://", "", s).split("/")[0]
+    return s[4:] if s.startswith("www.") else s
+
+
 def _now():
     return int(time.time())
 
@@ -66,7 +220,7 @@ def digest_of(html) -> str:
 
 def record(action, page="", agent="", summary="", source=AGENCY, block_id="",
            bytes_before=None, bytes_after=None, backup="", undo_cmd="",
-           issue_id=None, ok=True, error="") -> int:
+           issue_id=None, ok=True, error="", detail=None) -> int:
     """
     One line in the log. Never raises.
 
@@ -81,13 +235,15 @@ def record(action, page="", agent="", summary="", source=AGENCY, block_id="",
             board.ensure_schema(c)
             cur = c.execute(
                 "INSERT INTO site_changes(at,source,agent,action,page,block_id,"
-                " summary,bytes_before,bytes_after,backup,undo_cmd,issue_id,ok,error)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " summary,bytes_before,bytes_after,backup,undo_cmd,issue_id,ok,"
+                " error,detail)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (_now(), source, (agent or "")[:40], (action or "")[:30],
                  (page or "")[:200], (block_id or "")[:60], (summary or "")[:500],
                  bytes_before, bytes_after, (backup or "")[:120],
                  (undo_cmd or "")[:300], issue_id, 1 if ok else 0,
-                 (error or "")[:300]))
+                 (error or "")[:300],
+                 json.dumps(list(detail)[:20]) if detail else None))
             return cur.lastrowid
     except Exception:
         return 0
@@ -197,8 +353,9 @@ def sweep(seen) -> dict:
         html = row.get("html")
         dig = digest_of(html) if html is not None else ""
         size = len(html) if html is not None else row.get("bytes")
+        shape = shape_of(html) if html is not None else None
         now_pages[page] = {"bytes": size, "changed": row.get("changed") or "",
-                           "digest": dig}
+                           "digest": dig, "shape": shape}
         was = known.get(page)
         if was is None:
             if baseline:
@@ -222,15 +379,26 @@ def sweep(seen) -> dict:
             ours.append(page)
             continue
         edited.append(page)
+        # WHAT changed, not merely THAT it changed. Needs the previous
+        # snapshot, which is why the sweep keeps one — see describe().
+        lines = []
+        if shape is not None:
+            try:
+                lines = describe(json.loads(was.get("snapshot") or "null"), shape)
+            except Exception:
+                lines = []
         delta = ""
         if isinstance(size, int) and isinstance(was["bytes"], int):
             d = size - was["bytes"]
             delta = (f", {abs(d)} bytes {'bigger' if d > 0 else 'smaller'}"
                      if d else ", same size but different content")
         record("edited", page=page, source=OUTSIDE,
-               bytes_before=was["bytes"], bytes_after=size,
+               bytes_before=was["bytes"], bytes_after=size, detail=lines,
                summary=f"{page} was changed by somebody other than the agency"
-                       + delta)
+                       + delta
+                       + (" — " + lines[0] if lines else
+                          "; the file moved but the page reads the same"
+                          if shape is not None else ""))
 
     for page in known:
         if page in now_pages:
@@ -246,13 +414,18 @@ def sweep(seen) -> dict:
         with sqlite3.connect(board.DB, timeout=30) as c:
             board.ensure_schema(c)
             for page, v in now_pages.items():
+                snap = json.dumps(v["shape"]) if v.get("shape") is not None else None
                 c.execute(
-                    "INSERT INTO site_fingerprints(page,bytes,changed,digest,seen_at)"
-                    " VALUES(?,?,?,?,?)"
+                    "INSERT INTO site_fingerprints(page,bytes,changed,digest,"
+                    " seen_at,snapshot) VALUES(?,?,?,?,?,?)"
                     " ON CONFLICT(page) DO UPDATE SET bytes=excluded.bytes,"
                     "   changed=excluded.changed, digest=excluded.digest,"
-                    "   seen_at=excluded.seen_at",
-                    (page, v["bytes"], v["changed"], v["digest"], _now()))
+                    "   seen_at=excluded.seen_at,"
+                    # Keep the last snapshot when this pass could not read the
+                    # page. Overwriting it with nothing would mean the next
+                    # real change has nothing to be compared against.
+                    "   snapshot=COALESCE(excluded.snapshot, site_fingerprints.snapshot)",
+                    (page, v["bytes"], v["changed"], v["digest"], _now(), snap))
             for page in gone:
                 c.execute("UPDATE site_fingerprints SET bytes=NULL, digest='',"
                           " seen_at=? WHERE page=?", (_now(), page))
@@ -302,6 +475,12 @@ def recent(limit=30, page="", source="") -> dict:
 
     for r in rows:
         r["when"] = _ago(_now() - (r["at"] or _now()))
+        # The line-by-line answer to "what changed". Stored as JSON so the
+        # office can render it as a list rather than one run-on sentence.
+        try:
+            r["detail"] = json.loads(r.get("detail") or "[]")
+        except Exception:
+            r["detail"] = [str(r.get("detail"))] if r.get("detail") else []
         r["by"] = ("the agency — " + (r["agent"] or "an agent")
                    if r["source"] == AGENCY else "somebody else")
     return {"ok": True, "changes": rows, "total": total,
