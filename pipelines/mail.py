@@ -526,10 +526,16 @@ def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=N
         return None
 
 
-def send_plain(to: str, subject: str, body: str) -> dict:
+def send_plain(to: str, subject: str, body: str, html: str = "") -> dict:
     """
     One mail to an address the OWNER typed. Not outreach, and never treated as
     outreach.
+
+    `html`, when given, rides along as an ALTERNATIVE to the plain body rather
+    than replacing it. Both halves go in one message and the client picks: a
+    phone shows the pictures, a text-only reader shows the words, and a spam
+    filter — which scores a message with no text part badly on sight — finds
+    one. Which is why the body is still required even when there is html.
 
     Kept apart from _smtp_send on purpose, and the difference is the point.
     _smtp_send is the outreach boundary: it checks the daily cap, enforces the
@@ -562,6 +568,10 @@ def send_plain(to: str, subject: str, body: str) -> dict:
     msg["To"] = to
     msg["Subject"] = subject or "(no subject)"
     msg.set_content(body or "")
+    if html:
+        # add_alternative, not set_content: set_content would throw the plain
+        # text away and leave a message with no text part at all.
+        msg.add_alternative(html, subtype="html")
     try:
         port = int((setting("SMTP_PORT") or "587").strip() or 587)
     except ValueError:
