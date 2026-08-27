@@ -110,6 +110,7 @@ def main():
     _critic_tests()
     _cycle_tests()
     _suggestion_tests()
+    _discovery_tests()
 
     if _fail:
         print(f"\n{len(_fail)} FAILED: {_fail}")
@@ -195,10 +196,20 @@ def _cycle_tests():
     board.DB = _fresh_db()
     real_get = comp._get
     try:
-        print("With no rivals on file it refuses to invent one:")
-        out = comp.run()
-        check("it refuses", out["ok"], False)
-        check("and names the command that fixes it", "--add" in out["error"], True)
+        print("With no rivals on file it goes and looks, and invents nothing:")
+        # The map is mocked out here rather than called. This suite must not
+        # depend on a free public endpoint being up — see _discovery_tests for
+        # the search itself, against a recorded reply.
+        from unittest import mock
+        with mock.patch.object(comp, "discover",
+                               lambda *a, **k: {"ok": False, "found": 0,
+                                                "suggested": [], "areas": [],
+                                                "error": "the map did not answer"}):
+            out = comp.run()
+        check("it refuses to invent one", out["ok"], False)
+        check("it is not called a failure either", out.get("idle"), True)
+        check("and it says it went looking", out.get("looked"), True)
+        check("naming the command that fixes it now", "--add" in out["error"], True)
 
         print("Registering a rival:")
         rid = comp.add_competitor("Al Noor Glass", "https://www.alnoor.ae/")
@@ -343,6 +354,172 @@ class _Row:
 
     def note(self, _text):
         pass
+
+
+# ---------------------------------------------------------------------------
+# GOING AND FINDING THEM
+# ---------------------------------------------------------------------------
+
+# What Overpass actually hands back, in its real shape — see osm_tests for the
+# same fixtures used the other way round. The traps are deliberate: our own
+# company, a windscreen fitter, an optician and a hotel all come back from a
+# name search for "glass" and none of them is bidding against him for a shower
+# screen.
+def _el(_id, name, **tags):
+    return {"type": "node", "id": _id, "tags": dict({"name": name}, **tags)}
+
+
+OSM_REPLY = [
+    _el(1, "Al Noor Glass & Aluminium LLC", craft="glaziery",
+        website="https://www.alnoorglass.ae", **{"addr:city": "Dubai"}),
+    _el(2, "Gulf Aluminium Fabrication", office="company",
+        **{"contact:website": "gulfalufab.ae"}),
+    _el(3, "Emirates Glaziery Works", shop="glaziery"),          # no website
+    _el(4, "World Deal Technical Services", office="company",
+        website="https://www.worlddealtechnicalservices.com"),   # us
+    _el(5, "Speedy Auto Glass & Windscreen", shop="car_repair"),  # not a rival
+    _el(6, "Al Jaber Optical Glasses", shop="optician"),          # not a rival
+    _el(7, "Grand Millennium Hotel", tourism="hotel"),            # not in the trade
+    _el(8, "AL NOOR GLASS & ALUMINIUM L.L.C.", craft="glaziery",
+        website="http://alnoorglass.ae/contact"),                 # the same firm again
+]
+
+
+def _discovery_tests():
+    """
+    "the agent should find our competitors in our related services in UAE"
+
+    Waiting to be told, and then waiting for somebody to search a rival by
+    name, are both passive. This goes and looks at the map — and everything it
+    finds is still only a suggestion until he says yes.
+    """
+    from unittest import mock
+    from coordination import uae
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        print("\nWhat comes back from the map, and what survives:")
+        with mock.patch.object(comp, "_me",
+                               lambda: {"name": "World Deal Technical Services",
+                                        "domain": "worlddealtechnicalservices.com"}), \
+             mock.patch("pipelines.leads_osm.ask",
+                        lambda q, timeout=0: {"ok": True, "elements": OSM_REPLY}), \
+             mock.patch("time.sleep", lambda *_: None):
+            r = comp.discover(areas=["Dubai"])
+
+        names = [s["name"] for s in comp.suggested()]
+        check("the glazier is put forward", "Al Noor Glass & Aluminium LLC" in names, True)
+        check("so is the fabricator named for the trade",
+              "Gulf Aluminium Fabrication" in names, True)
+        check("and one with no website, because he may know them",
+              "Emirates Glaziery Works" in names, True)
+        check("we are not our own rival",
+              "World Deal Technical Services" in names, False)
+        check("a windscreen fitter is not one either",
+              any("Windscreen" in n for n in names), False)
+        check("nor an optician", any("Optical" in n for n in names), False)
+        check("nor a hotel", any("Hotel" in n for n in names), False)
+        check("the same firm listed twice is one suggestion",
+              sum(1 for n in names if n.lower().startswith("al noor glass")), 1)
+
+        print("\nEach one says what put it there:")
+        noor = next(s for s in comp.suggested() if s["name"].startswith("Al Noor"))
+        check("the domain came off the map", noor["domain"], "alnoorglass.ae")
+        check("and the evidence names the source",
+              "OpenStreetMap" in noor["evidence"][0], True)
+        check("and the emirate", "Dubai" in noor["evidence"][0], True)
+
+        print("\nStill only a suggestion — nothing is crawled:")
+        check("no confirmed rivals", comp.list_competitors(), [])
+
+        print("\nRunning it again does not pile up duplicates:")
+        before = len(comp.suggested())
+        with mock.patch.object(comp, "_me",
+                               lambda: {"name": "World Deal Technical Services",
+                                        "domain": "worlddealtechnicalservices.com"}), \
+             mock.patch("pipelines.leads_osm.ask",
+                        lambda q, timeout=0: {"ok": True, "elements": OSM_REPLY}), \
+             mock.patch("time.sleep", lambda *_: None):
+            comp.discover(areas=["Dubai"])
+        check("same count", len(comp.suggested()), before)
+
+        print("\nThe query asks the map about the right trade:")
+        seen = {}
+        with mock.patch.object(comp, "_me", lambda: {"name": "", "domain": ""}), \
+             mock.patch("pipelines.leads_osm.ask",
+                        lambda q, timeout=0: (seen.setdefault("q", q),
+                                              {"ok": True, "elements": []})[1]), \
+             mock.patch("time.sleep", lambda *_: None):
+            comp.discover(areas=["Sharjah"])
+        q = seen.get("q", "")
+        check("it asks for glaziers", 'craft"="glaziery' in q, True)
+        check("and window makers", 'craft"="window_construction' in q, True)
+        check("and searches names for the trade words", "[Aa]lumin" in q, True)
+        check("inside Sharjah's box", "25.27,55.35,25.45,55.65" in q, True)
+        check("and asks for centres so buildings come back too", "out center" in q, True)
+
+        print("\nA few emirates per pass, and all seven within a week:")
+        # Seven queries a day against a free, donated endpoint is not
+        # neighbourly, and the map does not change hourly. It rotates.
+        from pipelines import leads_osm as osm
+        every = [a for a in uae.EMIRATES if a in osm.BBOX]
+        check("every emirate has a box on the map", len(every), 7)
+        check("including Umm Al Quwain, which had none",
+              "Umm Al Quwain" in osm.BBOX, True)
+
+        asked = []
+        with mock.patch.object(comp, "_me", lambda: {"name": "", "domain": ""}), \
+             mock.patch("pipelines.leads_osm.ask",
+                        lambda q, timeout=0: (asked.append(q),
+                                              {"ok": True, "elements": []})[1]), \
+             mock.patch("time.sleep", lambda *_: None):
+            comp.discover()
+        check("a handful this pass, not all of them",
+              len(asked), comp.AREAS_PER_PASS)
+
+        covered = set()
+        for day in range(1, 15):
+            with mock.patch("time.gmtime",
+                            lambda *_: type("T", (), {"tm_yday": day})()):
+                covered.update(comp._next_areas(every))
+        check("and a fortnight of runs covers the country",
+              sorted(covered), sorted(every))
+
+        print("\n...and an area he names is honoured rather than rotated:")
+        asked = []
+        with mock.patch.object(comp, "_me", lambda: {"name": "", "domain": ""}), \
+             mock.patch("pipelines.leads_osm.ask",
+                        lambda q, timeout=0: (asked.append(q),
+                                              {"ok": True, "elements": []})[1]), \
+             mock.patch("time.sleep", lambda *_: None):
+            comp.discover(areas=["Fujairah"])
+        check("one query", len(asked), 1)
+        check("for Fujairah", osm.BBOX["Fujairah"] in asked[0], True)
+
+        print("\nThe map being down is not the agency inventing rivals:")
+        board.DB = _fresh_db()
+        with mock.patch("pipelines.leads_osm.ask",
+                        lambda q, timeout=0: {"ok": False, "elements": [],
+                                              "error": "no Overpass mirror answered"}), \
+             mock.patch("time.sleep", lambda *_: None):
+            r = comp.discover(areas=["Dubai"])
+        check("it says so", r["ok"], False)
+        check("names the reason", "no Overpass mirror" in r["error"], True)
+        check("and suggested nobody", comp.suggested(), [])
+
+        print("\nAnd the watcher goes looking on its own rather than dead-ending:")
+        board.DB = _fresh_db()
+        with mock.patch.object(comp, "_me", lambda: {"name": "", "domain": ""}), \
+             mock.patch("pipelines.leads_osm.ask",
+                        lambda q, timeout=0: {"ok": True, "elements": OSM_REPLY}), \
+             mock.patch("time.sleep", lambda *_: None):
+            out = comp._watch("seo-rival", _Row(), 5)
+        check("it found some", len(comp.suggested()) > 0, True)
+        check("and put them to him", "waiting for your yes" in out["error"], True)
+        check("which is not a failure", out.get("idle"), True)
+    finally:
+        board.DB = real_db
+
 
 if __name__ == "__main__":
     main()

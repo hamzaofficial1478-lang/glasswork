@@ -213,6 +213,39 @@ def _worst(*states):
     return min(states, key=lambda s: _RANK[s])
 
 
+# WHAT EACH SECTOR'S MODEL ACTUALLY DOES, which is not the same for all seven
+# and was nowhere on any screen.
+#
+# "double check each sector had modules integrated"
+#
+# Fair question, and the honest answer is more interesting than yes. A model is
+# routed per sector and all seven use one to WORD the requests they send each
+# other — that is coordination/ask.py, and it is why a sector with no brain
+# falls back to a template and says so. But only two sectors put a model to
+# work producing anything:
+#
+#   Content   writes the pages. Without a model it writes nothing at all, on
+#             purpose — see pipelines/content_write.
+#   Leads     writes the outreach mail — pipelines/mail.
+#
+# The other five are deterministic code. IT reads his site and compares it to
+# rules; SEO counts and ranks what it fetched; Report adds up rows; Security
+# matches patterns; the MD plans from the cabinet. Their model writes the
+# wording of a request and answers him in the office drawer, and that is all it
+# is for. That is a design choice rather than a gap — a number you can check is
+# worth more than a model's opinion of it — but he should be able to see which
+# is which rather than assuming every sector is thinking.
+BRAIN_DOES = {
+    "content": "writes the pages. No model routed means no page is written",
+    "leads": "writes the outreach mail",
+    "md": "plans the day and challenges the plan",
+    "it": "wording only — the site checks themselves are code, not judgement",
+    "seo": "wording only — the rankings and gaps are counted, not guessed",
+    "report": "wording only — the digest is added up from rows",
+    "security": "wording only — the screening is pattern matching",
+}
+
+
 def sector(key, task, env=None, shelf=None) -> dict:
     """One sector's verdict, with the reason spelled out in plain words."""
     env = _read_env() if env is None else env
@@ -273,6 +306,7 @@ def sector(key, task, env=None, shelf=None) -> dict:
 
     return {"sector": key, "state": state, "says": says,
             "brains": b, "shelves": shelf,
+            "brain_does": BRAIN_DOES.get(key, ""),
             "blocking": blocking, "thin": thin, "notes": notes}
 
 
@@ -374,6 +408,8 @@ def as_text() -> str:
     L = [f"SECTOR READINESS — {d['head']}"]
     for s in d["sectors"]:
         L.append(f"  {mark[s['state']]} {s['label']:22} {s['state']:9} {s['says']}")
+        if s.get("brain_does"):
+            L.append(f"      its model {s['brain_does']}")
     ck = d["checked"]
     L.append("")
     L.append(f"  last proven: {ck['ago'] // 60} min ago" if ck

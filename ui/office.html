@@ -733,7 +733,13 @@ function readyOf(key){
    part you read from across the screen; the words are in the tooltip. */
 function readyChip(rd, roomName, width){
   if(!rd) return '';
-  const tip=[rd.says,...(rd.blocking||[]),...(rd.thin||[]),...(rd.notes||[])]
+  /* "double check each sector had modules integrated" — the light said whether
+     a model answers, never what that model is FOR. Only Content and Leads put
+     one to work producing anything; the rest use theirs to word the requests
+     they send each other. That is a design choice and he should be able to see
+     it rather than assume every sector is thinking. */
+  const tip=[rd.says,...(rd.brain_does?['its model '+rd.brain_does]:[]),
+             ...(rd.blocking||[]),...(rd.thin||[]),...(rd.notes||[])]
     .filter((v,i,a)=>v&&a.indexOf(v)===i).join('\n');
   const st = oneOf(rd.state, RDY_STATES);
   const word = RDY_WORD[st];
@@ -1994,7 +2000,8 @@ function runCheckResult(){
   sect.forEach(s=>{
     const tone={ready:'ok',unchecked:'dim',thin:'warn',blocked:'bad'}[s.state]||'dim';
     const mark={ready:'✓',unchecked:'·',thin:'!',blocked:'✕'}[s.state]||'·';
-    H += chk(tone, mark, s.label+' — '+s.state, s.says);
+    H += chk(tone, mark, s.label+' — '+s.state,
+             s.says + (s.brain_does ? ' · its model '+s.brain_does : ''));
   });
   const badPipes=(c.pipelines||[]).filter(p=>!p.ok);
   H += badPipes.length

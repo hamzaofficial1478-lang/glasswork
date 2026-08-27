@@ -85,6 +85,11 @@ BBOX = {
     "Sharjah":          "25.27,55.35,25.45,55.65",
     "Ajman":            "25.38,55.42,25.48,55.58",
     "Ras Al Khaimah":   "25.65,55.85,25.90,56.10",
+    # UMM AL QUWAIN WAS MISSING, and it is an emirate he works in. Every list
+    # in this program now reads coordination/uae.py, and that one has all seven
+    # — so an emirate absent from here is an emirate the map search silently
+    # skips while the rest of the agency believes it is covered.
+    "Umm Al Quwain":    "25.50,55.53,25.62,55.75",
     "Al Ain":           "24.13,55.66,24.30,55.86",
     "Fujairah":         "25.08,56.28,25.20,56.40",
 }

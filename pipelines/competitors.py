@@ -377,6 +377,225 @@ def suggest_rival(name, evidence="", domain="", db=None):
         con.close()
 
 
+# ---------------------------------------------------------------------------
+# GOING AND FINDING THEM
+# ---------------------------------------------------------------------------
+#
+# "the competitors adding? i think you ignored that i think either we should
+#  add this or the agent should find our competitors in our related services
+#  in UAE."
+#
+# The first version of this waited to be told. Then it waited for the SEO desk
+# to happen to see somebody searching a rival by name — better, and still
+# passive: it only ever learns about a firm popular enough that Google suggests
+# its name, which is the handful of big ones he already knows about.
+#
+# This goes and looks. OpenStreetMap has the UAE's businesses tagged by trade,
+# it is free, keyless, and the agency already talks to it — pipelines/leads_osm
+# uses the same Overpass mirrors to find leads. A firm tagged as a glazier in
+# Sharjah, or one whose name contains "aluminium" sitting in an industrial area
+# in Ajman, is doing the work he does in the country he does it in. That is an
+# observation, not a guess.
+#
+# It still suggests rather than adds. Nothing is crawled until he says yes.
+
+# The trade, in OSM's vocabulary. Only tags that genuinely exist in the UAE
+# extract — see the note in leads_osm: inventing a tag produces a query that
+# always returns nothing, which looks exactly like "OSM has no data" and is
+# much harder to spot.
+RIVAL_TAGS = (
+    ("craft", "glaziery"),
+    ("shop", "glaziery"),
+    ("craft", "window_construction"),
+    ("craft", "metal_construction"),
+    ("shop", "windows"),
+    ("shop", "doors"),
+)
+
+# Tag coverage for this trade is thin in the Gulf — most of these firms are
+# mapped as a plain office or industrial unit with a descriptive name. The name
+# is the strongest signal there is, so it is searched directly. Anchored to the
+# trade words rather than to anything generic, or half of Dubai comes back.
+RIVAL_NAME_RE = r"[Gg]lass|GLASS|[Aa]lumin|ALUMIN|[Gg]laz|[Pp]ergola"
+
+# Words that mean this is somebody's showroom or supplier rather than a rival
+# fabricator — a car-glass fitter and a glass-bottle wholesaler are not bidding
+# against him for a shower screen.
+NOT_A_RIVAL = (
+    "auto", "car ", "windscreen", "windshield", "vehicle", "tinting film",
+    "bottle", "bottles", "spectacle", "optic", "optical", "eyewear",
+    "glasses", "sunglass", "mirror shop", "crystal palace",
+    "hospital", "school", "university", "hotel", "restaurant", "cafe",
+    "pharmacy", "supermarket", "mosque", "tower", "residence",
+)
+
+# How many rivals it is worth putting in front of him at once. A list of forty
+# is a list he will not read, and confirming a rival costs him a glance rather
+# than nothing.
+MOST_TO_SUGGEST = 12
+
+
+def _looks_like_a_rival(name, tags) -> bool:
+    n = (name or "").lower()
+    if len(n) < 4:
+        return False
+    if any(bad in n for bad in NOT_A_RIVAL):
+        return False
+    # It has to actually be in the trade — either tagged as it, or named for it.
+    tagged = any(tags.get(k) == v for k, v in RIVAL_TAGS)
+    named = bool(re.search(r"glass|alumin|glaz|pergola|shopfront|curtain wall",
+                           n, re.I))
+    return tagged or named
+
+
+def _ours(name, domain, mine) -> bool:
+    """Us, not a rival. Finding your own company and reporting it is a bad look."""
+    n = (name or "").strip().lower()
+    d = _normalise(domain)
+    if d and mine.get("domain") and d == mine["domain"]:
+        return True
+    own = (mine.get("name") or "").strip().lower()
+    if own and len(own) > 4 and (own in n or n in own):
+        return True
+    return False
+
+
+def _me():
+    """Who we are, so the search does not put us forward as our own rival."""
+    env = {}
+    try:
+        from providers import integrations
+        env = dict(integrations.read_env())
+    except Exception:
+        pass
+    import os
+    for k in ("BUSINESS_NAME", "AGENCY_NAME", "SITE_URL"):
+        if os.environ.get(k):
+            env[k] = os.environ[k]
+    return {"name": (env.get("BUSINESS_NAME") or env.get("AGENCY_NAME") or "").strip(),
+            "domain": _normalise(env.get("SITE_URL") or "")}
+
+
+# How long the whole search may take. It runs inside a step of the day that
+# gets seven minutes, and Overpass is a gift rather than a service — four
+# mirrors, each allowed to time out, across seven emirates is easily longer
+# than the step has. Whatever it has found when the clock runs out is what he
+# gets, which is the right way round: some rivals today beats none ever.
+SEARCH_BUDGET = 150
+
+# Emirates per pass. Seven queries against a free, donated endpoint every day
+# is not neighbourly, and the map does not change hourly. It works through them
+# a few at a time, oldest first, so the whole country is covered within a week
+# of runs and no single run is heavy.
+AREAS_PER_PASS = 3
+
+
+def _next_areas(want, per_pass=AREAS_PER_PASS):
+    """
+    The emirates to look at this time, rotating so they all get a turn.
+
+    Anchored to the day of the year rather than to a stored cursor: no state to
+    migrate, no row to go stale, and two runs on the same day look in the same
+    place — which is what you want, because the second one then finds nothing
+    new rather than re-asking a busy public endpoint for a different slice.
+    """
+    if not want:
+        return []
+    start = (time.gmtime().tm_yday * per_pass) % len(want)
+    doubled = list(want) + list(want)
+    return doubled[start:start + per_pass]
+
+
+def discover(areas=None, limit=MOST_TO_SUGGEST, timeout=45,
+             budget=SEARCH_BUDGET) -> dict:
+    """
+    Go and find firms doing this trade in the UAE. Suggests; adds nothing.
+
+    Returns {ok, found, suggested[], areas, error}. `found` counts everything
+    the map returned; `suggested` is what actually went in front of him after
+    the filtering, the de-duplication and taking ourselves out.
+
+    Bounded by `budget` seconds, because this runs inside a step of the day and
+    a public endpoint is allowed to be slow. Running out of time is not a
+    failure — it stops, keeps what it found, and says how far it got.
+    """
+    try:
+        from . import leads_osm as osm
+    except Exception as e:                                    # pragma: no cover
+        return {"ok": False, "error": f"the OSM reader did not load ({e})",
+                "found": 0, "suggested": []}
+    try:
+        from coordination import uae
+        wanted = [a for a in (areas or uae.EMIRATES) if a in osm.BBOX]
+    except Exception:                                         # pragma: no cover
+        wanted = [a for a in (areas or ()) if a in osm.BBOX] or list(osm.BBOX)
+    if not wanted:
+        wanted = list(osm.BBOX)
+    # Only if the caller did not name them. "--find --area Dubai" means Dubai,
+    # not "Dubai if it is Dubai's turn".
+    if areas is None:
+        wanted = _next_areas(wanted)
+
+    mine = _me()
+    stop_at = time.time() + max(20, int(budget))
+    seen, put_forward, found, trouble = set(), [], 0, []
+    ran_out = False
+    for area in wanted:
+        if time.time() >= stop_at:
+            ran_out = True
+            break
+        bbox = osm.BBOX[area]
+        tagged = "".join(f'nwr["{k}"="{v}"]({bbox});' for k, v in RIVAL_TAGS)
+        named = (f'nwr["name"~"{RIVAL_NAME_RE}"]["shop"]({bbox});'
+                 f'nwr["name"~"{RIVAL_NAME_RE}"]["craft"]({bbox});'
+                 f'nwr["name"~"{RIVAL_NAME_RE}"]["office"]({bbox});'
+                 f'nwr["name"~"{RIVAL_NAME_RE}"]["industrial"]({bbox});')
+        q = (f"[out:json][timeout:{int(timeout)}];({tagged}{named});"
+             f"out center {osm.MAX_RESULTS};")
+        # Never ask the endpoint for longer than is left on the clock.
+        left = max(10, int(stop_at - time.time()))
+        r = osm.ask(q, timeout=min(timeout, left))
+        if not r.get("ok"):
+            trouble.append(f"{area}: {r.get('error') or 'no answer'}")
+            continue
+        for el in r.get("elements") or []:
+            tags = el.get("tags") or {}
+            name = (tags.get("name:en") or tags.get("name") or "").strip()
+            if not _looks_like_a_rival(name, tags):
+                continue
+            found += 1
+            site = (tags.get("website") or tags.get("contact:website")
+                    or tags.get("url") or "").strip()
+            domain = _normalise(site)
+            if _ours(name, domain, mine):
+                continue
+            key = domain or name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            put_forward.append({"name": name, "domain": domain, "area": area})
+        if time.time() < stop_at:
+            time.sleep(osm.PAUSE)
+
+    # A rival with a website first: those are the ones this sector can actually
+    # watch, because watching means reading their sitemap. A name with no site
+    # is still worth showing him — he may know the firm — but it goes below.
+    put_forward.sort(key=lambda r: (not r["domain"], r["name"].lower()))
+    added = []
+    for r in put_forward[:limit]:
+        why = (f"mapped as a {('glass or aluminium firm' if r['domain'] else 'glass or aluminium firm')}"
+               f" in {r['area']} on OpenStreetMap"
+               + (f" ({r['domain']})" if r["domain"] else ", with no website listed"))
+        if suggest_rival(r["name"], evidence=why, domain=r["domain"]):
+            added.append(r["name"])
+
+    return {"ok": bool(put_forward) or not trouble,
+            "found": found, "candidates": len(put_forward),
+            "suggested": added, "areas": wanted, "ran_out_of_time": ran_out,
+            "error": ("; ".join(trouble) if trouble and not put_forward else ""),
+            "trouble": trouble}
+
+
 def suggested(db=None):
     """Firms waiting for him to say whether they are rivals."""
     con = sqlite3.connect(db or board.DB)
@@ -555,6 +774,23 @@ def _watch(agent, run_row, timeout):
 
     if not rivals:
         waiting = suggested()
+        if not waiting:
+            # NOTHING CONFIRMED AND NOTHING WAITING — so go and look, rather
+            # than reporting an empty desk for the third day running. This is
+            # the difference between "who bids against you is your call" and
+            # "who bids against you is your homework".
+            got = discover()
+            waiting = suggested()
+            if not waiting and not got.get("ok"):
+                return {"ok": False, "idle": True,
+                        "error": ("Went looking for competitors on OpenStreetMap "
+                                  "and could not reach it: "
+                                  + (got.get("error") or "no reason given")
+                                  + ". Nothing was invented. Add one yourself with "
+                                    'python -m pipelines.competitors --add "Their '
+                                    'Name" theirdomain.ae, or let it try again '
+                                    "tomorrow."),
+                        "looked": True}
         if waiting:
             qid = _ask_him_to_confirm(waiting)
             return {"ok": False, "idle": True,
@@ -720,6 +956,8 @@ def main():
     ap.add_argument("--add", nargs=2, metavar=("NAME", "DOMAIN"),
                     help='register a rival, e.g. --add "Al Noor Glass" alnoorglass.ae')
     ap.add_argument("--list", action="store_true", help="show the rivals on file")
+    ap.add_argument("--find", action="store_true",
+                    help="go and look for competitors in the UAE (OpenStreetMap)")
     ap.add_argument("--suggested", action="store_true",
                     help="firms the SEO desk has put forward, and why")
     ap.add_argument("--confirm-all", action="store_true",
@@ -733,6 +971,21 @@ def main():
         print(f"added #{rid}: {a.add[0]} ({_normalise(a.add[1])})" if rid
               else f"already on file: {_normalise(a.add[1])}")
         return
+    if a.find:
+        r = discover()
+        if r["suggested"]:
+            print(f"Found {r['found']} firm(s) in the trade across "
+                  f"{len(r['areas'])} emirate(s); {len(r['suggested'])} new one(s) "
+                  "are waiting for your yes:")
+            for n in r["suggested"]:
+                print("   " + n)
+            print("\nSee them with --suggested, accept them with --confirm-all.")
+        elif r.get("error"):
+            print("Could not look: " + r["error"])
+        else:
+            print(f"Looked across {len(r['areas'])} emirate(s), found "
+                  f"{r['found']} firm(s) in the trade and nothing new to add.")
+        return 0
     if a.suggested:
         waiting = suggested()
         if not waiting:
