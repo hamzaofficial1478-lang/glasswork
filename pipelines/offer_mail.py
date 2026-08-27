@@ -147,7 +147,7 @@ HEAVY_BYTES = 400_000
 CARD_H = 170
 
 
-def check_photos(services, timeout=12) -> tuple:
+def check_photos(services, timeout=12, drop_heavy=False) -> tuple:
     """
     Ask his server what each photograph actually is, before putting it in an email.
 
@@ -164,10 +164,13 @@ def check_photos(services, timeout=12) -> tuple:
     data. That one is KEPT and reported, because it is his picture of his work
     and the fix is to resize it, not to hide the service.
 
-    Returns (services, warnings).
+    Returns (services, warnings, originals) — originals being what was taken
+    out, keyed by service, so lighten() can put it straight back if there is no
+    stock picture to replace it with. Without that, an empty stock shelf did
+    not make the email lighter, it made it emptier.
     """
     import urllib.request
-    out, warns, heavy = [], [], []
+    out, warns, heavy, originals = [], [], [], {}
     for label, photo in services:
         if not photo:
             out.append((label, photo))
@@ -185,6 +188,8 @@ def check_photos(services, timeout=12) -> tuple:
             out.append((label, photo))
             continue
         if kind and not kind.startswith("image/"):
+            # Not kept as a fallback: it is not a picture, so putting it back
+            # would put a broken icon back.
             out.append((label, ""))
             name = photo.rsplit("/", 1)[-1]
             warns.append(f"{name} is served as '{kind}', not as an image, so it "
@@ -199,6 +204,13 @@ def check_photos(services, timeout=12) -> tuple:
             continue
         if size > HEAVY_BYTES:
             heavy.append((photo.rsplit("/", 1)[-1], size))
+            if drop_heavy:
+                # Emptied, not dropped: lighten() puts a light stock picture of
+                # the same thing in its place a moment later, and puts THIS
+                # back if there is no stock shelf to get one from.
+                originals[label] = photo
+                out.append((label, ""))
+                continue
         out.append((label, photo))
     if heavy:
         total = sum(s for _, s in heavy) / 1_000_000
@@ -213,7 +225,7 @@ def check_photos(services, timeout=12) -> tuple:
                     f"{total:.1f}MB in total). They slow the home page and they "
                     "are too heavy to email. Resize to 1600px wide and save as "
                     "WebP or JPEG.")
-    return out, warns
+    return out, warns, originals
 
 
 def file_ticket(kind, severity, detail) -> int:
@@ -248,12 +260,26 @@ def file_ticket(kind, severity, detail) -> int:
         return 0
 
 
+# THE ADDRESS PUBLISHED ON HIS SITE DOES NOT WORK.
+#
+# info@worlddealtechnicalservices.ae is on a domain with no DNS record at all —
+# no A record, no MX — so mail to it cannot be delivered. It is on his live
+# website today, which means enquiries sent to it are going nowhere.
+#
+# So the email address here is never scraped off the site. It comes from
+# BUSINESS_EMAIL, and the default is the working one he gave. Reading it off
+# the page would put the dead address on every brochure the agency sends.
+DEFAULT_EMAIL = "teamworlddeal@worlddealtechnicalservices.com"
+DEAD_DOMAIN = "worlddealtechnicalservices.ae"
+
+
 def contact_of(html="") -> dict:
-    """His phone, WhatsApp and site — from settings first, his own page second."""
+    """His phone, WhatsApp, email and site. Settings first, his page second."""
     g = lambda k: (mail.setting(k) or "").strip()      # noqa: E731
     site = g("SITE_URL").rstrip("/")
     phone = g("BUSINESS_PHONE")
     wa = g("BUSINESS_WHATSAPP") or phone
+    email = g("BUSINESS_EMAIL") or DEFAULT_EMAIL
     if html:
         if not phone:
             m = re.search(r'href="tel:([^"]+)"', html)
@@ -262,7 +288,10 @@ def contact_of(html="") -> dict:
             m = re.search(r'href="https?://(?:wa\.me|api\.whatsapp\.com/send\?phone=)'
                           r'(\+?\d[\d\s\-()]*)', html)
             wa = m.group(1).strip() if m else phone
-    return {"site": site, "phone": phone, "whatsapp": wa,
+    # Belt and braces: whatever else happens, the dead domain never goes out.
+    if DEAD_DOMAIN in (email or "").lower():
+        email = DEFAULT_EMAIL
+    return {"site": site, "phone": phone, "whatsapp": wa, "email": email,
             "wa_digits": re.sub(r"\D", "", wa or "")}
 
 
@@ -283,19 +312,81 @@ def business() -> dict:
 # THE EMAIL
 # ---------------------------------------------------------------------------
 
-def build(url="", timeout=SITE_TIMEOUT) -> dict:
+def lighten(services, warnings, mode="auto", originals=None) -> tuple:
+    """
+    Swap a photograph that is too heavy, or is not served as one, for a light
+    stock picture of the same thing.
+
+    "There is no need to directly extract images from website on every mail...
+     you can pick from stock to make mail lighter."
+
+    He is right about the symptom: six megabytes of his own photographs is an
+    email that sits there loading on mobile data. Where I would not go all the
+    way with him is that his own work is the one thing a competitor cannot
+    copy, so this is a choice rather than a replacement:
+
+        site    his own, whatever they weigh
+        stock   these, always
+        auto    his own where they are already light, stock where they are not
+
+    auto is the default and it does exactly what he asked for where it matters:
+    the 2.3MB folding door becomes about 60KB, and the wooden door and the sign
+    board — his real work, already small — stay his.
+    """
+    if mode == "site":
+        return services, warnings
+    originals = originals or {}
+    from . import stock_photos
+    out, swapped, failed, kept = [], [], [], []
+    for label, photo in services:
+        want_stock = (mode == "stock") or not photo
+        if not want_stock:
+            out.append((label, photo))
+            continue
+        got = stock_photos.for_service(label)
+        if got.get("ok"):
+            out.append((label, got["url"]))
+            swapped.append(f"{label} ({got['where']})")
+            continue
+        # NO STOCK PICTURE. Put his own back rather than sending a card with
+        # nothing on it — a heavy photograph beats no photograph, and the
+        # warning about the weight is already going with it.
+        back = originals.get(label) or photo
+        out.append((label, back))
+        if back:
+            kept.append(label)
+        failed.append(f"{label}: {got.get('why', 'nothing found')}")
+    if swapped:
+        warnings.append(f"{len(swapped)} picture(s) came from the stock shelf "
+                        "because yours were too heavy or would not display: "
+                        + ", ".join(swapped[:4])
+                        + ". Resize yours and they come back automatically")
+    if kept:
+        warnings.append(f"no stock picture was available, so your own heavy "
+                        f"ones are still being used for {len(kept)} service(s). "
+                        "Add Pexels or Pixabay on /setup, Stock images — or "
+                        "resize yours, which is the better fix")
+    elif failed and mode == "stock":
+        warnings.append("could not get a stock picture for: " + "; ".join(failed[:3]))
+    return out, warnings
+
+
+def build(url="", timeout=SITE_TIMEOUT, images="auto") -> dict:
     """{subject, preheader, html, text, services, photos, warnings}."""
     biz = business()
     site = read_the_site(url, timeout=timeout)
     services = site.get("services") or FALLBACK_SERVICES
-    warnings = []
+    warnings, originals = [], {}
     if not site.get("ok"):
         warnings.append(site.get("why") or "could not read the website")
         warnings.append("the email was built without photographs — the service "
                         "names are right, there are just no pictures")
     else:
-        services, photo_warnings = check_photos(services)
+        services, photo_warnings, originals = check_photos(
+            services, drop_heavy=(images != "site"))
         warnings += photo_warnings
+    services, warnings = lighten(services, warnings, mode=images,
+                                 originals=originals)
 
     con = contact_of()
     if not con["site"]:
@@ -350,6 +441,8 @@ def _text_email(biz, services, con) -> str:
         lines.append(f"  WhatsApp: https://wa.me/{con['wa_digits']}")
     if con["phone"]:
         lines.append(f"  Call:     {con['phone']}")
+    if con.get("email"):
+        lines.append(f"  Email:    {con['email']}")
     if con["site"]:
         lines.append(f"  Website:  {con['site']}")
     lines += ["",
@@ -415,19 +508,42 @@ def _html_email(biz, services, con, preheader, more="") -> str:
         cards.append("<tr>" + "".join(tds) + "</tr>")
     grid = "".join(cards)
 
-    buttons = []
+    # TWO BUTTONS, EACH ON ITS OWN FULL-WIDTH ROW.
+    #
+    # "in mobile view there was no whatsapp contact while in laptop it was."
+    #
+    # They were inline-block <a> tags sitting side by side. That is fine at
+    # 600px and fragile at 360: Gmail's mobile app rewrites widths, and a row
+    # that does not fit is a row where the second button is pushed out of the
+    # visible area rather than wrapping under the first. Two table rows cannot
+    # do that — each is its own line at every width, in every client.
+    #
+    # And they are the two he asked for: WhatsApp and email. The phone number
+    # is still there and still tappable, in the line underneath, because a
+    # third button competing with the first two wins nothing.
+    def _btn(href, label, bg, fg="#ffffff"):
+        return (f'<tr><td align="center" style="padding:0 0 10px">'
+                f'<a href="{e(href)}" style="display:block;background:{bg};'
+                f'color:{fg};text-decoration:none;font-weight:700;font-size:16px;'
+                f'padding:15px 20px;border-radius:7px;text-align:center">'
+                f'{e(label)}</a></td></tr>')
+
+    rows = []
     if con["wa_digits"]:
-        buttons.append(
-            f'<a href="https://wa.me/{e(con["wa_digits"])}" '
-            f'style="display:inline-block;background:#25d366;color:#ffffff;'
-            f'text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;'
-            f'border-radius:6px;margin:0 6px 8px 0">WhatsApp us</a>')
+        rows.append(_btn(f'https://wa.me/{con["wa_digits"]}',
+                         "WhatsApp us", "#25d366"))
+    if con.get("email"):
+        rows.append(_btn(f'mailto:{con["email"]}?subject=' 
+                         + urllib.parse.quote("Enquiry from your website"),
+                         "Email us", "#12313a"))
+    buttons = (f'<table role="presentation" width="100%" cellpadding="0" '
+               f'cellspacing="0" border="0" style="max-width:340px">'
+               + "".join(rows) + '</table>') if rows else ""
     if con["phone"]:
-        buttons.append(
-            f'<a href="tel:{e(re.sub(r"[^+0-9]", "", con["phone"]))}" '
-            f'style="display:inline-block;background:#12313a;color:#ffffff;'
-            f'text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;'
-            f'border-radius:6px;margin:0 6px 8px 0">{e(con["phone"])}</a>')
+        buttons += (f'<div style="font-size:14px;color:#3c4c53;padding-top:2px">'
+                    f'or call <a href="tel:{e(re.sub(r"[^+0-9]", "", con["phone"]))}"'
+                    f' style="color:#0b6b7a;text-decoration:none;font-weight:600">'
+                    f'{e(con["phone"])}</a></div>')
 
     site_link = ""
     if con["site"]:
@@ -484,6 +600,7 @@ def _html_email(biz, services, con, preheader, more="") -> str:
                  padding:16px 24px;font-size:13px;color:#5a6c73">
     <div style="font-weight:600;color:#1f2b30">{name}</div>
     <div style="margin-top:5px">Covering {where}.</div>
+    {f'<div style="margin-top:5px"><a href="mailto:{e(con["email"])}" style="color:#0b6b7a;text-decoration:none">{e(con["email"])}</a></div>' if con.get("email") else ''}
     {f'<div style="margin-top:5px">{site_link}</div>' if site_link else ''}
   </td></tr>
 
@@ -494,7 +611,7 @@ def _html_email(biz, services, con, preheader, more="") -> str:
 # SENDING
 # ---------------------------------------------------------------------------
 
-def send(to: str, url="", timeout=SITE_TIMEOUT) -> dict:
+def send(to: str, url="", timeout=SITE_TIMEOUT, images="auto") -> dict:
     """
     Send it to an address typed by hand. Never to anything out of the leads table.
 
@@ -503,7 +620,7 @@ def send(to: str, url="", timeout=SITE_TIMEOUT) -> dict:
     logged as somebody having been contacted. See the note on it — a preview he
     asked for must not cost him a real lead.
     """
-    built = build(url, timeout=timeout)
+    built = build(url, timeout=timeout, images=images)
     out = mail.send_plain(to, built["subject"], built["text"],
                           html=built["html"])
     out["subject"] = built["subject"]
@@ -533,11 +650,14 @@ def main():
     ap.add_argument("--send", action="store_true", help="same as --to; kept for habit")
     ap.add_argument("--out", default="", help="write the html here and send nothing")
     ap.add_argument("--url", default="", help="read the services from this site")
+    ap.add_argument("--images", choices=("auto", "site", "stock"), default="auto",
+                    help="auto: his own where they are light, stock where they "
+                         "are not. site: always his. stock: always stock")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
     if a.out:
-        r = build(a.url)
+        r = build(a.url, images=a.images)
         from pathlib import Path
         Path(a.out).write_text(r["html"], encoding="utf-8")
         if a.json:
@@ -552,7 +672,7 @@ def main():
         return 0
 
     if not a.to:
-        r = build(a.url)
+        r = build(a.url, images=a.images)
         print(json.dumps({k: v for k, v in r.items() if k != "html"}, indent=2)
               if a.json else
               f"Built it: {r['subject']}\n"
@@ -562,7 +682,7 @@ def main():
                 "--out offer.html to look at it first.")
         return 0
 
-    r = send(a.to, a.url)
+    r = send(a.to, a.url, images=a.images)
     if a.json:
         print(json.dumps(r, indent=2))
     elif r.get("ok"):

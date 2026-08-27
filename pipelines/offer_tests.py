@@ -307,6 +307,112 @@ def test_sending_to_himself_is_not_outreach():
           _sql("SELECT count(*) FROM outreach_log")[0][0], 0)
 
 
+
+def test_both_buttons_survive_a_narrow_screen():
+    """
+    "in mobile view there was no whatsapp contact while in laptop it was."
+
+    They were inline-block anchors side by side, which is fine at 600px and
+    fragile at 360 — Gmail's mobile app rewrites widths, and a row that does not
+    fit pushes the second button out of view rather than wrapping it under the
+    first. Each button is its own table row now, which cannot do that.
+    """
+    print("\nTwo buttons, each on its own line, at any width:")
+    _fresh_db()
+    with _Site():
+        r = O.build()
+    h = r["html"]
+    check("WhatsApp is there", "wa.me/971565100471" in h, True)
+    check("and so is email", "mailto:teamworlddeal@" in h, True)
+    check("neither is inline-block any more",
+          "display:inline-block" in h, False)
+    check("each is a full-width block", h.count("display:block;background:#25d366") , 1)
+    check("the phone is still there, as a line rather than a third button",
+          "or call" in h, True)
+
+
+def test_the_dead_address_never_goes_out():
+    """
+    info@worlddealtechnicalservices.ae is printed on his live website and the
+    domain has no DNS at all — no A record, no MX. Mail to it cannot arrive. It
+    must never be the address on a brochure the agency sends.
+    """
+    print("\nThe address on his site is dead, so it is never the one used:")
+    _fresh_db()
+    with _Site() as s:
+        # his page says the dead one; the email must not
+        s.page = PAGE + '<a href="mailto:info@worlddealtechnicalservices.ae">Mail</a>'
+        r = O.build()
+    check("the dead domain is nowhere in the email",
+          "worlddealtechnicalservices.ae" in r["html"], False)
+    check("the working address is used instead",
+          O.DEFAULT_EMAIL in r["html"], True)
+    check("and it is in the plain half too", O.DEFAULT_EMAIL in r["text"], True)
+
+    print("\n  ...and even if the setting itself holds the dead one:")
+    real = mail.setting
+    mail.setting = lambda n, d="": ("info@worlddealtechnicalservices.ae"
+                                    if n == "BUSINESS_EMAIL" else
+                                    {"SITE_URL": "https://x.test"}.get(n, d))
+    try:
+        con = O.contact_of()
+    finally:
+        mail.setting = real
+    check("it is refused and replaced", con["email"], O.DEFAULT_EMAIL)
+
+
+def test_a_heavy_photo_becomes_a_light_one_when_stock_is_there():
+    """
+    "you can pick from stock to make mail lighter." His folding door is 2.3MB.
+    """
+    print("\nA 2MB photograph is swapped for a light one:")
+    _fresh_db()
+    from . import stock_photos
+    real = stock_photos.for_service
+    stock_photos.for_service = lambda label, width=600: {
+        "ok": True, "url": f"https://images.pexels.com/{label}.jpg?w=600",
+        "where": "Pexels", "by": "Someone"}
+    try:
+        with _Site(heads={"glass.jfif": ("image/jpeg", 2_335_014),
+                          "folding.png": ("image/png", 90_000)}):
+            r = O.build(images="auto")
+    finally:
+        stock_photos.for_service = real
+    urls = r["html"]
+    check("the heavy one came from stock", "images.pexels.com" in urls, True)
+    check("the light one is still his own", "/pages/folding.png" in urls, True)
+    check("and it says which were swapped",
+          any("came from the stock shelf" in w for w in r["warnings"]), True)
+
+    print("\n  ...and with no stock shelf, his own heavy one is put BACK:")
+    _fresh_db()
+    stock_photos.for_service = lambda label, width=600: {
+        "ok": False, "why": "no stock photo API is set up"}
+    try:
+        with _Site(heads={"glass.jfif": ("image/jpeg", 2_335_014),
+                          "folding.png": ("image/png", 90_000)}):
+            r = O.build(images="auto")
+    finally:
+        stock_photos.for_service = real
+    # An empty stock shelf must not make the email emptier — which is exactly
+    # what it did on the first build: the heavy photo was taken out for a
+    # replacement that never came, and the card went out blank.
+    check("his photograph is still on the card", "/pages/glass.jfif" in r["html"], True)
+    check("nothing was silently lost", r["photos"], 2)
+    check("and he is told why stock was not used",
+          any("no stock picture was available" in w for w in r["warnings"]), True)
+
+    print("\n  ...and --images site never asks the stock shelf at all:")
+    asked = []
+    stock_photos.for_service = lambda label, width=600: asked.append(label) or {"ok": False}
+    try:
+        with _Site():
+            O.build(images="site")
+    finally:
+        stock_photos.for_service = real
+    check("not one call", asked, [])
+
+
 def main():
     real = board.DB
     _fresh_db()
@@ -318,6 +424,9 @@ def main():
         test_it_is_written_for_email_clients()
         test_the_message_that_goes_out_has_both_halves()
         test_sending_to_himself_is_not_outreach()
+        test_both_buttons_survive_a_narrow_screen()
+        test_the_dead_address_never_goes_out()
+        test_a_heavy_photo_becomes_a_light_one_when_stock_is_there()
     finally:
         board.DB = real
 

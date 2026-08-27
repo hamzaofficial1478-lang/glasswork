@@ -1024,6 +1024,29 @@ app.get("/api/results", (q, res) => {
   res.json(pyModule("coordination.results", args, 60000));
 });
 
+// ---- THROWING AWAY WHAT IS OLDER THAN THE WINDOW ----------------------------
+// "make a button to clear the communication older then 30 days... the data
+//  deleted must not get stored in the Db or any other place it must be deleted
+//  permanently"
+//
+// GET says what would go and changes nothing. POST does it, and 'permanently'
+// is the hard half — see coordination/purge.py: a DELETE leaves the bytes in
+// the file, so it ends by rewriting the database and emptying the write-ahead
+// log. Given a longer budget because rewriting the file takes as long as it
+// takes and being interrupted half way is the one thing it must not be.
+app.get("/api/purge", (q, res) => {
+  const d = parseInt(q.query.days, 10);
+  res.json(pyModule("coordination.purge",
+    ["--json", ...(Number.isFinite(d) && d > 0 ? ["--days", String(d)] : [])], 60000));
+});
+
+app.post("/api/purge", (req, res) => {
+  const d = parseInt((req.body || {}).days, 10);
+  res.json(pyModule("coordination.purge",
+    ["--run", "--json", ...(Number.isFinite(d) && d > 0 ? ["--days", String(d)] : [])],
+    300000));
+});
+
 // ---- WHAT CHANGED ON THE WEBSITE --------------------------------------------
 // "there should be a section in program where i can see whats changed in
 //  website... that's totally blind."

@@ -582,6 +582,11 @@ header>*{flex:none}
         <button class="actbtn" id="resD0" onclick="openResults(0)">Today</button>
         <button class="actbtn" id="resD7" onclick="openResults(7)">7 days</button>
         <button class="actbtn" id="resD30" onclick="openResults(30)">30 days</button>
+        <!-- "make a button to clear the communication older then 30 days...
+             the data deleted must not get stored in the Db or any other place
+             it must be deleted permanently". It asks first and says exactly
+             what will go, because permanent means there is no undo. -->
+        <button class="actbtn" id="resPurge" onclick="askPurge()">Clear old data</button>
         <button class="x" onclick="closeAll()">&times;</button>
       </span></h2>
   <div class="pgroup" id="resBody"></div>
@@ -1576,6 +1581,41 @@ function whyTone(why){
   if(w.includes('switched this sector off') || w.includes('has not been run')
      || w.includes('you stopped')) return 'var(--amber)';
   return 'var(--faint)';
+}
+
+/* CLEARING OUT WHAT IS OLDER THAN THIRTY DAYS.
+   Two steps, always. It reads what would go and shows him the list, and only
+   then does it offer to do it — because this one genuinely cannot be undone:
+   the database is rewritten and the write-ahead log emptied, so the words are
+   not in the file afterwards, which is what he asked for. */
+async function askPurge(){
+  const btn = $('#resPurge');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  let j = null;
+  try{ j = await (await fetch('/api/purge?days=30',{cache:'no-store'})).json(); }
+  catch(e){ j = {ok:false, error:String(e)}; }
+  btn.disabled = false; btn.textContent = 'Clear old data';
+  if(!j || !j.ok){ alert('Could not read what is on file.\n\n'+((j&&j.error)||'')); return; }
+  if(!j.rows){ alert(j.head + '.\n\nNothing to clear.'); return; }
+
+  const list = (j.tables||[]).map(x=>'  • '+x.rows+'  '+x.label).join('\n');
+  const kept = Object.keys(j.kept||{}).join(', ');
+  if(!confirm(
+      'Delete '+j.rows+' row(s) older than 30 days?\n\n'+list
+      + '\n\nKept whatever happens: '+kept
+      + '\n\nThis is permanent. The database is rewritten afterwards, so the '
+      + 'deleted text is not left in the file or in any backup taken from here '
+      + 'on. There is no undo.')) return;
+
+  btn.disabled = true; btn.textContent = 'Clearing…';
+  let r = null;
+  try{
+    r = await (await fetch('/api/purge',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:30})})).json();
+  }catch(e){ r = {ok:false, error:String(e)}; }
+  btn.disabled = false; btn.textContent = 'Clear old data';
+  alert(r && r.ok ? r.head : ('It did not run.\n\n'+((r&&r.error)||'no detail')));
+  openResults(RES.days);
 }
 
 function renderResults(){
