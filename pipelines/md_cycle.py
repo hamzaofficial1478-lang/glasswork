@@ -255,6 +255,9 @@ def clear_inbox(facts, dry_run=False) -> dict:
                 posted.append({"task_id": task_id, "sector": target})
             except board.SectorOff as e:
                 note = f" {target} is switched off, so nothing was posted: {e}"
+            except board.BoardFull as e:
+                note = (f" {target}'s board is already backed up, so nothing was "
+                        f"posted: {e}")
             except Exception as e:
                 note = f" Could not post it to {target}: {e}"
 
@@ -575,6 +578,13 @@ def _cycle(agent, dry_run):
                                   c["detail"] + f"\n\n[MD evidence] {c['evidence']}",
                                   risk=c.get("risk", "green"), created_by="MD")
         except board.SectorOff as e:
+            rejected.append({"sector": c["sector"], "title": c["title"],
+                             "why": str(e)})
+            continue
+        except board.BoardFull as e:
+            # Not a failure of the plan — a fact about the sector. The MD is
+            # told so it can plan around a desk that is not clearing its board,
+            # rather than adding a ninth job to eight nobody has touched.
             rejected.append({"sector": c["sector"], "title": c["title"],
                              "why": str(e)})
             continue

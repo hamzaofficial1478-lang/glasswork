@@ -310,11 +310,36 @@ def detect(now=None) -> list:
         #    separately turned one silent sector into fourteen tickets. The same
         #    question from the same sector to the same sector is ONE fault, and
         #    how many times it has been asked is part of what makes it bad.
+        #    AND NEVER ABOUT ITS OWN CHASING. This is the loop that filled his
+        #    control room and would have filled it for ever:
+        #
+        #      SEO asks Content something. Content does not answer.
+        #      The Overseer files 'Content has not answered SEO' and SENDS
+        #        Content a request about it.
+        #      Content does not answer that either — it answers nothing, which
+        #        was the original complaint.
+        #      The Overseer files 'Content has not answered Overseer: You have
+        #        not answered: Content has not answered SEO', and sends ANOTHER
+        #        request about that.
+        #      And again, nesting the whole previous subject inside the next,
+        #      one more fault and one more task every pass, for ever.
+        #
+        #    He read the result: "Content has not answered Overseer in 2 days:
+        #    You have not answered: Content has not answered Overseer in 2 days:
+        #    You hav" — eleven faults on one sector saying one thing.
+        #
+        #    A chase that has not been answered is not new information. It is
+        #    the SAME fact as the fault that caused the chase, and that fault
+        #    already exists, already counts its passes ("still true after 8
+        #    checks") and already escalates to the MD. So the Overseer's own
+        #    requests are not eligible to become faults. There is exactly one
+        #    fault per silence, and it gets louder rather than multiplying.
         asked = {}
         for r in _rows(c, "SELECT id, from_sector, to_sector, subject, created_at,"
                           " status FROM requests"
                           " WHERE status IN ('open','claimed') AND created_at < ?"
-                          " ORDER BY created_at", (now - UNANSWERED_SECS,)):
+                          "   AND from_sector <> ?"
+                          " ORDER BY created_at", (now - UNANSWERED_SECS, OVERSEER)):
             k = (r["to_sector"], r["from_sector"], (r["subject"] or "")[:80])
             g = asked.setdefault(k, {"n": 0, "first": r["created_at"], "ids": [],
                                      "claimed": 0})
@@ -757,6 +782,14 @@ def scan(now=None) -> dict:
     # ticket behind. He had seventeen hours of those.
     try:
         board.sweep_dead_processes()
+    except Exception:
+        pass
+    # Work nobody has picked up in days is not waiting, it is abandoned. Taken
+    # off the board BEFORE detect() runs, so the pass does not file 'nobody is
+    # picking this up' about jobs it is about to withdraw and then leave the
+    # ticket standing over an empty board.
+    try:
+        board.expire_unclaimed()
     except Exception:
         pass
     found = detect(now)

@@ -381,16 +381,52 @@ BANDS = [
 ]
 
 
-def band(score):
-    """(word, meaning) for a score, or the unknown case."""
+def band(score, why=None):
+    """
+    (word, meaning) for a score — and when the reasons are handed in, the
+    meaning is THIS sector's actual reason rather than a general one.
+
+    "FOR EACH SECTOR DETAILS THAT IS FAILED IT SHOWS SOMETHING IS HOLDING IT
+     BACK. while the program should show the actaull error what is holding it
+     back."
+
+    He is right and it was lazy. The band text said "something is holding it
+    back — usually nothing produced today, or a task nobody picked up", which
+    is a guess about sectors in general, printed underneath a breakdown that
+    already knew the specific answer for this one. Every reason carries its
+    own points and its own plain-words detail; the worst of them IS the answer,
+    and it was sitting one line away being ignored.
+
+    The general sentence is still the fallback for a sector with nothing
+    negative to report, because there a guess is all there is.
+    """
     if score is None:
         return ("not run yet", "No evidence to score. This is not a bad mark — the "
                                "sector simply has not run, produced anything, or been "
                                "given anything to do. Press Run the day.")
-    for floor, word, meaning in BANDS:
+    word, meaning = BANDS[-1][1], BANDS[-1][2]
+    for floor, w, m in BANDS:
         if score >= floor:
-            return word, meaning
-    return BANDS[-1][1], BANDS[-1][2]
+            word, meaning = w, m
+            break
+
+    if why:
+        # The biggest thing costing it points. Ties go to the first, which is
+        # the order they were measured in — running, producing, then stuck.
+        hurt = [r for r in why if (r.get("points") or 0) < 0]
+        if hurt:
+            worst = min(hurt, key=lambda r: r["points"])
+            return word, (f"{worst['label']} ({worst['points']}): "
+                          f"{worst['detail']}")
+        # Nothing NEGATIVE, but a low score still has a cause — almost always
+        # a component that scored zero rather than one that scored against it.
+        # "Produced something: nothing new in content_queue today" is the
+        # answer he wants, and it is worth zero, not minus.
+        blank = [r for r in why
+                 if not (r.get("points") or 0) and (r.get("detail") or "").strip()]
+        if blank and score < 60:
+            return word, f"{blank[0]['label']}: {blank[0]['detail']}"
+    return word, meaning
 
 
 # HOW A SCORE GOES UP. Written here so the dashboard can say it, rather than
@@ -530,7 +566,7 @@ def build():
         open_tasks = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=? AND status IN ('open','in_progress')", (match,))
         foot, _old = _room_stats(c, key, day0, open_tasks)
         score, why = _health(c, key, match, day0, now)
-        word, meaning = band(score)
+        word, meaning = band(score, why)
         sw = switches.get(key, {})
         on = board.sector_enabled(key)
         rooms.append({"key": key, "name": name, "score": score, "foot": foot,
@@ -810,7 +846,7 @@ def sector_detail(key):
                    " WHEN 'degraded' THEN 1 ELSE 2 END, last_seen DESC LIMIT 12",
                    (match,))
     c.close()
-    word, meaning = band(score)
+    word, meaning = band(score, why)
     return {"ok": True, "key": key, "name": name, "score": score, "why": why,
             "band": word, "band_means": meaning, "how_to_raise": HOW_TO_RAISE,
             "output_label": label, "columns": list(cols), "made": made,

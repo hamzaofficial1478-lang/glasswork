@@ -447,6 +447,28 @@ def set_sector(sector, enabled, note=""):
     return {"sector": sector, "enabled": bool(enabled), "note": note}
 
 
+# How many unclaimed jobs a sector may be holding before it stops being given
+# more. Eight is roughly a day's work for a sector that is actually claiming;
+# for one that is not, it is the point at which adding more is plainly futile.
+BOARD_FULL = 8
+
+
+class BoardFull(Exception):
+    """Raised when a sector's board is backed up and more work would be futile."""
+
+
+def open_task_count(sector) -> int:
+    """Jobs on this sector's board that nobody has picked up."""
+    with _conn() as c:
+        _migrate(c)
+        try:
+            return c.execute(
+                "SELECT count(*) FROM tasks WHERE lower(sector)=? AND status='open'",
+                (str(sector or "").strip().lower(),)).fetchone()[0]
+        except sqlite3.OperationalError:
+            return 0
+
+
 class SectorOff(Exception):
     """Raised when work is aimed at a sector the owner has switched off."""
 
@@ -479,6 +501,35 @@ def post_task(sector, title, detail, risk="green", created_by="MD", force=False,
         raise SectorOff(
             f"{sector} is switched off, so it was not given: {title!r}. "
             "Turn the sector back on to let work reach it.")
+
+    # A BOARD THAT IS ALREADY BACKED UP DOES NOT GET MORE WORK.
+    #
+    # He opened the control room and found 24 tasks on the Director's board, 9
+    # on IT's, 4 on Content's, 3 on SEO's — none of them claimed, some five
+    # days old — and every sector scored down for the backlog.
+    #
+    # The cause is not the board. Eleven of the seventeen pipelines that run in
+    # a day never call next_open_task at all: they do their work and go home
+    # without ever looking at what they were asked for. So the MD posted work
+    # every morning onto boards where most desks never look, the pile grew by a
+    # few every day, the Overseer filed 'nobody is picking this up', and the MD
+    # was told and posted more.
+    #
+    # Making eleven pipelines claim is the real repair and it is not one
+    # change. This is the thing that stops the pile growing while that happens,
+    # and it is the handbook's own rule turned on the MD: no decision without
+    # evidence. Posting a twenty-fifth task onto a board holding twenty-four
+    # nobody has touched is a decision with the evidence against it.
+    #
+    # force still goes through — the Overseer's fault tickets are ABOUT a
+    # sector rather than work for it, and must be filed regardless.
+    if not force:
+        waiting = open_task_count(sector)
+        if waiting >= BOARD_FULL:
+            raise BoardFull(
+                f"{sector} already has {waiting} job(s) on its board that "
+                f"nobody has picked up, so {title!r} was not added. Clearing "
+                "the backlog comes before adding to it.")
     if desk is None:
         try:
             from . import desks as _desks
@@ -521,12 +572,14 @@ def try_post_task(sector, title, detail, risk="green", created_by="MD",
 
     For a pipeline posting a follow-up to its OWN sector as a side effect of
     finishing: the owner switching that sector off mid-run is an instruction,
-    not an error, and it must not take the whole pass down with it.
+    not an error, and it must not take the whole pass down with it. A board
+    that is already backed up is the same shape of answer — no, and not a
+    crash.
     """
     try:
         return post_task(sector, title, detail, risk=risk, created_by=created_by,
                          about=about, desk=desk)
-    except SectorOff:
+    except (SectorOff, BoardFull):
         return None
 
 
@@ -770,6 +823,48 @@ def release_claim(task_id, by, reason="", force=False):
         c.execute("COMMIT;")
     return True, (f"{owner}'s claim on {row['title'][:60]!r} was released after "
                   f"{held // 3600}h; it is back on the board")
+
+
+# How long a job may sit on a board with nobody picking it up before the agency
+# admits nobody is going to. Three days is long enough to survive a weekend and
+# short enough that the board still describes this week.
+UNCLAIMED_DAYS = 3
+
+
+def expire_unclaimed(older_than_days=UNCLAIMED_DAYS) -> list:
+    """
+    Take work off the board that nobody has picked up, and say so.
+
+    His board had jobs on it five days old. Nobody was going to claim them —
+    eleven of the seventeen pipelines never look at the board at all — and
+    every day they sat there the sector was scored down for a backlog it was
+    never going to clear, the Overseer filed another 'nobody is picking this
+    up', and the pile grew.
+
+    A job nobody has claimed in three days is not waiting, it is abandoned.
+    Withdrawing it is not losing it: the row stays, with the reason on it, and
+    whatever caused it — a site ticket, a request, a gap in the keyword list —
+    is still in the cabinet and will raise it again if it still matters. What
+    changes is that the board stops lying about what is going to happen.
+    """
+    cut = _now() - int(older_than_days) * 86400
+    out = []
+    with _conn() as c:
+        _migrate(c)
+        rows = c.execute(
+            "SELECT id, sector, title, created_at FROM tasks"
+            "  WHERE status='open' AND created_at < ?", (cut,)).fetchall()
+        for r in rows:
+            days = (_now() - int(r["created_at"] or _now())) // 86400
+            c.execute(
+                "UPDATE tasks SET status='withdrawn', result=?, ended_at=?"
+                "  WHERE id=? AND status='open'",
+                (f"Nobody picked this up in {days} day(s), so it was taken off "
+                 "the board. It was not done. If it still matters it will be "
+                 "raised again by whatever asked for it.", _now(), r["id"]))
+            out.append({"id": r["id"], "sector": r["sector"],
+                        "title": r["title"], "days": days})
+    return out
 
 
 def dead_claims(now=None):
