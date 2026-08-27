@@ -1822,7 +1822,7 @@ function renderComms(){
         <div style="margin-top:9px;font-size:12px;line-height:1.6">
           <span style="font-weight:600">${esc(m.author)}</span>
           <span style="color:var(--faint);font-size:10px;font-family:'IBM Plex Mono',monospace">
-            ${esc(m.hhmm)}</span>
+            ${esc(m.when || m.hhmm)}</span>
           <div style="white-space:pre-wrap;color:var(--ink);margin-top:1px">${
             esc((m.body||'').slice(0,1200))}</div>
         </div>`).join('')}

@@ -187,6 +187,77 @@ def check_health(status, ms, url, err):
     return out
 
 
+# A domain or an address printed on the site whose domain has no DNS at all is
+# not a cosmetic problem: every link to it is broken and every enquiry sent to
+# it is lost. The Watcher can settle that with a lookup, so it should.
+_HOSTS = re.compile(r"https?://([A-Za-z0-9.\-]+)")
+_MAILS = re.compile(r"mailto:([A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+\.[A-Za-z]{2,}))")
+
+
+def _resolves(host) -> bool:
+    import socket
+    try:
+        socket.gethostbyname(host)
+        return True
+    except Exception:
+        return False
+
+
+def check_dead_addresses(html, site):
+    """
+    Links and email addresses on the page whose domain does not exist.
+
+    HE ASKED FOR THIS TWICE AND NOTHING HAPPENED. The .ae domain printed all
+    over his site has no DNS record — the links go nowhere and the address on
+    it cannot receive mail — and nothing in the agency was looking, so nothing
+    ever filed it, so the Fixer never had a ticket to work.
+
+    One DNS lookup per distinct domain, and only for domains that are close to
+    his own: checking every outbound link on the page would be slow and would
+    file tickets about somebody else's website.
+    """
+    out = []
+    own = _bare_host(site)
+    if not own:
+        return out
+    stem = own.split(".")[0]
+    seen = set()
+    for host in set(_HOSTS.findall(html or "")):
+        bare = _bare_host("https://" + host)
+        if not bare or bare == own or bare in seen:
+            continue
+        # Only ones that look like his: same first label, different ending.
+        if not bare.startswith(stem):
+            continue
+        seen.add(bare)
+        if not _resolves(bare):
+            out.append({"kind": "bug", "severity": "high",
+                        "detail": f"The site links to {bare}, and that domain "
+                                  f"has no DNS record at all — every one of "
+                                  f"those links is broken. Your site is on "
+                                  f"{own}."})
+    for addr, dom in set(_MAILS.findall(html or "")):
+        bare = _bare_host("https://" + dom)
+        if not bare or bare in seen or not bare.startswith(stem):
+            continue
+        seen.add(bare)
+        if not _resolves(bare):
+            out.append({"kind": "form_dead", "severity": "critical",
+                        "detail": f"The email address on the site is {addr}, and "
+                                  f"{bare} has no DNS record — mail sent to it "
+                                  f"cannot be delivered. Every enquiry anyone "
+                                  f"sends to that address is lost."})
+    return out
+
+
+def _bare_host(url):
+    m = _HOSTS.match((url or "").strip())
+    if not m:
+        return ""
+    h = m.group(1).lower()
+    return h[4:] if h.startswith("www.") else h
+
+
 def check_hygiene(html):
     """Only the basics that affect whether the page works at all on a phone."""
     out = []
@@ -277,6 +348,8 @@ def _check(agent, url, timeout, run_row):
         findings = enquiry + check_health(status, ms, site, err)
         if html:
             findings += check_hygiene(html)
+
+        findings += check_dead_addresses(html, site)
 
         ok, reasons = critic_check(findings, fetched, found)
         if not ok:

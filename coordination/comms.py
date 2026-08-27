@@ -87,6 +87,27 @@ def _rows(c, q, args=()):
         return []
 
 
+def _when(ts, now=None):
+    """
+    A time somebody can place. Clock time for today, a weekday name inside the
+    last week, a date beyond that — the same way a person writes it down.
+    """
+    ts = int(ts or 0)
+    if not ts:
+        return ""
+    now = int(now or time.time())
+    lt, nt = time.localtime(ts), time.localtime(now)
+    hhmm = time.strftime("%H:%M", lt)
+    if (lt.tm_year, lt.tm_yday) == (nt.tm_year, nt.tm_yday):
+        return hhmm
+    days = (now - ts) // 86400
+    if days < 1:
+        return "yesterday " + hhmm
+    if days < 7:
+        return time.strftime("%a ", lt) + hhmm
+    return time.strftime("%-d %b ", lt) + hhmm if hasattr(time, "strftime") else hhmm
+
+
 def _ago(secs):
     secs = max(0, int(secs))
     if secs < 60:
@@ -164,9 +185,21 @@ def threads(limit=40, since=None) -> list:
                 # list, but there is no beam to draw for it.
                 "drawable": (f_room.lower() in ROOMS and t_room.lower() in ROOMS
                              and f_room.lower() != t_room.lower()),
+                # WHEN, NOT JUST WHAT TIME.
+                #
+                # This was the clock time and nothing else, so a thread whose
+                # four messages were sent on four different days read as
+                # 21:51, 02:47, 23:11, 16:23 — out of order to the eye, with
+                # no way to tell which came first. He said he could not work
+                # out which message came at which time, and he was right: the
+                # information was not on the screen.
+                #
+                # 'when' carries the day when it is not today, so the same four
+                # read as 21:51, "Sun 02:47", "Mon 23:11", "23 Aug 16:23".
                 "messages": [{"author": m["author"], "body": m["body"],
                               "at": m["at"],
                               "hhmm": time.strftime("%H:%M", time.localtime(m["at"] or 0)),
+                              "when": _when(m["at"] or 0, now),
                               "ago": _ago(now - int(m["at"] or now))} for m in msgs],
             })
         return out

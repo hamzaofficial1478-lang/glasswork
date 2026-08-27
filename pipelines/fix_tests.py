@@ -247,8 +247,10 @@ def test_a_whole_pass_queues_and_never_writes():
         r = it_fix.run()
         check("the pass ran", r["ok"], True)
         check("it claimed the board task", bool(r["claimed_task"]), True)
-        check("three tickets read", r["tickets_read"], 3)
-        check("and three changes queued for the owner", r["queued_for_you"], 3)
+        # Four, not three: the task he posted is now worked as a ticket in its
+        # own right. It used to be claimed and its words never read.
+        check("three tickets plus the job he posted", r["tickets_read"], 4)
+        check("and a change queued for each ticket", r["queued_for_you"], 3)
 
         q = _sql("SELECT agent, kind, detail FROM site_queue WHERE status='pending'")
         check("all queued in the Fixer's name", {x["agent"] for x in q}, {"it-fixer"})

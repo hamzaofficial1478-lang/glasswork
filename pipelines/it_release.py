@@ -148,6 +148,21 @@ def plan_of(row) -> dict:
                 "html": change["html"], "issue_id": issue,
                 "why": d.get("why") or "", "row": row}
 
+    if isinstance(change, dict) and change.get("replace") and change.get("with"):
+        return {"do": "replace", "find": change["replace"],
+                "to": change["with"], "pages": change.get("pages") or [],
+                "issue_id": issue, "why": d.get("why") or "", "row": row}
+
+    # The search widget, queued by pipelines/site_search with the markup in it.
+    # It was un-carryable purely because nothing here knew the shape, so he
+    # approved it and got "this approval does not carry a change anyone can
+    # carry out" — which is the program blaming him for its own gap.
+    if isinstance(change, dict) and change.get("html") and not change.get("page"):
+        return {"do": "refuse", "issue_id": issue, "row": row,
+                "why": "this one is markup to paste into your header, and it "
+                       "does not say which file — open it from the office and "
+                       "paste it, or tell IT which file holds your header."}
+
     if isinstance(change, dict) and change.get("run"):
         name = str(change["run"])
         if name not in ALLOWED_CALLS:
@@ -162,8 +177,27 @@ def plan_of(row) -> dict:
                 "why": d.get("why") or "",
                 "steps": d.get("what_to_do") or []}
 
+    # A PLAIN NOTE IS NOT A BROKEN CHANGE.
+    #
+    # Four other places queue things for him and only one of them queues a
+    # change to carry out. seo_answers asks whether blocking an AI crawler in
+    # robots.txt was deliberate; site_services asks which website services
+    # should join the catalogue. Those are questions, and their detail is a
+    # sentence rather than an object.
+    #
+    # Answering one used to produce "this approval does not carry a change
+    # anyone can carry out" — the program calling his answer malformed when it
+    # was the program that had never learned to read it. A question he has
+    # answered is answered: noted, and off his list.
+    if isinstance(d, str) or not d:
+        return {"do": "noted", "issue_id": issue, "row": row,
+                "why": (row.get("detail") or "")[:300],
+                "steps": []}
+
     return {"do": "refuse", "issue_id": issue, "row": row,
-            "why": "this approval does not carry a change anyone can carry out"}
+            "why": ("this approval carries no change and no instruction — it "
+                    "looks like a record of something that was refused rather "
+                    "than a proposal. Nothing was done to your site.")}
 
 
 # The only routines this desk may call, by name. A list rather than getattr on
@@ -257,7 +291,7 @@ def _work(agent, limit, dry_run, skip_tests):
                 }
 
     plans = [plan_of(r) for r in waiting]
-    doable = [p for p in plans if p["do"] in ("head_block", "call")]
+    doable = [p for p in plans if p["do"] in ("head_block", "call", "replace")]
     noted = [p for p in plans if p["do"] == "noted"]
     refused = [p for p in plans if p["do"] == "refuse"]
 
@@ -374,6 +408,27 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             board.mark_site_change(
                 row["id"], "applied",
                 f"written to {plan['page']} and confirmed on the page"
+                + (" (tests were skipped at your request)" if skipped_tests else ""))
+            return True
+
+        if plan["do"] == "replace":
+            r = site_api.replace_text(plan["find"], plan["to"], agent=agent)
+            if not r.get("ok"):
+                return _could_not(plan, str(r.get("error")
+                                            or "the replacement did not finish"))
+            # Read one page back and check the old text has really gone. The
+            # same rule as a block: the server saying yes is not the page
+            # agreeing.
+            page = (r.get("changed") or [{}])[0].get("page", "")
+            if page and confirm(page, plan["find"]):
+                return _could_not(
+                    plan, f"'{plan['find']}' is still on {page} after the "
+                          "change was written. Nothing further was touched; "
+                          "this is worth a look by hand.")
+            _close_ticket(plan.get("issue_id"))
+            board.mark_site_change(
+                row["id"], "applied",
+                (r.get("head") or "text replaced")
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 

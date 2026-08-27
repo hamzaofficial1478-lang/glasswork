@@ -564,6 +564,130 @@ def fix_canonical(agent=AGENT, s=None, dry_run=False) -> dict:
                      + (f", {len(failed)} refused" if failed else ""))}
 
 
+# ---------------------------------------------------------------------------
+# FIND AND REPLACE, ACROSS EVERY PAGE
+# ---------------------------------------------------------------------------
+#
+# "ask for to change the wrong domain into the website code... that is
+#  worlddealtechnicalservices.ae to replace with correct domain .com no any
+#  results at all, asks to replace the dummy mail that is showing on the
+#  website with orignal mail did not did that"
+#
+# He asked for the same shape of thing twice and got nothing both times,
+# because the agency had no way to do it. It could put a block in a <head>, it
+# could rewrite a canonical tag, it could swap a placeholder address — three
+# special cases — and it could not do the general thing those are all instances
+# of: change this exact text to that exact text, everywhere it appears.
+#
+# So this is that. Deliberately dumb and deliberately exact: no regular
+# expression, no case folding, no clever matching of things that look similar.
+# The owner sees the count per file before anything is written, and what is
+# written is exactly what he was shown.
+
+# Below this length a find-and-replace across a whole website is not a fix, it
+# is an accident waiting to be approved. 'ae' would hit every 'ae' in every
+# word on the site.
+MIN_FIND = 6
+
+
+def plan_replace(find, replace, s=None) -> dict:
+    """
+    Where this exact text appears, and how many times, changing nothing.
+
+    Reads the top-level pages AND the usual include locations, for the same
+    reason find_placeholders does: /pages lists the top level only, and on his
+    site the header — the file every page pulls in — lives under includes/.
+    """
+    find = find or ""
+    if len(find) < MIN_FIND:
+        return {"ok": False, "error":
+                f"'{find}' is too short to replace safely across a whole site. "
+                f"Give me at least {MIN_FIND} characters."}
+    if replace is None:
+        return {"ok": False, "error": "what should it be replaced with?"}
+    if find == replace:
+        return {"ok": False, "error": "those are the same text"}
+
+    p = pages(s=s)
+    names = [x["page"] for x in (p.get("pages") or [])] if p.get("ok") else []
+    hits, looked, unreadable = [], [], []
+    for name in list(names) + [n for n in LIKELY_INCLUDES if n not in names]:
+        if name in looked:
+            continue
+        looked.append(name)
+        got = read_page(name, s=s)
+        if not got.get("ok"):
+            if name in names:
+                unreadable.append(name)
+            continue
+        html = got.get("html") or ""
+        n = html.count(find)
+        if not n:
+            continue
+        # One line of context per file, so what he is approving is legible
+        # rather than a number.
+        sample = ""
+        for line in html.splitlines():
+            if find in line:
+                sample = " ".join(line.split())[:160]
+                break
+        hits.append({"page": name, "times": n, "sample": sample})
+
+    total = sum(h["times"] for h in hits)
+    return {"ok": True, "find": find, "replace": replace, "pages": hits,
+            "files": len(hits), "times": total, "looked_in": len(looked),
+            "unreadable": unreadable,
+            "head": (f"'{find}' appears {total} time(s) in {len(hits)} file(s)"
+                     if total else
+                     f"'{find}' does not appear in any of the {len(looked)} "
+                     "files I can read")}
+
+
+def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:
+    """
+    Change this exact text to that, everywhere it appears. Releaser only.
+
+    Every write goes through put_page, so each file is backed up by the server
+    and each change is recorded in the change log with the command to undo it —
+    the same road every other change takes. Nothing special-cased here.
+    """
+    plan = plan_replace(find, replace, s=s)
+    if not plan.get("ok") or not plan["pages"]:
+        return {**plan, "changed": []}
+    if dry_run:
+        return {**plan, "dry_run": True}
+    refused = _may_write(agent)
+    if refused:
+        cid = board.queue_site_change(agent, "replace_text",
+                                      {"find": find, "replace": replace,
+                                       "files": plan["files"],
+                                       "times": plan["times"]})
+        return {"ok": False, "queued": cid, "error": refused}
+
+    changed, failed = [], []
+    for h in plan["pages"]:
+        got = read_page(h["page"], s=s)
+        if not got.get("ok"):
+            failed.append({"page": h["page"], "why": got.get("error")})
+            continue
+        html = got["html"]
+        if find not in html:
+            continue                      # changed under us since the plan
+        r = put_page(h["page"], html.replace(find, replace), agent=agent, s=s,
+                     _action="replace")
+        if r.get("ok"):
+            changed.append({"page": h["page"], "times": h["times"],
+                            "backup": r.get("backup")})
+        else:
+            failed.append({"page": h["page"], "why": r.get("error")})
+    return {"ok": not failed, "find": find, "replace": replace,
+            "changed": changed, "failed": failed,
+            "head": (f"changed '{find}' to '{replace}' "
+                     f"{sum(c['times'] for c in changed)} time(s) across "
+                     f"{len(changed)} file(s)"
+                     + (f", {len(failed)} refused" if failed else ""))}
+
+
 def blocks_on(page, s=None) -> list:
     """Which agency blocks a page is currently carrying."""
     got = read_page(page, s=s)

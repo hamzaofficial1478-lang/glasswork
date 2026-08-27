@@ -210,6 +210,132 @@ def fix_placeholders(issue, ctx):
             "undo": "python -m pipelines.site_api --undo --page <page>"}
 
 
+def fix_wrong_domain(issue, ctx):
+    """
+    A domain on the pages that is not the one the site is actually on.
+
+    "ask for to change the wrong domain into the website code... that is
+     worlddealtechnicalservices.ae to replace with correct domain .com no any
+     results at all"
+
+    He asked for this and nothing happened, because the agency could rewrite a
+    canonical TAG and had no way to change the same text everywhere else it
+    appears — in a link, in a mailto, in a bit of schema markup, in a phone
+    number's page. site_api.plan_replace does that now, and this is the recipe
+    that spots when it is needed.
+
+    The right domain is not guessed: it is the one his site is served from,
+    which is the one saved as SITE_URL. And it is only ever proposed when the
+    wrong one is actually ON the pages, with a count per file.
+    """
+    # NO KEYWORD LIST. The first version fired on the word "canonical", which
+    # made it swallow every canonical ticket — including ones that name no
+    # domain at all and belong to fix_canonical. The only honest trigger is
+    # whether a domain that is NOT his is actually named in the ticket.
+    text = (issue["detail"] or "")
+    right = _host_of(ctx.get("env", {}).get("SITE_URL") or "")
+    if not right:
+        return None
+    wrong = _wrong_domain_in(text, right)
+    if not wrong:
+        return None
+    try:
+        plan = site_api.plan_replace(wrong, right)
+    except Exception as e:
+        return _advice(f"Could not read the pages to count it: {e}",
+                       ["Check the Admin API address and token on /setup."])
+    if not plan.get("ok"):
+        return _advice("Could not work out the change: "
+                       + str(plan.get("error") or ""),
+                       ["Check the Admin API address and token on /setup."])
+    if not plan["times"]:
+        return {"how": "already_right",
+                "why": f"'{wrong}' is not on any page I can read any more — "
+                       "this ticket has been overtaken."}
+    where = ", ".join(f"{h['page']} ({h['times']}×)" for h in plan["pages"][:6])
+    return {"how": "replace", "find": wrong, "replace": right,
+            "pages": [h["page"] for h in plan["pages"]],
+            "times": plan["times"],
+            "why": (f"'{wrong}' appears {plan['times']} time(s) across "
+                    f"{plan['files']} file(s) — {where}. That domain has no DNS "
+                    f"record at all, so every link and address using it is "
+                    f"broken. Your site is on {right}."),
+            "undo": "python -m pipelines.site_api --undo <page>"}
+
+
+def fix_dead_email(issue, ctx):
+    """
+    An email address on the site that cannot receive mail.
+
+    info@worlddealtechnicalservices.ae is printed on his live website and the
+    domain has no DNS at all, so every enquiry sent to it bounces or vanishes.
+    He asked for it swapped for the working address and nothing happened.
+
+    Same shape as the domain: the replacement comes from BUSINESS_EMAIL, never
+    from the page, and it is only proposed when the dead one is really there.
+    """
+    text = (issue["detail"] or "").lower()
+    if "mail" not in text and "@" not in text:
+        return None
+    right = (ctx.get("env", {}).get("BUSINESS_EMAIL") or "").strip()
+    if not right:
+        return _advice(
+            "There is an address on your site that cannot receive mail, and no "
+            "working one saved for me to put in its place.",
+            ["Save it on /setup (BUSINESS_EMAIL), then run the Fixer again."],
+            needs="the address you actually read")
+    wrong = _dead_email_in(text) or _dead_email_in(issue["detail"] or "")
+    if not wrong or wrong.lower() == right.lower():
+        return None
+    try:
+        plan = site_api.plan_replace(wrong, right)
+    except Exception as e:
+        return _advice(f"Could not read the pages to count it: {e}", [])
+    if not plan.get("ok"):
+        return _advice("Could not work out the change: "
+                       + str(plan.get("error") or ""), [])
+    if not plan["times"]:
+        return {"how": "already_right",
+                "why": f"'{wrong}' is not on any page I can read any more."}
+    return {"how": "replace", "find": wrong, "replace": right,
+            "pages": [h["page"] for h in plan["pages"]],
+            "times": plan["times"],
+            "why": (f"'{wrong}' is on {plan['files']} page(s), {plan['times']} "
+                    f"time(s). That domain has no mail record, so anyone who "
+                    f"writes to it gets nothing back — the enquiry is simply "
+                    f"lost. Yours is {right}."),
+            "undo": "python -m pipelines.site_api --undo <page>"}
+
+
+_HOST = re.compile(r"https?://([A-Za-z0-9.\-]+)")
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def _host_of(url):
+    m = _HOST.match((url or "").strip())
+    if not m:
+        return ""
+    h = m.group(1)
+    return h[4:] if h.lower().startswith("www.") else h
+
+
+def _wrong_domain_in(text, right):
+    """A domain mentioned in the ticket that is not the site's own."""
+    bare = right.lower()
+    for host in set(_HOST.findall(text) + re.findall(
+            r"\b([a-z0-9\-]+\.(?:ae|com|net|org|co\.ae))\b", text.lower())):
+        h = host[4:] if host.lower().startswith("www.") else host
+        if h.lower() != bare and "." in h:
+            return h
+    return ""
+
+
+def _dead_email_in(text):
+    for a in _EMAIL.findall(text or ""):
+        return a
+    return ""
+
+
 def fix_title(issue, ctx):
     """
     A page with no <title>.
@@ -368,6 +494,11 @@ def fix_unreachable(issue, ctx):
 # by anything matching every bug.
 RECIPES = (
     fix_unreachable,
+    # Before fix_canonical: a wrong domain in a canonical tag is a wrong domain
+    # EVERYWHERE, and rewriting only the canonical leaves it in every link and
+    # mailto on the page. He asked for the domain changed, not the tag.
+    fix_wrong_domain,
+    fix_dead_email,
     fix_viewport,
     fix_canonical,
     fix_placeholders,
@@ -378,19 +509,45 @@ RECIPES = (
 )
 
 
-def plan_for(issue, ctx):
-    """The one plan for this ticket, or None if no recipe recognises it."""
+def plans_for(issue, ctx) -> list:
+    """
+    Every change this ticket calls for. A list, because one of them is not
+    always enough.
+
+    A TICKET IS ONE PROBLEM. AN INSTRUCTION IS NOT.
+
+    This used to return the first recipe that matched and stop. That is right
+    for a ticket the Watcher filed — "no viewport tag" is one problem with one
+    fix. It is wrong for something HE typed: he asked, in one sentence, for the
+    wrong domain replaced AND the dummy email replaced, the first recipe
+    matched, and the second half of what he asked for was dropped on the floor.
+    He then asked what the agency had actually done.
+
+    So a filed ticket still stops at the first match, and an instruction from
+    him is run past every recipe and gets every change it calls for.
+    """
+    everything = issue.get("kind") == "task"
+    out = []
     for recipe in RECIPES:
         try:
             got = recipe(issue, ctx)
         except Exception as e:                                # pragma: no cover
-            return _advice(f"The recipe for this ticket errored: {e}",
-                           ["This is a bug in the Fixer, not in your site. "
-                            "It has been filed."])
-        if got:
-            got["recipe"] = recipe.__name__
-            return got
-    return None
+            return [_advice(f"The recipe for this ticket errored: {e}",
+                            ["This is a bug in the Fixer, not in your site. "
+                             "It has been filed."])]
+        if not got:
+            continue
+        got["recipe"] = recipe.__name__
+        out.append(got)
+        if not everything:
+            break
+    return out
+
+
+def plan_for(issue, ctx):
+    """The first plan for this ticket, or None. Kept for callers that want one."""
+    got = plans_for(issue, ctx)
+    return got[0] if got else None
 
 
 # ---------------------------------------------------------------------------
@@ -421,12 +578,21 @@ def open_issues(con, limit=MAX_PER_PASS, only=None):
 
 def _context():
     """Everything a recipe might need, read once rather than per ticket."""
+    # THE ENVIRONMENT WINS, THEN .env — the same order the rest of the program
+    # uses. Reading .env alone was already the bug that made SMTP look
+    # unconfigured when it was configured, and here it made the Fixer say "no
+    # working address saved" while BUSINESS_EMAIL was sitting in the
+    # environment it was handed.
     env = {}
     try:
         from providers import integrations
-        env = integrations.read_env()
+        env = dict(integrations.read_env())
     except Exception:
         env = {}
+    import os as _os
+    for k, v in _os.environ.items():
+        if v and (k.startswith("BUSINESS_") or k in ("SITE_URL", "AGENCY_NAME")):
+            env[k] = v
     ctx = {"env": env,
            "business_name": env.get("BUSINESS_NAME") or env.get("AGENCY_NAME") or "",
            "phone": env.get("BUSINESS_PHONE") or env.get("BUSINESS_WHATSAPP") or "",
@@ -496,7 +662,26 @@ def _work(agent, limit, only, dry_run):
         # be the dashboard lying in the opposite direction.
         task = board.next_open_task(SECTOR, agent)
 
+        # WHAT HE ACTUALLY ASKED FOR.
+        #
+        # This claimed the board task and then never read a word of it. Zero
+        # references to its title or its detail: it took the job, worked its
+        # own ticket list, and closed the job as done. So "change the .ae
+        # domain to .com on the pages" and "replace the dummy email" were
+        # typed, claimed, and silently ignored — twice, and he was right to
+        # ask what the agency had actually done.
+        #
+        # A claimed task is now a ticket like any other. It goes through the
+        # same recipes, so an instruction that matches one becomes an exact
+        # change he can approve, and one that matches none is reported as
+        # having no recipe instead of vanishing.
         issues = open_issues(con, limit=limit, only=only)
+        if task and not only:
+            issues.insert(0, {
+                "id": 0, "kind": "task", "severity": "high",
+                "detail": f"{task.get('title', '')}. {task.get('detail', '') or ''}",
+                "url": "", "status": "open", "found_by": task.get("created_by", "MD"),
+                "found_at": task.get("created_at") or _now(), "task_id": task["id"]})
         if not issues:
             total = con.execute("SELECT count(*) FROM site_issues").fetchone()[0]
             waiting = con.execute("SELECT count(*) FROM site_issues"
@@ -516,11 +701,12 @@ def _work(agent, limit, only, dry_run):
         ctx = _context()
         worked, unhandled = [], []
         for issue in issues:
-            plan = plan_for(issue, ctx)
-            if plan is None:
+            got = plans_for(issue, ctx)
+            if not got:
                 unhandled.append(issue)
                 continue
-            worked.append({"issue": issue, "plan": plan})
+            for plan in got:
+                worked.append({"issue": issue, "plan": plan})
 
         ok, reasons = critic_check(worked, unhandled)
         if not ok:
@@ -550,7 +736,7 @@ def _work(agent, limit, only, dry_run):
             "critic": "passed",
             "tickets_read": len(issues),
             "patched": sum(1 for w in worked
-                           if w["plan"]["how"] in ("patch", "call")),
+                           if w["plan"]["how"] in ("patch", "call", "replace")),
             "advised": sum(1 for w in worked if w["plan"]["how"] == "advice"),
             "overtaken": len(overtaken),
             "no_recipe": len(unhandled),
@@ -607,9 +793,10 @@ def _hand_on(agent, issue, plan, con):
     that has already finished.
     """
     if plan["how"] == "already_right":
-        with sqlite3.connect(board.DB, timeout=30) as c:
-            c.execute("UPDATE site_issues SET status='closed' WHERE id=?",
-                      (issue["id"],))
+        if issue["id"]:
+            with sqlite3.connect(board.DB, timeout=30) as c:
+                c.execute("UPDATE site_issues SET status='closed' WHERE id=?",
+                          (issue["id"],))
         return {"state": "overtaken", "issue": issue["id"], "why": plan["why"]}
 
     page = plan.get("page") or (plan.get("pages") or [""])[0] or "site"
@@ -620,9 +807,10 @@ def _hand_on(agent, issue, plan, con):
         detail = _for_the_owner(issue, plan)
         change_id = board.queue_site_change(agent, "fix_" + (issue["kind"] or "site"),
                                             detail)
-        with sqlite3.connect(board.DB, timeout=30) as c:
-            c.execute("UPDATE site_issues SET status='in_review' WHERE id=?",
-                      (issue["id"],))
+        if issue["id"]:
+            with sqlite3.connect(board.DB, timeout=30) as c:
+                c.execute("UPDATE site_issues SET status='in_review' WHERE id=?",
+                          (issue["id"],))
         return {"state": "queued", "issue": issue["id"], "change_id": change_id,
                 "how": plan["how"]}
     finally:
@@ -640,9 +828,11 @@ def _for_the_owner(issue, plan):
     """
     head = {"patch": "I can fix this exactly",
             "call": "I can fix this exactly",
+            "replace": "I can fix this exactly",
             "advice": "This one needs you"}.get(plan["how"], "")
     body = {
-        "issue_id": issue["id"],
+        "issue_id": issue["id"] or None,
+        "from_your_instruction": issue.get("kind") == "task",
         "severity": issue["severity"],
         "found": (issue["detail"] or "")[:400],
         "url": issue["url"] or "",
@@ -653,6 +843,11 @@ def _for_the_owner(issue, plan):
         body["change"] = {"page": plan["page"], "block": plan["block_id"],
                           "html": plan["html"]}
         body["undo"] = plan["undo"]
+    elif plan["how"] == "replace":
+        body["change"] = {"replace": plan["find"], "with": plan["replace"],
+                          "pages": plan.get("pages") or [],
+                          "times": plan.get("times") or 0}
+        body["undo"] = plan.get("undo") or ""
     elif plan["how"] == "call":
         body["change"] = {"run": plan["call"], "pages": plan.get("pages") or []}
         body["undo"] = plan.get("undo") or ""
@@ -696,8 +891,8 @@ def _as_text(r):
         return "IT FIXER — " + (r.get("error") or "nothing to do")
     lines = ["IT FIXER — " + (r.get("summary") or "")]
     for p in r.get("plans") or []:
-        mark = {"patch": "fix ", "call": "fix ", "advice": "ask ",
-                "already_right": "gone"}.get(p["how"], "    ")
+        mark = {"patch": "fix ", "call": "fix ", "replace": "fix ",
+                "advice": "ask ", "already_right": "gone"}.get(p["how"], "    ")
         lines.append(f"  {mark} #{p['issue']:<4} [{p['severity']}] {p['why'][:100]}")
     for u in r.get("unhandled") or []:
         lines.append(f"  ??   #{u['issue']:<4} no recipe — {u['detail'][:80]}")
