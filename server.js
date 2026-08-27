@@ -1009,6 +1009,21 @@ app.post("/api/run/start", (req, res) => {
     why: "Running. Watch the office floor — the lamps come on as each sector picks up." });
 });
 
+// ---- WHAT EACH SECTOR ACTUALLY PRODUCED -------------------------------------
+// "there is no any section that shows the results of the sectors."
+//
+// The floor shows who is working, the run panel shows which steps ran, the
+// control room lists the last forty rows of all time. None of the three answers
+// "I pressed Run — what came out of it?". This does, and for a sector that
+// produced nothing it says which of the six reasons it was.
+app.get("/api/results", (q, res) => {
+  const args = ["--json"];
+  const days = parseInt(q.query.days, 10);
+  if (Number.isFinite(days) && days > 0) args.push("--days", String(Math.min(days, 365)));
+  if (q.query.sector) args.push("--sector", String(q.query.sector).slice(0, 40));
+  res.json(pyModule("coordination.results", args, 60000));
+});
+
 // ---- WHAT CHANGED ON THE WEBSITE --------------------------------------------
 // "there should be a section in program where i can see whats changed in
 //  website... that's totally blind."

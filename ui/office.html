@@ -280,6 +280,17 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
    panel look identical whichever list is on screen, and 'Everything' vs 'Not
    the agency' becomes guesswork. */
 .actbtn.on{border-color:var(--glass);color:var(--glass)}
+
+/* The rows a sector produced. Same table the control room uses — a sector's
+   output should not look like two different things on two screens. */
+.made{width:100%;border-collapse:collapse;font-size:12.5px}
+.made th{text-align:left;padding:7px 10px;color:var(--etch);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line);
+  white-space:nowrap}
+.made td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.made td.mono{font-family:'IBM Plex Mono',monospace;color:var(--faint);
+  white-space:nowrap}
+.made tr:hover td{background:var(--panel2)}
 .pgroup{padding:16px 20px;border-bottom:1px solid var(--line)}.pgroup .gh{margin-bottom:12px}
 .conn{display:flex;align-items:center;gap:12px;padding:10px 0}
 .conn .ic{width:32px;height:32px;border-radius:8px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none}
@@ -429,6 +440,7 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   <button class="htab on">Office</button>
   <button class="htab" onclick="openActivity()">Activity <span id="actBadge"></span></button>
   <button class="htab" onclick="openComms()">Sector traffic <span id="commBadge"></span></button>
+  <button class="htab" onclick="openResults()">Results</button>
   <button class="htab" onclick="openChanges()">Website changes</button>
   <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
   <button class="htab" onclick="openPanel('connPanel')">Connections</button>
@@ -519,6 +531,28 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
   <h2><span>Sector traffic <small id="commHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
       <button class="x" onclick="closeAll()">×</button></h2>
   <div class="pgroup" id="commBody"></div>
+</div>
+
+<!-- WHAT EACH SECTOR ACTUALLY PRODUCED.
+     "there is no any section that shows the results of the sectors."
+
+     The floor shows which desks are lit — that is who is working, not what came
+     out. The run panel shows which steps ran — 'SEO finds the gaps, finished'
+     says the program did not crash, not that it found anything. Neither answers
+     the question he asks after pressing Run.
+
+     Every sector gets its numbers for the period, the actual rows it produced,
+     and — the half that matters on the day he goes looking — why it produced
+     nothing, when it produced nothing. -->
+<div class="panel wide full" id="resPanel">
+  <h2><span>Results <small id="resHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" id="resD0" onclick="openResults(0)">Today</button>
+        <button class="actbtn" id="resD7" onclick="openResults(7)">7 days</button>
+        <button class="actbtn" id="resD30" onclick="openResults(30)">30 days</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="resBody"></div>
 </div>
 
 <!-- WHAT CHANGED ON THE WEBSITE.
@@ -1471,6 +1505,109 @@ async function openLeads(scope){
         <td style="color:var(--muted)">${esc(l.found)}</td>
       </tr>`).join('')
     + `</tbody></table>`;
+}
+
+/* ---- WHAT EACH SECTOR PRODUCED ---------------------------------------------
+   "there is no any section that shows the results of the sectors."
+
+   Two halves, and the second is the one worth building carefully. The numbers
+   and the rows are easy. The line under a quiet sector saying WHY it was quiet
+   is what stops him guessing — and it is drawn differently depending on which
+   of the six reasons it is, because "you switched this off" and "its work
+   failed" call for completely different things from him. ------------------- */
+let RES = {days:0, data:null};
+
+async function openResults(days){
+  RES.days = (days===undefined||days===null) ? RES.days : days;
+  openPanel('resPanel');
+  renderResults();
+  try{
+    const r = await fetch('/api/results'+(RES.days?('?days='+RES.days):''),{cache:'no-store'});
+    RES.data = await r.json();
+  }catch(e){ RES.data = {ok:false, error:String(e)}; }
+  renderResults();
+}
+
+/* A quiet sector is not all one thing. Red is broken and wants IT; amber is
+   waiting on him; grey is a perfectly ordinary nothing-to-do. Painting all
+   three the same colour is how a normal day starts looking like a fire. */
+function whyTone(why){
+  const w = (why||'').toLowerCase();
+  if(w.includes('work failed')) return 'var(--danger)';
+  if(w.includes('switched this sector off') || w.includes('has not been run')
+     || w.includes('you stopped')) return 'var(--amber)';
+  return 'var(--faint)';
+}
+
+function renderResults(){
+  const B=$('#resBody'), d=RES.data;
+  [['resD0',0],['resD7',7],['resD30',30]].forEach(([id,n])=>
+    $('#'+id).classList.toggle('on', RES.days===n));
+  if(!d){ B.innerHTML=`<p style="color:var(--muted);font-size:12.5px">Reading…</p>`; return; }
+  if(!d.ok){
+    $('#resHead').textContent='';
+    B.innerHTML=`<div class="warnbox"><b>Could not read the results.</b><br>${esc(d.error||'no detail')}</div>`;
+    return;
+  }
+  $('#resHead').textContent = '· '+(d.head||'');
+
+  B.innerHTML = (d.sectors||[]).map(s=>{
+    const counts = (s.counts||[]).map(c=>
+      `<span style="display:inline-block;margin-right:18px">
+         <b style="font-family:'IBM Plex Mono',monospace;font-size:15px;
+            color:${c.n?'var(--glass)':'var(--faint)'}">${c.n}</b>
+         <span style="font-size:11px;color:var(--muted);margin-left:5px">${esc(c.label)}</span>
+       </span>`).join('');
+
+    const why = s.nothing_because
+      ? `<div style="font-size:12px;color:${whyTone(s.nothing_because)};
+             line-height:1.6;margin-top:8px">${esc(s.nothing_because)}</div>` : '';
+
+    // The actual rows, not a count of them. Capped at eight on screen: he is
+    // scanning, and a hundred leads in a panel is a wall he scrolls past.
+    const rows = (s.items||[]).slice(0,8).map(it=>
+      `<tr><td class="mono">${esc(it.at||'')}</td>`
+      + it.cols.map(v=>`<td>${esc(String(v==null?'':v)).slice(0,140)}</td>`).join('')
+      + `</tr>`).join('');
+    const table = s.items && s.items.length
+      ? `<div style="overflow-x:auto;margin-top:10px"><table class="made">
+           <thead><tr><th>at</th>${(s.columns||[]).map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+           <tbody>${rows}</tbody></table></div>`
+        + (s.made>8?`<div style="font-size:11px;color:var(--faint);margin-top:6px">
+             …and ${s.made-8} more</div>`:'')
+      : '';
+
+    // What the last run asked of this sector, when something went wrong with
+    // it — but ONLY if the sector still produced something. If it produced
+    // nothing, the line above already quotes the failed step by name, and
+    // printing it twice made Leads say "every Overpass mirror refused the
+    // connection" twice in a row, which reads like two separate problems.
+    //
+    // The case this IS for is the one that would otherwise be invisible: a
+    // sector that found twelve businesses AND had a step fall over. The
+    // numbers look fine and something is still broken.
+    const bad = s.nothing_because ? []
+              : (s.steps||[]).filter(x=>['failed','stopped','skipped'].includes(x.status));
+    const steps = bad.length
+      ? `<div style="margin-top:8px">` + bad.map(x=>
+          `<div style="font-size:11.5px;color:var(--muted);line-height:1.6">
+             <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+                   text-transform:uppercase;letter-spacing:.08em;
+                   color:${x.status==='failed'?'var(--danger)':'var(--amber)'}">${esc(x.status)}</span>
+             &nbsp;${esc(x.label)}${x.summary?' — '+esc(x.summary):''}</div>`).join('')
+        + `</div>` : '';
+
+    return `<div style="border-left:2px solid ${s.made?'var(--ok)':'var(--line2)'};
+                 padding:2px 0 14px 12px;margin-bottom:18px">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <b style="font-size:13.5px;font-weight:600">${esc(s.name)}</b>
+          ${s.enabled===false?`<span style="font-size:10px;font-family:'IBM Plex Mono',monospace;
+             text-transform:uppercase;letter-spacing:.08em;color:var(--amber)">switched off</span>`:''}
+        </div>
+        <div style="margin-top:8px">${counts||''}</div>
+        ${why}${steps}${table}
+      </div>`;
+  }).join('');
 }
 
 /* ---- WHAT CHANGED ON THE WEBSITE -------------------------------------------

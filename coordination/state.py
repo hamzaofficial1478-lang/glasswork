@@ -732,11 +732,18 @@ _DETAIL = {
            "SELECT id, kind AS a, detail AS b, severity AS c, status AS d,"
            " found_at AS at FROM site_issues ORDER BY found_at DESC LIMIT 40",
            ("kind", "what is wrong", "severity", "status")),
+    # 'type', not 'service'. content_queue has never had a service column, so
+    # this query has raised OperationalError since the day it was written — and
+    # sector_detail catches that with a bare except and returns an empty list,
+    # so the Content sheet has quietly shown "Nothing yet" for its whole life
+    # however much Content had actually produced. Found by trying to write a
+    # row into the table. coordination/results_tests.py now runs every one of
+    # these queries against a fresh schema so it cannot happen again.
     "Content": ("content queue",
                 "SELECT id, title AS a, COALESCE(brief,'') AS b, status AS c,"
-                " COALESCE(service,'') AS d, created_at AS at"
+                " COALESCE(type,'') AS d, created_at AS at"
                 " FROM content_queue ORDER BY created_at DESC LIMIT 40",
-                ("title", "brief", "status", "service")),
+                ("title", "brief", "status", "kind")),
     "SEO": ("keyword intelligence",
             "SELECT id, phrase AS a, evidence AS b, score AS c, sources AS d,"
             " seen_at AS at FROM keyword_intel ORDER BY score DESC LIMIT 40",
@@ -747,15 +754,15 @@ _DETAIL = {
               " FROM leads ORDER BY found_at DESC LIMIT 40",
               ("company", "email", "area", "stage")),
     "Report": ("daily reports",
-               "SELECT id, day AS a, summary AS b, COALESCE(health,'') AS c,"
+               "SELECT id, day AS a, summary AS b, COALESCE(health_score,'') AS c,"
                " COALESCE(spend_usd,'') AS d, created_at AS at"
                " FROM daily_reports ORDER BY created_at DESC LIMIT 40",
                ("day", "summary", "health", "spend")),
     "Security": ("security events",
                  "SELECT id, kind AS a, COALESCE(detail,'') AS b,"
-                 " COALESCE(verdict,'') AS c, COALESCE(source,'') AS d, at"
+                 " COALESCE(action,'') AS c, COALESCE(source,'') AS d, at"
                  " FROM security_events ORDER BY at DESC LIMIT 40",
-                 ("kind", "detail", "verdict", "source")),
+                 ("kind", "detail", "what we did", "source")),
 }
 
 
