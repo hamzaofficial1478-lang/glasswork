@@ -132,6 +132,11 @@ STEPS = [
     # pipeline that ever ran under that name — so every ticket the Watcher
     # filed sat open for ever and the board looked calm rather than stuck.
     ("IT patches what it found", "pipelines.it_fix", "IT", "it"),
+    # AFTER the Fixer, so anything he approved since yesterday goes on today.
+    # It is the last link in the chain and it was the missing one: the Watcher
+    # found problems, the Fixer wrote the changes, he pressed Approve, and his
+    # yes went into a table nothing ever read. This is what reads it.
+    ("IT carries out what you approved", "pipelines.it_release", "IT", "it"),
     ("IT reindexes site search", "pipelines.site_search", "IT", "it"),
     # LAST in the IT lane, after anything the agency itself might have changed,
     # so its own edits are already in the log and this reports only what moved

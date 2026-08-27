@@ -878,6 +878,11 @@ _ADDED_COLUMNS = (
     # program on any other box, so a stop that cannot place the pid does not
     # get to send a signal to it.
     ("day_runs",     "host",         "TEXT"),
+    # What happened after he said yes. There was nowhere to record it, because
+    # nothing ever acted on an approval — the row reached 'approved' and stayed
+    # there. See pipelines/it_release.py.
+    ("site_queue",   "applied_at",   "INTEGER"),
+    ("site_queue",   "note",         "TEXT"),
     ("locks",        "pid",          "INTEGER"),
     # The same two ideas, one table over. Tasks were handed out in arrival
     # order with no notion of what they were about or who they were for, so an
@@ -1697,6 +1702,43 @@ def decide_site_change(change_id, decision):
     with _conn() as c:
         c.execute("UPDATE site_queue SET status=?, decided_at=? WHERE id=?",
                   (decision, _now(), change_id))
+
+
+def approved_site_changes(limit=25):
+    """
+    What he has said yes to and nobody has acted on yet.
+
+    THE OTHER HALF OF HIS QUESTION. "if it cannot make changes to site then
+    what was full access of website and the files uploaded into the website?"
+    The answer was that his approval was written to a row that nothing ever
+    read: pending → approved → and there it sat, for ever. This is the query
+    the Releaser runs, and until it existed the queue was a suggestion box.
+
+    Oldest first, because a decision he made on Monday should not be overtaken
+    by one he made this morning.
+    """
+    with _conn() as c:
+        _migrate(c)
+        rows = c.execute(
+            "SELECT * FROM site_queue WHERE status='approved'"
+            " ORDER BY decided_at, id LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def mark_site_change(change_id, status, note=""):
+    """
+    Record what became of an approved change. 'applied' or 'failed'.
+
+    Never silently: a change that could not be written has to end up somewhere
+    he can see, or it disappears from the queue and he assumes it went on.
+    """
+    if status not in ("applied", "failed"):
+        raise ValueError(f"not an outcome: {status}")
+    with _conn() as c:
+        _migrate(c)
+        c.execute("UPDATE site_queue SET status=?, applied_at=?, note=?"
+                  " WHERE id=?", (status, _now(), (note or "")[:500], change_id))
+    return {"id": change_id, "status": status, "note": note}
 
 
 # ---------------------------------------------------------------------------

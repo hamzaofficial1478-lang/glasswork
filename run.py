@@ -373,6 +373,7 @@ def tests():
             "pipelines.secure_tests",
             "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.fix_tests",
+            "pipelines.release_tests",
             "pipelines.site_tests", "pipelines.seo_tests",
             "pipelines.answers_tests", "pipelines.intel_tests",
             "pipelines.report_tests", "pipelines.run_tests"]

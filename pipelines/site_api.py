@@ -866,8 +866,21 @@ def head_holder(candidates, s=None) -> str:
     A trade site built with PHP includes has one header file and seven pages
     that pull it in. The markup belongs in the header, once.
     """
+    # NO CANDIDATES IS NOT NO ANSWER.
+    #
+    # candidates comes from live_pages(), which reads the site over the public
+    # internet and follows its own navigation. That fails for reasons that have
+    # nothing to do with the question being asked: the site is briefly down, an
+    # outbound fetch is blocked, the home page is behind something. Returning ""
+    # then made the Fixer downgrade a fact it could have patched — the viewport
+    # tag — into advice, and he would have been told to paste it in by hand for
+    # no reason at all.
+    #
+    # The admin endpoint can list the files whatever the public side is doing,
+    # and the search below already ends there. So with nothing to go on, start
+    # from the listing instead of giving up.
     if not candidates:
-        return ""
+        return _from_the_listing([], s=s)
     # If a real page has its own </head>, there is no include to find.
     for pg in candidates[:4]:
         got = read_page(pg, s=s)
@@ -891,24 +904,40 @@ def head_holder(candidates, s=None) -> str:
         if got.get("ok") and "</head" in (got.get("html") or "").lower():
             return name
 
-    # NOTHING NAMED AN INCLUDE WE COULD READ, SO GO AND LOOK.
-    #
-    # An include can be written a dozen ways — a constant, a variable, a
-    # front controller, a path built at run time — and a regex will miss most
-    # of them. Rather than give up and refuse every page again, ask the server
-    # for its files and read the ones that are plausibly a header. Cheap: a
-    # handful of reads, and only when the regex has already come up empty.
+    return _from_the_listing(candidates, s=s)
+
+
+def _from_the_listing(candidates, s=None) -> str:
+    """
+    NOTHING NAMED AN INCLUDE WE COULD READ, SO GO AND LOOK.
+
+    An include can be written a dozen ways — a constant, a variable, a front
+    controller, a path built at run time — and a regex will miss most of them.
+    Rather than give up and refuse every page again, ask the server for its
+    files and read the ones that are plausibly a header. Cheap: a handful of
+    reads, and only when the regex has already come up empty.
+
+    The usual include locations are searched too. The listing only covers the
+    top level, and on his site the header is under includes/ — so a search that
+    trusted the listing alone would look everywhere except where it is.
+    """
+    names, seen = [], set()
     p = pages(s=s)
-    if not p.get("ok"):
-        return ""
-    likely, rest = [], []
-    for row in p.get("pages") or []:
+    for row in (p.get("pages") or []) if p.get("ok") else []:
         n = row["page"]
-        if n in candidates:
+        if n in candidates or n in seen:
             continue
-        (likely if any(w in n.lower() for w in
-                       ("head", "header", "top", "meta", "layout", "template"))
-         else rest).append(n)
+        seen.add(n)
+        names.append(n)
+    for n in LIKELY_INCLUDES:
+        if n not in seen and n not in candidates:
+            seen.add(n)
+            names.append(n)
+    if not names:
+        return ""
+    likely = [n for n in names if any(w in n.lower() for w in
+              ("head", "header", "top", "meta", "layout", "template"))]
+    rest = [n for n in names if n not in likely]
     for name in likely + rest[:12]:
         got = read_page(name, s=s)
         if got.get("ok") and _is_a_header_fragment(got.get("html") or ""):

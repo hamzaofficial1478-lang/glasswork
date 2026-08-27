@@ -290,9 +290,21 @@ CREATE TABLE IF NOT EXISTS site_queue (
   agent      TEXT,
   kind       TEXT,                        -- upsert_page | release | rollback | form_test | ...
   detail     TEXT,
-  status     TEXT DEFAULT 'pending',      -- pending | approved | rejected | applied
+  status     TEXT DEFAULT 'pending',      -- pending | approved | rejected
+                                          -- | applied  (it is on the site now)
+                                          -- | failed   (tried, and could not)
   queued_at  INTEGER,
-  decided_at INTEGER
+  decided_at INTEGER,
+  -- WHAT HAPPENED AFTER HE SAID YES.
+  --
+  -- There was nowhere to put it, because nothing ever acted on an approval:
+  -- the row went to 'approved' and stopped there for good. He asked what full
+  -- access to his website was for, and the honest answer was that his yes went
+  -- into a table nobody read. pipelines/it_release.py is what reads it, and
+  -- these two are where it writes down how it went.
+  applied_at INTEGER,
+  note       TEXT                         -- in his words: what was written, or
+                                          -- why it could not be
 );
 
 -- ---- security -------------------------------------------------------------
