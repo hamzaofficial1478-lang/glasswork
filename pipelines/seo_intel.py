@@ -552,6 +552,13 @@ def step_ceiling() -> int:
     """
     try:
         from . import day_run
+        # THIS STEP'S ceiling, not the day's default. seo_intel is one of the
+        # two steps given longer than everything else, and reading the default
+        # meant the pass budgeted itself for seven minutes inside a fifteen
+        # minute slot and cut its own gathering short for no reason.
+        for_this = getattr(day_run, "step_timeout_for", None)
+        if callable(for_this):
+            return int(for_this("pipelines.seo_intel")) or TIME_BUDGET
         return int(getattr(day_run, "STEP_TIMEOUT", 0)) or TIME_BUDGET
     except Exception:
         return TIME_BUDGET

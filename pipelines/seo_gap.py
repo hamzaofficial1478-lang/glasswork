@@ -27,7 +27,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from coordination import cabinet, board, deskwork
+from coordination import cabinet, board, deskwork, uae
 from providers import store
 
 
@@ -52,7 +52,16 @@ def _ask_send(to, situation, facts, subject, body, from_sector="SEO"):
 SERVICES = ["glass work", "glass partition", "glass railing", "glass balustrade",
             "shower glass", "glass door", "aluminium windows", "aluminium doors",
             "aluminium work", "aluminium cladding", "wooden doors", "pergola"]
-CORE_AREAS = ["Dubai", "Abu Dhabi", "Sharjah"]
+# THE WHOLE COUNTRY, NOT THREE CITIES OF IT.
+#
+# "there you mentioned only 3 cities of UAE while we are covering the whole UAE"
+#
+# This was ["Dubai", "Abu Dhabi", "Sharjah"], and it did more damage here than
+# anywhere else: it seeded the searches AND decided what counted as a local
+# phrase. "aluminium work ajman" came back from Google, found no area it
+# recognised, and was filed as general interest rather than as a buying search
+# in an emirate he works in. See coordination/uae.py — one list, read by all.
+CORE_AREAS = uae.served()
 BUY_SIGNALS = ("price", "cost", "installation", "install", "repair", "supplier",
                "company", "near me", "contractor", "fixing", "fit out", "fitting",
                "service", "manufacturer", "quotation", "quote")
@@ -106,17 +115,16 @@ def _intent(phrase):
     p = phrase.lower()
     if any(b in p for b in BUY_SIGNALS):
         return "buy"
-    if any(a.lower() in p for a in CORE_AREAS) or "uae" in p:
+    # Any place in the country, not only the emirate names. A person searching
+    # "glass partition mussafah" is in Abu Dhabi and is buying.
+    if uae.is_uae(p):
         return "local"
     return "info"
 
 
 def _area_of(phrase):
-    p = phrase.lower()
-    for a in CORE_AREAS:
-        if a.lower() in p:
-            return a
-    return ""
+    """The emirate this phrase is about, via a district or town if need be."""
+    return uae.emirate_in(phrase)
 
 
 def _rival_names():

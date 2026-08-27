@@ -179,8 +179,16 @@ CREATE TABLE IF NOT EXISTS leads (
   whatsapp TEXT,                       -- E.164, ONLY from a click-to-chat button they published
   address TEXT,                        -- as they printed it
   contact_kind TEXT,                   -- role inbox | named person | phone only
-  evidence TEXT                        -- JSON: where each detail came from and how
+  evidence TEXT,                       -- JSON: where each detail came from and how
+  -- Normalised identity, so the same firm written three ways is one lead.
+  -- See board.phone_key / domain_key / company_key.
+  phone_key TEXT,                      -- last 9 digits, format-independent
+  domain_key TEXT,                     -- their website's registered domain
+  company_key TEXT                     -- name with punctuation and LLC/FZE off
 );
+CREATE INDEX IF NOT EXISTS leads_phone_key ON leads(phone_key);
+CREATE INDEX IF NOT EXISTS leads_domain_key ON leads(domain_key);
+CREATE INDEX IF NOT EXISTS leads_company_key ON leads(company_key);
 CREATE TABLE IF NOT EXISTS outreach_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lead_id INTEGER, channel TEXT, direction TEXT,  -- sent | reply

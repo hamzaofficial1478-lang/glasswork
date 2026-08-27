@@ -15,6 +15,7 @@ goes through it — no agent writes to the tables directly.
 """
 
 import os
+import re
 import socket
 import sqlite3
 import time
@@ -978,6 +979,31 @@ _ADDED_COLUMNS = (
     # there. See pipelines/it_release.py.
     ("site_queue",   "applied_at",   "INTEGER"),
     ("site_queue",   "note",         "TEXT"),
+    # THE SAME FIRM, WRITTEN THREE WAYS, COLLECTED THREE TIMES.
+    #
+    # "the main thing from leads is the one lead that had already scrapped that
+    #  will not get scrapped again."
+    #
+    # lead_seen compared the raw columns. That catches a directory that spells
+    # everything identically and nothing else. In practice the same business
+    # comes back as:
+    #
+    #   +971 4 123 4567   /   04-123 4567   /   00971 4 1234567
+    #   Al Quoz Fitout LLC  /  AL QUOZ FIT OUT L.L.C.  /  Al Quoz Fitout
+    #   and often with no email at all on one of the two listings
+    #
+    # Every one of those was a fresh row, and a fresh row is a second email to
+    # somebody who already had one — which is the thing that burns the
+    # relationship and the sending domain together.
+    #
+    # So the comparison is on NORMALISED keys, written beside the raw values
+    # rather than instead of them: the last nine digits of the phone, the
+    # registered domain of the website, and the company name with its legal
+    # suffixes and punctuation stripped. Existing rows are backfilled once, so
+    # a cabinet that already holds duplicates stops adding to them.
+    ("leads",        "phone_key",    "TEXT"),
+    ("leads",        "domain_key",   "TEXT"),
+    ("leads",        "company_key",  "TEXT"),
     ("locks",        "pid",          "INTEGER"),
     # The same two ideas, one table over. Tasks were handed out in arrival
     # order with no notion of what they were about or who they were for, so an
@@ -1177,6 +1203,32 @@ def _migrate(c):
     except Exception:
         pass
     _MIGRATED.add(key)
+    # Once per cabinet, and AFTER the flag is set — backfill_lead_keys opens
+    # its own connection and would recurse straight back into here otherwise.
+    try:
+        _backfill_keys(c)
+    except Exception:
+        pass
+
+
+def _backfill_keys(c):
+    """Write the normalised lead keys onto rows that predate the columns."""
+    try:
+        rows = c.execute(
+            "SELECT id, phone, whatsapp, website, company FROM leads"
+            " WHERE company_key IS NULL OR company_key=''").fetchall()
+    except sqlite3.OperationalError:
+        return
+    for r in rows:
+        pk, dk, ck = _keys_of({"phone": r["phone"] or r["whatsapp"],
+                               "website": r["website"], "company": r["company"]})
+        c.execute("UPDATE leads SET phone_key=?, domain_key=?, company_key=?"
+                  " WHERE id=?", (pk, dk, ck, r["id"]))
+    if rows:
+        try:
+            c.commit()
+        except Exception:
+            pass
 
 
 def ensure_schema(con=None):
@@ -1668,24 +1720,134 @@ def _norm(email):
     return (email or "").strip().lower()
 
 
-def lead_seen(email=None, phone=None, company=None):
+# Legal and trading suffixes that appear on one listing and not the next. They
+# carry no identity — "Al Quoz Fitout" and "Al Quoz Fitout L.L.C." are one firm.
+_SUFFIXES = (
+    "llc", "l l c", "fzc", "fzco", "fze", "fz llc", "dmcc", "pjsc", "psc",
+    "wll", "ltd", "limited", "co", "company", "est", "establishment",
+    "trading", "general trading", "contracting", "group", "holding",
+    "international", "uae", "dubai branch", "branch",
+)
+# LONGEST FIRST, or a shorter one eats the tail of a longer one: "general
+# trading" lost its "trading" to the shorter entry and left "general" behind,
+# which no rule then matched. Sorted once, here, rather than trusted to
+# whoever adds the next word to the tuple above.
+_SUFFIXES_LONGEST_FIRST = tuple(sorted(_SUFFIXES, key=len, reverse=True))
+
+
+def phone_key(phone) -> str:
     """
-    True if we already have this lead — by email, phone, or company name.
-    The Hunter calls this BEFORE storing anything. Emails re-appear constantly
-    across directories, so this is what stops re-collecting and re-mailing them.
+    A UAE phone reduced to the only part that identifies it: the national
+    significant number, with the country code and the trunk zero taken off.
+
+      +971 4 123 4567   ->  41234567
+      04-123 4567       ->  41234567
+      00971 4 1234567   ->  41234567
+      +971 50 123 4567  ->  501234567
+      050 123 4567      ->  501234567
+
+    "Strip the spaces and compare" — what this used to do — matched none of
+    those to each other, and "take the last nine digits" gets the landline
+    forms wrong because one of them carries a trunk zero the other does not.
+    The prefixes have to come off the front, in order.
     """
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if not digits:
+        return ""
+    for prefix in ("00971", "971"):
+        if digits.startswith(prefix) and len(digits) > len(prefix):
+            digits = digits[len(prefix):]
+            break
+    digits = digits.lstrip("0")
+    # Anything left that is still longer than a UAE number is a foreign one
+    # written in full; keep its own significant tail rather than mangling it.
+    return digits[-10:] if len(digits) > 10 else digits
+
+
+def domain_key(url) -> str:
+    """
+    The registered domain of a website, with the www and the path gone.
+
+    A business's own domain is the strongest identity signal there is: two
+    listings with different names and no email are the same firm if they point
+    at the same site.
+    """
+    s = str(url or "").strip().lower()
+    if not s:
+        return ""
+    s = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", s)
+    s = s.split("/")[0].split("?")[0].split("#")[0]
+    s = s.split("@")[-1].split(":")[0]
+    if s.startswith("www."):
+        s = s[4:]
+    return s if "." in s else ""
+
+
+def company_key(name) -> str:
+    """
+    A company name with the punctuation, the legal suffixes AND the spaces
+    taken off.
+
+    The spaces matter more than they look. "Al Quoz Fitout" and "Al Quoz Fit
+    Out" are one firm on two directories, and any comparison that keeps the
+    spacing treats them as two. What is left is not meant to be readable — it
+    is an identity, and the readable name is in the column next to it.
+    """
+    s = re.sub(r"[^a-z0-9 ]+", " ", str(name or "").lower())
+    s = re.sub(r"\s+", " ", s).strip()
+    if not s:
+        return ""
+    changed = True
+    while changed and s:
+        changed = False
+        for suf in _SUFFIXES_LONGEST_FIRST:
+            if s.endswith(" " + suf):
+                s = s[: -(len(suf) + 1)].strip()
+                changed = True
+    return s.replace(" ", "")
+
+
+def _keys_of(lead: dict) -> tuple:
+    return (phone_key(lead.get("phone") or lead.get("whatsapp")),
+            domain_key(lead.get("website")),
+            company_key(lead.get("company")))
+
+
+def lead_seen(email=None, phone=None, company=None, website=None):
+    """
+    True if we already have this lead. The Hunter calls this BEFORE storing
+    anything — a lead already in the cabinet is skipped, logged as a duplicate,
+    and never re-mailed.
+
+    FOUR KEYS, AND THREE OF THEM ARE NORMALISED. Comparing the raw columns only
+    caught a directory that spelled everything exactly as the last one did,
+    which is not how directories work. See phone_key / domain_key /
+    company_key above for what each of them survives.
+    """
+    pk, dk, ck = _keys_of({"phone": phone, "website": website, "company": company})
     with _conn() as c:
+        _migrate(c)
         if email:
             if c.execute("SELECT 1 FROM leads WHERE lower(email)=?",
                          (_norm(email),)).fetchone():
                 return True
-        if phone:
-            if c.execute("SELECT 1 FROM leads WHERE replace(phone,' ','')=?",
-                         (phone.replace(" ", ""),)).fetchone():
+        if pk:
+            if c.execute("SELECT 1 FROM leads WHERE phone_key=?", (pk,)).fetchone():
                 return True
-        if company:
-            if c.execute("SELECT 1 FROM leads WHERE lower(company)=?",
-                         (company.strip().lower(),)).fetchone():
+            # An older row written before the key column existed and not yet
+            # backfilled. Cheap belt and braces on a table this size.
+            if c.execute("SELECT 1 FROM leads WHERE replace(replace(replace("
+                         "COALESCE(phone,''),' ',''),'-',''),'+','') LIKE ?",
+                         ("%" + pk,)).fetchone():
+                return True
+        if dk:
+            if c.execute("SELECT 1 FROM leads WHERE domain_key=?", (dk,)).fetchone():
+                return True
+        if ck:
+            if c.execute("SELECT 1 FROM leads WHERE company_key=?", (ck,)).fetchone():
+                return True
+            if c.execute("SELECT 1 FROM leads WHERE lower(trim(company))=?",
+                         ((company or "").strip().lower(),)).fetchone():
                 return True
     return False
 
@@ -1695,22 +1857,25 @@ def add_lead_if_new(lead: dict):
     Store a lead only if it's genuinely new. Returns the lead id, or None if it
     was a duplicate (and logs the skip so the Scanner can report 'N dupes skipped').
     """
-    if lead_seen(lead.get("email"), lead.get("phone"), lead.get("company")):
+    if lead_seen(lead.get("email"), lead.get("phone"), lead.get("company"),
+                 lead.get("website")):
         return None
     ev = lead.get("evidence")
     if ev is not None and not isinstance(ev, str):
         ev = json.dumps(ev)
+    pk, dk, ck = _keys_of(lead)
     with _conn() as c:
         _migrate(c)
         cur = c.execute(
             "INSERT INTO leads(name,company,email,phone,socials,source,area,segment,"
-            "found_at,website,whatsapp,address,contact_kind,evidence)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "found_at,website,whatsapp,address,contact_kind,evidence,"
+            "phone_key,domain_key,company_key)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (lead.get("name"), lead.get("company"), _norm(lead.get("email")),
              lead.get("phone"), lead.get("socials"), lead.get("source"),
              lead.get("area"), lead.get("segment"), _now(),
              lead.get("website"), lead.get("whatsapp"), lead.get("address"),
-             lead.get("contact_kind"), ev),
+             lead.get("contact_kind"), ev, pk, dk, ck),
         )
         return cur.lastrowid
 

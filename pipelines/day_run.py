@@ -205,6 +205,52 @@ MAX_LANES = 3
 
 STEP_TIMEOUT = 420
 
+# THE STEPS THAT HONESTLY NEED LONGER, NAMED ONE BY ONE.
+#
+# "the test suite did not finish inside 360s (my conerce is the time is out why
+#  cannot we test by increasing the time out limit)"
+#
+# He is right and the answer was a circular one: the Releaser's test budget was
+# capped under STEP_TIMEOUT so a suite would not be killed mid-run, and
+# STEP_TIMEOUT was one number for every step in the day. So the suite could
+# never be given more time without giving every step more time, which would
+# have hidden genuinely hung steps behind a much longer wait.
+#
+# Two steps are different in kind rather than merely slower, and both showed up
+# in his log on the same day:
+#
+#   it_release  runs the WHOLE test suite before it is allowed to write to his
+#               website. That is the red line and it is worth the minutes. The
+#               suite has grown to thirty-seven and his machine is not this one.
+#   seo_intel   gathers from free sources one polite request at a time. It is
+#               bounded by other people's servers, not by us.
+#
+# Everything else keeps the seven minutes, so a step that has genuinely hung is
+# still caught quickly. A number in here is a promise that the step is doing
+# real work for that long — not somewhere to hide a hang.
+LONGER = {
+    "pipelines.it_release": 1200,
+    "pipelines.seo_intel": 900,
+}
+
+
+def step_timeout_for(module) -> int:
+    """How long this particular step is allowed to take."""
+    return int(LONGER.get(module, STEP_TIMEOUT))
+
+
+def longest_step() -> int:
+    """The longest any step may run. What the reaper's fuse has to clear."""
+    return max([STEP_TIMEOUT] + list(LONGER.values()))
+
+# How long a run with NO PID RECORDED may go quiet before it is written off.
+# Only rows from before the pid column existed land here; everything since is
+# settled by asking the operating system whether the process is still there,
+# which is a real answer rather than a guess. An hour is deliberately far more
+# rope than a stopwatch alone deserves — the cost of waiting is a stale line on
+# a screen, and the cost of being wrong is killing the books on a live run.
+NO_PID_GRACE = 3600
+
 # ---------------------------------------------------------------------------
 # STOPPING
 # ---------------------------------------------------------------------------
@@ -599,7 +645,8 @@ def _run_child(mod, stop=None):
         except Exception as e:                           # pragma: no cover
             return 1, str(e), False
 
-        deadline = time.time() + STEP_TIMEOUT
+        budget = step_timeout_for(mod)
+        deadline = time.time() + budget
         cut_short = False
         while True:
             try:
@@ -626,7 +673,7 @@ def _run_child(mod, stop=None):
             # The timeout has to LEAD, or _summarise reads the step's own last
             # cheerful line and the run panel says it finished.
             tail = [l for l in out.splitlines() if l.strip()][-1:]
-            out = (f"timed out after {STEP_TIMEOUT}s"
+            out = (f"timed out after {budget}s"
                    + (f" — last said: {tail[0].strip()[:120]}" if tail else ""))
         return code, out, cut_short
     finally:
@@ -698,7 +745,7 @@ def _run_lanes(rid, stop=None):
                 # the day for ever. The ceiling is what its steps are allowed
                 # to take, plus room to be queued behind others — but waited
                 # for in short hops, so a Stop is not sat out to the ceiling.
-                until = time.time() + STEP_TIMEOUT * (len(plan[dep]) + 2)
+                until = time.time() + longest_step() * (len(plan[dep]) + 2)
                 while not ev.wait(timeout=0.5):
                     if stopping() or time.time() >= until:
                         break
@@ -875,11 +922,48 @@ def _reap(c, run, steps) -> bool:
     side by side, several at once — so nothing having moved in longer than a
     single step is allowed to take is not slow, it is dead. The lock is then a
     thing to CLEAN UP rather than a thing to consult.
+
+    AND PROGRESS ALONE WAS WRONG, WHICH IS THE BUG HE HIT.
+
+    "one major bug i found when the program was working and i opened the full
+     control room section and when i get back to office the progarm had stoped
+     working"
+
+    It had not stopped. This reaped it. Every screen that asks for the run's
+    status calls status(), status() calls this, and this declared the run dead
+    on a stopwatch without ever asking the machine whether the process was
+    still there. His own log from the same day says why the stopwatch ran out:
+    "SEO builds the keyword picture — timed out after 420s" and "IT RELEASER —
+    the test suite did not finish inside 360s". A step is allowed to take seven
+    minutes and writes nothing while it does. Nine minutes of honest work by a
+    perfectly healthy run, one page load, and the row was flipped to 'stalled',
+    the live steps marked failed, and the door unlocked underneath a process
+    that was still running.
+
+    So the stopwatch is now only the thing that makes it WORTH ASKING. The
+    answer comes from the operating system: board.process_alive, which is
+    careful in the right direction — a pid on another machine, a pid we cannot
+    place, anything it is not sure about counts as alive, because killing the
+    books on a live run is far worse than showing 'running' for a few minutes
+    longer.
+
+    A row with no pid at all is an old one, from before the column was written.
+    There is nothing to ask about, so those keep the old behaviour — on a much
+    longer fuse, because a stopwatch is all they have.
     """
     now = _now()
     last = max([run["started_at"] or 0]
                + [s["ended_at"] or s["started_at"] or 0 for s in steps])
-    if now - last <= STEP_TIMEOUT + 120:
+    if now - last <= longest_step() + 120:
+        return False
+
+    pid = run["pid"] if "pid" in run.keys() else None
+    if pid:
+        if board.process_alive(pid, (run["host"] if "host" in run.keys() else "") or ""):
+            # Working, quietly, on something long. Not a corpse.
+            return False
+    elif now - last <= NO_PID_GRACE:
+        # Nothing to ask. Give it a great deal of rope before calling it.
         return False
     c.execute("UPDATE day_runs SET status='stalled', ended_at=? WHERE id=? AND status='running'",
               (last, run["id"]))

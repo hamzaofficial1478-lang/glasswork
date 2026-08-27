@@ -64,7 +64,7 @@ import json
 import sys
 import time
 
-from coordination import auditor, board, dispatch
+from coordination import auditor, board, deskwork, dispatch, uae
 from . import mail, security_screen, services
 
 AGENT = "leads-outreach"
@@ -86,10 +86,10 @@ def _company():
         from coordination import site
         return {"name": site.site_name(), "website": site.site_url(),
                 "phone": "", "whatsapp": "",
-                "areas": ["Dubai", "Abu Dhabi", "Sharjah"]}
+                "areas": uae.served()}
     except Exception:
         return {"name": "", "website": "", "phone": "", "whatsapp": "",
-                "areas": ["Dubai", "Abu Dhabi", "Sharjah"]}
+                "areas": uae.served()}
 
 
 def eligible(limit=BATCH):
@@ -193,7 +193,7 @@ def _run(agent, dry_run, limit) -> dict:
 
     task = board.next_open_task(SECTOR, agent)
     if not task:
-        return {"ok": False, "error": dispatch.why_nothing(SECTOR, agent)}
+        return dispatch.nothing_here(SECTOR, agent)
 
     company = _company()
     can, cannot = eligible(limit)
@@ -438,7 +438,7 @@ def main():
         r = preview(a.to)
         if a.json:
             print(json.dumps(r, indent=2))
-            return 0 if r.get("ok") else 1
+            return deskwork.exit_code(r)
         if not r.get("ok"):
             print("  --  " + str(r.get("error")))
             if r.get("hint"):
@@ -474,7 +474,7 @@ def main():
 
     r = run(dry_run=a.dry_run, limit=a.limit)
     print(json.dumps(r) if a.json else as_text(r))
-    return 0 if r.get("ok") else 1
+    return deskwork.exit_code(r)
 
 
 if __name__ == "__main__":

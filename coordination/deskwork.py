@@ -104,6 +104,12 @@ class Job:
                                  f"and the reason could not be read: {e}")
         return self._nothing
 
+    @property
+    def idle(self) -> dict:
+        """The result to return when there was nothing to claim. See
+        dispatch.nothing_here — not a success, and not a failure either."""
+        return {"ok": False, "idle": True, "error": self.why_nothing}
+
     # ---- reading what was asked for --------------------------------------
 
     @property
@@ -278,6 +284,32 @@ class Job:
 
 
 _VOWELS = "aeiou"
+
+
+def exit_code(result) -> int:
+    """
+    What a pipeline's `main()` should hand back to the shell.
+
+    THREE OUTCOMES, NOT TWO, and the runner already knows it — day_run._verdict
+    reads a step that exits 0 while reporting ok:false as 'idle' rather than
+    'ok'. The pipelines were throwing that distinction away one line earlier by
+    exiting 1 for anything that was not a success, so a desk with nothing on
+    its board came out the same colour as a desk that crashed:
+
+        "its work failed: Leads collects from OpenStreetMap — Nothing open on
+         the Leads board."
+
+    Nothing failed. Another Leads desk had the one job. An exit code was all
+    the runner had to go on, so this is where the distinction has to survive.
+
+      0   it worked, OR it did nothing wrong and had nothing to do
+      1   something is actually broken and somebody should look
+    """
+    if not isinstance(result, dict):
+        return 0 if result else 1
+    if result.get("ok"):
+        return 0
+    return 0 if result.get("idle") else 1
 
 
 def _plural(word, n):

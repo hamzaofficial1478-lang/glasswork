@@ -148,7 +148,7 @@ def main():
     a = ap.parse_args()
     r = run()
     print(json.dumps(r, indent=2) if a.json else _as_text(r))
-    return 0 if r.get("ok") else 1
+    return deskwork.exit_code(r)
 
 
 if __name__ == "__main__":

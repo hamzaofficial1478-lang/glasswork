@@ -302,6 +302,26 @@ def next_task(sector, agent, now=None):
             return got
 
 
+def nothing_here(sector, agent) -> dict:
+    """
+    The standard result for a desk that came back empty-handed.
+
+    `ok: False` because no work was done and nothing must read this as a
+    success. `idle: True` because DOING NOTHING WRONG IS NOT FAILING, and the
+    two were the same thing on his screen:
+
+        "its work failed: Leads collects from OpenStreetMap — Nothing open on
+         the Leads board. This desk works from the board, never on its own
+         initiative."
+
+    Nothing failed there. Another Leads desk had already taken the one job on
+    the board, which is the coordination layer working exactly as designed. It
+    read as a red step because these pipelines exited 1, and an exit code is
+    all the runner had to go on. See deskwork.exit_code.
+    """
+    return {"ok": False, "idle": True, "error": why_nothing(sector, agent)}
+
+
 def why_nothing(sector, agent) -> str:
     """
     One honest sentence for a pipeline that found nothing to claim.

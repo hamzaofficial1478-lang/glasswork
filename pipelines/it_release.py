@@ -75,14 +75,35 @@ SECTOR = "IT"
 LOCK = "site_writes"
 
 # BOUNDED BY THE DAY, not by patience. This runs as a step inside day_run, and
-# a step gets STEP_TIMEOUT — seven minutes — before the run kills it. A test
-# budget larger than that would be killed mid-suite and read as a crash rather
-# than as "the tests took too long", which is a much worse thing to see. Six
-# minutes leaves room for the writes afterwards.
+# a budget larger than the step's would be killed mid-suite and read as a crash
+# rather than as "the tests took too long", which is a much worse thing to see.
+#
+# "the test suite did not finish inside 360s (my conerce is the time is out why
+#  cannot we test by increasing the time out limit)"
+#
+# He is right, and the reason it could not be raised was circular: this had to
+# fit under a step timeout that was one number for every step in the day, so
+# giving the suite more time meant giving a hung step more time too. day_run
+# names the few steps that honestly need longer — this is one — so the budget
+# is now read from the slot this step actually gets, less the time the writes
+# afterwards need. It is not a copy of that number; a second copy is a second
+# thing to forget when the first one changes.
 #
 # Running out of time means nothing is written. That is the safe direction: an
 # unproven suite is exactly the case the rule exists for.
-TEST_TIMEOUT = 360
+WRITE_RESERVE = 120
+
+
+def _test_budget() -> int:
+    try:
+        from . import day_run
+        slot = int(day_run.step_timeout_for("pipelines.it_release"))
+    except Exception:                                        # pragma: no cover
+        slot = 420
+    return max(120, slot - WRITE_RESERVE)
+
+
+TEST_TIMEOUT = _test_budget()
 
 MAX_PER_PASS = 10
 
@@ -495,7 +516,7 @@ def main():
     r = run(limit=a.limit, dry_run=bool(a.dry_run or a.list),
             skip_tests=bool(a.skip_tests))
     print(json.dumps(r, indent=2) if a.json else _as_text(r))
-    return 0 if r.get("ok") else 1
+    return deskwork.exit_code(r)
 
 
 if __name__ == "__main__":

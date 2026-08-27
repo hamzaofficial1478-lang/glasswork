@@ -57,7 +57,7 @@ import time
 import urllib.parse
 from html import unescape as _unescape
 
-from coordination import board, cabinet, deskwork
+from coordination import board, cabinet, deskwork, uae
 
 try:
     from . import fetcher, services, site_services
@@ -494,7 +494,7 @@ CHECKS = [
     ("aeo.localbusiness", "aeo", "LocalBusiness markup with the real details", 5,
      _c_localbusiness,
      "Add LocalBusiness JSON-LD: legal name, the actual address, the phone that "
-     "gets answered, and areaServed listing Dubai, Abu Dhabi and Sharjah.", "IT"),
+     "gets answered, and areaServed listing every emirate you work in.", "IT"),
     ("aeo.speakable", "aeo", "Something marked for a voice assistant to read", 1,
      _c_speakable,
      "Add a speakable specification pointing at the answer paragraph. Small win, "
@@ -867,7 +867,7 @@ def localbusiness_jsonld(base, pages) -> tuple:
             "addressLocality": city or "Dubai",
             "addressCountry": "AE",
         },
-        "areaServed": ["Dubai", "Abu Dhabi", "Sharjah"],
+        "areaServed": uae.served(),
         "openingHours": "Mo-Sa 08:00-18:00",
     }
     snippet = ('<script type="application/ld+json">\n'

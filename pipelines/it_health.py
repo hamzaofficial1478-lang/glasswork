@@ -326,7 +326,7 @@ def _check(agent, url, timeout, run_row):
             # Not just "nothing to do". Since the board started routing work to
             # the desk that can do it, an empty-handed Watcher usually means the
             # opposite — there IS work, and it is somebody else's. Say which.
-            return {"ok": False, "error": dispatch.why_nothing("IT", agent)}
+            return dispatch.nothing_here("IT", agent)
         run_row.task(task["id"])
 
         if not site:

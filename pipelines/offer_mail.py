@@ -50,7 +50,7 @@ import re
 import sys
 import urllib.parse
 
-from coordination import board
+from coordination import board, uae
 from . import mail
 
 SITE_TIMEOUT = 25
@@ -302,7 +302,7 @@ def business() -> dict:
         "name": g("BUSINESS_NAME") or g("AGENCY_NAME") or "World Deal Technical Services",
         "tagline": g("BUSINESS_TAGLINE") or "Glass, aluminium and wooden works",
         "areas": [a.strip() for a in
-                  (g("BUSINESS_AREAS") or "Dubai, Abu Dhabi, Sharjah").split(",")
+                  (g("BUSINESS_AREAS") or ", ".join(uae.EMIRATES)).split(",")
                   if a.strip()],
         "years": g("BUSINESS_YEARS") or "10",
     }

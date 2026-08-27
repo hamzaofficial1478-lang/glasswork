@@ -60,7 +60,7 @@ import sqlite3
 import sys
 import time
 
-from coordination import board
+from coordination import board, deskwork
 from . import site_api
 
 AGENT = "it-fixer"
@@ -911,7 +911,7 @@ def main():
     r = run(limit=a.limit, only=a.issue or None,
             dry_run=bool(a.dry_run or a.list))
     print(json.dumps(r, indent=2) if a.json else _as_text(r))
-    return 0 if r.get("ok") else 1
+    return deskwork.exit_code(r)
 
 
 if __name__ == "__main__":

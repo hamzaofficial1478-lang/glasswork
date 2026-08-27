@@ -409,7 +409,7 @@ def main():
         return 0
     out = run()
     print(json.dumps(out, indent=2) if a.json else json.dumps(out, indent=2))
-    return 0 if out.get("ok") else 1
+    return deskwork.exit_code(out)
 
 
 if __name__ == "__main__":

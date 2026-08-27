@@ -33,7 +33,7 @@ import re
 import sqlite3
 import time
 
-from coordination import board, deskwork
+from coordination import board, deskwork, uae
 
 # The service taxonomy, same grounding the SEO Strategist used. A phrase has to
 # name a service we actually sell, or it cannot become a page.
@@ -115,7 +115,7 @@ def cluster(rows):
 def make_brief(g, rank):
     """A brief a human could actually write from, grounded in the real phrases."""
     svc, area = g["service"], g["area"]
-    where = f" in {area}" if area else " across Dubai, Abu Dhabi & Sharjah"
+    where = f" in {area}" if area else f" across {uae.served_phrase('&')}"
     title = f"{svc.title()}{where}".replace("Uae", "UAE")
     primary = sorted(g["phrases"], key=len)[0]      # shortest = the head term
     secondary = [p for p in sorted(set(g["phrases"])) if p != primary][:10]

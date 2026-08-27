@@ -336,6 +336,41 @@ SERVICES = {
                    "local_market", "supermarket", "builder"),
         "related": ("curtain_wall", "pergola", "cladding", "glass_repair"),
     },
+    # THE SEO DESK TURNED DOWN A REAL SERVICE BECAUSE THIS CATALOGUE HAD NOT
+    # HEARD OF IT.
+    #
+    #   "'swimming pools' is not a service this business sells, so there is
+    #    nobody to go and look for."
+    #   "the swimming pool is in our service that swimming pool safety glass"
+    #
+    # The keyword research was right and the catalogue was wrong. Pool fencing
+    # and infinity-edge walls are laminated safety glass with a specific code
+    # requirement behind them, they are bought by exactly the buyers already
+    # listed elsewhere here, and they are among the better-paying glass jobs in
+    # this country. A phrase naming a real service must never come back as "we
+    # do not sell that".
+    "pool_glass": {
+        "label": "swimming pool safety glass and fencing",
+        "names": ("swimming pool glass",
+                  "pool glass",
+                  "pool fencing",
+                  "pool fence",
+                  "swimming pool fence",
+                  "glass pool fence",
+                  "pool safety glass",
+                  "swimming pool safety glass",
+                  "infinity pool glass",
+                  "pool balustrade",
+                  "swimming pool",
+                  "frameless pool fence"),
+        "signals": ("pool", "swimming", "villa", "resort", "hotel", "spa",
+                    "compound", "leisure", "club", "landscap", "gym",
+                    "holiday home", "chalet"),
+        "buyers": ("hotel", "developer", "villa_compound", "property_management",
+                   "landlord", "holiday_let", "gym", "construction", "builder",
+                   "landscaping"),
+        "related": ("glass_railing", "laminated_glass", "pergola", "glass_repair"),
+    },
     "glass_repair": {
         "label": "glass and aluminium repair and replacement",
         "names": ("glass repair",

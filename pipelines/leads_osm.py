@@ -46,7 +46,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from coordination import board, dispatch
+from coordination import board, deskwork, dispatch
 from . import find_site, harvest, leads_sources as ls, services
 
 AGENT = "leads-hunter"
@@ -763,7 +763,7 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
         return {"ok": False, "error": "Leads is switched off."}
     task = board.next_open_task(SECTOR, agent)
     if not task:
-        return {"ok": False, "error": dispatch.why_nothing(SECTOR, agent)}
+        return dispatch.nothing_here(SECTOR, agent)
 
     segs = [segment] if segment else segments_covered()[:max(1, int(per_segment))]
     areas = [area] if area else list(DEFAULT_AREAS)
@@ -962,7 +962,7 @@ def main():
                 print(f"   {c['company'][:30]:32} {c['phone'][:15]:16} "
                       f"{(c.get('email') or '')[:30]:32} {c['area'][:14]:16} "
                       f"{c['website'][:28]}")
-        return 0 if r.get("ok") else 1
+        return deskwork.exit_code(r)
 
     r = run(segment=None, area=a.area if a.area != "Dubai" else None,
             per_segment=a.per_segment, dry_run=a.dry_run,
@@ -970,7 +970,7 @@ def main():
             guess_sites=a.guess_sites)
     print(json.dumps(r, indent=2) if a.json else
           (r.get("head") or r.get("error") or "nothing to do"))
-    return 0 if r.get("ok") else 1
+    return deskwork.exit_code(r)
 
 
 if __name__ == "__main__":

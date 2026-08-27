@@ -32,17 +32,19 @@ import os
 import re
 import sqlite3
 
-from coordination import board, dispatch
+from coordination import board, dispatch, uae
 from . import services
 
 # Where to look. The keyword work named the first six; the rest are simply where
 # the money is in the UAE, and leaving them out was costing us reach for no
 # reason. Abu Dhabi and Sharjah are in because the business serves all three
 # emirates, and a target list that only knows Dubai is half a target list.
-DISTRICTS = ["Business Bay", "Al Quoz", "Al Barsha", "Jumeirah Village Circle",
-             "Dubai Marina", "Downtown Dubai", "Deira", "Jumeirah Lake Towers",
-             "Dubai Investment Park", "Dubai Silicon Oasis", "Al Qusais", "Mirdif",
-             "Abu Dhabi", "Al Ain", "Sharjah", "Ajman", "Ras Al Khaimah"]
+# THE WHOLE COUNTRY. This list stopped at Ras Al Khaimah and never had Umm Al
+# Quwain or Fujairah in it at all, so two emirates he works in were never
+# searched. It is one list now — coordination/uae.py — and it is districts
+# first, because a map search for "Al Quoz" returns the workshops and a search
+# for "Dubai" returns the same well-known forty every time.
+DISTRICTS = uae.search_areas()
 
 # WHO WE SELL TO
 #
@@ -652,7 +654,7 @@ def _hunt(agent, run_row):
         # 1. claim the MD's task (atomic — two Hunters cannot both take it)
         task = board.next_open_task("Leads", agent)
         if not task:
-            return {"ok": False, "error": dispatch.why_nothing("Leads", agent)}
+            return dispatch.nothing_here("Leads", agent)
         run_row.task(task["id"])
 
         # 2. the MD scoped this as prep because there is no outreach route yet.

@@ -49,7 +49,7 @@ import urllib.parse
 import urllib.request
 
 from coordination import board
-from coordination import deskwork
+from coordination import deskwork, uae
 from . import harvest
 from . import leads_sources as ls
 from . import services
@@ -334,28 +334,42 @@ def local_first(areas):
     The base comes from the address the owner saved on /setup. With none saved
     the list is left exactly as written, which already starts in Dubai; guessing
     a home city from nothing would be inventing a fact.
+
+    THE ORDER WITHIN THE HOME EMIRATE MATTERS TOO, and this used to get it
+    backwards. It put the emirate itself first and its districts after, so the
+    first search of every run was "hotel in Dubai" — which returns the same
+    forty well-known names every time, most of them already in the cabinet as
+    duplicates. "hotel in Al Quoz" returns the street. Districts first, the
+    emirate as the catch-all behind them.
     """
     try:
         from coordination import site
         base = (site.status().get("url") or "")
     except Exception:
         base = ""
+    # A domain has no spaces or hyphens in the middle of a place name, so the
+    # comparison is made on a flattened copy of both.
+    flat = base.lower().replace(" ", "").replace("-", "").replace("_", "")
     home = ""
-    for city in ("dubai", "abu dhabi", "sharjah", "ajman", "ras al khaimah", "al ain"):
-        if city.replace(" ", "") in base.lower().replace(" ", "").replace("-", ""):
-            home = city
+    for place in sorted(set(uae.EMIRATES) | set(uae.CITIES), key=lambda s: -len(s)):
+        if place.lower().replace(" ", "") in flat:
+            home = uae.emirate_of(place) or place
             break
     if not home:
         return list(areas)
 
     def rank(a):
-        al = a.lower()
-        if al == home:
-            return 0                      # the emirate itself
-        if home == "dubai" and al not in ("abu dhabi", "al ain", "sharjah",
-                                          "ajman", "ras al khaimah"):
-            return 1                      # a Dubai district
-        return 2
+        where = uae.emirate_of(a)
+        mine = where.lower() == home.lower()
+        is_emirate = a.strip().lower() in {e.lower() for e in uae.EMIRATES}
+        if mine and not is_emirate:
+            return 0                      # a district or town of home — the street
+        if mine:
+            return 1                      # home emirate, searched wide
+        if not is_emirate:
+            return 2                      # somebody else's district
+        return 3                          # somebody else's emirate
+
     return sorted(areas, key=rank)
 
 
@@ -501,8 +515,7 @@ def _sized(wanted, limit, max_searches):
     return page, max(max_searches if wanted <= PLACES_PAGE else 1, searches)
 
 
-EMIRATES = ("Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Ras Al Khaimah",
-            "Fujairah", "Umm Al Quwain")
+EMIRATES = tuple(uae.EMIRATES)
 
 
 def _answer(job, out, area, service):

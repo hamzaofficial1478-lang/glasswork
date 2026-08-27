@@ -672,12 +672,19 @@ def test_hunting_for_one_service():
     print("\nThe owner does not have to learn our spelling:")
     for typed in ("shower glass", "Shower Glass", "shower_glass", "frameless shower"):
         check(f"'{typed}' finds the job", sv.resolve_service(typed), "shower_glass")
+    # "swimming pools" USED TO BE THE EXAMPLE HERE, and the owner caught it:
+    # "the swimming pool is in our service that swimming pool safety glass".
+    # Pool fencing and infinity-edge walls are laminated safety glass and among
+    # the better-paying jobs in this country. The catalogue was wrong, not the
+    # keyword — so the example moves to something he genuinely does not do.
+    check("pool glass IS ours, and is found",
+          sv.resolve_service("swimming pool safety glass"), "pool_glass")
     check("a service we do not sell resolves to nothing",
-          sv.resolve_service("swimming pools"), "")
+          sv.resolve_service("carpet cleaning"), "")
 
     print("\nAsking for work we do not sell finds nobody, loudly:")
-    check("no targets are planned", lh.plan_targets(service="swimming pools"), [])
-    out = lh.run(service="swimming pools", dry_run=True)
+    check("no targets are planned", lh.plan_targets(service="carpet cleaning"), [])
+    out = lh.run(service="carpet cleaning", dry_run=True)
     check("the hunt refuses", out["ok"], False)
     check("and says what we DO sell", "aluminium_doors" in out["error"], True)
 

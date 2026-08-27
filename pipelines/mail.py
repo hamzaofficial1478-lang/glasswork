@@ -33,6 +33,7 @@ enforces it). This composer only ever drafts on that basis.
 
 import html as _html
 
+from coordination import uae
 from . import services
 
 # --- email type by lead stage ----------------------------------------------
@@ -104,7 +105,7 @@ def banner_spec(company: dict) -> dict:
             "services": company.get("services", ["glass work", "aluminium", "doors", "pergolas"]),
             "phone": company.get("phone", ""),
             "whatsapp": company.get("whatsapp", ""),
-            "areas": company.get("areas", ["Dubai", "Abu Dhabi", "Sharjah"]),
+            "areas": company.get("areas", uae.served()),
             "logo_slot": "logo",
         },
         "hero_image": {
@@ -167,7 +168,7 @@ def writing_brief(lead: dict, company: dict, owner_voice: str = "") -> dict:
             "website": company.get("website", ""),
             "phone": company.get("phone", ""),
             "whatsapp": company.get("whatsapp", ""),
-            "areas": company.get("areas", ["Dubai", "Abu Dhabi", "Sharjah"]),
+            "areas": company.get("areas", uae.served()),
         },
         "banner": banner_spec(company),
     }
@@ -259,7 +260,7 @@ def render(plan_or_brief: dict, draft: str, company: dict, lead: dict) -> dict:
     site = (fb.get("website") or company.get("website") or "").strip()
     phone = (fb.get("phone") or company.get("phone") or "").strip()
     wa = (fb.get("whatsapp") or company.get("whatsapp") or "").strip()
-    areas = fb.get("areas") or company.get("areas") or ["Dubai", "Abu Dhabi", "Sharjah"]
+    areas = fb.get("areas") or company.get("areas") or uae.served()
     name = company.get("name", "Glassworks")
     tagline = company.get("tagline", "Glass & aluminium, done properly")
 
@@ -717,7 +718,7 @@ if __name__ == "__main__":  # show the EMAIL, not the plan (pure, no side effect
                     "tagline": "Glass & aluminium, done properly since 2014",
                     "phone": "+971 4 000 0000", "whatsapp": "+971 50 000 0000",
                     "website": "https://glassworks.ae",
-                    "areas": ["Dubai", "Abu Dhabi", "Sharjah"]}
+                    "areas": uae.served()}
 
     if a.plan:
         import json

@@ -14,6 +14,7 @@ Covers the three pieces the Run button stands on:
 Everything runs against a throwaway cabinet and a throwaway provider store. No
 network, no real API call, and nothing touches the owner's real config.
 """
+import os
 import sqlite3
 import subprocess
 import sys
@@ -412,6 +413,49 @@ def _day_run_tests():
               True)
     finally:
         board.release_lock(day_run.LOCK, day_run.LOCK_HOLDER)
+
+    print("\n...and a LIVE run on a long step survives him opening a screen:")
+    # "one major bug i found when the program was working and i opened the full
+    #  control room section and when i get back to office the progarm had
+    #  stoped working"
+    #
+    # It had not stopped — this reaped it. Every screen that shows the run
+    # calls status(), status() calls _reap, and _reap declared it dead on a
+    # stopwatch alone. His own log says why the stopwatch ran out on a healthy
+    # day: "SEO builds the keyword picture — timed out after 420s". A step is
+    # ALLOWED to take seven minutes and writes nothing while it does.
+    # Past the fuse for the LONGEST step there is, so the pid check is what
+    # decides these and not the stopwatch.
+    quiet = _now() - (day_run.longest_step() + 300)
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO day_runs(id,started_at,status,started_by,steps_total,pid,host)"
+                " VALUES('busy',?,'running','owner',1,?,?)",
+                (quiet, os.getpid(), board._this_host()))
+    con.execute("INSERT INTO day_steps(run_id,seq,label,module,status,started_at)"
+                " VALUES('busy',0,'SEO builds the keyword picture',"
+                "'pipelines.seo_intel','running',?)", (quiet,))
+    con.commit(); con.close()
+    st = day_run.status("busy")
+    check("nothing has moved in a very long time, and it is still running",
+          st["run"]["status"], "running")
+    check("the step it is on is untouched", st["steps"][0]["status"], "running")
+
+    print("\n...and asking twice does not change the answer:")
+    check("still running", day_run.status("busy")["run"]["status"], "running")
+
+    print("\n...while a pid that really is gone is still reaped:")
+    corpse = subprocess.Popen([sys.executable, "-c", "pass"])
+    corpse.wait()
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO day_runs(id,started_at,status,started_by,steps_total,pid,host)"
+                " VALUES('corpse',?,'running','owner',1,?,?)",
+                (quiet, corpse.pid, board._this_host()))
+    con.execute("INSERT INTO day_steps(run_id,seq,label,module,status,started_at)"
+                " VALUES('corpse',0,'IT checks','pipelines.it_health','running',?)", (quiet,))
+    con.commit(); con.close()
+    st = day_run.status("corpse")
+    check("the process is gone, so the books are closed", st["run"]["status"], "stalled")
+    check("and the step it died on says so", st["steps"][0]["status"], "failed")
 
     print("\n...and a dead one lets go of the lock, so the button works again:")
     con = sqlite3.connect(board.DB)

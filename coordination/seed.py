@@ -8,6 +8,8 @@ plan from on day one. Safe to run more than once: it never inserts a duplicate.
     python3 coordination/seed.py
 """
 import sqlite3
+
+from . import uae
 from pathlib import Path
 
 DB = Path(__file__).parent / "agency.db"
@@ -21,7 +23,7 @@ SERVICES = [
 ]
 
 # service + main emirate  -> local-intent terms
-CITIES = ["Dubai", "Abu Dhabi", "Sharjah"]
+CITIES = uae.served()
 
 # high buying-intent services in the Dubai districts worth chasing
 HOT_SERVICES = ["aluminium pergola", "frameless shower glass",
