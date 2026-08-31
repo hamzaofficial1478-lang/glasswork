@@ -332,6 +332,25 @@ def next_task(sector, agent, now=None, skip=()):
                           "before anything new")
         return held
 
+    # THE DAY GATE — and note it is BELOW the held-work check, deliberately.
+    #
+    # "until i did not start the day they should not start the work if they had
+    #  some task left behind those agents will complete their previous recorded
+    #  task first"
+    #
+    # Both halves of that sentence, in the only order that satisfies both.
+    # Finishing something you already hold is not starting work, so it happens
+    # whether the day is open or not — gating it would leave a claim aging
+    # until the Overseer filed it as abandoned, which is the ninety-hour
+    # deadlock rebuilt on purpose. Taking something NEW off the board is
+    # starting work, and that waits for him.
+    #
+    # See board.day_is_open for when the gate is in force and how he stands it
+    # down from his own terminal.
+    day = board.day_is_open()
+    if day["enforced"] and not day["open"]:
+        return None
+
     seen = {str(s) for s in (skip or ())}
     while True:
         o = offer(sector, agent, now)
@@ -378,6 +397,24 @@ def why_nothing(sector, agent) -> str:
     should say which it walked past and why, or the owner sees an idle sector
     and no reason for it.
     """
+    # THE DAY HAS NOT STARTED is the first thing to say, and it must be said
+    # before the board is even counted. Reporting "nothing open on the SEO
+    # board" while six tasks sit on it, because the real reason is that he has
+    # not pressed Run, is the exact shape of misleading message the owner keeps
+    # catching — true in the letter, useless in the fact.
+    day = board.day_is_open()
+    if day["enforced"] and not day["open"]:
+        waiting = board.open_task_count(sector)
+        return (f"The day has not started, so no desk takes anything new — "
+                f"{day['why']}. "
+                + (f"{waiting} task(s) are waiting on the {sector} board and "
+                   f"will be picked up the moment you start the day. "
+                   if waiting else "")
+                + "Press Run in the office, or run "
+                  "'python -m pipelines.day_run --start'. To work one pipeline "
+                  "outside the day, set WORK_OUTSIDE_THE_DAY=1. Anything this "
+                  "desk had already claimed is finished first either way.")
+
     o = offer(sector, agent)
     if not o["total"]:
         return (f"Nothing open on the {sector} board. This desk works from the "

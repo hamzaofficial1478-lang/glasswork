@@ -454,6 +454,89 @@ def set_sector(sector, enabled, note=""):
 BOARD_FULL = 8
 
 
+# ----------------------------------------------------------------------------
+# THE DAY GATE — nothing starts until the owner starts the day
+# ----------------------------------------------------------------------------
+#
+# "until i did not start the day they should not start the work if they had
+#  some task left behind those agents will complete their previous recorded
+#  task first"
+#
+# Two rules in one sentence, and they pull in opposite directions, which is
+# what makes this worth writing down rather than guessing at:
+#
+#   NEW work waits for him. A desk does not go looking for something to do
+#   because the clock says so. He opens the agency; then it works.
+#
+#   HELD work does not wait for anybody. A task this desk claimed and did not
+#   finish is already its own, already recorded, and finishing it is not
+#   "starting work" — it is stopping being half-done. Gating that would leave
+#   a claim aging on the board until the Overseer filed it as abandoned, which
+#   is the ninety-hour deadlock all over again.
+#
+# The gate lives in coordination/dispatch.py, at the one funnel every desk goes
+# through to pick something up. This function is only the question.
+#
+# ENV OVERRIDE. He runs pipelines from PowerShell by hand — that IS him
+# starting the work, and refusing him at his own terminal would be the program
+# arguing with its owner. WORK_OUTSIDE_THE_DAY=1 says so out loud, and every
+# refusal below names it.
+
+def day_is_open(now=None) -> dict:
+    """
+    Is the agency open for business right now, and is the gate even in force?
+
+    Returns {open, enforced, why, run_id}.
+
+    `enforced` is False for a cabinet that has never run a day at all. That is
+    not a loophole and it is not a convenience for the tests — it is the honest
+    reading of the rule. "Do not start before I start the day" is a rule about
+    an agency in service. A cabinet with no day in its history has never been
+    in service, has nothing scheduled against it, and the only thing that ever
+    reaches it is somebody typing a command, which is a person starting work.
+    The moment he runs his first day, the gate is live and stays live.
+    """
+    now = int(now if now is not None else _now())
+    try:
+        with _conn() as c:
+            _migrate(c)
+            ever = c.execute("SELECT count(*) FROM day_runs").fetchone()[0]
+            row = c.execute(
+                "SELECT id, pid, host, started_at FROM day_runs"
+                " WHERE status='running' ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+    except Exception:
+        # A cabinet that cannot be read is not a reason to stop work; it is a
+        # different problem, and one the caller will hit anyway a line later.
+        return {"open": True, "enforced": False, "run_id": None,
+                "why": "the cabinet could not be read, so the gate stood aside"}
+
+    if str(os.environ.get("WORK_OUTSIDE_THE_DAY", "")).strip().lower() in (
+            "1", "true", "yes", "on"):
+        return {"open": True, "enforced": False, "run_id": None,
+                "why": "WORK_OUTSIDE_THE_DAY is set, so the gate is standing open"}
+
+    if not ever:
+        return {"open": False, "enforced": False, "run_id": None,
+                "why": ("this cabinet has never run a day, so there is no "
+                        "rhythm to be out of step with yet")}
+
+    if row is None:
+        return {"open": False, "enforced": True, "run_id": None,
+                "why": "no day is running"}
+
+    # A row saying 'running' left behind by a program he closed is not an open
+    # day. This is the same liveness test sweep_dead_processes uses, asked here
+    # so the gate is right even before the Overseer's next pass.
+    if not process_alive(row["pid"], row["host"] or ""):
+        return {"open": False, "enforced": True, "run_id": row["id"],
+                "why": ("the last day run belongs to a program that is no "
+                        "longer running")}
+
+    return {"open": True, "enforced": True, "run_id": row["id"],
+            "why": f"the day started {_ago(now - int(row['started_at'] or now))} ago"}
+
+
 class DeskBusy(Exception):
     """Raised when the desk this job is for is mid-run with work already queued."""
 

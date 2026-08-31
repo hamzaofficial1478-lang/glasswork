@@ -550,6 +550,35 @@ def _report(agent):
             card = {"verdict": f"could not build the MD's card ({e})"}
         telegram_text += "\n\nThe MD: " + card.get("verdict", "")
 
+        # A DIGEST OF A DAY THAT HAS NOT RUN IS NOT A DIGEST.
+        #
+        # Report is the only desk that does substantial work without claiming
+        # anything — it adds up rows, so an empty board does not stop it — and
+        # it is the only one whose output leaves the building on its own. Put
+        # together, that meant running this before the day started sent the
+        # owner "Daily digest - <today>" summarising a day that had not
+        # happened yet. Every figure in it would be yesterday's, under today's
+        # date, which is worse than no digest at all.
+        #
+        # Nothing else changes: the numbers are still computed and still
+        # returned, so running it by hand shows him exactly what it would send.
+        # Inside the day this is the last step of the close lane, so the day is
+        # open and the send goes as it always did.
+        day_open = board.day_is_open()
+        if day_open["enforced"] and not day_open["open"]:
+            return {"ok": True, "agent": agent, "critic": "passed", "day": day,
+                    "health_score": state["metrics"]["health"],
+                    "sector_scores": sector_scores, "decisions_scored": scored,
+                    "decisions_waiting": waiting, "md_card": card,
+                    "summary": summary, "actions": actions, "spend_usd": spend,
+                    "telegram_sent": False,
+                    "telegram_detail": (
+                        f"Not sent — {day_open['why']}, so this would be a "
+                        f"digest of a day that has not happened. The figures "
+                        f"are here to read; start the day and Report sends it "
+                        f"as the last step."),
+                    "digest": telegram_text}
+
         tg = integrations.send_message(telegram_text)
 
         return {"ok": True, "agent": agent, "critic": "passed", "day": day,
