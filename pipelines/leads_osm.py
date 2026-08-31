@@ -46,7 +46,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from coordination import board, deskwork, dispatch
+from coordination import board, deskwork, dispatch, uae
 from . import find_site, harvest, leads_sources as ls, services
 
 AGENT = "leads-hunter"
@@ -770,8 +770,34 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     if not task:
         return dispatch.nothing_here(SECTOR, agent)
 
+    # READ THE JOB. This claimed the task and then searched its own default
+    # three areas regardless — "Find 20 leads in Al Quoz" was claimed, and the
+    # collector went and searched Dubai, Sharjah and Abu Dhabi. The Places
+    # hunter learned this already (see leads_hunt.run); this is the same repair
+    # one collector over, so both doors into the Leads sector obey the ask.
+    asked = deskwork.Job(task, SECTOR, agent)
+    if area is None:
+        # A district first, because a map search for a district returns the
+        # street and one for an emirate returns the same well-known forty.
+        area = asked.first_mention(list(BBOX), None) or \
+            asked.first_mention(uae.search_areas(), None)
+        if area and area not in BBOX:
+            # He named somewhere real that has no bounding box of its own —
+            # Al Quoz, Mussafah. Search the emirate it sits in rather than
+            # dropping the instruction on the floor.
+            area = uae.emirate_of(area) or None
+    if segment is None:
+        named = asked.first_mention(list(segments_covered()), None)
+        if named:
+            segment = named
+    wanted = asked.how_many(None)
+
     segs = [segment] if segment else segments_covered()[:max(1, int(per_segment))]
     areas = [area] if area else list(DEFAULT_AREAS)
+    if wanted and not segment:
+        # More asked for than one segment will give: widen the search rather
+        # than returning fifteen banks and calling it twenty leads.
+        segs = segments_covered()[:max(1, min(6, -(-int(wanted) // 15)))]
     collected, errors = [], []
     for s in segs:
         for a in areas:

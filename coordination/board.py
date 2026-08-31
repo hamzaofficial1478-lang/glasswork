@@ -454,8 +454,24 @@ def set_sector(sector, enabled, note=""):
 BOARD_FULL = 8
 
 
+class DeskBusy(Exception):
+    """Raised when the desk this job is for is mid-run with work already queued."""
+
+
 class BoardFull(Exception):
     """Raised when a sector's board is backed up and more work would be futile."""
+
+
+def _waiting_for_desk(desk) -> int:
+    """Open tasks already earmarked for this desk."""
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT count(*) FROM tasks WHERE status='open'"
+                          " AND lower(COALESCE(desk,''))=?",
+                          ((desk or "").strip().lower(),)).fetchone()
+        return int(r[0] or 0)
+    except Exception:
+        return 0
 
 
 def open_task_count(sector) -> int:
@@ -538,6 +554,33 @@ def post_task(sector, title, detail, risk="green", created_by="MD", force=False,
                                        sector=sector)
         except Exception:
             desk = None
+
+    # A DESK THAT IS MID-RUN IS NOT ASKED FOR SOMETHING ELSE.
+    #
+    # "if an agent is working let it work do not put or ask after each secod
+    #  the same question to put more load on that agent let it work"
+    #
+    # He is describing the shape rather than one bug: the day posts, the
+    # Overseer notices nothing has been picked up, the MD posts again, and the
+    # one desk that could do any of it is out doing the first one. Nothing gets
+    # done faster — a desk works one job at a time — and every extra row is
+    # something the Overseer then files a complaint about.
+    #
+    # ONLY when it already has work waiting. A busy desk with an empty queue
+    # still gets the job: it will pick it up the moment it finishes, and
+    # holding it back would just mean the desk goes idle for a day. This is
+    # about the SECOND thing in the queue, not the first.
+    if not force and desk:
+        try:
+            if desk_at_work(desk) and _waiting_for_desk(desk) >= 1:
+                raise DeskBusy(
+                    f"{desk} is mid-run and already has work waiting, so "
+                    f"{title!r} was not added. It works one job at a time; a "
+                    "second one in the queue only makes the board look busier.")
+        except DeskBusy:
+            raise
+        except Exception:
+            pass                      # never let the courtesy check block work
     tid = uuid.uuid4().hex[:12]
     with _conn() as c:
         _migrate(c)
@@ -580,7 +623,7 @@ def try_post_task(sector, title, detail, risk="green", created_by="MD",
     try:
         return post_task(sector, title, detail, risk=risk, created_by=created_by,
                          about=about, desk=desk)
-    except (SectorOff, BoardFull):
+    except (SectorOff, BoardFull, DeskBusy):
         return None
 
 
@@ -829,6 +872,12 @@ def release_claim(task_id, by, reason="", force=False):
 # How long a job may sit on a board with nobody picking it up before the agency
 # admits nobody is going to. Three days is long enough to survive a weekend and
 # short enough that the board still describes this week.
+# How long a run may be marked 'running' and still count as a desk that is
+# genuinely at work. Past this it is a corpse, not a busy agent — the longest
+# step in the day gets 20 minutes, so 25 clears the slowest honest run with
+# room to spare. See board.desk_at_work.
+STILL_WORKING = 1500
+
 UNCLAIMED_DAYS = 3
 
 
@@ -866,6 +915,36 @@ def expire_unclaimed(older_than_days=UNCLAIMED_DAYS) -> list:
             out.append({"id": r["id"], "sector": r["sector"],
                         "title": r["title"], "days": days})
     return out
+
+
+def desk_at_work(agent, now=None):
+    """
+    Is this desk mid-run right now? Returns the run row, or None.
+
+    "if an agent is working let it work do not put or ask after each secod the
+     same question to put more load on that agent"
+
+    A live run means a process is out there doing the thing. Piling a second
+    job on the same desk in that moment does not get the second job done any
+    sooner — the desk works one at a time — it just makes the board look busier
+    and gives the Overseer something else to complain about.
+
+    Deliberately only counts a run that is BOTH still marked running and young
+    enough to plausibly be running. A row left at 'running' by a killed process
+    is not a working desk, and treating it as one would be the opposite bug:
+    work held back for ever because of a corpse.
+    """
+    now = int(now or _now())
+    try:
+        with _conn() as c:
+            r = c.execute(
+                "SELECT id, agent, started_at, note FROM agent_runs"
+                " WHERE agent=? AND status='running' AND started_at >= ?"
+                " ORDER BY started_at DESC LIMIT 1",
+                (agent or "", now - STILL_WORKING)).fetchone()
+        return dict(r) if r else None
+    except Exception:
+        return None
 
 
 def dead_claims(now=None):

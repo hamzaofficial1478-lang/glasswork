@@ -237,8 +237,29 @@ def detect(now=None) -> list:
         # 3. A TASK CLAIMED AND THEN SAT ON. Claiming is exclusive — while this
         #    row is held, no other agent may touch the work. An abandoned claim
         #    is worse than an untouched task: it looks handled.
+        #    AND A DESK THAT IS ACTUALLY WORKING IS NOT ABANDONING ANYTHING.
+        #
+        #    "if an agent is working let it work do not put or ask after each
+        #     secod the same question to put more load on that agent"
+        #
+        #    This fired on the clock alone: held longer than ABANDONED_SECS and
+        #    a fault was filed, whether or not the desk was mid-run. A long job
+        #    — the Releaser running the whole test suite, the writer waiting on
+        #    a model — was reported as abandoned while it was happening, which
+        #    is both a false alarm and, now that IT acts on these, a genuine
+        #    hazard: the repair for 'abandoned' is to take the claim away.
+        #
+        #    board.release_claim has always refused to take a live claim, so
+        #    nothing could actually be pulled from under a working desk. But
+        #    filing the fault at all put a red mark on a desk doing its job and
+        #    sent IT to look at it every pass. Same test as board.dead_claims:
+        #    has this agent recorded ANY work since it took the claim.
         for r in _rows(c, "SELECT id, sector, title, owner, claimed_at FROM tasks"
                           " WHERE status='in_progress' AND claimed_at < ?"
+                          "   AND NOT EXISTS (SELECT 1 FROM agent_runs a"
+                          "                    WHERE a.agent = tasks.owner"
+                          "                      AND a.started_at >= tasks.claimed_at"
+                          "                      AND a.status IN ('running','ok'))"
                           " ORDER BY claimed_at", (now - ABANDONED_SECS,)):
             held = now - int(r["claimed_at"] or now)
             out.append({

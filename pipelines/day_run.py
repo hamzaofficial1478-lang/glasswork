@@ -132,6 +132,13 @@ STEPS = [
     # pipeline that ever ran under that name — so every ticket the Watcher
     # filed sat open for ever and the board looked calm rather than stuck.
     ("IT patches what it found", "pipelines.it_fix", "IT", "it"),
+    # AND THE AGENCY ITSELF, which is the half that was missing. The
+    # Overseer files a fault when a desk crashes and posts it to IT; every
+    # recipe the Fixer has is a WEBSITE recipe, so it reported "no recipe"
+    # and the lamp stayed red for ever. This is IT's hands for its own
+    # house: dead locks, dead claims, runs that never ended — and for what
+    # it cannot fix, a word to him or to the MD rather than silence.
+    ("IT repairs the agency itself", "pipelines.it_selfheal", "IT", "it"),
     # AFTER the Fixer, so anything he approved since yesterday goes on today.
     # It is the last link in the chain and it was the missing one: the Watcher
     # found problems, the Fixer wrote the changes, he pressed Approve, and his

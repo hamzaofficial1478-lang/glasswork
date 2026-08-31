@@ -258,6 +258,11 @@ def clear_inbox(facts, dry_run=False) -> dict:
             except board.BoardFull as e:
                 note = (f" {target}'s board is already backed up, so nothing was "
                         f"posted: {e}")
+            except board.DeskBusy as e:
+                # Not a refusal — a courtesy. The desk is out doing the last
+                # thing and already has one queued; a third row would not make
+                # any of it happen sooner.
+                note = f" That desk is mid-run, so it was left alone: {e}"
             except Exception as e:
                 note = f" Could not post it to {target}: {e}"
 
@@ -585,6 +590,11 @@ def _cycle(agent, dry_run):
             # Not a failure of the plan — a fact about the sector. The MD is
             # told so it can plan around a desk that is not clearing its board,
             # rather than adding a ninth job to eight nobody has touched.
+            rejected.append({"sector": c["sector"], "title": c["title"],
+                             "why": str(e)})
+            continue
+        except board.DeskBusy as e:
+            # The desk is working. Let it work — see board.desk_at_work.
             rejected.append({"sector": c["sector"], "title": c["title"],
                              "why": str(e)})
             continue
