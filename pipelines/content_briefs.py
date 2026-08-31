@@ -33,7 +33,7 @@ import re
 import sqlite3
 import time
 
-from coordination import board, deskwork, uae
+from coordination import board, deskwork, inbox, uae
 
 # The service taxonomy, same grounding the SEO Strategist used. A phrase has to
 # name a service we actually sell, or it cannot become a page.
@@ -209,12 +209,21 @@ def run(agent="content-writer", max_briefs=6, draft_allowance=1):
             out = _brief(agent, max_briefs, draft_allowance, job)
             deskwork.settle(job, out, made=out.get("stored"),
                             what="page brief")
+        # _brief claims and answers ONE request — the handoff it briefs from.
+        # Everything else addressed to Content is read here, so a second and
+        # third message in the same day are not left to age. Four of the nine
+        # edges that went nowhere pointed at this sector.
+        post = inbox.read_post("Content", agent)
+        out["post"] = post
         if out.get("ok"):
-            run_row.note(f"briefed {out.get('stored', 0)} page(s)"
-                         + (f", {out['already_briefed']} already done"
-                            if out.get("already_briefed") else ""))
+            note = (f"briefed {out.get('stored', 0)} page(s)"
+                    + (f", {out['already_briefed']} already done"
+                       if out.get("already_briefed") else ""))
         else:
-            run_row.note(out.get("error", "nothing to brief"))
+            note = out.get("error", "nothing to brief")
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
 
 
@@ -254,8 +263,29 @@ def _brief(agent, max_briefs, draft_allowance, job=None):
             pass                       # never let housekeeping stop the work
 
         # 1. claim the handoff SEO left on the board (atomic — no grabbing)
-        waiting = [r for r in board.open_requests_for("Content")
-                   if "keyword" in (r["subject"] or "").lower()]
+        #
+        # THE MAGIC WORD. This used to read:
+        #
+        #     waiting = [r for r in board.open_requests_for("Content")
+        #                if "keyword" in (r["subject"] or "").lower()]
+        #
+        # and it worked, by luck, for exactly as long as nobody routed a model
+        # to SEO. The template subject SEO falls back to is "Keyword-gap list
+        # ready", which contains the word. Give SEO a brain and the brain
+        # writes the subject in its own voice — "Service pages worth building
+        # this month" — which does not, so Content walked straight past the one
+        # message it exists to answer. Nothing errored. Nothing was logged. The
+        # better the SEO model, the more certainly Content heard nothing.
+        #
+        # Proved both ways on a throwaway cabinet before this was changed:
+        #     "Keyword-gap list ready"                  -> seen
+        #     "Service pages worth building this month" -> not seen
+        #
+        # Content now claims anything addressed to it. If it cannot brief from
+        # a request it says so on the thread, which is a worse outcome for that
+        # one message and a far better one than a filter that quietly drops
+        # every message somebody bothered to write well.
+        waiting = board.open_requests_for("Content")
         claimed = None
         for r in waiting:
             if board.claim_request(r["id"], agent):

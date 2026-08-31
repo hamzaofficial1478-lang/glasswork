@@ -1559,6 +1559,22 @@ def post_request(from_sector, to_sector, subject, body,
                 reads that row rather than guessing from words in the subject.
     `urgency`   the asker's own read. Context, not authority.
     """
+    # ADDRESSED TO A SECTOR THAT EXISTS, OR NOT POSTED AT ALL.
+    #
+    # pipelines/mail.py asked sector "MD" to scan every outreach draft before
+    # sending, blocking for two minutes on the answer. The Managing Director's
+    # sector is called "Director". Nothing reads "MD", so the request went into
+    # an inbox with no owner, the wait always timed out, and every mail was
+    # held unsent with "MD did not approve (or did not answer)" — which read
+    # like the MD refusing, when the MD had never been asked.
+    #
+    # A typo in an address is not a small bug here: it is silence that looks
+    # like a decision. Normalising known aliases and rejecting the rest costs
+    # one function call and makes that whole class of fault impossible.
+    from . import inbox as _inbox
+    from_sector = _inbox.to_sector(from_sector, strict=False)
+    to_sector = _inbox.to_sector(to_sector)
+
     now = _now()
     with _conn() as c:
         _migrate(c)
@@ -2021,11 +2037,49 @@ def request_verification(from_sector, to_sector, subject, body, blocking=True, t
     The asker does NOT proceed past a blocking verification without a reply — that
     is the whole point: no sector overrides another's judgement on its own turf.
     """
+    # Normalised HERE as well as inside post_request, because everything below
+    # this line reasons about the sector by name: which desks belong to it,
+    # whether any of them is at work, and what the thread note calls it. Passed
+    # "MD", the grace check below looked for desks in a sector called MD, found
+    # none, and fell back to the full two-minute wait — the exact behaviour it
+    # was written to remove. Caught by running it, not by reading it.
+    from . import inbox as _inbox
+    from_sector = _inbox.to_sector(from_sector, strict=False)
+    to_sector = _inbox.to_sector(to_sector)
+
     rid = post_request(from_sector, to_sector, subject, body)
     if not blocking:
         return rid
+
+    # WAITING FOR A ROOM THAT WENT HOME.
+    #
+    # The day runs in lanes: the Director's lane finishes, then IT / Leads /
+    # SEO run side by side, then Security and Content, then close. So when
+    # Leads blocks on the Director mid-outreach, the Director's step finished
+    # minutes ago. There is nobody in the building to answer, and the polling
+    # loop below happily spent the full two minutes finding that out — two
+    # minutes per mail, on every mail, before holding each one unsent.
+    #
+    # A wait is only worth making when somebody could plausibly answer it:
+    # a desk in that sector is mid-run now, or one is running concurrently in
+    # this day's lane. If not, this returns straight away with the answer
+    # already known — nobody is there — and leaves the request open so the
+    # sector's reader picks it up on its next pass. The asker gets the same
+    # None it would have got in two minutes' time, immediately, and the thread
+    # says why rather than looking like a refusal.
+    grace = _answerable_grace(to_sector, timeout)
+    if grace <= 0:
+        reply_request(
+            rid, from_sector,
+            f"(not waited on) No desk in {to_sector} is running, so a blocking "
+            f"wait here would time out without anyone having seen the question. "
+            f"{from_sector} has taken the safe path for an unanswered ask and "
+            f"carried on. This is still open: {to_sector} answers it on its next "
+            f"pass, and the asker retries then.")
+        return None
+
     waited = 0
-    while waited < timeout:
+    while waited < grace:
         with _conn() as c:
             msgs = c.execute(
                 "SELECT author,body FROM request_msgs WHERE request_id=? ORDER BY id",
@@ -2036,7 +2090,36 @@ def request_verification(from_sector, to_sector, subject, body, blocking=True, t
                 return m["body"]
         time.sleep(2)
         waited += 2
+    reply_request(
+        rid, from_sector,
+        f"(waited {grace}s) {to_sector} was running but did not answer in time. "
+        f"{from_sector} took the safe path for an unanswered ask. Still open.")
     return None
+
+
+def _answerable_grace(sector, timeout) -> int:
+    """
+    How long it is worth blocking for an answer from `sector`.
+
+    `timeout` if a desk in that sector is at work right now — it may well be
+    mid-pass and about to read its post. 0 if the sector is dark, because
+    waiting cannot change that. Any error here returns the full timeout: the
+    old behaviour, which is slow but never wrong.
+    """
+    try:
+        from . import desks as _desks, inbox as _inbox
+        # Normalised here too, not only in the caller. A helper that silently
+        # returns "wait the full two minutes" for a name it does not recognise
+        # is exactly the failure this function exists to prevent, and it should
+        # not depend on every caller having spelled the sector correctly.
+        sector = _inbox.to_sector(sector, strict=False)
+        agents = [d for d, spec in _desks.DESKS.items()
+                  if (spec.get("sector") or "").lower() == (sector or "").lower()]
+        if not agents:
+            return int(timeout)
+        return int(timeout) if any(desk_at_work(a) for a in agents) else 0
+    except Exception:
+        return int(timeout)
 
 
 # ----------------------------------------------------------------------------

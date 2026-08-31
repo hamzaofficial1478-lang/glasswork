@@ -7,6 +7,8 @@ status, body) and a plain-language likely cause — that one feature makes almos
 every misconfiguration obvious at a glance.
 """
 import json
+import random
+import time
 
 import requests
 
@@ -37,8 +39,87 @@ def _likely_cause(status, err_text):
     return f"HTTP {status}."
 
 
-def _execute(cred, url, headers, body, timeout):
-    """Single HTTP execution. Returns a dict with ok/status/text/raw (redacted)."""
+# ---------------------------------------------------------------------------
+# COMING BACK AFTER A MOMENT
+# ---------------------------------------------------------------------------
+#
+# "if an api module hit error there is no time increasing thing?"
+#
+# There was not. One HTTP call per model, and any failure — including a 429,
+# which literally means 'you are going too fast, come back shortly' — burned
+# that model and moved the cascade to the next one. When a sector's primary and
+# fallback sit on the same provider and the same key, which is the normal case,
+# one rate limit burned both inside the same second and the sector reported
+# 'all providers for this task failed'. The owner read that as the fallback not
+# existing. The fallback existed; it was spent in the same breath as the primary.
+#
+# So: transient failures are retried on the SAME model, with the wait growing
+# each time, before the cascade is allowed to give up on it.
+#
+#   429  rate limited        retry — and honour Retry-After if the provider
+#                            sends one, because the provider knows better than
+#                            any formula here
+#   408/409/425              retry
+#   500 502 503 504          provider-side wobble, retry
+#   0    timeout / no socket retry
+#
+# Never retried, because trying again cannot change the answer and only wastes
+# the owner's time and quota:
+#
+#   400 422  malformed request — a bug here
+#   401 403  wrong key
+#   402      out of credit
+#   404      wrong URL or model id
+#
+# Waits are 1s, 2s, 4s with a little jitter, so two agents that hit the same
+# limit in the same second do not come back in the same second either. Total
+# added delay in the worst case is about seven seconds — cheap next to a sector
+# going dark for the day.
+
+RETRY_STATUSES = {0, 408, 409, 425, 429, 500, 502, 503, 504}
+MOST_TRIES = 3
+FIRST_WAIT = 1.0
+LONGEST_WAIT = 20.0
+
+
+def _retry_after(r) -> float:
+    """Seconds the provider asked us to wait, or 0. Its number beats ours."""
+    try:
+        v = (r.headers.get("Retry-After") or "").strip()
+    except Exception:
+        return 0.0
+    if not v:
+        return 0.0
+    try:
+        return max(0.0, min(LONGEST_WAIT, float(v)))
+    except ValueError:
+        pass
+    try:                                   # the HTTP-date form
+        from email.utils import parsedate_to_datetime
+        import datetime
+        when = parsedate_to_datetime(v)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=datetime.timezone.utc)
+        secs = (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+        return max(0.0, min(LONGEST_WAIT, secs))
+    except Exception:
+        return 0.0
+
+
+def _wait_before(attempt, asked=0.0) -> float:
+    """1s, 2s, 4s, with jitter — unless the provider named its own number."""
+    if asked > 0:
+        return asked
+    return min(LONGEST_WAIT,
+               FIRST_WAIT * (2 ** attempt) * (0.75 + random.random() * 0.5))
+
+
+def _execute(cred, url, headers, body, timeout, tries=MOST_TRIES, sleep=None):
+    """
+    HTTP execution with backoff on the transient statuses. Returns a dict with
+    ok/status/text/raw (redacted), plus `attempts` and, when it retried, a
+    `waited` trail so the failover screen can show what it actually did.
+    """
     raw = {
         "url": url,
         "headers": redact_headers(cred, headers),
@@ -46,23 +127,52 @@ def _execute(cred, url, headers, body, timeout):
         "status": None,
         "response_body": None,
     }
-    try:
-        r = requests.post(url, headers=headers, data=body, timeout=timeout)
-        raw["status"] = r.status_code
-        text = r.text
-        raw["response_body"] = text[:4000]
-        ok = 200 <= r.status_code < 300
-        return {"ok": ok, "status": r.status_code, "text": text,
-                "cause": None if ok else _likely_cause(r.status_code, text), "raw": raw}
-    except requests.exceptions.Timeout:
-        raw["status"] = 0
-        return {"ok": False, "status": 0, "text": "timed out",
-                "cause": _likely_cause(0, "timed out"), "raw": raw}
-    except Exception as e:
-        raw["status"] = 0
-        raw["response_body"] = str(e)
-        return {"ok": False, "status": 0, "text": str(e),
-                "cause": _likely_cause(0, str(e)), "raw": raw}
+    nap = sleep or time.sleep
+    waited = []
+    tries = max(1, int(tries))
+    for attempt in range(tries):
+        pause = None
+        try:
+            r = requests.post(url, headers=headers, data=body, timeout=timeout)
+            raw["status"] = r.status_code
+            text = r.text
+            raw["response_body"] = text[:4000]
+            ok = 200 <= r.status_code < 300
+            if ok or r.status_code not in RETRY_STATUSES or attempt == tries - 1:
+                return {"ok": ok, "status": r.status_code, "text": text,
+                        "cause": None if ok else _likely_cause(r.status_code, text),
+                        "raw": raw, "attempts": attempt + 1,
+                        "waited": waited}
+            pause = _wait_before(attempt, _retry_after(r))
+        except requests.exceptions.Timeout:
+            raw["status"] = 0
+            raw["response_body"] = "timed out"
+            if attempt == tries - 1:
+                return {"ok": False, "status": 0, "text": "timed out",
+                        "cause": _likely_cause(0, "timed out"), "raw": raw,
+                        "attempts": attempt + 1, "waited": waited}
+            pause = _wait_before(attempt)
+        except Exception as e:
+            raw["status"] = 0
+            raw["response_body"] = str(e)
+            # A connection that was refused or reset is worth another go; a
+            # malformed URL or a missing library is not, and retrying it three
+            # times just triples how long the owner waits for the same message.
+            transient = any(w in str(e).lower() for w in
+                            ("connection", "reset", "temporarily", "unreachable",
+                             "broken pipe", "eof occurred"))
+            if not transient or attempt == tries - 1:
+                return {"ok": False, "status": 0, "text": str(e),
+                        "cause": _likely_cause(0, str(e)), "raw": raw,
+                        "attempts": attempt + 1, "waited": waited}
+            pause = _wait_before(attempt)
+        waited.append(round(pause, 2))
+        nap(pause)
+    # Unreachable: every branch above returns on the last attempt. Kept so a
+    # future edit to the loop cannot fall out of it returning None.
+    return {"ok": False, "status": raw["status"] or 0, "text": "",
+            "cause": "gave up after retries", "raw": raw,
+            "attempts": tries, "waited": waited}
 
 
 def _content_text(body_text):

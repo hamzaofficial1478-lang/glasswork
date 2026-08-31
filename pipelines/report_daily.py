@@ -40,7 +40,7 @@ import json
 import sqlite3
 import time
 
-from coordination import board, deskwork, scorecard as _scorecard, state as _state
+from coordination import board, deskwork, inbox, scorecard as _scorecard, state as _state
 from providers import integrations
 
 GRACE = {
@@ -460,10 +460,18 @@ def critic_check(state, summary=None):
 
 def run(agent="reporter"):
     with board.agent_run(agent) as run_row:
+        # Report reads its post first. It is the last step of the day, so a
+        # question filed here is tomorrow's work — which is the honest answer,
+        # and infinitely better than the silence it replaced.
+        post = inbox.read_post("Report", agent)
         with deskwork.at_the_desk("Report", agent, run_row) as job:
             out = _report(agent)
             deskwork.settle(job, out)
-        run_row.note(out.get("summary") or out.get("error") or "produced the daily digest")
+        out["post"] = post
+        note = out.get("summary") or out.get("error") or "produced the daily digest"
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
 
 

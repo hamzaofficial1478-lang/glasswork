@@ -27,7 +27,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from coordination import cabinet, board, deskwork, uae
+from coordination import cabinet, board, deskwork, inbox, uae
 from providers import store
 
 
@@ -257,13 +257,104 @@ def run(agent="seo-strategist", max_seeds=18, cost_ceiling=0.0):
     nothing, and then closed as though it had answered.
     """
     with board.agent_run(agent) as run_row:
+        # SEO's one reader. It sits here rather than in seo_intel because this
+        # is the desk that holds the keyword judgement other sectors ask for —
+        # Content's "clear these page targets" is answered below from the
+        # cabinet, not filed as a ticket and forgotten.
+        post = inbox.read_post("SEO", agent, handler=answer_as_seo)
         with deskwork.at_the_desk("SEO", agent, run_row) as job:
             out = _gap(agent, max_seeds, cost_ceiling, job)
             deskwork.settle(job, out, made=out.get("stored"),
                             what="keyword gap")
-        run_row.note(f"found {out['stored']} new keyword gaps" if out.get("stored")
-                     else out.get("error", "no new gaps found"))
+        out["post"] = post
+        note = (f"found {out['stored']} new keyword gaps" if out.get("stored")
+                else out.get("error", "no new gaps found"))
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
+
+
+# What Content's clearance request is called. Matched on the shape of the ask,
+# not on a word in the subject: Content's subject is written by whichever model
+# is routed to Content, so the words move. See CLEARANCE_ASK below.
+CLEARANCE_ASK = ("clear these page targets", "worth writing for",
+                 "volume/difficulty", "volume and difficulty", "rank or reject")
+
+
+def answer_as_seo(req, body, con):
+    """
+    The questions SEO can answer off its own cabinet, without a model.
+
+    Returns None for anything else, which files it as work on SEO's board —
+    the honest outcome, and still an answer on the thread.
+
+    THE ONE THAT MATTERS: Content clusters the gap list into page candidates
+    and asks SEO to clear them before writing. Nothing ever answered, so every
+    candidate but one sat at status='blocked_on_seo' for ever and Content wrote
+    a single page a day at best. This answers it from the keywords table: how
+    many tracked phrases sit behind each candidate, and how many of those carry
+    buying intent. That is the evidence SEO actually holds. It does not
+    pretend to volume and difficulty figures, which need DataForSEO — it says
+    so, and clears on the evidence it has rather than blocking on evidence it
+    does not.
+    """
+    subject = (req.get("subject") or "").lower()
+    text = (subject + "\n" + (body or "")).lower()
+    if not any(p in text for p in CLEARANCE_ASK):
+        return None
+
+    rows = con.execute("SELECT phrase, area, intent FROM keywords").fetchall()
+    if not rows:
+        return ("No page targets can be cleared: SEO's keyword table is empty, so "
+                "there is no evidence here to rank them against. Nothing is "
+                "rejected — run the gap pass first and ask again. Anything you "
+                "write off the back of no keyword data is a guess, and I would "
+                "rather say that than wave it through.")
+
+    buying = {"buy", "hire", "quote", "price", "cost", "near me", "service",
+              "install", "installation", "company", "contractor", "supplier"}
+    tracked = [(r["phrase"] or "").lower() for r in rows]
+    intent_of = {(r["phrase"] or "").lower(): (r["intent"] or "info").lower()
+                 for r in rows}
+
+    # Each bulleted candidate in Content's message, scored against the cabinet.
+    cleared, held, lines = 0, 0, []
+    for raw in (body or "").splitlines():
+        cand = raw.strip().lstrip("-•* ").strip()
+        if not cand or len(cand) < 6 or cand.endswith(":"):
+            continue
+        key = cand.split("(")[0].strip().lower()
+        if not key:
+            continue
+        behind = [p for p in tracked if key in p or p in key]
+        intents = [intent_of.get(p, "info") for p in behind]
+        commercial = sum(1 for p in behind
+                         if intent_of.get(p) in ("buy", "commercial", "transactional")
+                         or any(w in p for w in buying))
+        if len(behind) >= 2 or commercial >= 1:
+            cleared += 1
+            lines.append(f"  CLEAR   {cand}  — {len(behind)} tracked phrase(s), "
+                         f"{commercial} with buying intent")
+        else:
+            held += 1
+            lines.append(f"  HOLD    {cand}  — only {len(behind)} tracked phrase(s) "
+                         f"behind it and no buying intent. Not a no; it is a "
+                         f"'find me evidence first'.")
+        del intents
+
+    if not lines:
+        return None                # not a candidate list after all — file it
+
+    return ("Cleared on the evidence SEO actually holds, which is the keyword "
+            f"table ({len(rows)} phrases tracked), not volume and difficulty — "
+            "those need DataForSEO and it is not connected, so I am not going to "
+            "quote numbers I cannot stand behind.\n\n"
+            + "\n".join(lines)
+            + f"\n\n{cleared} cleared to write, {held} held. Write the cleared "
+              "ones. For the held ones, send me the phrases you think sit behind "
+              "them and I will look again — a page with one phrase behind it "
+              "competes with your own other pages for the same search.")
 
 
 def seeds_for(job, max_seeds):

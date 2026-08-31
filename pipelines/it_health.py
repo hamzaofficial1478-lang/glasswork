@@ -38,7 +38,7 @@ import time
 import urllib.error
 import urllib.request
 
-from coordination import board, dispatch, site as _site
+from coordination import board, dispatch, inbox, site as _site
 
 UA = "Mozilla/5.0 (compatible; glasswork-it-watcher/1.0; read-only health check)"
 
@@ -311,8 +311,23 @@ def file_issues(findings, url, agent):
 def run(agent="it-watcher", url=None, timeout=20):
     """Wrapped so the run is on the record even when it refuses to report."""
     with board.agent_run(agent) as run_row:
+        # IT READS ITS POST BEFORE IT DOES ANYTHING ELSE.
+        #
+        # Nothing in this sector ever opened the inbox. SEO's schema-and-markup
+        # fixes and the Fixer's own "I have no patch for this" tickets were
+        # written every day into a room with no door. This is IT's one reader,
+        # and it runs first in IT's lane so anything it files as work is
+        # claimable by it_fix, it_selfheal and it_release later the same day.
+        #
+        # No handler: IT answers by DOING, not by replying. Every request
+        # becomes a task on IT's board and the asker is told the task id.
+        post = inbox.read_post("IT", agent)
         out = _check(agent, url, timeout, run_row)
-        run_row.note(out.get("summary") or out.get("error") or "checked the site")
+        out["post"] = post
+        note = out.get("summary") or out.get("error") or "checked the site"
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
 
 

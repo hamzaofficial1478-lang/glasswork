@@ -32,7 +32,7 @@ import os
 import re
 import sqlite3
 
-from coordination import board, dispatch, uae
+from coordination import board, dispatch, inbox, uae
 from . import services
 
 # Where to look. The keyword work named the first six; the rest are simply where
@@ -637,10 +637,18 @@ def critic_check(smap, env_ready):
 
 def run(agent="leads-hunter"):
     with board.agent_run(agent) as run_row:
+        # Leads reads its post first — this is the sector's one reader, and it
+        # runs at the head of the Leads lane so anything filed as work can be
+        # claimed by the Hunter, the Scanner or Outreach later the same day.
+        post = inbox.read_post("Leads", agent)
         out = _hunt(agent, run_row)
-        run_row.note(f"mapped {out.get('usable_sources', 0)} usable source(s) across "
-                     f"{out.get('segments_covered', 0)} segment(s)"
-                     if out.get("ok") else out.get("error", "nothing to hunt"))
+        out["post"] = post
+        note = (f"mapped {out.get('usable_sources', 0)} usable source(s) across "
+                f"{out.get('segments_covered', 0)} segment(s)"
+                if out.get("ok") else out.get("error", "nothing to hunt"))
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
 
 

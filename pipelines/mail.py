@@ -186,7 +186,14 @@ def plan(lead: dict, company: dict, owner_voice: str = "") -> dict:
         "brief": brief,
         "shelves_needed": ["stock_images", "email"],  # image asset, then delivery
         "md_scan": {
-            "gate": "MD",
+            # "Director", not "MD". The Managing Director's sector is called
+            # Director everywhere in the cabinet, and this line said "MD" —
+            # so every outreach mail posted its approval request to an inbox
+            # no code has ever read, blocked the full two minutes waiting, and
+            # was then held unsent under "MD did not approve (or did not
+            # answer)". Which read like a refusal. The MD was never asked.
+            # board.post_request now rejects an unknown sector outright.
+            "gate": "Director",
             "question": "Does this copy, the chosen proof point and the banner image actually "
                         "make an impact for this lead — or is it filler? Approve, or send back.",
             "checks": ["copy earns a reply", "proof point is real and relevant",
@@ -439,7 +446,7 @@ def compose(lead: dict, company: dict, *, agent: str, sector: str = "Leads",
     verdict = None
     if board is not None:
         verdict = board.request_verification(
-            sector, "MD", subject=f"Scan {p['email_type']} mail before send",
+            sector, "Director", subject=f"Scan {p['email_type']} mail before send",
             body=p["md_scan"]["question"] + "\n\n--- draft ---\n" + drafted["draft"],
             blocking=True, timeout=md_timeout)
     trace["steps"].append({"md_scan": "answered" if verdict else "no answer",

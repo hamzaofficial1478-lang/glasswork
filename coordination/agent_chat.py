@@ -653,8 +653,17 @@ def _log(w, message, reply):
     append-only for the same reason everything else here is.
     """
     try:
-        from . import board
-        rid = board.post_request("Owner", w["sector"],
+        from . import board, inbox
+        # whois() returns sector 'unknown' for a name it does not recognise,
+        # and the board now refuses a request addressed to a sector that does
+        # not exist — rightly, since nobody would ever read it. The owner
+        # talking to a desk we cannot place is still the owner talking, so it
+        # is filed to the Director, who is his single point of contact.
+        try:
+            to = inbox.to_sector(w["sector"])
+        except inbox.UnknownSector:
+            to = "Director"
+        rid = board.post_request("Owner", to,
                                  f"Owner asked {w['agent']}", message or "(no message)")
         board.reply_request(rid, w["agent"], reply, close=True)
     except Exception:

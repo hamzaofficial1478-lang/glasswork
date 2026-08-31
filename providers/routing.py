@@ -123,8 +123,15 @@ def call_task(task: str, messages, max_tokens: int = 512, timeout: int = 0) -> d
                     "used": {"credential": cred["name"], "model": model["api_model_id"]},
                     "output": res["output"], "failovers": failovers,
                     "load": load_note}
+        # attempts/waited come from client._execute's backoff. Showing them is
+        # the difference between "the fallback did not work" and "the fallback
+        # was tried three times over seven seconds and the provider was still
+        # rate-limiting" — the owner could not tell those apart before, and
+        # they need completely different fixes.
         failovers.append({"model": model["api_model_id"], "status": res["status"],
-                          "cause": res.get("cause")})
+                          "cause": res.get("cause"),
+                          "attempts": res.get("attempts", 1),
+                          "waited": res.get("waited") or []})
     return {"ok": False, "task": task, "error": "all providers for this task failed",
             "failovers": failovers, "load": load_note}
 
