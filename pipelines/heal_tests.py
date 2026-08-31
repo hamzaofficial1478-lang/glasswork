@@ -251,6 +251,8 @@ def main():
         test_a_busy_desk_is_not_handed_a_third_job()
         test_a_corpse_is_not_mistaken_for_a_busy_desk()
         test_nothing_broken_is_not_an_error()
+        test_a_claim_can_always_be_released_eventually()
+        test_a_desk_finishes_what_it_is_holding_first()
     finally:
         board.DB = real
 
@@ -260,6 +262,89 @@ def main():
         sys.exit(1)
     print("all self-repair tests passed")
 
+
+
+def test_a_claim_can_always_be_released_eventually():
+    """
+    His screen, contradicting itself:
+
+      the card    "holding '...' since 90h ago with nothing running"
+      the button  "seo-strategist has been recording work since it claimed this
+                   — it is slow, not dead. Leave it alone."
+
+    Both were reading the truth. The liveness test asked "has this agent run
+    since it claimed", and seo-strategist runs EVERY DAY — so ninety hours on
+    it had four clean runs behind it, none of them about that task, and the
+    claim became permanently unreleasable. The only desk that could do the work
+    was locked out of it by its own unrelated diligence.
+    """
+    print("\nA claim held 90h while the desk did other work every day:")
+    db = _fresh_db()
+    now = int(time.time())
+    tid = board.post_task("SEO", "Owner's order: find the seo gaps", "",
+                          created_by="owner", force=True)
+    board.claim_task(tid, "seo-strategist")
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE tasks SET claimed_at=? WHERE id=?", (now - 90 * 3600, tid))
+        for days in (3, 2, 1):
+            c.execute("INSERT INTO agent_runs(agent,status,note,started_at,task_id)"
+                      " VALUES('seo-strategist','ok','keyword pass',?,NULL)",
+                      (now - days * 86400,))
+    ok, why = board.release_claim(tid, by="owner-office")
+    check("it can be put back on the board", ok, True)
+    check("and it is open again",
+          _q(db, "SELECT status FROM tasks WHERE id=?", (tid,))[0][0], "open")
+
+    print("\n...and a desk genuinely working its own task keeps it:")
+    db = _fresh_db()
+    tid = board.post_task("SEO", "Find the gaps", "", created_by="MD", force=True)
+    board.claim_task(tid, "seo-strategist")
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE tasks SET claimed_at=? WHERE id=?", (now - 90 * 3600, tid))
+        c.execute("INSERT INTO agent_runs(agent,status,note,started_at,task_id)"
+                  " VALUES('seo-strategist','ok','working it',?,?)", (now - 3600, tid))
+    ok, _ = board.release_claim(tid, by="owner-office")
+    check("left alone", ok, False)
+
+    print("\n...and a run in flight on a DIFFERENT task does not protect it:")
+    db = _fresh_db()
+    tid = board.post_task("SEO", "Find the gaps", "", created_by="MD", force=True)
+    board.claim_task(tid, "seo-strategist")
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE tasks SET claimed_at=? WHERE id=?", (now - 90 * 3600, tid))
+        c.execute("INSERT INTO agent_runs(agent,status,note,started_at,task_id)"
+                  " VALUES('seo-strategist','running','other work',?,'some-other-task')",
+                  (now - 120,))
+    ok, _ = board.release_claim(tid, by="owner-office")
+    check("released", ok, True)
+
+
+def test_a_desk_finishes_what_it_is_holding_first():
+    """
+    "if they had some task left behind those agents will complete their
+     previous recorded task first"
+
+    Nothing stopped a desk claiming a second job while holding the first —
+    next_open_task only ever looked at status='open', so a desk's own unfinished
+    claim was invisible to it. That is how a claim reaches ninety hours old on a
+    desk that runs every day.
+    """
+    print("\nUnfinished work comes before anything new:")
+    _fresh_db()
+    old = board.post_task("SEO", "Owner's order: find the seo gaps", "",
+                          created_by="owner", force=True)
+    board.claim_task(old, "seo-strategist")
+    board.post_task("SEO", "Find keyword gaps for pergolas", "",
+                    created_by="MD", force=True)
+
+    got = board.next_open_task("SEO", "seo-strategist")
+    check("the desk is handed its own unfinished job", got["id"], old)
+    check("and told why", "did not finish it" in (got.get("why_me") or ""), True)
+
+    board.finish_task(old, "seo-strategist", {"did": "done"}, status="done")
+    got2 = board.next_open_task("SEO", "seo-strategist")
+    check("only then does it get the new one",
+          got2["title"], "Find keyword gaps for pergolas")
 
 if __name__ == "__main__":
     main()

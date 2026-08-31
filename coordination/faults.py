@@ -259,6 +259,9 @@ def detect(now=None) -> list:
                           "   AND NOT EXISTS (SELECT 1 FROM agent_runs a"
                           "                    WHERE a.agent = tasks.owner"
                           "                      AND a.started_at >= tasks.claimed_at"
+                          "                      AND (a.task_id = tasks.id"
+                          "                           OR (a.status = 'running'"
+                          "                               AND a.task_id IS NULL))"
                           "                      AND a.status IN ('running','ok'))"
                           " ORDER BY claimed_at", (now - ABANDONED_SECS,)):
             held = now - int(r["claimed_at"] or now)

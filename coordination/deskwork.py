@@ -415,7 +415,7 @@ def _claim(sector, agent, takes):
             if guard > MOST_LOOKS:                            # pragma: no cover
                 return None, Job(None, sector, agent)
             try:
-                task = board.next_open_task(sector, agent)
+                task = board.next_open_task(sector, agent, skip=held)
             except Exception:                                 # pragma: no cover
                 task = None
             if task is None:

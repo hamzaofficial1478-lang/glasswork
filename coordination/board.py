@@ -679,7 +679,7 @@ def _claim(task_id, agent, allow_unapproved):
         return cur.rowcount == 1
 
 
-def next_open_task(sector, agent):
+def next_open_task(sector, agent, skip=()):
     """
     Claim the task this desk should be doing next, and return it. None if there
     is nothing on the board it can take.
@@ -708,7 +708,7 @@ def next_open_task(sector, agent):
     except Exception:
         dispatch = None
     if dispatch is not None:
-        return dispatch.next_task(sector, agent)
+        return dispatch.next_task(sector, agent, skip=skip)
     # Fallback, if dispatch cannot be imported for any reason: the old
     # behaviour, which is worse but is not nothing.
     with _conn() as c:                                       # pragma: no cover
@@ -839,14 +839,43 @@ def release_claim(task_id, by, reason="", force=False):
                     "is exclusive while it is live. Wait, or have the owner "
                     "force it.")
             # Held long enough. Now the actual test: is anything running?
+            # WORK ON *THIS TASK*, NOT ANY WORK AT ALL. This asked "has this
+            # agent recorded a run since it claimed", and that is a different
+            # question with the same shape — which made the claim permanently
+            # unreleasable and put a flat contradiction on his screen:
+            #
+            #   the card    "holding '...' since 90h ago with nothing running"
+            #   the button  "seo-strategist has been recording work since it
+            #                claimed this — it is slow, not dead."
+            #
+            # Both were reading the truth. seo-strategist runs EVERY DAY — the
+            # keyword pass, the gap pass — so ninety hours after claiming one
+            # task it had four clean runs behind it, none of them about that
+            # task. The clause matched, the release was refused, and the only
+            # desk that could do the work was locked out of it for ever by its
+            # own unrelated diligence.
+            #
+            # Two things genuinely mean "leave it alone", and neither of them
+            # is "this agent has been busy elsewhere":
+            #   a run stamped with THIS task id — it really is working it
+            #   a run in flight that names no task — it MIGHT be this, and
+            #     killing a live claim is worse than waiting one more pass
+            #
+            # A run stamped with a DIFFERENT task is not this one, live or not.
+            # Without that last word the same false positive comes back one
+            # size smaller: seo-strategist mid-run on the gap pass would hold
+            # an unrelated claim open exactly as its finished runs used to.
             alive = c.execute(
-                "SELECT 1 FROM agent_runs WHERE agent=? AND started_at >= ?"
-                " AND status IN ('running','ok') LIMIT 1",
-                (owner, int(row["claimed_at"] or 0))).fetchone()
+                "SELECT 1 FROM agent_runs"
+                " WHERE agent=? AND started_at >= ?"
+                "   AND (task_id = ?"
+                "        OR (status = 'running' AND task_id IS NULL))"
+                "   AND status IN ('running','ok') LIMIT 1",
+                (owner, int(row["claimed_at"] or 0), task_id)).fetchone()
             if alive:
                 c.execute("COMMIT;")
-                return False, (f"{owner} has been recording work since it claimed "
-                               "this — it is slow, not dead. Leave it alone.")
+                return False, (f"{owner} is recording work against this task — it "
+                               "is slow, not dead. Leave it alone.")
 
         prev = row["result"]
         try:
@@ -966,10 +995,15 @@ def dead_claims(now=None):
         except Exception:
             return out
         for r in rows:
+            # Same rule as release_claim, and it has to be the same or the two
+            # screens disagree: work against THIS task, or a run in flight.
+            # "this agent ran yesterday" is not evidence about this claim.
             alive = c.execute(
                 "SELECT 1 FROM agent_runs WHERE agent=? AND started_at >= ?"
-                " AND status IN ('running','ok') LIMIT 1",
-                (r["owner"] or "", int(r["claimed_at"] or 0))).fetchone()
+                "   AND (task_id = ?"
+                "        OR (status = 'running' AND task_id IS NULL))"
+                "   AND status IN ('running','ok') LIMIT 1",
+                (r["owner"] or "", int(r["claimed_at"] or 0), r["id"])).fetchone()
             if alive:
                 continue                 # slow, not dead
             out.append({"id": r["id"], "sector": r["sector"], "title": r["title"],

@@ -275,7 +275,34 @@ def offer(sector, agent, now=None) -> dict:
             "total": len(ordered)}
 
 
-def next_task(sector, agent, now=None):
+def _held_by(agent, skip=()):
+    """
+    The task this desk already claimed and never finished, oldest first.
+
+    Read straight from the board rather than through `offer`, because offer
+    scores OPEN work and this is not open — it belongs to this desk already.
+
+    `skip` is what stops this becoming a livelock. One agent name can cover two
+    passes — it-watcher is both the health check and the change watcher — and a
+    pass that has just looked at a job and said "not mine" must not be handed
+    the same job again on the next breath, for ever. deskwork passes the ids it
+    has already put down.
+    """
+    skip = {str(s) for s in (skip or ())}
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT * FROM tasks WHERE status='in_progress' AND owner=?"
+                " ORDER BY claimed_at", (agent or "",)).fetchall()
+        for r in rows:
+            if str(r["id"]) not in skip:
+                return dict(r)
+        return None
+    except Exception:
+        return None
+
+
+def next_task(sector, agent, now=None, skip=()):
     """
     Claim the task this desk should be doing, and return it. None if there is
     nothing it can take.
@@ -285,13 +312,33 @@ def next_task(sector, agent, now=None):
     task now gone rather than giving up. The scan is bounded by the board, and
     each pass is strictly shorter than the last, so it terminates.
     """
-    seen = set()
+    # FINISH WHAT YOU ARE ALREADY HOLDING FIRST.
+    #
+    # "if they had some task left behind those agents will complete their
+    #  previous recorded task first"
+    #
+    # Nothing stopped a desk claiming a second job while still holding the
+    # first. next_open_task only ever looked at status='open', so an in-progress
+    # claim was invisible to the very desk that made it: the desk took a new
+    # job every morning, the old claim aged, and eventually the Overseer filed
+    # it as abandoned — by the same desk that was busy doing something else.
+    # That is how a claim reaches ninety hours old on a desk that runs daily.
+    #
+    # Handed straight back, before the board is even read. It is already this
+    # desk's work and no scoring can rank anything above it.
+    held = _held_by(agent, skip=skip)
+    if held:
+        held["why_me"] = ("you claimed this and did not finish it — it comes "
+                          "before anything new")
+        return held
+
+    seen = {str(s) for s in (skip or ())}
     while True:
         o = offer(sector, agent, now)
         t = o.get("take")
-        if not t or t["id"] in seen:
+        if not t or str(t["id"]) in seen:
             return None
-        seen.add(t["id"])
+        seen.add(str(t["id"]))
         if board.claim_task(t["id"], agent):
             got = board.get_task(t["id"])
             if got is not None:
