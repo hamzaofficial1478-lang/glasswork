@@ -241,6 +241,58 @@ def _reply(claimed, agent, body, close=False):
     return board.reply_request(claimed["id"], agent, body, close=close)
 
 
+def take_seo_clearance(con, agent) -> list:
+    """
+    Read SEO's answer and unblock the pages it cleared.
+
+    Content holds a page at status='blocked_on_seo' until SEO says the search
+    demand behind it is real. Nothing ever read the answer, so even after SEO
+    started replying the rows stayed blocked for ever and Content wrote one
+    page a day at most — the clearance loop closed on the thread and nowhere
+    that mattered.
+
+    Matching is done by asking seo_gap which of OUR OWN titles it cleared, so
+    Content never parses SEO's wording. That is the same mistake as the
+    "keyword" subject filter, and it is not being made twice.
+    """
+    from . import seo_gap
+
+    blocked = [dict(r) for r in con.execute(
+        "SELECT id, title FROM content_queue WHERE status='blocked_on_seo'")]
+    if not blocked:
+        return []
+    titles = [b["title"] for b in blocked]
+
+    # Every thread Content opened with SEO that SEO has since replied on.
+    with board._conn() as bc:
+        threads = bc.execute(
+            "SELECT r.id FROM requests r WHERE r.from_sector='Content'"
+            "   AND r.to_sector='SEO'"
+            "   AND EXISTS (SELECT 1 FROM request_msgs m"
+            "                WHERE m.request_id=r.id AND m.author!='Content')"
+            " ORDER BY r.created_at DESC LIMIT 20").fetchall()
+        replies = []
+        for t in threads:
+            replies += [m["body"] for m in bc.execute(
+                "SELECT body FROM request_msgs WHERE request_id=? AND author!='Content'"
+                " ORDER BY id", (t["id"],)).fetchall()]
+
+    cleared = []
+    for reply in replies:
+        cleared += [t for t in seo_gap.cleared_from(reply, titles) if t not in cleared]
+    if not cleared:
+        return []
+
+    freed = []
+    for b in blocked:
+        if b["title"] in cleared:
+            con.execute("UPDATE content_queue SET status='briefed' WHERE id=?",
+                        (b["id"],))
+            freed.append({"id": b["id"], "title": b["title"]})
+    con.commit()
+    return freed
+
+
 def _brief(agent, max_briefs, draft_allowance, job=None):
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
@@ -261,6 +313,16 @@ def _brief(agent, max_briefs, draft_allowance, job=None):
             board.release_dead_request_claims()
         except Exception:
             pass                       # never let housekeeping stop the work
+
+        # 0b. Pages SEO has since cleared stop being blocked. This runs before
+        #     the claim below, so a pass that finds no new handoff can still
+        #     free yesterday's held pages — that is real work, and reporting
+        #     "nothing to brief" while three cleared pages sit blocked is the
+        #     kind of quiet contradiction the owner keeps catching.
+        try:
+            freed = take_seo_clearance(con, agent)
+        except Exception:
+            freed = []
 
         # 1. claim the handoff SEO left on the board (atomic — no grabbing)
         #
@@ -291,6 +353,16 @@ def _brief(agent, max_briefs, draft_allowance, job=None):
             if board.claim_request(r["id"], agent):
                 claimed = r
                 break
+        if not claimed and not job and freed:
+            # A pass that unblocked pages did something, and must not report
+            # "nothing to claim" over the top of it. This is the outcome after
+            # SEO answers: no new handoff, but yesterday's held pages are now
+            # writable, and content_write can pick them up on the next step.
+            return {"ok": True, "agent": agent, "stored": 0,
+                    "unblocked": freed,
+                    "summary": (f"{len(freed)} page(s) SEO has cleared are no longer "
+                                f"blocked and are ready to write: "
+                                + ", ".join(f["title"] for f in freed))}
         if not claimed and not job:
             # Not a fault: Content is refusing to invent work nobody asked for.
             # Say WHY, and what the cabinet actually holds, so the fix is obvious.

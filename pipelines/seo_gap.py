@@ -312,49 +312,116 @@ def answer_as_seo(req, body, con):
                 "write off the back of no keyword data is a guess, and I would "
                 "rather say that than wave it through.")
 
-    buying = {"buy", "hire", "quote", "price", "cost", "near me", "service",
-              "install", "installation", "company", "contractor", "supplier"}
-    tracked = [(r["phrase"] or "").lower() for r in rows]
-    intent_of = {(r["phrase"] or "").lower(): (r["intent"] or "info").lower()
-                 for r in rows}
-
-    # Each bulleted candidate in Content's message, scored against the cabinet.
-    cleared, held, lines = 0, 0, []
-    for raw in (body or "").splitlines():
-        cand = raw.strip().lstrip("-•* ").strip()
-        if not cand or len(cand) < 6 or cand.endswith(":"):
-            continue
-        key = cand.split("(")[0].strip().lower()
-        if not key:
-            continue
-        behind = [p for p in tracked if key in p or p in key]
-        intents = [intent_of.get(p, "info") for p in behind]
-        commercial = sum(1 for p in behind
-                         if intent_of.get(p) in ("buy", "commercial", "transactional")
-                         or any(w in p for w in buying))
-        if len(behind) >= 2 or commercial >= 1:
-            cleared += 1
-            lines.append(f"  CLEAR   {cand}  — {len(behind)} tracked phrase(s), "
-                         f"{commercial} with buying intent")
-        else:
-            held += 1
-            lines.append(f"  HOLD    {cand}  — only {len(behind)} tracked phrase(s) "
-                         f"behind it and no buying intent. Not a no; it is a "
-                         f"'find me evidence first'.")
-        del intents
-
-    if not lines:
+    candidates = read_candidates(body)
+    if not candidates:
         return None                # not a candidate list after all — file it
 
-    return ("Cleared on the evidence SEO actually holds, which is the keyword "
-            f"table ({len(rows)} phrases tracked), not volume and difficulty — "
-            "those need DataForSEO and it is not connected, so I am not going to "
-            "quote numbers I cannot stand behind.\n\n"
+    tracked = [(r["phrase"] or "").lower() for r in rows]
+    cleared, held, lines = 0, 0, []
+    for c in candidates:
+        verdict, why = judge_candidate(c, tracked)
+        if verdict == "CLEAR":
+            cleared += 1
+        else:
+            held += 1
+        lines.append(f"  {verdict:6}  {c['title']}  — {why}")
+
+    return ("Checked against the keyword table SEO actually holds "
+            f"({len(rows)} phrases tracked) — not volume and difficulty, which "
+            "need DataForSEO and it is not connected. I am not going to quote "
+            "numbers I cannot stand behind, so this is a check of whether the "
+            "evidence you cited is really in the cabinet.\n\n"
             + "\n".join(lines)
             + f"\n\n{cleared} cleared to write, {held} held. Write the cleared "
-              "ones. For the held ones, send me the phrases you think sit behind "
-              "them and I will look again — a page with one phrase behind it "
-              "competes with your own other pages for the same search.")
+              "ones now — do not wait for me again on those. For anything held, "
+              "send the phrases you think sit behind it and I will look again.")
+
+
+def cleared_from(reply, titles) -> list:
+    """
+    Which of these page titles did SEO clear? Content calls this with its own.
+
+    Deliberately not a parser for SEO's reply. Content passes the titles IT
+    knows about and this looks for each one on a CLEAR line — so the caller
+    never has to understand the sender's format, and a reworded reply cannot
+    silently stop working the way Content's "keyword" subject filter did. If
+    the reply changes shape, the tests in seo_tests.py fail here, in one place,
+    rather than a sector quietly writing nothing for a month.
+    """
+    if not reply:
+        return []
+    out = []
+    for line in str(reply).splitlines():
+        s = line.strip()
+        if not s.startswith("CLEAR"):
+            continue
+        for t in titles:
+            if t and t in s and t not in out:
+                out.append(t)
+    return out
+
+
+# Content writes each candidate as:
+#     - Glass Partition in Dubai  (glass partition dubai, 4 phrases, 2 buying-intent)
+# The parenthetical is Content's own evidence. SEO's job is to check that claim
+# against its table, not to re-derive it worse: matching the TITLE against
+# phrases is what the first version of this did, and "glass partition in dubai"
+# is not a substring of "glass partition dubai" — the word "in" — so it held
+# every page on the board and Content still wrote nothing. Same starvation, one
+# step further along.
+_CANDIDATE = re.compile(
+    r"^[-•*\s]*(?P<title>.+?)\s*\(\s*(?P<primary>[^,()]+?)\s*,\s*"
+    r"(?P<phrases>\d+)\s+phrases?\s*,\s*(?P<buying>\d+)\s+buying-intent\s*\)\s*$")
+
+
+def read_candidates(body) -> list:
+    """The page candidates in Content's message, with the evidence it cited."""
+    out = []
+    for raw in (body or "").splitlines():
+        m = _CANDIDATE.match(raw.strip())
+        if not m:
+            continue               # prose, headers and blank lines are not pages
+        out.append({"title": m.group("title").strip(),
+                    "primary": m.group("primary").strip().lower(),
+                    "phrases": int(m.group("phrases")),
+                    "buying": int(m.group("buying"))})
+    return out
+
+
+# A page wants more than one search behind it, or one search that someone is
+# clearly ready to buy from. One informational phrase is not a page — it is a
+# section of a page that already exists, and building it competes with our own.
+ENOUGH_PHRASES = 2
+
+
+def judge_candidate(cand, tracked) -> tuple:
+    """
+    CLEAR or HOLD, and why in one line the writer can act on.
+
+    The check that matters is the first one: is the primary keyword Content
+    named actually in SEO's table? If it is not, Content has clustered
+    something SEO never found, and clearing it would be SEO rubber-stamping
+    evidence it cannot see.
+    """
+    primary = cand["primary"]
+    if primary not in tracked:
+        near = [p for p in tracked if primary in p or p in primary]
+        if not near:
+            return ("HOLD", f"'{primary}' is not in SEO's keyword table at all, and "
+                            f"nothing near it is. I cannot clear a page on evidence "
+                            f"I do not hold.")
+        return ("CLEAR", f"'{primary}' is not tracked verbatim but {len(near)} close "
+                         f"phrase(s) are; {cand['buying']} carry buying intent.")
+    if cand["buying"] >= 1:
+        return ("CLEAR", f"{cand['phrases']} tracked phrase(s), {cand['buying']} of "
+                         f"them buying intent. That is a page.")
+    if cand["phrases"] >= ENOUGH_PHRASES:
+        return ("CLEAR", f"{cand['phrases']} tracked phrases, none with buying intent "
+                         f"— informational, so write it to be found rather than to "
+                         f"sell, and link it to the service page.")
+    return ("HOLD", f"only {cand['phrases']} tracked phrase and no buying intent. "
+                    f"Not a no — a 'find me evidence first'. It would compete with "
+                    f"our own pages for the same search.")
 
 
 def seeds_for(job, max_seeds):

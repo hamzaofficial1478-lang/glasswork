@@ -104,6 +104,8 @@ def main():
     _critic_tests()
     _full_cycle_tests()
     test_backlinks_and_guest_posts()
+    test_seo_answers_content_s_clearance_from_its_own_table()
+    test_cleared_from_reads_our_own_titles_not_seo_s_wording()
 
     if _fail:
         print(f"\n{len(_fail)} FAILED: {_fail}")
@@ -257,6 +259,76 @@ def _full_cycle_tests():
     finally:
         seo._suggest = real_suggest
         board.DB = real_db
+
+
+def test_seo_answers_content_s_clearance_from_its_own_table():
+    print("The question that sat unanswered for ever:")
+    import sqlite3 as _s, tempfile as _t
+    from pathlib import Path as _P
+    from coordination import board as _b
+    from . import seo_gap
+    real = _b.DB
+    d = _P(_t.mkdtemp()); db = d / "agency.db"
+    c = _s.connect(db)
+    c.executescript((_P(__file__).parents[1] / "coordination" / "schema.sql")
+                    .read_text(encoding="utf-8"))
+    c.executemany("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)",
+                  [("glass partition dubai", "Dubai", "buy"),
+                   ("glass partition price dubai", "Dubai", "buy"),
+                   ("frameless shower glass sharjah", "Sharjah", "info"),
+                   ("shower glass sharjah", "Sharjah", "info")])
+    c.commit()
+    c.row_factory = _s.Row
+    _b.DB = str(db)
+    try:
+        body = ("Clustered your gap list into 3 page candidates:\n"
+                "- Glass Partition in Dubai  (glass partition dubai, 2 phrases, 2 buying-intent)\n"
+                "- Shower Glass in Sharjah  (shower glass sharjah, 2 phrases, 0 buying-intent)\n"
+                "- Curtain Walling in Fujairah  (curtain walling fujairah, 1 phrases, 0 buying-intent)\n"
+                "\nOne is briefed as the template. The rest are held until you clear "
+                "volume and difficulty — please rank or reject them.")
+        req = {"subject": "Clear these page targets for volume/difficulty"}
+        reply = seo_gap.answer_as_seo(req, body, c)
+
+        check("it answered rather than filing a ticket", reply is not None, True)
+        cleared = seo_gap.cleared_from(reply, [
+            "Glass Partition in Dubai", "Shower Glass in Sharjah",
+            "Curtain Walling in Fujairah"])
+        check("buying intent clears", "Glass Partition in Dubai" in cleared, True)
+        check("two informational phrases clear too, as an info page",
+              "Shower Glass in Sharjah" in cleared, True)
+        check("a phrase SEO never found is held",
+              "Curtain Walling in Fujairah" in cleared, False)
+        check("the prose line is not mistaken for a page",
+              "briefed as the template" in reply, False)
+        check("and it does not pretend to volume figures it has not got",
+              "DataForSEO" in reply, True)
+
+        # A question that is not a clearance goes back as None, so the inbox
+        # files it as work rather than this handler guessing at it.
+        check("an unrelated question is not answered here",
+              seo_gap.answer_as_seo({"subject": "The site is down"}, "help", c), None)
+
+        # An empty table must refuse rather than wave everything through.
+        c.execute("DELETE FROM keywords"); c.commit()
+        empty = seo_gap.answer_as_seo(req, body, c)
+        check("with no keywords it clears nothing",
+              "keyword table is empty" in (empty or ""), True)
+    finally:
+        _b.DB = real
+        c.close()
+
+
+def test_cleared_from_reads_our_own_titles_not_seo_s_wording():
+    print("Content never parses SEO's format:")
+    from . import seo_gap
+    reply = ("  CLEAR   Glass Partition in Dubai  — 2 tracked phrases.\n"
+             "  HOLD    Pergola in Al Ain  — one phrase.")
+    got = seo_gap.cleared_from(reply, ["Glass Partition in Dubai", "Pergola in Al Ain"])
+    check("only the cleared one comes back", got, ["Glass Partition in Dubai"])
+    check("an empty reply clears nothing", seo_gap.cleared_from("", ["x"]), [])
+    check("a title nobody mentioned is not invented",
+          seo_gap.cleared_from(reply, ["Something Else"]), [])
 
 
 if __name__ == "__main__":
