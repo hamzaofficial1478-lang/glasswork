@@ -156,32 +156,123 @@ def _read_env() -> dict:
         return {}
 
 
+def _configured(task):
+    """
+    Every model the owner has PUT on this task, and what became of each one.
+
+    THE COUNT AND THE COMPLAINT WERE BOTH WRONG, and he caught it:
+
+      "sector 'content' runs on one brain with no fallback ... they all have
+       fallback ip ... either the tester is not testing the fallback or it is
+       only pushing fake message over the actual error"
+
+    readiness counted resolve_task's candidates, which is the USABLE chain
+    after three filters have run. A model he configured can be missing from it
+    for four completely different reasons, and the light said the same eleven
+    words for all four — and for "you genuinely only saved one", which is the
+    only case the words actually described.
+
+    The one that bit him hardest is the last: a SECONDARY set to fusion is not
+    a fallback, it is a deliberate cross-check partner (see
+    providers.routing.deliberate — the MD and Security put hard calls to two
+    models and treat disagreement as the signal). resolve_task leaves it out of
+    the failover chain, correctly. Reporting that as "one brain and no
+    fallback" told him he had not configured something he plainly had.
+
+    Returns (rows, route). Each row says what the model is and whether it is in
+    the failover chain, with the reason when it is not.
+    """
+    try:
+        from providers import store
+    except Exception:
+        return [], None
+    route = (store.get_routing() or {}).get(task)
+    if not isinstance(route, dict):
+        return [], None
+
+    paid_ok = route.get("paid_allowed", True)
+    fusion = (route.get("secondary_mode", "fallback") != "fallback")
+
+    wanted = []
+    if route.get("primary"):
+        wanted.append((route["primary"], "primary"))
+    if route.get("secondary"):
+        wanted.append((route["secondary"], "cross-check" if fusion else "secondary"))
+    for mid in (route.get("fallback") or []):
+        if mid:
+            wanted.append((mid, "fallback"))
+
+    rows, seen = [], set()
+    for mid, role in wanted:
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        try:
+            cred, model = store.find_model(mid)
+        except Exception:
+            cred = model = None
+        if not cred or not model:
+            rows.append({"role": role, "name": mid, "in_chain": False,
+                         "why": "points at a model that is no longer on the shelf",
+                         "last": {}})
+            continue
+        name = f'{cred.get("name", "?")} · {model.get("api_model_id", "?")}'
+        last = model.get("last_test_result") or {}
+        if not model.get("enabled", True):
+            rows.append({"role": role, "name": name, "in_chain": False,
+                         "why": "switched off", "last": last})
+        elif not paid_ok and model.get("cost_tier") == "paid":
+            rows.append({"role": role, "name": name, "in_chain": False,
+                         "why": "is a paid model, and this sector is set to "
+                                "free providers only", "last": last})
+        elif role == "cross-check":
+            rows.append({"role": role, "name": name, "in_chain": False,
+                         "why": "held as a cross-check partner, not a fallback — "
+                                "that is what secondary_mode=fusion means",
+                         "last": last})
+        else:
+            rows.append({"role": role, "name": name, "in_chain": True,
+                         "why": "", "last": last})
+    return rows, route
+
+
 def _brains(task):
     """The sector's model chain, and how much of it has been proven to answer."""
     try:
-        from providers import routing, store
+        from providers import routing
     except Exception as e:
         return {"n": 0, "verified": 0, "names": [], "error": str(e)}
     try:
         r = routing.resolve_task(task)
     except Exception as e:
         return {"n": 0, "verified": 0, "names": [], "error": str(e)}
+
+    rows, route = _configured(task)
+    chain = [x for x in rows if x["in_chain"]]
+    held = [x for x in rows if not x["in_chain"]]
+    # Configured means he saved it, whether or not it survived the filters.
+    # Reporting only the survivors is what made a machine with three models
+    # look like a machine with one.
+    saved = len(rows)
+
     if not r.get("ok"):
-        return {"n": 0, "verified": 0, "names": [], "error": r.get("error")}
+        return {"n": 0, "verified": 0, "tested": 0, "names": [],
+                "saved": saved, "held": held, "error": r.get("error")}
 
     names, verified, tested = [], 0, 0
-    for cand in r.get("candidates", []):
-        names.append(f'{cand.get("credential_name", "?")} · {cand.get("api_model_id", "?")}')
-        try:
-            _cred, model = store.find_model(cand["model_id"])
-            last = (model or {}).get("last_test_result") or {}
-        except Exception:
-            last = {}
+    for x in chain:
+        names.append(x["name"])
+        last = x["last"]
         if last.get("ok") is True:
             verified += 1
         if "ok" in last:
             tested += 1
-    return {"n": len(names), "verified": verified, "tested": tested, "names": names}
+    # A cross-check partner is a second brain for the "does this sector have
+    # two" question even though it is not a failover step.
+    partners = sum(1 for x in held if x["role"] == "cross-check")
+    return {"n": len(names), "verified": verified, "tested": tested,
+            "names": names, "saved": saved, "held": held,
+            "with_partner": len(names) + partners}
 
 
 def _shelf_state(names):
@@ -267,8 +358,29 @@ def sector(key, task, env=None, shelf=None) -> dict:
                          "none proven yet — run the check")
         elif b["verified"] == 1 and b["n"] == 1:
             state = _worst(state, THIN)
-            thin.append("one brain and no fallback")
-        if key in WANTS_TWO and b["n"] < 2:
+            # NAME WHAT HAPPENED TO THE OTHERS. He had saved fallbacks and this
+            # said "one brain and no fallback" — true of the failover chain,
+            # and read as "you did not configure one", which was false. A held
+            # model is a different problem from a missing one and needs a
+            # different thing done about it.
+            held = [h for h in (b.get("held") or []) if h["role"] != "cross-check"]
+            if held:
+                thin.append(
+                    "one brain in the failover chain. You saved "
+                    f"{b.get('saved', 1)}, and "
+                    + "; ".join(f"{h['name']} is not in it because it {h['why']}"
+                                for h in held[:3]))
+            elif b.get("with_partner", 1) > 1:
+                thin.append("one brain in the failover chain — the second model "
+                            "is a cross-check partner, so if the first fails "
+                            "there is nothing to fall back to")
+            else:
+                thin.append("one brain and no fallback")
+        # WITH_PARTNER, not n. A cross-check partner does not appear in the
+        # failover chain, so counting the chain told the MD and Security they
+        # were running on one model when both were configured exactly as
+        # designed — the loudest of the four false alarms he reported.
+        if key in WANTS_TWO and b.get("with_partner", b["n"]) < 2:
             state = _worst(state, THIN)
             thin.append("this sector puts hard calls to two models; with one, "
                         "the cross-check silently stops happening")

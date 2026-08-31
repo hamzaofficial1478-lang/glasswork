@@ -153,6 +153,8 @@ def _readiness_tests():
     finally:
         readiness._brains = real
 
+    _fallback_and_shelf_tests()
+
     print("\nThe remembered check:")
     check("no check yet -> empty, not a fake pass", readiness.last_check(), {})
     readiness.record_check({"ready": False, "blocking": ["seo has no brain"]})
@@ -1001,6 +1003,124 @@ def main():
         sys.exit(1)
     print("\nall run tests passed")
 
+
+
+def _fallback_and_shelf_tests():
+    """
+    Two false alarms he caught on the same run, and they are the same kind of
+    bug: a screen reporting on a copy of the truth that had the answer stripped
+    out of it.
+
+      "sector 'content' runs on one brain with no fallback ... they all have
+       fallback ip ... either the tester is not testing the fallback or it is
+       only pushing fake message over the actual error"
+
+      "Content & Social — unchecked / stock_images: 2 API saved, not proven yet
+       ... fix that not proven api issue"
+    """
+    import json as _json
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from providers import store
+
+    real_store = store.STORE
+    d = _P(_tf.mkdtemp())
+    store.STORE = d / "providers.local.json"
+
+    def model(mid, api, tier="free", enabled=True, tested_ok=True):
+        m = {"id": mid, "api_model_id": api, "category": "LLM",
+             "cost_tier": tier, "enabled": enabled, "priority": 1}
+        if tested_ok is not None:
+            m["last_test_result"] = {"ok": tested_ok, "at": 1}
+        return m
+
+    def tool(tid, name, tested_ok=True):
+        t = {"id": tid, "shelf": "stock_images", "name": name,
+             "base_url": "https://x/", "api_key": "k", "auth_style": "bearer",
+             "enabled": True, "priority": 1}
+        if tested_ok is not None:
+            t["last_test_result"] = {"ok": tested_ok, "status": 200, "at": 1}
+        return t
+
+    try:
+        payload = _json.dumps({
+            "credentials": [{"id": "c", "name": "OpenRouter", "models": [
+                model("m1", "big/model"), model("m2", "small/model"),
+                model("m3", "other/model"),
+                model("m_off", "paused/model", enabled=False),
+                model("m_paid", "pricey/model", tier="paid")]}],
+            "tools": [tool("t1", "Pexels"), tool("t2", "Pixabay")],
+            "routing": {
+                "content":  {"primary": "m1", "fallback": ["m2"], "enabled": True},
+                "md":       {"primary": "m1", "secondary": "m3",
+                             "secondary_mode": "fusion", "enabled": True},
+                "it":       {"primary": "m1", "fallback": ["m_off"], "enabled": True},
+                "seo":      {"primary": "m1", "fallback": ["m_paid"],
+                             "paid_allowed": False, "enabled": True},
+                "report":   {"primary": "m1", "fallback": ["m_gone"], "enabled": True},
+                "security": {"primary": "m1", "enabled": True},
+            }}, indent=2)
+        store.STORE.write_text(payload, encoding="utf-8")
+
+        print("\nA tested shelf API reads as tested:")
+        # The probe stored the result and shelf_catalogue built a fresh dict
+        # that left the field out, so `working` was zero for ever and no number
+        # of full checks could shift "2 API saved, not proven yet".
+        got = store.shelf_items("stock_images")
+        check("the reader carries the test result through",
+              [(i["name"], (i.get("last_test_result") or {}).get("ok")) for i in got],
+              [("Pexels", True), ("Pixabay", True)])
+        check("so readiness counts them as working",
+              readiness._shelf_state(["stock_images"])["stock_images"]["working"], 2)
+        check("and Content is no longer held at 'unchecked' for it",
+              any("not proven yet" in n
+                  for n in readiness.sector("content", "content", env={},
+                                            shelf=readiness._shelf_state(
+                                                ["stock_images"]))["notes"]),
+              False)
+
+        print("\nA fallback he saved is counted as a fallback:")
+        b = readiness._brains("content")
+        check("two in the failover chain", b["n"], 2)
+        check("and nothing is held back", b["held"], [])
+        check("so the sector is not called thin",
+              readiness.sector("content", "content", env={},
+                               shelf=readiness._shelf_state(["stock_images"]))["thin"],
+              [])
+
+        print("\nA cross-check partner is a second brain, not a missing one:")
+        # md and security put hard calls to two models and treat disagreement as
+        # the signal, so a fusion secondary is deliberately NOT in the failover
+        # chain. Reading the chain told him he had configured one model when he
+        # had configured two — the loudest of the four false alarms.
+        b = readiness._brains("md")
+        check("the chain really is one", b["n"], 1)
+        check("but two models are saved", b["saved"], 2)
+        check("and the pair is recognised", b["with_partner"], 2)
+        thin = readiness.sector("md", "md", env={}, shelf={})["thin"]
+        check("so it stops claiming the cross-check has stopped",
+              any("cross-check silently stops" in x for x in thin), False)
+        check("and says what is actually true instead",
+              any("cross-check partner" in x for x in thin), True)
+
+        print("\nAnd when a fallback IS missing, it says which and why:")
+        for task, needle in (("it", "switched off"),
+                             ("seo", "paid model"),
+                             ("report", "no longer on the shelf")):
+            thin = readiness.sector(task, task,
+                                    env={"SITE_URL": "x", "SMTP_HOST": "y",
+                                         "NTFY_TOPIC": "t"},
+                                    shelf={})["thin"]
+            check(f"{task}: names the reason",
+                  any(needle in x for x in thin), True)
+            check(f"{task}: and says how many he saved",
+                  any("You saved 2" in x for x in thin), True)
+
+        print("\nOne genuinely alone is still reported as alone:")
+        thin = readiness.sector("security", "security", env={}, shelf={})["thin"]
+        check("plainly", any("one brain and no fallback" in x for x in thin), True)
+    finally:
+        store.STORE = real_store
 
 if __name__ == "__main__":
     main()

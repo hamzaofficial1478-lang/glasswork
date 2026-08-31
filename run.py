@@ -7,6 +7,7 @@ run.py — the one file you start the agency from.
     python run.py --check         health check: what is configured, what is not
     python run.py --site          test your real website end to end (changes nothing)
     python run.py --site --index  the same, and build the Algolia search index
+    python run.py --why           why is a desk red? what its last run said
     python run.py --tests         run every test suite
     python run.py --no-update     skip the git pull
 
@@ -435,6 +436,8 @@ def main():
                     help="with --site: also build the Algolia index for real")
     ap.add_argument("--url", default="",
                     help="with --site: test this address instead of the saved one")
+    ap.add_argument("--why", nargs="?", const="", metavar="SECTOR",
+                    help="why is that desk red? reads the last run of every desk")
     ap.add_argument("--tests", action="store_true", help="run every test suite")
     ap.add_argument("--no-update", action="store_true", help="skip the git pull")
     ap.add_argument("--force", action="store_true",
@@ -461,6 +464,14 @@ def main():
         out = site_check.run(url=a.url or None, do_index=a.index)
         say(site_check.as_text(out))
         sys.exit(0 if out.get("ok") else 1)
+    if a.why is not None:
+        # A red lamp on the floor already knew why — the run wrote it
+        # down. It just needed a mouse and a page that had not
+        # reloaded. This is the same rows, as a command.
+        from coordination import whyred
+        print(whyred.as_text(whyred.look(sector=a.why)))
+        return 0
+
     if a.check:
         check()
         return

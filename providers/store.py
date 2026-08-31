@@ -438,6 +438,18 @@ def shelf_catalogue() -> dict:
                 "cost_tier": m.get("cost_tier", "unknown"),
                 "enabled": bool(m.get("enabled", True)),
                 "priority": int(m.get("priority", 100)),
+                # WITHOUT THIS THE TEST RESULT NEVER LEAVES THE FILE.
+                #
+                # "for content and socual fix that not proven api issue"
+                #
+                # The preflight probes every shelf API and writes the result
+                # back with upsert_tool. It was stored correctly. But this is
+                # the reader the readiness light and the control room use, and
+                # it built a fresh dict that simply left the field out — so
+                # `working` counted zero for ever and "2 API saved, not proven
+                # yet" survived any number of full checks. The test was real;
+                # the copy handed to the screen had the answer stripped off it.
+                "last_test_result": m.get("last_test_result") or {},
             })
     for t in data.get("tools", []):
         cat.setdefault(t["shelf"], []).append({
@@ -447,6 +459,7 @@ def shelf_catalogue() -> dict:
             "daily_cap": t.get("daily_cap", 0),
             "enabled": bool(t.get("enabled", True)),
             "priority": int(t.get("priority", 100)),
+            "last_test_result": t.get("last_test_result") or {},
         })
     for shelf in cat:
         cat[shelf].sort(key=lambda i: i.get("priority", 100))
