@@ -80,12 +80,21 @@ GOOD_BODY = (
 
 
 def _brain(body=GOOD_BODY, title="Aluminium Pergolas in Sharjah"):
-    def call_task(task, messages, max_tokens=512, timeout=0):
-        return {"ok": True, "used": "stand-in", "output": json.dumps({
-            "title": title, "meta": "Aluminium pergolas across Sharjah.",
-            "h1": "Aluminium pergolas in Sharjah", "html": body,
-            "note": "led with the survey time"})}
-    return call_task
+    """
+    A stand-in for the Writer's brain.
+
+    **kw because the Writer climbs the load ladder now rather than calling
+    call_task directly, and think() takes agent= and reason= as well. The
+    return shape is the same either way — the ladder hands back what the
+    underlying call handed back, plus which rung answered.
+    """
+    def brain(task, messages, max_tokens=512, timeout=0, **kw):
+        return {"ok": True, "used": "stand-in", "rung": "own",
+                "output": json.dumps({
+                    "title": title, "meta": "Aluminium pergolas across Sharjah.",
+                    "h1": "Aluminium pergolas in Sharjah", "html": body,
+                    "note": "led with the survey time"})}
+    return brain
 
 
 def _queue_a_brief(db, brief=None):
@@ -99,9 +108,16 @@ def _queue_a_brief(db, brief=None):
 def _write(body=GOOD_BODY, include="", **kw):
     """Run the Writer with a stand-in brain and no site to read."""
     import providers
+    # Both seams: the Writer asks the LADDER whether anything could write
+    # (own model or a shelf spare) before it starts, then calls think() to do
+    # it. Patching only resolve_task left the pre-check reading the real
+    # config, which does not exist in a test run.
     with mock.patch.object(providers, "resolve_task",
                            lambda t: {"ok": True, "task": t, "route": {}}), \
-         mock.patch.object(providers, "call_task", _brain(body)), \
+         mock.patch.object(providers.ladder, "who_could_answer",
+                           lambda s: {"ok": True, "own": True, "own_error": "",
+                                      "spare": 0, "why": ""}), \
+         mock.patch.object(providers, "think", _brain(body)), \
          mock.patch.object(CW, "_include_of_his_site", lambda: include), \
          mock.patch.dict("os.environ", {
              "BUSINESS_NAME": "World Deal Technical Services",
@@ -123,8 +139,14 @@ def test_no_brain_means_no_page():
     db = _fresh_db()
     _queue_a_brief(db)
     import providers
+    # The shelf is emptied too: with a spare on it Content SHOULD write, and
+    # this test is about there being nothing anywhere that can.
     with mock.patch.object(providers, "resolve_task",
-                           lambda t: {"ok": False, "error": "no routing configured"}):
+                           lambda t: {"ok": False, "error": "no routing configured"}), \
+         mock.patch.object(providers.ladder.routing, "resolve_task",
+                           lambda t: {"ok": False, "error": "no routing configured"}), \
+         mock.patch.object(providers.ladder.store, "shelf_catalogue",
+                           lambda: {"llm_extra": []}):
         out = CW.run()
     check("it does not write", out["pages"] if out.get("pages") else [], [])
     check("and it is not called a success", out["ok"], False)

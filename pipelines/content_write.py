@@ -201,8 +201,13 @@ def next_brief(con, limit=MAX_PER_PASS, only_id=None) -> list:
 
 def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
     """The Content brain writes the body. Returns {ok, page|error, brain}."""
+    # THE LADDER, NOT A BARE CALL. "No model routed means no page is written"
+    # is true of Content in a way it is not of the sectors whose brains only
+    # word things — the page IS the model's output. So when Content's own chain
+    # is down this climbs: a spare off the shelf first, and the Director's own
+    # model as a last resort, capped and logged. See providers/ladder.py.
     try:
-        from providers import call_task
+        from providers import think
     except Exception as e:                                    # pragma: no cover
         return {"ok": False, "error": f"the provider shelf did not load ({e})"}
 
@@ -241,9 +246,10 @@ def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
     lines.append("There are no other facts. Anything you would like to say that "
                  "is not on this list, leave out.")
 
-    r = call_task(BRAIN, [{"role": "system", "content": SYSTEM},
-                          {"role": "user", "content": "\n".join(lines)}],
-                  max_tokens=tokens)
+    r = think(BRAIN, [{"role": "system", "content": SYSTEM},
+                      {"role": "user", "content": "\n".join(lines)}],
+              agent=AGENT, max_tokens=tokens,
+              reason=f"writing the page: {brief.get('title') or 'untitled'}")
     if not r.get("ok"):
         return {"ok": False,
                 "error": f"Content's brain did not answer ({r.get('error') or 'no reason given'})"}
@@ -252,7 +258,8 @@ def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
         return {"ok": False,
                 "error": "the brain's reply was not in the shape asked for, so it "
                          "was not trusted to be a page"}
-    return {"ok": True, "page": page, "brain": r.get("used")}
+    return {"ok": True, "page": page, "brain": r.get("used"),
+            "rung": r.get("rung"), "borrowed": r.get("why") if r.get("rung") != "own" else ""}
 
 
 def _parse(out):
@@ -409,17 +416,25 @@ def _write(agent, dry_run, only_id, limit, job=None):
         # THE BRAIN IS CHECKED BEFORE ANY WORK IS DONE, not after. Finding out
         # there is no writer AFTER borrowing a shelf and reading the cabinet is
         # how a pass burns a minute to say nothing.
+        # Asked of the LADDER, not of Content's routing alone — a spare on the
+        # llm_extra shelf can write the page perfectly well, and refusing while
+        # one sits idle would be the pass giving up with help available. What
+        # it deliberately does NOT count is the Director's model: that rung is
+        # for a key that broke, not for one the owner never entered, and
+        # spending it on an unconfigured sector would use up the day's
+        # emergencies on a setting he could fix in ten seconds.
         try:
-            from providers import resolve_task
-            route = resolve_task(BRAIN)
+            from providers import ladder
+            route = ladder.who_could_answer(BRAIN)
         except Exception as e:                                # pragma: no cover
-            route = {"ok": False, "error": str(e)}
+            route = {"ok": False, "why": str(e), "own_error": str(e)}
         if not route.get("ok"):
             return {"ok": False, "agent": agent, "pages": [],
                     "waiting": len(waiting),
-                    "error": ("No model is routed to Content, so there is nothing "
-                              "here that can write a page: "
-                              + str(route.get("error") or "")
+                    "error": ("No model is routed to Content and there is no spare "
+                              "on the shelf, so there is nothing here that can "
+                              "write a page: "
+                              + str(route.get("own_error") or route.get("why") or "")
                               + ". Nothing was written — a template with the "
                                 "keyword slotted in four times is the page every "
                                 "other glazier already has, and it would cost him "

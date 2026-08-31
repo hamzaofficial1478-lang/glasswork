@@ -446,8 +446,27 @@ def all_sectors() -> dict:
     else:
         head = "all sectors ready"
 
+    # WHO IS LIVING ON BORROWED HELP.
+    #
+    # The load ladder means a sector with a dead API key still gets its work
+    # done — off the llm_extra shelf, or in the last resort on the Director's
+    # own model. That is the point of it, and it is also its one danger: the
+    # screen would show a healthy agency while a key had been broken for a
+    # month. So a sector that borrowed today says so here, above everything
+    # else, because the repair is the key rather than more borrowing.
+    borrowed = {}
+    try:
+        from providers import ladder as _ladder
+        borrowed = _ladder.state()
+    except Exception:
+        borrowed = {}
+    on_md = borrowed.get("on_the_directors_brain") or []
+    if on_md:
+        head = (", ".join(on_md) + " has no working model of its own and is "
+                "running on the Director's — fix the API key")
+
     return {"ok": True, "at": int(time.time()), "sectors": out,
-            "counts": counts, "head": head,
+            "counts": counts, "head": head, "borrowed": borrowed,
             "can_run": counts[BLOCKED] == 0, "checked": last_check()}
 
 
@@ -522,6 +541,14 @@ def as_text() -> str:
         L.append(f"  {mark[s['state']]} {s['label']:22} {s['state']:9} {s['says']}")
         if s.get("brain_does"):
             L.append(f"      its model {s['brain_does']}")
+    b = d.get("borrowed") or {}
+    if b.get("per_sector"):
+        L.append("")
+        L.append("  BORROWED HELP TODAY — " + b.get("head", ""))
+        for sec in b.get("on_the_directors_brain") or []:
+            L.append(f"      {sec} is on the Director's model. That is the last "
+                     f"rung and it is capped at {b.get('cap')} a day: fix its "
+                     f"API key on /setup or {sec} stops working.")
     ck = d["checked"]
     L.append("")
     L.append(f"  last proven: {ck['ago'] // 60} min ago" if ck

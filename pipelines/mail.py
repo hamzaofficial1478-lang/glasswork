@@ -396,16 +396,37 @@ def _brief_to_text(brief: dict) -> str:
     return "\n".join(lines)
 
 
-def _write_copy(call_task, brief):
-    """Ask the sector brain (an LLM) to write the copy from the brief."""
+def _write_copy(call_task, brief, agent=""):
+    """
+    Ask the sector brain (an LLM) to write the copy from the brief.
+
+    Climbs the load ladder when Leads' own chain is down. Like Content's page,
+    the mail IS the model's output — there is no template that would do — so a
+    dead key here means the lead is simply never written to, which is a job
+    lost rather than a cosmetic degradation. Rung 3 and rung 4 exist for
+    exactly this. providers/ladder.py caps and logs both.
+
+    `call_task` is still the injected argument so the existing tests can hand
+    in a stub; when it is the real one, the ladder is used instead.
+    """
     if call_task is None:
         return {"ok": False, "error": "no provider layer available"}
     prompt = ("Write a short outreach email from this brief. Return only the "
               "subject line then the body.\n\n" + _brief_to_text(brief))
-    r = call_task("leads", [{"role": "user", "content": prompt}], max_tokens=400)
+    try:
+        from providers import call_task as _real, think
+    except Exception:                                        # pragma: no cover
+        _real, think = None, None
+    if think is not None and call_task is _real:
+        r = think("leads", [{"role": "user", "content": prompt}],
+                  agent=agent or "leads-hunter", max_tokens=400,
+                  reason="writing outreach copy for a cleared lead")
+    else:
+        r = call_task("leads", [{"role": "user", "content": prompt}], max_tokens=400)
     if not r.get("ok"):
         return {"ok": False, "error": r.get("error", "brain unavailable"), "failovers": r.get("failovers")}
-    return {"ok": True, "draft": r["output"], "used": r.get("used")}
+    return {"ok": True, "draft": r["output"], "used": r.get("used"),
+            "rung": r.get("rung")}
 
 
 def compose(lead: dict, company: dict, *, agent: str, sector: str = "Leads",
@@ -432,7 +453,7 @@ def compose(lead: dict, company: dict, *, agent: str, sector: str = "Leads",
     try:
         # (asset selection from the real-project library happens here when wired)
         # 2) write the copy with the sector brain
-        drafted = _write_copy(call_task, p["brief"])
+        drafted = _write_copy(call_task, p["brief"], agent=agent)
         trace["steps"].append({"write": drafted.get("ok"),
                                "error": drafted.get("error"), "used": drafted.get("used")})
     finally:
