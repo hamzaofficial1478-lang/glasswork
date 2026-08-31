@@ -27,7 +27,7 @@ An answer, always. Even "I cannot do this" is an answer. The one thing a sector
 may never do is take a question and go quiet, because a blocking asker then
 waits out its whole timeout and everything behind it stalls.
 
-So a request addressed to a sector gets exactly one of four outcomes here, and
+So a request addressed to a sector gets exactly one of five outcomes here, and
 every one of them writes back on the thread:
 
   ANSWERED   the sector had a handler that knew the answer. Thread closed.
@@ -35,13 +35,20 @@ every one of them writes back on the thread:
              on that sector's board and the asker is told the task id. The
              thread stays open until the work is done, which is honest: the
              question has been accepted, not answered.
-  DECLINED   the sector cannot take it — switched off, board already backed up,
-             the desk mid-run with a queue. The asker is told which, so it can
-             decide rather than guess. Thread closed; asking again tomorrow is
-             a fresh question.
+  LATER      the board is backed up, or the desk is mid-run with a queue behind
+             it. Nothing is wrong with the ask and it is not refused. The thread
+             stays open and the sector looks again on its next pass.
+  DECLINED   the owner has switched the sector off. That is a decision rather
+             than a delay, so the thread closes and asking tomorrow is a fresh
+             question.
   RETURNED   the handler raised. The claim is given back so the request returns
              to the inbox rather than dying at status='claimed', and the reason
              goes on the thread.
+
+LATER and DECLINED were one outcome to begin with, and running it showed why
+they cannot be. A 'desk is busy' close makes the question depend on the asker
+remembering to repeat itself tomorrow — which is precisely how work disappears
+quietly, and precisely what this file exists to stop.
 
 FILED is the important one. It is the floor under every sector: even with no
 handler written and no model routed, a request now becomes visible, claimable
@@ -147,6 +154,16 @@ def _file_as_task(sector, req, agent):
 
     Returns (outcome, reply_text, task_id). Never raises: every refusal the
     board can make is a sentence the asker can act on.
+
+    Two shapes of no, and they are not the same:
+
+      'declined'  the owner switched the sector off. That is a decision, the
+                  thread closes, and asking again tomorrow is a fresh question.
+      'later'     the board is backed up or the desk is mid-run with a queue.
+                  Nothing is wrong with the ask. The thread stays OPEN so this
+                  sector picks it up on its own next pass — closing it would
+                  make the question depend on the asker remembering to repeat
+                  itself, which is how work quietly disappears.
     """
     title = (req.get("subject") or "").strip() or f"Request from {req.get('from_sector')}"
     detail = (
@@ -166,14 +183,14 @@ def _file_as_task(sector, req, agent):
                 f"Nothing has been lost — ask again once the owner turns the "
                 f"sector back on.", None)
     except board.BoardFull as e:
-        return ("declined",
-                f"{sector} cannot take this on yet: {e}. It is not refused on "
-                f"merit — the board is backed up. Ask again once it has cleared.",
-                None)
+        return ("later",
+                f"{sector} cannot take this on yet: {e} It is not refused on "
+                f"merit — the board is backed up. Left open; {sector} picks it "
+                f"up on its next pass without you having to ask again.", None)
     except board.DeskBusy as e:
-        return ("declined",
-                f"{sector} cannot queue this yet: {e} Ask again on the next run.",
-                None)
+        return ("later",
+                f"{sector} cannot queue this yet: {e} Left open; the desk takes "
+                f"it when it finishes what it is holding.", None)
     except Exception as e:                       # never leave the asker hanging
         return ("declined",
                 f"{sector} could not file this as work: {e}", None)
@@ -251,8 +268,12 @@ def work_the_inbox(sector, agent, handler=None, limit=MOST_PER_PASS,
 
         # filed / declined both reply; only 'declined' closes the thread, because
         # a filed request is still owed a real answer when the task finishes.
+        # 'later' deliberately does NOT close: the sector owes this an answer
+        # and will look again itself. See _file_as_task.
         board.reply_request(req["id"], agent, reply,
                             close=(outcome == "declined"))
+        if outcome == "later":
+            _unclaim(req["id"])
         results.append({"request": req["id"], "from": req["from_sector"],
                         "subject": req["subject"], "outcome": outcome,
                         "task": task_id})
@@ -262,7 +283,7 @@ def work_the_inbox(sector, agent, handler=None, limit=MOST_PER_PASS,
         con.close()
 
     counts = {k: sum(1 for r in results if r["outcome"] == k)
-              for k in ("answered", "filed", "declined", "returned")}
+              for k in ("answered", "filed", "declined", "later", "returned")}
     return {"ok": True, "sector": sector, "agent": agent,
             "read": handled, "results": results, **counts,
             "head": _head(sector, counts, handled)}
@@ -283,7 +304,7 @@ def read_post(sector, agent, handler=None, limit=MOST_PER_PASS, con=None) -> dic
     except Exception as e:
         return {"ok": False, "sector": sector, "agent": agent, "read": 0,
                 "results": [], "answered": 0, "filed": 0, "declined": 0,
-                "returned": 0,
+                "later": 0, "returned": 0,
                 "error": f"{type(e).__name__}: {e}",
                 "head": f"could not read {sector}'s post: {e}"}
 
@@ -298,6 +319,8 @@ def _head(sector, counts, handled) -> str:
         bits.append(f"filed {counts['filed']} as work")
     if counts["declined"]:
         bits.append(f"declined {counts['declined']}")
+    if counts.get("later"):
+        bits.append(f"held {counts['later']} for the next pass")
     if counts["returned"]:
         bits.append(f"put {counts['returned']} back after an error")
     return f"{sector} read {handled} request(s): " + ", ".join(bits)

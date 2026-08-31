@@ -164,6 +164,31 @@ def test_a_switched_off_sector_declines_rather_than_going_quiet():
               "switched off" in _thread(rid)[-1]["body"], True)
 
 
+def test_a_busy_desk_holds_the_question_rather_than_losing_it():
+    print("Busy is not the same as no:")
+    with _Cabinet():
+        board.post_task("Report", "First job", "d", desk="reporter")
+        rid = board.post_request("SEO", "Report", "Score these decisions", "b")
+        with board.agent_run("reporter"):
+            out = inbox.work_the_inbox("Report", "reporter")
+        check("held for later, not declined", out["later"], 1)
+        check("nothing was closed", _status(rid) == "closed", False)
+        check("and it is back in the inbox for the next pass",
+              [r["id"] for r in board.open_requests_for("Report")], [rid])
+        check("with the reason on the thread",
+              "Left open" in _thread(rid)[-1]["body"], True)
+
+
+def test_a_switched_off_sector_is_a_decision_and_closes():
+    print("But an owner switching a sector off IS a no:")
+    with _Cabinet():
+        rid = board.post_request("SEO", "Content", "Write these pages", "b")
+        board.set_sector("Content", False, note="testing")
+        out = inbox.work_the_inbox("Content", "content-lead")
+        check("declined, not held", out["declined"], 1)
+        check("and closed", _status(rid), "closed")
+
+
 def test_the_whole_inbox_is_read_not_just_the_first():
     print("\nEvery message, not the top one:")
     with _Cabinet():

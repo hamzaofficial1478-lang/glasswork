@@ -128,11 +128,19 @@ def _parse(out):
 
 
 def _clean_sector(name, fallback):
-    n = str(name or "").strip().lower()
-    for s in SECTORS:
-        if s.lower() == n:
-            return s
-    return fallback
+    """
+    The sector a model named, or the caller's own choice if it named nonsense.
+
+    Aliases go through coordination/inbox, so a brain that writes "MD" — the
+    obvious thing to write, and what pipelines/mail.py had hardcoded — reaches
+    the Director rather than being quietly swapped for the fallback and the
+    redirect reported as though the model had chosen it.
+    """
+    from . import inbox
+    try:
+        return inbox.to_sector(name)
+    except inbox.UnknownSector:
+        return fallback
 
 
 def compose(from_sector, to_sector, situation, facts,
