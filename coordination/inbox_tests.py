@@ -377,6 +377,64 @@ def test_a_sector_writing_to_itself_is_still_answered():
         check("and replied to", len(_thread(rid)) >= 2, True)
 
 
+def test_a_chase_does_not_become_more_work_for_the_jammed_sector():
+    print("\nThe loop that jammed his SEO board:")
+    with _Cabinet():
+        traffic = [
+            ("Overseer", "You have not answered", "SEO has not answered Overseer in 1 days"),
+            ("Overseer", "Work on your board that nobody is picking up", "3 open"),
+            ("Director", "Escalating: SEO has not answered Overseer", "forwarded"),
+            ("Overseer", "SEO has 8 faults open at once", "the sector alarm"),
+            ("Content", "Clear these page targets for volume/difficulty", "- a page"),
+            ("IT", "Which pages should carry the FAQ schema?", "a real question"),
+        ]
+        for frm, subj, body in traffic:
+            board.post_request(frm, "SEO", subj, body)
+
+        out = inbox.work_the_inbox("SEO", "seo-strategist")
+        check("the chases were noted, not filed", out["noted"], 4)
+        check("only real work reached the board", out["filed"], 2)
+        titles = sorted(t_["title"] for t_ in _open_tasks("SEO"))
+        check("and it is the right two", titles,
+              ["Clear these page targets for volume/difficulty",
+               "Which pages should carry the FAQ schema?"])
+        check("the board is nowhere near full",
+              board.open_task_count("SEO") < board.BOARD_FULL, True)
+        check("and every chase still got an answer", len(inbox.unanswered("SEO")), 0)
+
+
+def test_a_chase_is_answered_with_what_the_sector_is_actually_doing():
+    print("\nAnd the answer is not a brush-off:")
+    with _Cabinet():
+        board.post_task("SEO", "Real work", "d")
+        rid = board.post_request("Overseer", "SEO",
+                                 "Work on your board that nobody is picking up", "1 open")
+        inbox.work_the_inbox("SEO", "seo-strategist")
+        said = _thread(rid)[-1]["body"]
+        check("it says why no task was made",
+              "not work for it" in said, True)
+        check("and counts the work that IS open", "1 job(s) open" in said, True)
+        check("the thread is closed", _status(rid), "closed")
+
+
+def test_a_real_question_from_the_overseer_is_still_work():
+    print("\nThe Overseer asking for something real is not a chase:")
+    with _Cabinet():
+        board.post_request("Overseer", "SEO", "Please re-index the sitemap", "detail")
+        out = inbox.work_the_inbox("SEO", "seo-strategist")
+        check("filed as work", out["filed"], 1)
+        check("not noted away", out["noted"], 0)
+
+
+def test_a_sector_cannot_dodge_by_using_chase_words():
+    print("\nAnd Content cannot dodge SEO by wording it like a chase:")
+    with _Cabinet():
+        board.post_request("SEO", "Content", "You have not answered", "the gap list")
+        out = inbox.work_the_inbox("Content", "content-lead")
+        check("still real work — SEO is not a chaser", out["filed"], 1)
+        check("nothing noted away", out["noted"], 0)
+
+
 def main():
     for fn in list(globals().values()):
         if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):

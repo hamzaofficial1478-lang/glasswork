@@ -11,6 +11,7 @@ any value that leaves the server (see redacted_view / auth.mask).
 """
 import contextlib
 import json
+import os
 import tempfile
 import time
 import uuid
@@ -20,6 +21,9 @@ from . import auth
 from .urls import normalize_base
 
 STORE = Path(__file__).parents[1] / "config" / "providers.local.json"
+# The owner's real file, remembered so the suite can tell it apart from a
+# temp store a test has pointed STORE at. See _load.
+_REAL_STORE = STORE
 
 _EMPTY = {"credentials": [], "routing": {}, "usage": {}, "tools": []}
 
@@ -115,6 +119,27 @@ def known_shelves() -> list:
 
 
 def _load() -> dict:
+    # THE SUITE MUST NOT REACH HIS REAL KEYS.
+    #
+    # "the test suite did not finish inside 1080s" — on a machine where the
+    # same suite takes under two minutes here. The difference is this file. A
+    # test that resolves a route and calls it is a stub call on a clean
+    # checkout and a LIVE API call on his, complete with timeouts, retries and
+    # rate limits, and it_release refuses to touch the website until the suite
+    # finishes. So his own configuration made the release gate slow enough to
+    # time out, which is the same shape of fault as .env turning it red.
+    #
+    # Same switch as providers/integrations.read_env, set once by run.py for
+    # the whole suite: an empty store, so every provider path takes its
+    # not-configured branch and nothing leaves the machine.
+    # Only HIS file at the real path is hidden. A suite that builds its own
+    # store repoints STORE at a temp file and must still be able to read what
+    # it just wrote — blanket-emptying broke eight of them, which is the right
+    # answer arriving the wrong way round.
+    if STORE == _REAL_STORE and str(
+            os.environ.get("AGENCY_IGNORE_DOTENV", "")).strip().lower() in (
+            "1", "true", "yes", "on"):
+        return json.loads(json.dumps(_EMPTY))
     if not STORE.exists():
         return json.loads(json.dumps(_EMPTY))
     try:

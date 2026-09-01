@@ -148,6 +148,69 @@ def _unclaim(request_id):
         pass
 
 
+# A COMPLAINT THAT A SECTOR IS NOT WORKING IS NOT MORE WORK FOR THAT SECTOR.
+#
+# This is the worst thing this file has done, and it is mine. The Overseer
+# chases a sector that has gone quiet — "You have not answered", "Work on your
+# board that nobody is picking up" — and the inbox reader dutifully filed each
+# chase as a claimable task on that sector's own board. So:
+#
+#   SEO is behind  ->  Overseer chases SEO  ->  the chase becomes a task on
+#   SEO's board    ->  SEO is further behind and the board is fuller  ->  the
+#   Overseer files 'work nobody is picking up'  ->  THAT becomes a task too
+#
+# His SEO board reached eight and every real request after it was refused with
+# "SEO already has 8 job(s) on its board that nobody has picked up". Reading his
+# log, most of what was jammed in there was this: notices about SEO not doing
+# work, filling the space SEO needed to do work. He called it the sectors
+# colliding with each other and that is exactly what it was.
+#
+# A chase is answered on the thread and files nothing. The fault behind it
+# already exists, already counts its passes and already escalates to the MD —
+# the sector does not need a second copy of it as a job, and there is nothing
+# it could DO with one. The work the chase is about is the work already on the
+# board.
+CHASES = (
+    "you have not answered",
+    "work on your board that nobody is picking up",
+    "your desk is down",
+    "one of your agents is crashing",
+    "you are sitting on a claimed task",
+    "you are holding a lock nobody can take",
+    "faults open at once",
+    "escalating",
+)
+
+# Who is allowed to be chasing. A sector genuinely asking another sector for
+# something is never a chase, whatever words it happens to use.
+CHASERS = ("overseer", "director")
+
+
+def is_a_chase(req) -> bool:
+    """Is this a notice ABOUT the sector rather than work FOR it?"""
+    frm = (req.get("from_sector") or "").strip().lower()
+    if frm not in CHASERS:
+        return False
+    subject = (req.get("subject") or "").lower()
+    return any(p in subject for p in CHASES)
+
+
+def _answer_a_chase(sector, req) -> str:
+    """Acknowledge the chase, in terms that say why no task was created."""
+    try:
+        waiting = board.open_task_count(sector)
+    except Exception:
+        waiting = 0
+    return (
+        f"Noted, and deliberately not filed as a job. This is a notice about "
+        f"{sector}, not work for it — turning it into a task would put a "
+        f"complaint that {sector} is behind onto the same board that is behind, "
+        f"and the board is what needs clearing.\n\n"
+        f"{sector} has {waiting} job(s) open right now. Those are the work this "
+        f"notice is about, and they are what {sector} will do next. The fault "
+        f"behind this stays open and keeps counting until they are done.")
+
+
 def _file_as_task(sector, req, agent):
     """
     Turn a request into claimable work, and say what happened.
@@ -239,6 +302,18 @@ def work_the_inbox(sector, agent, handler=None, limit=MOST_PER_PASS,
         row["_body"] = body
         outcome, reply, task_id = "filed", "", None
         try:
+            # A chase is answered and closed here, before the handler and
+            # before the filing fallback. It is not this sector's judgement
+            # to make and it is not work — see CHASES above.
+            if is_a_chase(row):
+                board.reply_request(req["id"], agent,
+                                    _answer_a_chase(sector, row), close=True)
+                results.append({"request": req["id"], "from": req["from_sector"],
+                                "subject": req["subject"], "outcome": "noted",
+                                "task": None})
+                handled += 1
+                continue
+
             answer = handler(row, body, con) if handler else None
             if answer is None:
                 outcome, reply, task_id = _file_as_task(sector, row, agent)
@@ -283,7 +358,8 @@ def work_the_inbox(sector, agent, handler=None, limit=MOST_PER_PASS,
         con.close()
 
     counts = {k: sum(1 for r in results if r["outcome"] == k)
-              for k in ("answered", "filed", "declined", "later", "returned")}
+              for k in ("answered", "filed", "noted", "declined", "later",
+                        "returned")}
     return {"ok": True, "sector": sector, "agent": agent,
             "read": handled, "results": results, **counts,
             "head": _head(sector, counts, handled)}
@@ -303,8 +379,8 @@ def read_post(sector, agent, handler=None, limit=MOST_PER_PASS, con=None) -> dic
         return work_the_inbox(sector, agent, handler=handler, limit=limit, con=con)
     except Exception as e:
         return {"ok": False, "sector": sector, "agent": agent, "read": 0,
-                "results": [], "answered": 0, "filed": 0, "declined": 0,
-                "later": 0, "returned": 0,
+                "results": [], "answered": 0, "filed": 0, "noted": 0,
+                "declined": 0, "later": 0, "returned": 0,
                 "error": f"{type(e).__name__}: {e}",
                 "head": f"could not read {sector}'s post: {e}"}
 
@@ -317,6 +393,8 @@ def _head(sector, counts, handled) -> str:
         bits.append(f"answered {counts['answered']}")
     if counts["filed"]:
         bits.append(f"filed {counts['filed']} as work")
+    if counts.get("noted"):
+        bits.append(f"noted {counts['noted']} chase(s) without making work of them")
     if counts["declined"]:
         bits.append(f"declined {counts['declined']}")
     if counts.get("later"):
