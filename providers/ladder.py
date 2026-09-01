@@ -445,6 +445,38 @@ def think(sector, messages, agent="", reason="", max_tokens=512, timeout=0,
     sector = (sector or "").strip().lower()
     climbed = []
 
+    # A LOADED DESK MAY REACH THE SHELF FIRST, WITHOUT FAILING ANYTHING.
+    #
+    # "if any one getting slow can use any thing from shelf openly to complete
+    #  the task fastly"
+    #
+    # The shelf was only reachable after the sector's own chain had FAILED,
+    # which made it a rescue and nothing else. That is the wrong shape for a
+    # desk that is simply busy: its own model works, it is just queueing on it,
+    # and a spare sitting idle on the shelf could take the work now.
+    #
+    # So a caller that says it is loaded goes to the shelf FIRST and keeps its
+    # own model free for whatever is already queued on it. Nothing is spent
+    # that was not already allowed — the shelf is the owner's own pool, it is
+    # single-holder so two desks cannot both take it, and if it is empty or
+    # busy this drops straight through to the ordinary chain below. Open, as
+    # he asked, and only for a desk that says it is loaded: the Director's
+    # model is untouched by any of this and stays four rungs away.
+    if loaded and allow_shelf:
+        first = call_spare_for(sector, messages, agent=agent,
+                               reason=reason or f"{sector} is loaded and going "
+                                                f"to the shelf to keep its own "
+                                                f"model free",
+                               max_tokens=max_tokens, timeout=timeout)
+        if first.get("ok"):
+            _note_borrow(sector, SHELF, agent, "loaded — took a spare to go faster",
+                         True)
+            return {**first, "task": sector, "rung": SHELF, "climbed": climbed,
+                    "why": (f"{sector} is loaded, so it took a spare off the "
+                            f"shelf and left its own model for the queue")}
+        climbed.append({"rung": SHELF, "failed": first.get("error"),
+                        "note": "tried first because the desk is loaded"})
+
     # RUNGS 0 and 1 — the sector's own chain, cascade and retry included.
     own = routing.call_task(sector, messages, max_tokens=max_tokens,
                             timeout=timeout)
@@ -456,7 +488,7 @@ def think(sector, messages, agent="", reason="", max_tokens=512, timeout=0,
 
     # RUNG 3 — a spare off the shelf. Reached because the chain failed; a
     # loaded desk can also get here without failing, via spread() upstream.
-    if allow_shelf:
+    if allow_shelf and not any(c["rung"] == SHELF for c in climbed):
         why = reason or (f"{sector}'s own model(s) did not answer: "
                          f"{own.get('error', 'no reason given')}")
         spare = call_spare_for(sector, messages, agent=agent, reason=why,

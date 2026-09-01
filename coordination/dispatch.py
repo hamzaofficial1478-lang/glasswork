@@ -302,6 +302,69 @@ def _held_by(agent, skip=()):
         return None
 
 
+
+# How many jobs one sector may be given in a single run. One. See next_task.
+PER_RUN = 1
+
+
+def _sector_is_busy(sector, skip=()):
+    """
+    The unfinished job this sector is already holding, if any.
+
+    Sector-wide on purpose. The rule he asked for is about the SECTOR, and a
+    per-agent check would let SEO's four other desks each take something while
+    the strategist was still mid-job — which is the same pile-up wearing a
+    different hat.
+
+    `skip` is what stops this eating its own tail, and leaving it out made the
+    suite go intermittent. deskwork's claim loop takes a job, finds it is not
+    for this pass, and HOLDS it — still in_progress — while it looks for the
+    next one, handing everything back at the end. Without skip, that held job
+    made the sector look busy to the very pass holding it, so a desk could
+    never reach the job it was actually there to do. A job this pass is
+    carrying is not a job standing in its way.
+    """
+    skip = {str(s) for s in (skip or ())}
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT id, title, owner FROM tasks"
+                " WHERE lower(sector)=? AND status='in_progress'"
+                " ORDER BY claimed_at",
+                ((sector or "").strip().lower(),)).fetchall()
+        for r in rows:
+            if str(r["id"]) not in skip:
+                return dict(r)
+        return None
+    except Exception:
+        return None
+
+
+def _claimed_this_run(sector, run_id=None, started_at=None):
+    """How many tasks this sector has taken on since the current run began."""
+    if started_at is None:
+        if not run_id:
+            return 0
+        try:
+            with _conn() as c:
+                r = c.execute("SELECT started_at FROM day_runs WHERE id=?",
+                              (run_id,)).fetchone()
+            started_at = int(r["started_at"]) if r else None
+        except Exception:
+            return 0
+    if not started_at:
+        return 0
+    try:
+        with _conn() as c:
+            n = c.execute(
+                "SELECT count(*) FROM tasks WHERE lower(sector)=?"
+                "   AND claimed_at IS NOT NULL AND claimed_at >= ?",
+                ((sector or "").strip().lower(), int(started_at))).fetchone()[0]
+        return int(n or 0)
+    except Exception:
+        return 0
+
+
 def next_task(sector, agent, now=None, skip=()):
     """
     Claim the task this desk should be doing, and return it. None if there is
@@ -349,6 +412,39 @@ def next_task(sector, agent, now=None, skip=()):
     # down from his own terminal.
     day = board.day_is_open()
     if day["enforced"] and not day["open"]:
+        return None
+
+    # ONE TASK PER SECTOR PER RUN, AND UNFINISHED WORK BLOCKS THE NEXT ONE.
+    #
+    # "1 task per 1 run for each sector ... if an sector or agent did not
+    #  completed its work in 1st run when the 2nd run will happen that sector
+    #  or agent will not get the new task it will firstly complete that already
+    #  listed task"
+    #
+    # I told him this was already the design. It was not, and counting the day
+    # showed it plainly: IT runs six pipelines in one day and SEO five, each
+    # claiming its own task, so a sector could take five or six jobs in a
+    # single run. That is the overloading he has been describing from the
+    # start — the board filling faster than any desk could clear it.
+    #
+    # Two rules, and the order matters. Held work is handed back ABOVE this, so
+    # neither rule can ever stop a desk finishing what it started.
+    #
+    #   1. Anything in progress anywhere in the sector stops the whole sector
+    #      taking on more. Not just that agent: a sector with a half-done job
+    #      is a sector with a job, and handing its neighbours new work is how
+    #      three unfinished things end up open at once.
+    #   2. One claim per sector per run, even when everything finished cleanly.
+    #      Finishing fast is not a reason to be given more; the point is a
+    #      steady one-in-one-out, not a race.
+    #
+    # The pipelines still all RUN — a board task is direction, not permission,
+    # and seo_gap still finds gaps on a pass where it claimed nothing. This
+    # caps what the sector is ASKED to do, which is the thing that was piling up.
+    busy = _sector_is_busy(sector, skip=skip)
+    if busy:
+        return None
+    if _claimed_this_run(sector, day.get("run_id")) >= PER_RUN:
         return None
 
     seen = {str(s) for s in (skip or ())}
@@ -414,6 +510,25 @@ def why_nothing(sector, agent) -> str:
                   "'python -m pipelines.day_run --start'. To work one pipeline "
                   "outside the day, set WORK_OUTSIDE_THE_DAY=1. Anything this "
                   "desk had already claimed is finished first either way.")
+
+    # ONE PER RUN, AND FINISH WHAT IS OPEN — said before the board is counted,
+    # for the same reason the day gate is: "nothing on the board" is a lie when
+    # there are six tasks on it and the sector is simply not taking more.
+    busy = _sector_is_busy(sector)
+    if busy:
+        return (f"{sector} is already on a job and takes nothing new until it is "
+                f"done: {(busy.get('title') or '')[:70]!r}, held by "
+                f"{busy.get('owner') or 'this sector'}. One job at a time is the "
+                f"rule — a sector given a second job while the first is open is "
+                f"how the board fills faster than any desk can clear it.")
+    day = board.day_is_open()
+    if _claimed_this_run(sector, day.get("run_id")) >= PER_RUN:
+        waiting = board.open_task_count(sector)
+        return (f"{sector} has taken its job for this run and finished it. "
+                + (f"{waiting} more are waiting and go on the next run. "
+                   if waiting else "")
+                + "One task per sector per run, on purpose: finishing fast is "
+                  "not a reason to be handed more.")
 
     o = offer(sector, agent)
     if not o["total"]:

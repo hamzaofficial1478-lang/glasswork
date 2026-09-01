@@ -277,6 +277,71 @@ def test_an_unreadable_cabinet_does_not_stop_the_work():
         board.DB = real
 
 
+def test_a_sector_takes_one_job_a_run_not_one_per_pipeline():
+    print("\nIT runs six pipelines in a day; it does not get six jobs:")
+    with _Cabinet() as cab:
+        cab.open_the_day()
+        for i in range(5):
+            board.post_task("IT", f"IT job {i}", "d", force=True)
+        took = []
+        for a in ("it-watcher", "it-fixer", "it-releaser", "it-search", "it-lead"):
+            got = board.next_open_task("IT", a)
+            if got:
+                took.append((a, got["id"]))
+        check("exactly one job left the board", len(took), 1)
+        check("four are still waiting", board.open_task_count("IT"), 4)
+        check("and the others are told why, not fobbed off",
+              "already on a job" in dispatch.why_nothing("IT", "it-fixer"), True)
+
+
+def test_an_unfinished_job_blocks_the_whole_sector_next_run():
+    print("\n'it will firstly complete that already listed task':")
+    with _Cabinet() as cab:
+        cab.open_the_day()
+        board.post_task("IT", "The job from run one", "d", force=True)
+        board.post_task("IT", "Something newer", "d", force=True)
+        got = board.next_open_task("IT", "it-watcher")
+        # WHICH of the two the desk picks is desks.py's call and not the point
+        # here; that it is still holding the SAME one next run is.
+        first = got["id"]
+        check("run one takes one of them", bool(first), True)
+
+        # Run one ends without it being finished.
+        with sqlite3.connect(board.DB) as c:
+            c.execute("UPDATE day_runs SET status='ok' WHERE id='today'")
+            c.execute("INSERT INTO day_runs(id,started_at,status,started_by,"
+                      "steps_total,steps_done,pid,host) VALUES('r2',?,'running',"
+                      "'owner',1,0,?,?)",
+                      (int(time.time()) + 1, os.getpid(), board._this_host()))
+
+        back = board.next_open_task("IT", "it-watcher")
+        check("run two hands the SAME job back", back["id"], first)
+        check("with the reason", "did not finish it" in back["why_me"], True)
+        check("and nobody else gets the newer one",
+              board.next_open_task("IT", "it-fixer"), None)
+
+        board.finish_task(first, "it-watcher", "done at last")
+        moved = board.next_open_task("IT", "it-fixer")
+        check("only once it is done does the sector move on", bool(moved), True)
+        check("and it is the other job, not the finished one",
+              moved["id"] != first, True)
+
+
+def test_finishing_fast_does_not_earn_a_second_job():
+    print("\nOne per run means one, even on a good day:")
+    with _Cabinet() as cab:
+        cab.open_the_day()
+        a = board.post_task("IT", "First", "d", force=True)
+        board.post_task("IT", "Second", "d", force=True)
+        got = board.next_open_task("IT", "it-watcher")
+        board.finish_task(got["id"], "it-watcher", "quick")
+        check("nothing more this run", board.next_open_task("IT", "it-fixer"), None)
+        check("and it says so plainly",
+              "taken its job for this run" in dispatch.why_nothing("IT", "it-fixer"),
+              True)
+        del a
+
+
 def main():
     for fn in list(globals().values()):
         if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):

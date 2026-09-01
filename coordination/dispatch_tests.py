@@ -149,11 +149,23 @@ def _order_tests():
           any("nothing is left to starve" in w["label"] for w in order[1]["why"]),
           True)
 
-    print("\nBoth desks get the right one, in one pass each:")
+    print("\nBoth desks get the right one — but a sector does one at a time:")
     got_w = board.next_open_task("IT", "it-watcher")
-    got_f = board.next_open_task("IT", "it-fixer")
     check("the Watcher takes the health check", got_w["id"], trivial)
-    check("the Fixer takes the broken form", got_f["id"], urgent)
+    # ONE JOB AT A TIME. This used to claim both in a row, which is what the
+    # owner had been watching happen for weeks: IT runs six pipelines in a day
+    # and each took its own task, so a sector could pick up six jobs in one
+    # run and finish none. The Fixer gets nothing until the Watcher's job is
+    # done, and the sector says so rather than reporting an empty board.
+    check("the Fixer is told to wait, not handed a second job",
+          board.next_open_task("IT", "it-fixer"), None)
+    check("and the reason names the job in hand",
+          "already on a job" in dispatch.why_nothing("IT", "it-fixer"), True)
+
+    board.finish_task(trivial, "it-watcher", "checked")
+    got_f = board.next_open_task("IT", "it-fixer")
+    check("with that finished, the Fixer takes the broken form",
+          got_f["id"], urgent)
     check("neither is left open",
           [t["id"] for t in dispatch.board_order("IT")], [])
 
@@ -283,14 +295,21 @@ def _race_tests():
     check("the other is refused", wins.count(False), 1)
     check("and the task has one owner", board.get_task(t)["owner"] in ("a", "b"), True)
 
-    print("\nThe loser is not blocked — it takes the next thing it can do:")
+    print("\nThe loser is not blocked — it takes the next thing, on the next pass:")
     db = _fresh()
     a = board.post_task("IT", "Check the site", "read-only", desk="")
     b = board.post_task("IT", "Check the sitemap", "read-only", desk="")
     first = board.next_open_task("IT", "it-watcher")
+    check("the first desk takes one", first["id"] in (a, b), True)
+    # A sector does ONE job at a time now, so the second desk waits rather than
+    # opening a second front. The task is not lost and not refused on merit —
+    # it is the next thing this sector does.
+    check("the second waits while that one is open",
+          board.next_open_task("IT", "it-search"), None)
+    board.finish_task(first["id"], "it-watcher", "done")
     second = board.next_open_task("IT", "it-search")
-    check("both tasks got taken", sorted([first["id"], second["id"]]),
-          sorted([a, b]))
+    check("and gets it once the first is finished",
+          sorted([first["id"], second["id"]]), sorted([a, b]))
     check("by different desks", first["owner"] != second["owner"], True)
     check("and nothing is left open", dispatch.board_order("IT"), [])
 

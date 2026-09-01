@@ -410,6 +410,37 @@ def test_a_job_handed_back_after_the_last_worker_left_is_not_orphaned():
           True, True)
 
 
+def test_a_loaded_desk_goes_to_the_shelf_first_and_keeps_its_own_model_free():
+    print("\n'if any one getting slow can use any thing from shelf openly':")
+    with _Agency({"seo-1": "its own answer", "shelf-1": "the spare answered",
+                  "md-1": "the MD's"},
+                 {"seo": ["seo-1"], "md": ["md-1"]}, shelf=["shelf-1"]) as a:
+        r = ladder.think("seo", Q, agent="seo-strategist", loaded=True)
+        check("the spare answered", r["output"], "the spare answered")
+        check("off the shelf", r["rung"], ladder.SHELF)
+        check("its own model was left alone", "seo-1" in a.asked, False)
+        check("and the Director was never near it", "md-1" in a.asked, False)
+
+
+def test_a_loaded_desk_with_an_empty_shelf_just_uses_its_own_model():
+    print("\nAnd an empty shelf is not a failure, it is a fall-through:")
+    with _Agency({"seo-1": "its own answer", "md-1": "the MD's"},
+                 {"seo": ["seo-1"], "md": ["md-1"]}) as a:
+        r = ladder.think("seo", Q, agent="seo-strategist", loaded=True)
+        check("its own model answered", r["output"], "its own answer")
+        check("reported as its own", r["rung"], ladder.OWN)
+        check("the Director was not asked", "md-1" in a.asked, False)
+
+
+def test_a_desk_that_is_not_loaded_still_leaves_the_shelf_alone():
+    print("\nAn ordinary pass does not spend the shelf:")
+    with _Agency({"seo-1": "its own answer", "shelf-1": "spare"},
+                 {"seo": ["seo-1"]}, shelf=["shelf-1"]) as a:
+        r = ladder.think("seo", Q, agent="seo-strategist")
+        check("its own model", r["rung"], ladder.OWN)
+        check("the shelf was untouched", "shelf-1" in a.asked, False)
+
+
 def main():
     for fn in list(globals().values()):
         if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):
