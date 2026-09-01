@@ -44,6 +44,12 @@ import time
 from . import board
 
 AGENCY = "agency"
+
+# How much a page may drift in size, with nothing visible changing, before it
+# stops being a counter ticking over and starts being a real edit. Two bytes is
+# a number going from 99 to 100; a person editing a page moves more than this
+# or moves something describable. See sweep().
+NOISE_BYTES = 24
 OUTSIDE = "outside"
 
 # How long after an agency write a page's fingerprint may move and still be
@@ -121,6 +127,13 @@ def shape_of(html) -> dict:
         "phones": sorted({re.sub(r"\D", "", p)[-9:] for p in _PHONE.findall(_visible(h))})[:20],
         "words": len(_visible(h).split()),
         "code_bytes": sum(len(m.group(0)) for m in _SCRIPTY.finditer(h)),
+        # A digest of what a VISITOR actually reads, markup stripped out.
+        # This is what makes "the file moved but the page reads the same" an
+        # exact statement rather than a guess: if this matches, the words on
+        # the page are identical and whatever moved was not words. Without it
+        # the noise test had to lean on the structural shape, which cannot see
+        # a sentence being rewritten. See sweep().
+        "text": digest_of(" ".join(_visible(h).split())),
     }
 
 
@@ -318,7 +331,7 @@ def _ours_after(page, seen_at):
         return False
 
 
-def sweep(seen) -> dict:
+def sweep(seen, confirmed_gone=None) -> dict:
     """
     Compare what the site looks like now against what we last saw.
 
@@ -345,7 +358,7 @@ def sweep(seen) -> dict:
     # fingerprints are taken and the reporting starts from the next one.
     baseline = not known
     now_pages = {}
-    added, edited, gone, ours = [], [], [], []
+    added, edited, gone, ours, noisy = [], [], [], [], []
     for row in seen or []:
         page = row.get("page")
         if not page:
@@ -378,6 +391,49 @@ def sweep(seen) -> dict:
         if _ours_after(page, was.get("seen_at")):
             ours.append(page)
             continue
+
+        # BYTES THAT MOVED WITH NOTHING VISIBLE BEHIND THEM.
+        #
+        # "blog-details.php was changed by somebody other than the agency, 2
+        # bytes smaller; the file moved but the page reads the same" — and two
+        # bytes bigger the pass before. That is a view counter, a timestamp or
+        # a rotating token, not a person editing his site, and reporting it
+        # every pass buries the one change that would matter.
+        #
+        # The test is deliberately strict: the SHAPE — headings, links, blocks,
+        # the things describe() compares — has to be identical, AND the size
+        # move has to be tiny. A real edit changes something describable or
+        # changes real length. The fingerprint is still updated, so a genuine
+        # change on top of the noise is caught next pass.
+        if shape is not None and was.get("snapshot"):
+            try:
+                before = json.loads(was["snapshot"]) or {}
+            except Exception:
+                before = {}
+            # Both sides must carry a text digest. An older fingerprint taken
+            # before this existed cannot prove the words are the same, and
+            # "cannot prove" must fall through to reporting it — a missed real
+            # edit is worse than one more line in the log.
+            reads_same = bool(before.get("text")) and before.get("text") == shape.get("text")
+            drift = (abs(int(size) - int(was["bytes"]))
+                     if isinstance(size, int) and isinstance(was["bytes"], int)
+                     else None)
+            if reads_same and not describe(before, shape) \
+                    and drift is not None and drift <= NOISE_BYTES:
+                # Recorded, but as COSMETIC — not in `edited`, so it never
+                # becomes "somebody changed your site" on his screen and never
+                # earns a ticket. The row is still there if he goes looking,
+                # because a file genuinely did move and hiding that outright
+                # would be its own small lie.
+                noisy.append(page)
+                record("cosmetic", page=page, source=OUTSIDE,
+                       bytes_before=was["bytes"], bytes_after=size,
+                       summary=(f"{page} moved by {drift} byte(s) and reads "
+                                f"exactly the same — a counter, a timestamp or "
+                                f"a re-saved file, not an edit. Noted and not "
+                                f"raised."))
+                continue
+
         edited.append(page)
         # WHAT changed, not merely THAT it changed. Needs the previous
         # snapshot, which is why the sweep keeps one — see describe().
@@ -400,10 +456,25 @@ def sweep(seen) -> dict:
                           "; the file moved but the page reads the same"
                           if shape is not None else ""))
 
+    # A PAGE WE COULD NOT READ IS NOT A PAGE THAT WAS DELETED.
+    #
+    # "includes/header.php is no longer on the site" — an hour later, "changed
+    # by somebody other than the agency". He had touched nothing. A read that
+    # timed out simply left the page out of this pass's list, and absence from
+    # the list was being read as absence from the site. So a guessed include
+    # that answers nine times out of ten flaps between "gone" and "restored"
+    # for ever, and every flap is a fresh alarm about a file nobody touched.
+    #
+    # `confirmed_gone` is the caller saying "I asked, and the site told me it
+    # is not there". Anything else missing from `seen` is simply unknown this
+    # pass, and unknown is not news.
+    told_gone = {str(p) for p in (confirmed_gone or [])}
     for page in known:
         if page in now_pages:
             continue
         if known[page].get("bytes") is None:
+            continue
+        if page not in told_gone:
             continue
         gone.append(page)
         record("gone", page=page, source=OUTSIDE,
@@ -433,6 +504,7 @@ def sweep(seen) -> dict:
         pass
 
     return {"ok": True, "pages_seen": len(now_pages), "added": added,
+            "noisy": noisy,
             "edited": edited, "gone": gone, "was_us": ours,
             "first_look": baseline,
             "head": (f"{len(now_pages)} page(s) fingerprinted for the first "

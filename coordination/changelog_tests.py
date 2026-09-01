@@ -136,14 +136,24 @@ def test_a_page_appearing_and_vanishing():
     check("and logged in his words",
           "appeared on the site" in CL.recent()["changes"][0]["summary"], True)
 
+    # A PAGE SIMPLY MISSING FROM THIS PASS IS NOT A DELETED PAGE.
+    #
+    # This is the bug that told him "includes/header.php is no longer on the
+    # site" and then, an hour later, that it had been changed — on a site he
+    # had not touched. One read timed out. Absence from the list now means
+    # nothing; the caller has to say it ASKED and was told the file is gone.
     r = CL.sweep([{"page": "index.php", "bytes": 10, "html": "a"}])
-    check("the missing page is reported", r["gone"], ["pergolas.php"])
+    check("a page we simply could not read is not called deleted", r["gone"], [])
+
+    r = CL.sweep([{"page": "index.php", "bytes": 10, "html": "a"}],
+                 confirmed_gone=["pergolas.php"])
+    check("but one the site says is gone, is", r["gone"], ["pergolas.php"])
     check("and logged",
           "no longer on the site" in CL.recent()["changes"][0]["summary"], True)
 
     print("\n...and if it comes back it reads as back, not as brand new:")
     r = CL.sweep([{"page": "index.php", "bytes": 10, "html": "a"},
-                  {"page": "pergolas.php", "bytes": 20, "html": "bb"}])
+                  {"page": "pergolas.php", "bytes": 22, "html": "bb changed"}])
     check("not reported as a page that never existed", r["added"], [])
     check("reported as changed instead", r["edited"], ["pergolas.php"])
 
@@ -338,10 +348,20 @@ def test_a_file_that_moved_without_the_page_changing_says_so():
     CL.sweep([{"page": "index.php", "bytes": len(a), "html": a}])
     CL.sweep([{"page": "index.php", "bytes": len(b), "html": b}])
     row = CL.recent(5)["changes"][0]
-    check("still recorded — something did move", row["action"], "edited")
-    check("but nothing is claimed about the page", row["detail"], [])
-    check("and it says as much",
-          "reads the same" in (row["summary"] or ""), True)
+    # RECORDED, BUT NOT AS AN EDIT. The owner watched his log fill with
+    # "blog-details.php was changed by somebody other than the agency, 2 bytes
+    # smaller" on a site he had not touched — a counter ticking over. It is
+    # still written down, because a file did move and hiding that is its own
+    # small lie, but it is not "somebody changed your site" and it does not
+    # earn anyone a ticket.
+    check("still recorded — something did move", row["action"], "cosmetic")
+    check("and it says plainly that the page reads the same",
+          "reads exactly the same" in (row["summary"] or ""), True)
+    check("and that nobody needs to act",
+          "not raised" in (row["summary"] or ""), True)
+
+    last = CL.sweep([{"page": "index.php", "bytes": len(b), "html": b}])
+    check("it is kept out of the edited list", "index.php" in last["edited"], False)
 
 
 def main():

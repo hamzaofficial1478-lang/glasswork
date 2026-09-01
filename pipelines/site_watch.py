@@ -75,14 +75,18 @@ def look(s=None) -> dict:
             rows[extra] = {"page": extra}
             guessed.add(extra)
 
-    seen, unreadable = [], []
+    seen, unreadable, confirmed_gone = [], [], []
+    # A guess that has already been fingerprinted is no longer a guess:
+    # it exists, we have seen it, and it must be treated like any other
+    # watched page rather than silently dropped when a read fails.
+    already_known = set(changelog.fingerprints())
     for name in names:
         row = rows[name]
         got = site_api.read_page(name, s=s)
         if got.get("ok"):
             seen.append({"page": name, "bytes": row.get("bytes"),
                          "changed": row.get("changed"), "html": got.get("html") or ""})
-        elif name in guessed:
+        elif name in guessed and name not in already_known:
             # A guess that is not there. Most sites have one of these locations
             # and not the other eleven, so a missing one is the normal case and
             # says nothing — recording it would fill his log with a dozen files
@@ -93,12 +97,24 @@ def look(s=None) -> dict:
             # knowing. Recorded WITHOUT html so the comparison falls back to
             # size and timestamp rather than being dropped — dropping it would
             # read as the page having vanished.
-            unreadable.append(name)
-            seen.append({"page": name, "bytes": row.get("bytes"),
-                         "changed": row.get("changed")})
+            # WHY IT COULD NOT BE READ DECIDES WHAT IT MEANS.
+            #
+            # A 404 is the site saying the file is not there — that is news. A
+            # timeout, a refused connection or a 500 is us failing to ask, and
+            # calling that "the page was deleted" is how he got told his header
+            # had vanished from a site he had not touched. Only the first kind
+            # is passed to the sweep as confirmed gone.
+            why = str(got.get("error") or "").lower()
+            if "404" in why or "not found" in why or "no such file" in why:
+                confirmed_gone.append(name)
+            else:
+                unreadable.append(name)
+                seen.append({"page": name, "bytes": row.get("bytes"),
+                             "changed": row.get("changed")})
 
-    out = changelog.sweep(seen)
+    out = changelog.sweep(seen, confirmed_gone=confirmed_gone)
     out["unreadable"] = unreadable
+    out["confirmed_gone"] = confirmed_gone
     out["ok"] = True
     return out
 

@@ -239,6 +239,57 @@ def clear_inbox(facts, dry_run=False) -> dict:
         task_id = None
         note = ""
         target = _who_should_act(item)
+
+        # A CHASE IS NOT WORK, AND THE MD WAS THE OTHER DOOR IT CAME THROUGH.
+        #
+        # The inbox reader stopped filing "you have not answered" and "work
+        # nobody is picking up" as tasks. This did not, and it is where the
+        # rest of them were getting in: the Overseer escalates a fault to the
+        # Director, the MD reads it and posts "From the MD: Seo has 10 faults
+        # open at once" onto SEO's board, unassigned, where nobody claims it
+        # because there is nothing in it to do. Every one of the QUEUED
+        # unassigned rows in his control room is one of these.
+        #
+        # And it feeds itself: those unclaimed rows make the Overseer file
+        # "work nobody is picking up", which escalates, which the MD turns into
+        # another unclaimable row. Two doors into the same loop; I shut one and
+        # left the other open.
+        #
+        # The MD still ANSWERS the escalation — it just answers it with what
+        # the sector is already carrying instead of adding to the pile.
+        try:
+            from coordination import inbox as _inbox
+            chase = _inbox.is_a_chase({"from_sector": item.get("from"),
+                                       "subject": item.get("subject")})
+        except Exception:
+            chase = False
+        if chase:
+            waiting, is_off = 0, False
+            try:
+                waiting = board.open_task_count(target) if target else 0
+                # Worth saying even though nothing was going to be posted
+                # anyway: a sector he has switched off explains every quiet
+                # thing about it, and he should not have to work that out.
+                is_off = bool(target) and not board.sector_enabled(target)
+            except Exception:
+                waiting, is_off = 0, False
+            board.reply_request(
+                item["id"], "managing-director",
+                f"Read, and deliberately not turned into a job. This is a notice "
+                f"about {target or 'a sector'}, not work for it — putting a "
+                f"complaint that a sector is behind onto the board that is behind "
+                f"is what made the board that way.\n\n"
+                + (f"{target} has {waiting} job(s) open. Those are what this "
+                   f"notice is about and what it will do next.\n\n"
+                   if target else "")
+                + (f"{target} is switched off, so it is doing nothing at all "
+                   f"until you turn it back on — that is the whole reason this "
+                   f"keeps being raised.\n\n" if is_off else "")
+                + "The fault stays open and keeps counting until the work behind "
+                  "it is done.", close=True)
+            done.append({**line, "action": "noted, not filed as work"})
+            continue
+
         if target:
             try:
                 task_id = board.post_task(

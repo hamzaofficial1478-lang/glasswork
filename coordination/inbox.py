@@ -171,15 +171,28 @@ def _unclaim(request_id):
 # it could DO with one. The work the chase is about is the work already on the
 # board.
 CHASES = (
+    # Both forms. The Overseer addresses the sector directly ("You have not
+    # answered") and forwards the fault text to the Director ("SEO has not
+    # answered Overseer in 2 days") — same complaint, two wordings, and
+    # matching only the first let half of them through the MD's door.
     "you have not answered",
+    "has not answered",
     "work on your board that nobody is picking up",
-    "your desk is down",
-    "one of your agents is crashing",
     "you are sitting on a claimed task",
     "you are holding a lock nobody can take",
-    "faults open at once",
-    "escalating",
+    # "Seo has 10 faults open at once" — the actionable thing is the ten
+    # faults, which already exist and are already routed. A row telling the
+    # sector it has them adds nothing it can do.
+    "faults open",
 )
+
+# NOT chases, and the distinction cost a test to find: a desk that has stopped
+# responding or crashed is a REAL job for IT, whatever the Overseer calls it.
+# The word "escalating" is only a wrapper the MD puts round something else, so
+# it is stripped and the thing inside is judged on its own merits — otherwise
+# "Escalating: seo-strategist stopped responding" would be filed away as
+# paperwork and the dead desk would stay dead.
+_WRAPPERS = ("escalating:", "escalating", "from the md:", "you have not answered:")
 
 # Who is allowed to be chasing. A sector genuinely asking another sector for
 # something is never a chase, whatever words it happens to use.
@@ -187,11 +200,23 @@ CHASERS = ("overseer", "director")
 
 
 def is_a_chase(req) -> bool:
-    """Is this a notice ABOUT the sector rather than work FOR it?"""
+    """
+    Is this a notice ABOUT the sector rather than work FOR it?
+
+    The wrappers are peeled off first and the inside is judged, because an
+    escalation is a delivery mechanism rather than a kind of message. What the
+    Overseer escalated decides whether there is anything to do about it.
+    """
     frm = (req.get("from_sector") or "").strip().lower()
     if frm not in CHASERS:
         return False
-    subject = (req.get("subject") or "").lower()
+    subject = (req.get("subject") or "").strip().lower()
+    peeled = True
+    while peeled:
+        peeled = False
+        for w in _WRAPPERS:
+            if subject.startswith(w):
+                subject, peeled = subject[len(w):].strip(), True
     return any(p in subject for p in CHASES)
 
 

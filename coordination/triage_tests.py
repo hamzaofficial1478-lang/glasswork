@@ -329,9 +329,15 @@ def test_the_md_actually_opens_its_post():
         # tasks too, and counting those made this assert on the wrong thing.
         tasks = cab.sql("SELECT sector, title FROM tasks"
                         " WHERE created_by='MD' AND title LIKE 'From the MD:%'")
+        # "Content has 3 faults open" is a TALLY — the three faults already
+        # exist and are already routed, so a row telling Content it has them is
+        # paperwork it cannot act on. It is answered on the thread instead. The
+        # crashed strategist is real work and still goes to a board. This is
+        # the split that stopped his sector boards filling with unassigned
+        # "From the MD:" rows nobody could claim.
         check("the work went to the sector that can act",
-              sorted({t["sector"] for t in tasks}), ["Content", "SEO"])
-        check("and it is only the inbox items that were routed", len(tasks), 2)
+              sorted({t["sector"] for t in tasks}), ["SEO"])
+        check("and it is only the inbox items that were routed", len(tasks), 1)
         check("and the reply names the task",
               any(t["title"][:20] in reply or "as task" in reply for t in tasks), True)
 

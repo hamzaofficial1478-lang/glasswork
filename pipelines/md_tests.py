@@ -96,7 +96,11 @@ def test_the_brain_never_touches_the_hands():
     # somebody else's work, and it may never claim a TASK.
     writes = set(re.findall(r"board\.(\w+)\(", src))
     allowed = {"post_task", "log_decision", "agent_run", "recent_hit_rate",
-               "claim_request", "reply_request"}
+               "claim_request", "reply_request",
+               # A read, not a hand on the work. The MD counts what a
+               # sector is already carrying so it can answer an
+               # escalation with that number instead of adding to it.
+               "open_task_count", "sector_enabled"}
     check("it only posts work, answers its own post, and logs the decision",
           writes - allowed, set())
     check("it never finishes a task — that is the doing", "finish_task" in writes, False)
