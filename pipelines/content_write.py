@@ -61,6 +61,29 @@ from coordination import auditor, board, deskwork, uae
 from . import site_api
 
 AGENT = "content-writer"
+
+# Headroom left at the end of the step's slot, so the last page has somewhere
+# to be written down before the day's stopwatch takes the process away.
+LEAVE_SPARE = 75
+
+
+def _deadline(now=None):
+    """
+    The wall-clock moment this pass must stop starting new pages, or None.
+
+    Read from day_run's own budget for this step rather than guessed at, so
+    changing the step timeout in one place changes this too. None when the
+    budget cannot be read — better to behave exactly as before than to invent
+    a limit and stop early for no reason.
+    """
+    try:
+        from . import day_run
+        slot = int(day_run.step_timeout_for("pipelines.content_write"))
+    except Exception:                                        # pragma: no cover
+        return None
+    if slot <= LEAVE_SPARE:
+        return None
+    return (now if now is not None else time.time()) + (slot - LEAVE_SPARE)
 SECTOR = "Content"
 
 # One page per pass. Writing is the expensive step and a spree of six
@@ -443,7 +466,30 @@ def _write(agent, dry_run, only_id, limit, job=None):
 
         include = _include_of_his_site()
         pages, held = [], []
+        # STOP BEFORE THE STEP IS KILLED, AND KEEP WHAT IS FINISHED.
+        #
+        # "its work failed: Content writes the pages — timed out after 420s"
+        # and six pages still sitting in the queue afterwards.
+        #
+        # Each page is a model call, and six of them at a minute or two each
+        # does not fit in one step. Being killed by the day's stopwatch is the
+        # worst possible way to end: the pages already written are lost with
+        # everything else, so the next run starts from six again and times out
+        # again, for ever. The queue never drains and the step never succeeds.
+        #
+        # A page is banked the moment it is finished (each _store commits), so
+        # the only thing missing was knowing when to stop. This leaves a
+        # minute's headroom, writes as many as fit, and reports the rest as
+        # still queued — which is a partial success and reads like one, instead
+        # of a failure that threw away real work.
+        deadline = _deadline()
         for row in waiting:
+            if deadline and time.time() > deadline:
+                held.append({"id": row["id"], "title": row["title"],
+                             "why": (f"ran out of time this pass — {len(pages)} "
+                                     f"page(s) were written and banked. This one "
+                                     f"is still queued and is first up next run.")})
+                continue
             brief = row["brief"]
             got = _ask_the_writer(brief, facts)
             if not got.get("ok"):

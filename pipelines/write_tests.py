@@ -389,12 +389,55 @@ def test_it_only_writes_briefs_that_are_ready():
     check("which is not a failure", out.get("idle"), True)
 
 
+def test_running_out_of_time_banks_what_was_written():
+    print("\nTimed out after 420s, six pages still queued, nothing saved:")
+    db = _fresh_db()
+    for i in range(4):
+        _queue_a_brief(db, {**BRIEF, "title": f"Page {i}"})
+    real = CW._deadline
+    try:
+        # Already out of time before the first page is started.
+        CW._deadline = lambda now=None: __import__("time").time() - 1
+        out = _write()
+        check("the pass did not crash", isinstance(out, dict), True)
+        check("and it is not reported as a failure", out.get("ok"), True)
+        held = out.get("held") or []
+        # Content writes ONE page a pass by design — the MD's no-drafting-spree
+        # gate — so one is what is in hand when the clock runs out.
+        check("the unwritten one is held, not lost", len(held), 1)
+        check("it says the time ran out",
+              "ran out of time" in (held[0].get("why") or ""), True)
+        check("and that it is still queued for next run",
+              "still queued" in (held[0].get("why") or ""), True)
+        with sqlite3.connect(db) as c:
+            left = c.execute("SELECT count(*) FROM content_queue"
+                             " WHERE status='briefed'").fetchone()[0]
+        check("the queue still holds all four", left, 4)
+    finally:
+        CW._deadline = real
+
+
+def test_no_deadline_means_the_old_behaviour():
+    print("\nAnd with no budget to read, nothing changes:")
+    real = CW._deadline
+    try:
+        CW._deadline = lambda now=None: None
+        db = _fresh_db()
+        _queue_a_brief(db)
+        out = _write()
+        check("it still writes", len(out.get("pages") or []), 1)
+    finally:
+        CW._deadline = real
+
+
 def main():
     real = board.DB
     _fresh_db()
     try:
         test_no_brain_means_no_page()
         test_a_written_page_is_queued_and_not_published()
+        test_running_out_of_time_banks_what_was_written()
+        test_no_deadline_means_the_old_behaviour()
         test_it_uses_his_own_header_when_there_is_one()
         test_the_photo_slot_is_left_empty_on_purpose()
         test_the_auditor_stops_the_four_things_that_matter()

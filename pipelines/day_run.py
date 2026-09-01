@@ -241,9 +241,18 @@ STEP_TIMEOUT = 420
 # Everything else keeps the seven minutes, so a step that has genuinely hung is
 # still caught quickly. A number in here is a promise that the step is doing
 # real work for that long — not somewhere to hide a hang.
+#   content_write  every page is a model call, and a service page is not a
+#               short one. Six queued pages at a minute or two each cannot fit
+#               in seven minutes, and being killed part-way used to throw away
+#               the pages already written — so the queue never drained, and the
+#               same six timed out again the next day, and the next. It now
+#               stops one page short of its own budget and banks what it has
+#               (see content_write._deadline), and the budget is honest about
+#               what writing pages costs.
 LONGER = {
     "pipelines.it_release": 1200,
-    "pipelines.seo_intel": 900,
+    "pipelines.seo_intel": 1500,
+    "pipelines.content_write": 1500,
 }
 
 
