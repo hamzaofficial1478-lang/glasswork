@@ -51,8 +51,10 @@ import time
 
 try:
     from . import board
+    from . import clock as _clock
 except ImportError:  # pragma: no cover
     import board
+    import clock as _clock
 
 # ---- when patience runs out -------------------------------------------------
 # Nothing in this agency legitimately takes twenty minutes. The site check times
@@ -264,7 +266,7 @@ def detect(now=None) -> list:
                           "                               AND a.task_id IS NULL))"
                           "                      AND a.status IN ('running','ok'))"
                           " ORDER BY claimed_at", (now - ABANDONED_SECS,)):
-            held = now - int(r["claimed_at"] or now)
+            held = _clock.age(int(r["claimed_at"] or now), now)
             out.append({
                 "key": f"abandoned:{r['id']}:{r['claimed_at']}",
                 "kind": "abandoned", "agent": r["owner"] or "", "sector": r["sector"],
@@ -303,7 +305,7 @@ def detect(now=None) -> list:
             stuck.setdefault(r["sector"] or "", []).append(r)
         for sector, rows in stuck.items():
             oldest = rows[0]
-            waited = now - int(oldest["created_at"] or now)
+            waited = _clock.age(int(oldest["created_at"] or now), now)
             waiting_on = sorted({(r["desk"] or "").strip() for r in rows} - {""})
             out.append({
                 "key": f"unclaimed:{sector}",
@@ -372,7 +374,11 @@ def detect(now=None) -> list:
             g["first"] = min(g["first"] or now, r["created_at"] or now)
             g["claimed"] += 1 if r["status"] == "claimed" else 0
         for (to_s, from_s, subj), g in asked.items():
-            waited = now - int(g["first"] or now)
+            # AGENCY TIME, NOT WALL-CLOCK. This line said 26 days on a machine
+            # that had been switched off for 25 of them, and the alarm was
+            # measuring nothing but how long his laptop had been shut. See
+            # coordination/clock.py.
+            waited = _clock.age(int(g["first"] or now), now)
             again = (f" It has now been asked {g['n']} times and answered none of "
                      "them." if g["n"] > 1 else "")
             out.append({
@@ -381,7 +387,7 @@ def detect(now=None) -> list:
                 # Asked repeatedly and still ignored is not a slow reply any more,
                 # it is a sector that is not listening.
                 "severity": BLOCKING if g["n"] >= 3 else DEGRADED,
-                "what": f"{to_s} has not answered {from_s} in {_ago(waited)}: {subj[:70]}"
+                "what": f"{to_s} has not answered {from_s} in {_clock._phrase(waited)} of agency time: {subj[:70]}"
                         + (f" (×{g['n']})" if g["n"] > 1 else ""),
                 "detail": (f"{from_s} asked and is waiting. A blocking verification "
                            "means the asker stops until it hears back, so this is not "

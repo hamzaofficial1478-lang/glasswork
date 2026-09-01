@@ -421,6 +421,24 @@ def plan(facts: dict) -> list:
             "evidence": (f"owner asked for {lead_t['per_day']} lead(s) today, "
                          f"{lead_t['done_today']} collected")})
 
+    # THE POSTS TARGET HAD NOWHERE TO GO. targets.py has counted "Pages or
+    # posts published" since it was written, the owner can set it, Report scores
+    # against it — and nothing in this plan ever read it, so asking for a post
+    # produced a target nobody acted on and a Content board with nothing on it.
+    # Leads had this branch; Content did not, and that asymmetry is the whole
+    # reason "1 content post" came back as no post.
+    post_t = _target(facts, "posts")
+    if post_t.get("per_day") and post_t.get("remaining"):
+        out.append({
+            "sector": "Content", "risk": "green", "urgency": 4,
+            "title": "Write the page that is next in the queue",
+            "detail": ("Take the next briefed page and write it. Real facts only, "
+                       "from the cabinet — no invented projects, no invented "
+                       "numbers. It queues for the owner's approval; nothing goes "
+                       "on the site from here."),
+            "evidence": (f"owner asked for {post_t['per_day']} post(s) today, "
+                         f"{post_t['done_today']} published")})
+
     if facts.get("approvals"):
         out.append({
             "sector": "Report", "risk": "green", "urgency": 6,

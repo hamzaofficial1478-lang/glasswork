@@ -386,6 +386,7 @@ def tests():
             "coordination.inbox_tests",
             "coordination.daygate_tests",
             "coordination.honest_tests",
+            "coordination.clock_tests",
             "providers.tests", "providers.retry_tests",
             "providers.ladder_tests", "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",

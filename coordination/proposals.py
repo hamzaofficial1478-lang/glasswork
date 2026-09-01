@@ -220,7 +220,19 @@ def set_orders(sector, text, day=None):
                   " VALUES(?,?,?,?) ON CONFLICT(day,sector) DO UPDATE SET"
                   " orders=excluded.orders, updated_at=excluded.updated_at",
                   (day, sector, (text or "").strip(), _now()))
-    return {"day": day, "sector": sector, "orders": (text or "").strip()}
+    # A number in a sector order is a target too. He wrote "collect 20 leads"
+    # into the Leads box; the MD plans collection from targets.status(), not
+    # from the sentence, so without this the order became a task titled after
+    # itself and the Hunter still found nothing to collect. See
+    # coordination/targets.from_words.
+    set_targets = []
+    try:
+        from . import targets as _targets
+        set_targets = _targets.from_words(text)
+    except Exception:
+        set_targets = []
+    return {"day": day, "sector": sector, "orders": (text or "").strip(),
+            "targets_set": set_targets}
 
 
 def orders(day=None) -> dict:

@@ -138,6 +138,65 @@ def set_target(name, per_day, note=""):
             "within_safe_ceiling": ok, "warning": warning}
 
 
+# WORDS THAT NAME A NUMBER ARE A TARGET, NOT JUST A SENTENCE.
+#
+# "i asked for 20 leads and 1 content post but in images you can see it's
+#  saying leads sector had nothing to run why?"
+#
+# Because he typed it and the MD reads figures. Orders and targets were two
+# separate things that nobody had joined up: an order became a task titled
+# "Owner's order: collect 20 leads", which is a real task and does get claimed
+# — but the MD posts the actual COLLECT TODAY'S LEADS task only when
+# targets.status() reports a leads target with something still to do. No
+# target, no collection task, and the Hunter came back to an empty board.
+#
+# He should not have to know that his own program keeps numbers in one place
+# and sentences in another. Writing "20 leads" sets the target.
+#
+# Only patterns where the number is unambiguous — a bare figure next to the
+# thing being counted. Anything vaguer is left alone rather than guessed at,
+# because a target invented from a misread sentence is worse than none: it
+# makes the MD plan work he never asked for.
+_NUMBER_WORDS = [
+    ("leads", r"(\d{1,3})\s*(?:new\s+)?(?:leads?|prospects?|businesses|firms|companies)"),
+    ("mails", r"(\d{1,3})\s*(?:outreach\s+)?(?:e-?mails?|mails?)\b"),
+    ("posts", r"(\d{1,2})\s*(?:content\s+|blog\s+|service\s+)?(?:posts?|pages?|articles?)"),
+    ("site_checks", r"(\d{1,2})\s*(?:site\s+|website\s+)?(?:checks?|diagnostics?|audits?)"),
+]
+
+
+def from_words(text, apply=True) -> list:
+    """
+    The daily targets an order in plain English is asking for.
+
+    Returns [{name, per_day, phrase, ...}] — what it found and, when `apply`,
+    what it set. `apply=False` is the dry run the office uses to show him what
+    it understood before it acts on it.
+    """
+    import re
+    said = (text or "").lower()
+    found = []
+    for name, pattern in _NUMBER_WORDS:
+        m = re.search(pattern, said)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if n <= 0:
+            continue
+        row = {"name": name, "per_day": n, "phrase": m.group(0).strip(),
+               "label": JOBS[name]["label"]}
+        if apply:
+            try:
+                row.update(set_target(name, n, note="from the owner's own words"))
+            except Exception as e:                           # pragma: no cover
+                row["error"] = str(e)
+        else:
+            ok, warning = check_ceiling(name, n)
+            row.update({"within_safe_ceiling": ok, "warning": warning})
+        found.append(row)
+    return found
+
+
 def set_orders(text, day=None):
     """
     The owner's orders for a day, in his own words: "focus on Sharjah hotels",
@@ -152,7 +211,11 @@ def set_orders(text, day=None):
                   " updated_at=excluded.updated_at",
                   (d, (text or "").strip()[:4000], int(time.time())))
         c.commit()
-    return {"ok": True, "day": d}
+    # A number in the order is a target. See from_words: the MD plans from
+    # figures, the owner writes sentences, and nobody had joined the two up —
+    # which is why "20 leads" produced a task saying "collect 20 leads" and no
+    # actual collection.
+    return {"ok": True, "day": d, "targets_set": from_words(text)}
 
 
 def get_orders(day=None):
