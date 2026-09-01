@@ -343,6 +343,22 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
       </div>
 
       <div class="cred">
+        <div class="cred-h"><b>Who you actually bid against</b><span class="inl dim" id="cmpHead"></span></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">The firms SEO watches. <b>Only these are ever crawled</b> — the agency will not decide who your competition is, because you know and it does not. Add the ones you lose jobs to.</p>
+        <div class="field" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:2;min-width:180px"><label>Company name</label>
+            <input id="cmpName" placeholder="Al Noor Glass &amp; Aluminium" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px"></div>
+          <div style="flex:2;min-width:180px"><label>Their website</label>
+            <input id="cmpDomain" placeholder="alnoorglass.ae" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px"></div>
+          <button class="pbtn" id="cmpAdd">Add rival</button>
+        </div>
+        <div class="hint">The website is what identifies them — the same domain is never added twice, whatever you call it.</div>
+        <div class="btnrow" style="margin-top:10px"><button class="mini" id="cmpFind">Go and find some (free, OpenStreetMap)</button><span class="inl dim" id="cmpMsg"></span></div>
+        <div id="cmpWaiting" style="margin-top:12px"></div>
+        <div id="cmpList" style="margin-top:12px"></div>
+      </div>
+
+      <div class="cred">
         <div class="cred-h"><b>What your website says you sell</b></div>
         <p class="hint" style="margin-top:0;margin-bottom:10px">Reads your own site and checks it against the agency's service list. Anything on your site that the agency doesn't know about <b>cannot be targeted or written about</b> — this is how you find those.</p>
         <div class="btnrow"><button class="pbtn" id="readSite">Read my website</button><span class="inl dim" id="siteSvcMsg"></span></div>
@@ -1113,9 +1129,57 @@ async function loadProviders(){
   loadShelves();
   loadUsage();
 }
+
+// ---- competitors ------------------------------------------------------------
+// Only confirmed rivals are ever crawled, so this screen is the whole gate.
+function renderCompetitors(s){
+  if(!s || !s.ok){ $('#cmpHead').textContent=''; return; }
+  $('#cmpHead').textContent = s.head || '';
+  const wait=(s.suggested||[]), on=(s.confirmed||[]);
+  $('#cmpWaiting').innerHTML = !wait.length ? '' :
+    `<div class="hint" style="color:var(--amber);margin-bottom:6px">⚠ ${wait.length} firm(s) put forward by the SEO desk, waiting for your yes. Nothing is crawled until you say.</div>`
+    + wait.map(r=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)">
+        <div style="flex:1"><b>${esc(r.name||'')}</b> <span class="dim">${esc(r.domain||'no website on file')}</span>
+        ${(r.evidence||[]).length?`<div class="hint" style="margin:2px 0 0">people searched: ${esc((r.evidence||[]).slice(0,3).join(', '))}</div>`:''}</div>
+        <button class="mini cmpYes" data-n="${esc(r.name||'')}">Yes, a rival</button>
+        <button class="mini cmpNo" data-n="${esc(r.name||'')}">Not a rival</button></div>`).join('')
+    + `<div class="btnrow" style="margin-top:8px"><button class="mini" id="cmpAll">Accept all ${wait.length}</button></div>`;
+  $('#cmpList').innerHTML = !on.length
+    ? '<div class="hint">No rivals on file yet. Until you add at least one, the rival-watch pass has nothing to look at and says so.</div>'
+    : on.map(r=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)">
+        <div style="flex:1"><b>${esc(r.name||'')}</b> <span class="dim">${esc(r.domain||'')}</span></div>
+        <button class="mini cmpDel" data-n="${esc(String(r.id))}">Remove</button></div>`).join('');
+  document.querySelectorAll('.cmpDel').forEach(b=>b.onclick=()=>cmpDo({action:'remove',which:b.dataset.n}));
+  document.querySelectorAll('.cmpNo').forEach(b=>b.onclick=()=>cmpDo({action:'reject',name:b.dataset.n}));
+  document.querySelectorAll('.cmpYes').forEach(b=>b.onclick=()=>cmpDo({action:'confirm_all'}));
+  const all=$('#cmpAll'); if(all) all.onclick=()=>cmpDo({action:'confirm_all'});
+}
+async function cmpDo(body){
+  inl($('#cmpMsg'),'dim','Saving…');
+  const j=await api('POST','/api/competitors',body);
+  if(j && j.ok){ inl($('#cmpMsg'),'ok','Saved'); renderCompetitors(j); }
+  else inl($('#cmpMsg'),'bad',(j&&j.error)||'Could not save');
+}
+async function loadCompetitors(){ renderCompetitors(await api('GET','/api/competitors')); }
+$('#cmpAdd').onclick = async ()=>{
+  const name=$('#cmpName').value.trim(), domain=$('#cmpDomain').value.trim();
+  if(!name||!domain){ inl($('#cmpMsg'),'bad','Both a name and a website.'); return; }
+  await cmpDo({action:'add',name,domain});
+  $('#cmpName').value=''; $('#cmpDomain').value='';
+};
+$('#cmpFind').onclick = async ()=>{
+  const b=$('#cmpFind'); b.disabled=true;
+  inl($('#cmpMsg'),'dim','Looking across the emirates — this takes a minute…');
+  const j=await api('POST','/api/competitors',{action:'find'});
+  b.disabled=false;
+  if(j && j.ok){ inl($('#cmpMsg'),'ok','Done'); renderCompetitors(j); }
+  else inl($('#cmpMsg'),'bad',(j&&j.error)||'Could not look');
+};
+
 loadSettings();
 loadProviders();
 loadTargets();
+loadCompetitors();
 </script>
 </body>
 </html>

@@ -359,6 +359,7 @@ def spread(sector, jobs, max_tokens=512, timeout=0, agent="",
                 # eats half the pile one item at a time.
                 with res_lock:
                     dead.append({"model": model["api_model_id"],
+                                 "model_id": model["id"],
                                  "cause": res.get("cause"),
                                  "after": mine})
                 with pile_lock:
@@ -367,12 +368,35 @@ def spread(sector, jobs, max_tokens=512, timeout=0, agent="",
                     results.pop(key, None)
                 return
 
-    threads = [threading.Thread(target=_worker, args=(c,), daemon=True)
-               for c in hands]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    # A HANDED-BACK JOB MUST HAVE SOMEBODY LEFT TO HAND IT TO.
+    #
+    # Caught by this suite going intermittent, not by reading it, and it lost
+    # real work: five of six jobs done and the sixth reported with no model
+    # against it. The race is small and entirely mine. A worker whose model
+    # dies puts its job back on the pile — but by then the healthy worker may
+    # already have found the pile empty and returned, so the returned job sits
+    # there with nobody to take it and falls through to the "nothing left
+    # standing" line below, which is a lie: something WAS standing.
+    #
+    # So the pass repeats while there is work left and a model that has not
+    # died. Bounded by the number of models, because each round either clears
+    # the pile or kills another model — it cannot loop for ever.
+    rounds = 0
+    while True:
+        rounds += 1
+        threads = [threading.Thread(target=_worker, args=(c,), daemon=True)
+                   for c in hands if c["model_id"] not in
+                   {d.get("model_id") for d in dead}]
+        if not threads:
+            break
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        with pile_lock:
+            left = len(pile)
+        if not left or rounds > len(hands):
+            break
 
     # Anything still on the pile had no model left standing.
     for key, _m in pile:

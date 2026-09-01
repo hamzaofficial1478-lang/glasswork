@@ -1141,12 +1141,30 @@ def _work(agent, deep, budget=None) -> dict:
         partial = ("" if not built.get("ran_out_of_time") else
                    f" (stopped at {built['seeds_done']} of {built['seeds_total']} "
                    f"seeds — out of time, the rest go on tomorrow's pass)")
+        # "(-413s of the budget unspent)" — printed on the same line as "out
+        # of time", which is the same fact said twice, once as nonsense.
+        # `left` is deadline minus now, so a pass that OVERRAN comes out
+        # negative and the sentence claimed it had negative seconds spare.
+        #
+        # There are three real cases and they read differently:
+        #   overran   it went past its slot. Say by how much; never "unspent".
+        #   stopped   it hit the deadline and put the rest back. The seeds line
+        #             above already says that, so adding a spare-time figure to
+        #             it is noise at best and a contradiction at worst.
+        #   finished  it got through everything with time to spare, which is
+        #             the only case where "unspent" means anything.
         left = int(deadline - time.time())
         result["seconds_left"] = left
+        if left < 0:
+            timing = f" ({abs(left)}s over its budget)"
+        elif built.get("ran_out_of_time"):
+            timing = ""
+        else:
+            timing = f" ({left}s of the budget unspent)"
         result["summary"] = (
             f"{built['phrases']} phrases from free sources, {built['striking']} in "
             f"striking distance, {len(writeable)} pages handed to Content" + partial
-            + f" ({left}s of the budget unspent)")
+            + timing)
         return result
     finally:
         if borrow_id:

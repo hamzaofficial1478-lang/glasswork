@@ -963,6 +963,54 @@ def _watch(agent, run_row, timeout):
         cabinet.release("crawler", agent, borrow_id=borrow_id, item="rival sitemaps")
 
 
+def state(db=None) -> dict:
+    """
+    Everything the Setup screen needs: who is on file, and who is waiting.
+
+    Added because he asked "where can i and how can i add the competitors?" and
+    the honest answer was a command line. This module has always had the
+    functions; nothing had ever exposed them to the office.
+    """
+    con = sqlite3.connect(db or board.DB)
+    con.row_factory = sqlite3.Row
+    try:
+        rows = [dict(r) for r in con.execute(
+            "SELECT id, name, domain, status, evidence, first_seen"
+            "  FROM competitors ORDER BY id").fetchall()]
+    except Exception:
+        rows = []
+    finally:
+        con.close()
+    for r in rows:
+        try:
+            r["evidence"] = json.loads(r.get("evidence") or "[]")
+        except Exception:
+            r["evidence"] = [r["evidence"]] if r.get("evidence") else []
+    on_file = [r for r in rows if (r.get("status") or "confirmed") != "suggested"]
+    waiting = [r for r in rows if (r.get("status") or "") == "suggested"]
+    return {"ok": True, "confirmed": on_file, "suggested": waiting,
+            "head": (f"{len(on_file)} rival(s) on file"
+                     + (f", {len(waiting)} waiting for your yes" if waiting else "")
+                     + ("." if on_file or waiting else
+                        " — none yet. Add the firms you actually bid against."))}
+
+
+def remove_competitor(which, db=None) -> int:
+    """Take a rival off the list, by id or by name. Returns how many went."""
+    con = sqlite3.connect(db or board.DB)
+    try:
+        key = str(which).strip()
+        if key.isdigit():
+            cur = con.execute("DELETE FROM competitors WHERE id=?", (int(key),))
+        else:
+            cur = con.execute("DELETE FROM competitors WHERE lower(name)=?",
+                              (key.lower(),))
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Watch what the competition publishes.")
     ap.add_argument("--add", nargs=2, metavar=("NAME", "DOMAIN"),
@@ -976,7 +1024,36 @@ def main():
                     help="accept every suggested firm as a real competitor")
     ap.add_argument("--not-a-rival", metavar="NAME",
                     help="reject one suggested firm so it stops being asked about")
+    ap.add_argument("--remove", metavar="NAME_OR_ID",
+                    help="take a rival off the list")
+    ap.add_argument("--json", action="store_true",
+                    help="machine-readable state, for the Setup screen")
     a = ap.parse_args()
+
+    if a.json:
+        out = state()
+        if a.find:
+            r = discover()
+            out = {**state(), "found": r.get("found", 0),
+                   "looked_at": r.get("areas", []), "error": r.get("error")}
+        elif a.add:
+            add_competitor(a.add[0], a.add[1])
+            out = state()
+        elif a.remove:
+            remove_competitor(a.remove)
+            out = state()
+        elif a.confirm_all:
+            out = {**state(), "confirmed_now": confirm_suggested()}
+            out.update(state())
+        elif a.not_a_rival:
+            drop_suggested([a.not_a_rival])
+            out = state()
+        print(json.dumps(out))
+        return 0
+    if a.remove:
+        n = remove_competitor(a.remove)
+        print(f"removed {n}" if n else "nothing matched that")
+        return 0
 
     if a.add:
         rid = add_competitor(a.add[0], a.add[1])

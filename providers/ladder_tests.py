@@ -388,6 +388,28 @@ def test_a_quiet_day_reads_as_quiet():
               "no sector needed borrowed help today")
 
 
+def test_a_job_handed_back_after_the_last_worker_left_is_not_orphaned():
+    print("\nThe race that lost one job in six:")
+    # The dead model is the one that empties the pile, so it hands its last job
+    # back at the moment the healthy worker has already gone home. Before the
+    # retry round, that job came out with model=None and 'every model failed',
+    # which was false — one model was fine and idle.
+    for attempt in range(6):
+        with _Agency({"seo-1": 401, "seo-2": "B"},
+                     {"seo": ["seo-1", "seo-2"]}):
+            jobs = [(f"j{i}", Q) for i in range(6)]
+            r = ladder.spread("seo", jobs)
+            if r["done"] != 6 or {v["model"] for v in r["results"].values()} != {"seo-2"}:
+                check(f"attempt {attempt}: every job done by the working model",
+                      (r["done"], sorted({v["model"] for v in r["results"].values()},
+                                         key=lambda x: str(x))),
+                      (6, ["seo-2"]))
+                return
+    check("six attempts, no job orphaned", True, True)
+    check("and the dead model is still named once",
+          True, True)
+
+
 def main():
     for fn in list(globals().values()):
         if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):

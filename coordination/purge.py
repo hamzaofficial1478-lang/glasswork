@@ -241,13 +241,96 @@ def as_text(r) -> str:
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------
+# CLEAR THE BOARDS — start a test from nothing
+# ---------------------------------------------------------------------------
+
+def clear_boards(sectors=None, run=False) -> dict:
+    """
+    Withdraw every unfinished task, so each sector starts a run at zero.
+
+    "cancel the tasks that are on any of the sector make them with 0 tasks
+     onboard so we can test their fresh version"
+
+    Withdrawn, not deleted. The rows stay with status='withdrawn' and a reason,
+    because the Report scores against what was posted and silently vanishing a
+    week of work would make its numbers wrong in a way nobody could later
+    explain. The boards read zero either way, which is what he is after.
+
+    Requests are closed too, and that matters more than it looks: an open
+    request is what the inbox turns into a task, so clearing tasks while
+    leaving the post unread would refill the boards on the very next run and
+    the fresh start would last one pass.
+
+    Nothing else is touched. Leads, keywords, site issues, the decision log and
+    every day's history stay exactly as they are — this clears the WORK, not
+    the evidence.
+    """
+    import time as _t
+    from . import board as _b
+
+    where, args = "status IN ('open','in_progress')", []
+    if sectors:
+        names = [str(s).strip() for s in sectors if str(s).strip()]
+        where += " AND sector IN (" + ",".join("?" * len(names)) + ")"
+        args = names
+
+    with sqlite3.connect(_b.DB, timeout=30) as c:
+        c.row_factory = sqlite3.Row
+        tasks = [dict(r) for r in c.execute(
+            f"SELECT id, sector, title, status FROM tasks WHERE {where}", args)]
+        rq_where = "status IN ('open','claimed')"
+        rq_args = []
+        if sectors:
+            rq_where += " AND to_sector IN (" + ",".join("?" * len(args)) + ")"
+            rq_args = args
+        reqs = [dict(r) for r in c.execute(
+            f"SELECT id, to_sector, subject FROM requests WHERE {rq_where}", rq_args)]
+
+        if run:
+            now = int(_t.time())
+            note = "cleared by the owner for a fresh test"
+            c.execute(f"UPDATE tasks SET status='withdrawn', owner=NULL,"
+                      f" result=?, finished_at=? WHERE {where}", (note, now, *args))
+            c.execute(f"UPDATE requests SET status='closed' WHERE {rq_where}", rq_args)
+            for r in reqs:
+                c.execute("INSERT INTO request_msgs(request_id,author,body,at)"
+                          " VALUES(?,?,?,?)",
+                          (r["id"], "owner",
+                           "Closed by the owner: the boards were cleared for a "
+                           "fresh test. Nothing was wrong with this ask — send it "
+                           "again on the next run if it still matters.", now))
+
+    per = {}
+    for t_ in tasks:
+        per[t_["sector"]] = per.get(t_["sector"], 0) + 1
+    return {"ok": True, "done": bool(run), "tasks": len(tasks),
+            "requests": len(reqs), "per_sector": per,
+            "sectors": sorted(per) or [],
+            "head": (("Cleared " if run else "Would clear ")
+                     + f"{len(tasks)} unfinished task(s) and close "
+                       f"{len(reqs)} open request(s)"
+                     + (" — " + ", ".join(f"{s}: {n}" for s, n in sorted(per.items()))
+                        if per else " — every board is already empty")
+                     + ("." if run else ". Add --run to do it."))}
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Throw away what is older than the window, permanently.")
     ap.add_argument("--days", type=int, default=DEFAULT_DAYS)
     ap.add_argument("--run", action="store_true", help="actually delete")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--clear-boards", action="store_true",
+                    help="withdraw every unfinished task so the sectors start "
+                         "a run at zero (add --run to do it)")
+    ap.add_argument("--sector", action="append", default=None,
+                    help="only this sector; repeatable. Default: all of them")
     a = ap.parse_args()
+    if a.clear_boards:
+        r = clear_boards(a.sector, run=a.run)
+        print(json.dumps(r, indent=2) if a.json else r["head"])
+        return 0
     r = run(a.days) if a.run else plan(a.days)
     print(json.dumps(r, indent=2) if a.json else as_text(r))
     return 0 if r.get("ok") else 1

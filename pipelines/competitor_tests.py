@@ -102,7 +102,61 @@ def test_a_rival_cannot_steer_our_http_client():
     check("a redirect into the private network is blocked too", blocked, True)
 
 
+def test_the_setup_screen_can_add_and_remove_rivals():
+    print("\n'where can i and how can i add the competitors?':")
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        s = comp.state()
+        check("nothing on file to begin with", s["confirmed"], [])
+        check("and it says what to do", "you actually bid against" in s["head"], True)
+
+        comp.add_competitor("Al Noor Glass", "https://www.alnoorglass.ae/services")
+        s = comp.state()
+        check("added", [r["name"] for r in s["confirmed"]], ["Al Noor Glass"])
+        check("and the URL was reduced to the domain",
+              s["confirmed"][0]["domain"], "alnoorglass.ae")
+
+        check("the same firm twice is refused",
+              comp.add_competitor("Al Noor again", "alnoorglass.ae"), None)
+
+        check("removed by name", comp.remove_competitor("Al Noor Glass"), 1)
+        check("gone", comp.state()["confirmed"], [])
+    finally:
+        board.DB = real
+
+
+def test_suggested_and_confirmed_are_kept_apart():
+    print("\nOnly firms he has said yes to are ever crawled:")
+    import json as _j
+    import sqlite3 as _s
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        comp.add_competitor("On File Ltd", "onfile.ae")
+        with _s.connect(board.DB) as c:
+            c.execute("INSERT INTO competitors(name,domain,status,evidence)"
+                      " VALUES(?,?,?,?)",
+                      ("Febtech", "febtech.ae", "suggested",
+                       _j.dumps(["febtech glass dubai"])))
+        s = comp.state()
+        check("one on file", [r["name"] for r in s["confirmed"]], ["On File Ltd"])
+        check("one waiting", [r["name"] for r in s["suggested"]], ["Febtech"])
+        check("the head says both", "waiting for your yes" in s["head"], True)
+        check("and the evidence comes with it",
+              s["suggested"][0]["evidence"], ["febtech glass dubai"])
+
+        comp.confirm_suggested()
+        s = comp.state()
+        check("accepting moves it across", len(s["confirmed"]), 2)
+        check("and nothing is left waiting", s["suggested"], [])
+    finally:
+        board.DB = real
+
+
 def main():
+    test_the_setup_screen_can_add_and_remove_rivals()
+    test_suggested_and_confirmed_are_kept_apart()
     test_a_rival_cannot_steer_our_http_client()
     _domain_tests()
     _parse_tests()

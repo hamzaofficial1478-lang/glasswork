@@ -504,9 +504,25 @@ def _head(total, watched, last, rows):
         bits.append(f"{mine} by the agency")
     if theirs:
         bits.append(f"{theirs} by somebody else")
-    return (f"{total} change(s) on file across {watched} watched page(s) — "
-            + " and ".join(bits) + " in this list"
-            + (f". Last look {_ago(_now() - last)}." if last else "."))
+    # BOTH SCREENS WERE RIGHT AND THEY READ AS A CONTRADICTION.
+    #
+    # "nothing on the site has changed since the last look" from the Watcher,
+    # and "8 change(s) on file" from here, on the same screen. The Watcher is
+    # reporting THIS LOOK; this is the whole history since the agency started
+    # watching. Two different questions, two true answers, and nothing in
+    # either sentence said which question it was answering.
+    #
+    # So this one now says the period out loud, and — the part that actually
+    # resolves it — says how many are new since the last look. Nothing new is
+    # the normal, healthy state of a site nobody has edited, and it should read
+    # that way rather than looking like the two halves disagree.
+    fresh = sum(1 for r in rows if last and int(r.get("at") or 0) >= int(last))
+    since = (f"{fresh} of them at the last look" if fresh
+             else "none of them new — nothing changed at the last look")
+    return (f"{total} change(s) recorded since the agency started watching, "
+            f"across {watched} page(s) — " + " and ".join(bits)
+            + f". {since}"
+            + (f", {_ago(_now() - last)}." if last else "."))
 
 
 def _ago(secs):

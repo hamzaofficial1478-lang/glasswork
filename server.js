@@ -1153,6 +1153,45 @@ app.get("/api/readiness", (_q, res) =>
 // and ignored the read mark, and the next person to reorder this file would
 // have got a badge that never cleared and no idea why. Deleted, not moved.)
 
+// ---- competitors -----------------------------------------------------------
+// He asked where to add them and the honest answer was "a command line" — this
+// module has always had the functions, nothing had ever put them in the office.
+// Everything goes through pipelines.competitors so the normalising, the dedup
+// on domain and the suggested/confirmed split live in one place.
+app.get("/api/competitors", (_q, res) =>
+  res.json(pyModule("pipelines.competitors", ["--json"], 60000)));
+
+app.post("/api/competitors", (req, res) => {
+  const b = req.body || {};
+  const act = String(b.action || "").trim();
+  const args = ["--json"];
+  if (act === "add") {
+    const name = String(b.name || "").trim().slice(0, 120);
+    const domain = String(b.domain || "").trim().slice(0, 200);
+    if (!name || !domain)
+      return res.status(400).json({ ok: false, error: "A rival needs a name and a website." });
+    args.push("--add", name, domain);
+  } else if (act === "remove") {
+    const which = String(b.which || "").trim().slice(0, 120);
+    if (!which) return res.status(400).json({ ok: false, error: "Which one?" });
+    args.push("--remove", which);
+  } else if (act === "confirm_all") {
+    args.push("--confirm-all");
+  } else if (act === "find") {
+    args.push("--find");
+  } else if (act === "reject") {
+    const name = String(b.name || "").trim().slice(0, 120);
+    if (!name) return res.status(400).json({ ok: false, error: "Which one?" });
+    args.push("--not-a-rival", name);
+  } else {
+    return res.status(400).json({ ok: false, error: "Unknown action." });
+  }
+  // --find goes out to OpenStreetMap across the emirates, so it gets
+  // longer than the rest. The others are cabinet writes and are instant.
+  res.json(pyModule("pipelines.competitors", args,
+                    act === "find" ? 300000 : 60000));
+});
+
 // ---- the owner's daily targets ---------------------------------------------
 // The numbers the agency works to. Read and written through coordination.targets
 // so the ceiling checks and the measurement live in one place — the server does
