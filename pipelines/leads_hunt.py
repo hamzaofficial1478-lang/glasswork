@@ -585,12 +585,18 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
         if not key:
             plan["ok"] = False
             plan["error"] = (
-                "No Google Places key. Put one on the 'maps' shelf (Setup -> Shelf -> maps) "
-                "or set GOOGLE_PLACES_API_KEY. Get it at console.cloud.google.com: enable "
-                "'Places API (New)', create an API key, restrict it to that API. Google's "
-                "monthly credit covers far more searching than this business will do. "
-                "Without it nothing real can be collected — the plan above is what it "
-                "WOULD run.")
+                "No Google Places key, so THIS pass collected nothing — but you do "
+                "not need one to get leads. The free path is already in the day: "
+                "'Leads collects from OpenStreetMap' (pipelines.leads_osm) finds real "
+                "UAE businesses with no key at all, and it runs right after this step. "
+                "If it also came back empty, the reason is on ITS line, not this one.\n\n"
+                "Reading this as 'Leads is blocked until I buy something' is the wrong "
+                "conclusion and it is this message's fault for not saying so. Places is "
+                "an upgrade: it carries opening hours, ratings and categories OSM does "
+                "not. To add it: Setup -> Shelf -> maps, or set GOOGLE_PLACES_API_KEY. "
+                "Get it at console.cloud.google.com — enable 'Places API (New)', create "
+                "a key, restrict it to that API. Google's monthly credit covers far more "
+                "searching than this business will do.")
         return plan
 
     # only one Hunter goes shopping at a time: two of them running the same

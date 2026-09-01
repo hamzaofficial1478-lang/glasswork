@@ -796,11 +796,23 @@ def _watch(agent, run_row, timeout):
             return {"ok": False, "idle": True,
                     "suggested": [r["name"] for r in waiting],
                     "asked": qid,
+                    # "in the office" was a lie by omission: there is no office
+                    # control for this, only the commands below. He asked where
+                    # to add competitors and the program had been telling him to
+                    # look somewhere that does not exist.
                     "error": (f"{len(waiting)} firm(s) look like competitors and are "
-                              "waiting for your yes in the office: "
+                              "waiting for your yes: "
                               + ", ".join(r["name"] for r in waiting[:5])
                               + (f" and {len(waiting) - 5} more" if len(waiting) > 5 else "")
-                              + ". Nothing is crawled until you approve them.")}
+                              + ".\n\nNothing is crawled until you approve them. "
+                              "To see the full list with why each was suggested:\n"
+                              "    python -m pipelines.competitors --suggested\n"
+                              "To accept them all:\n"
+                              "    python -m pipelines.competitors --confirm-all\n"
+                              "To reject one:\n"
+                              "    python -m pipelines.competitors --not-a-rival \"NAME\"\n"
+                              "To add one yourself:\n"
+                              "    python -m pipelines.competitors --add \"NAME\" rival.ae")}
         return {"ok": False, "idle": True, "error":
                 "No competitors on file yet, and this pipeline will not invent any — "
                 "who actually bids against you is your call. The SEO strategist puts "
