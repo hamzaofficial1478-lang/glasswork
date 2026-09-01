@@ -546,12 +546,81 @@ def test_security_clearance_fails_safe():
 from providers import store as _store
 
 
+def test_one_leads_task_not_two_when_the_order_names_the_number():
+    print("\n'merge them into 1 task':")
+    tgt = {"jobs": [{"name": "leads", "per_day": 20, "done_today": 0,
+                     "remaining": 20, "done_yesterday": 7, "on_file": 7,
+                     "unit": "leads"}]}
+    facts = {"targets": tgt, "sector_orders": {"Leads": "find 20 leads"},
+             "site": {}, "proposals": [], "source_map_done": True, "approvals": 0}
+    leads = [c for c in MD.plan(facts) if c["sector"] == "Leads"]
+    check("one Leads task, not two", len(leads), 1)
+    check("titled in his own words", leads[0]["title"], "Owner's order: find 20 leads")
+    check("and it carries his sentence", "find 20 leads" in leads[0]["detail"], True)
+    check("plus how the work is actually done",
+          "Dedup before storing" in leads[0]["detail"], True)
+    check("it keeps the owner's urgency", leads[0]["urgency"], 1)
+
+
+def test_the_merged_task_carries_yesterday_and_the_running_total():
+    print("\n'and also the previous day's leads':")
+    tgt = {"jobs": [{"name": "leads", "per_day": 20, "done_today": 5,
+                     "remaining": 15, "done_yesterday": 7, "on_file": 12,
+                     "unit": "leads"}]}
+    facts = {"targets": tgt, "sector_orders": {"Leads": "find 20 leads"},
+             "site": {}, "proposals": [], "source_map_done": True, "approvals": 0}
+    d = [c for c in MD.plan(facts) if c["sector"] == "Leads"][0]
+    check("today's position", "5 done today of 20" in d["detail"], True)
+    check("what is left", "15 still to go" in d["detail"], True)
+    check("yesterday", "Yesterday: 7" in d["detail"], True)
+    check("and the running total", "On file altogether: 12" in d["detail"], True)
+
+
+def test_an_empty_yesterday_is_called_out_rather_than_buried():
+    print("\nA day that collected nothing should be visible on the task:")
+    tgt = {"jobs": [{"name": "leads", "per_day": 20, "done_today": 0,
+                     "remaining": 20, "done_yesterday": 0, "on_file": 40,
+                     "unit": "leads"}]}
+    facts = {"targets": tgt, "sector_orders": {}, "site": {}, "proposals": [],
+             "source_map_done": True, "approvals": 0}
+    d = [c for c in MD.plan(facts) if c["sector"] == "Leads"][0]
+    check("it says so", "Nothing at all came in yesterday" in d["detail"], True)
+    check("and asks for a reason rather than a quiet close",
+          "say why on the task" in d["detail"], True)
+
+
+def test_an_order_with_no_number_stays_its_own_task():
+    print("\nDirection is not a quantity, and is not folded into one:")
+    facts = {"targets": {"jobs": []},
+             "sector_orders": {"SEO": "focus on Sharjah hotels this week"},
+             "site": {}, "proposals": [], "source_map_done": True, "approvals": 0}
+    seo = [c for c in MD.plan(facts) if c["sector"] == "SEO"]
+    check("still a task of its own", len(seo), 1)
+    check("in his words", "Sharjah hotels" in seo[0]["title"], True)
+
+
+def test_the_wording_is_right_for_one():
+    print("\n'1 post', not '1 posts':")
+    tgt = {"jobs": [{"name": "posts", "per_day": 1, "done_today": 0,
+                     "remaining": 1, "done_yesterday": 0, "on_file": 0,
+                     "unit": "posts"}]}
+    facts = {"targets": tgt, "sector_orders": {}, "site": {}, "proposals": [],
+             "source_map_done": True, "approvals": 0}
+    d = [c for c in MD.plan(facts) if c["sector"] == "Content"][0]
+    check("singular", "asked for 1 post today" in d["evidence"], True)
+
+
 def main():
     with _store.isolated():
         _main()
 
 
 def _main():
+    test_one_leads_task_not_two_when_the_order_names_the_number()
+    test_the_merged_task_carries_yesterday_and_the_running_total()
+    test_an_empty_yesterday_is_called_out_rather_than_buried()
+    test_an_order_with_no_number_stays_its_own_task()
+    test_the_wording_is_right_for_one()
     test_two_minds_on_the_allocation()
     test_security_clearance_fails_safe()
     test_the_sector_proposal_queue()

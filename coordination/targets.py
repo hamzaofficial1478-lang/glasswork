@@ -237,6 +237,23 @@ def _done_today(c, job, day0):
         return 0
 
 
+def _running_position(c, job, day0):
+    """
+    (yesterday, all time). The two numbers a sector needs to know where it is.
+
+    "merge them into 1 task just on the base when the user will ask to find the
+     next leads and also the previous day's leads"
+
+    A job's own SQL counts everything since a moment, so yesterday is the
+    difference between two of those counts and the all-time figure is the same
+    count from zero. No new queries to write and no chance of the two
+    disagreeing with what the target screen already shows.
+    """
+    since_yesterday = _done_today(c, job, day0 - 86400)
+    today = _done_today(c, job, day0)
+    return max(0, since_yesterday - today), _done_today(c, job, 0)
+
+
 def status(day0=None):
     """
     Where the day stands: every job, its target, what has actually happened, and
@@ -254,10 +271,12 @@ def status(day0=None):
                 if row:
                     set_any = True
                 done = _done_today(c, job, day0)
+                yesterday, on_file = _running_position(c, job, day0)
                 ok, warning = check_ceiling(name, per_day)
                 entry = {
                     "name": name, "label": job["label"], "unit": job["unit"],
                     "per_day": per_day, "done_today": done,
+                    "done_yesterday": yesterday, "on_file": on_file,
                     "remaining": max(0, per_day - done),
                     "pct": (min(100, round(done / per_day * 100)) if per_day else None),
                     "hit": bool(per_day) and done >= per_day,

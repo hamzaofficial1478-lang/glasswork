@@ -46,6 +46,7 @@ import json
 import sqlite3
 
 from coordination import board, briefing, proposals as _props, state as _state, targets
+from coordination import targets as _targets
 
 MAX_TASKS_PER_CYCLE = 6      # a plan nobody can finish is not a plan
 # How many of its own requests the MD answers in one pass. A queue of twenty-six
@@ -343,6 +344,59 @@ def _target(facts, name):
     return {}
 
 
+
+def _unit(tgt, job, n) -> str:
+    """'1 post', '20 leads'. He reads these lines; '1 posts' looks careless."""
+    word = str(tgt.get("unit") or job)
+    return word[:-1] if n == 1 and word.endswith("s") else word
+
+
+def _counted_job(sector, job, tgt, folded, title, how) -> dict:
+    """
+    One task for a job that has a number on it, carrying where the sector is.
+
+    Three things go into it, and the third is the one that was missing:
+
+      HIS WORDS      if the order that set this number was written in a
+                     sentence, that sentence is the title. He asked for "find
+                     20 leads"; the board should say that back to him, not a
+                     phrase the MD made up about the same thing.
+      TODAY'S NUMBER what is still to do, not the whole target — a sector that
+                     has already collected twelve of twenty needs eight.
+      WHERE IT IS    "and also the previous day's leads". Yesterday's count and
+                     the running total, so the sector knows whether it is
+                     catching up or starting fresh, and so a day that collected
+                     nothing is visible on the task itself rather than only in
+                     a report nobody opens.
+    """
+    owner_said = folded.get(job)
+    per, done = int(tgt.get("per_day") or 0), int(tgt.get("done_today") or 0)
+    left = max(0, per - done)
+    yday, on_file = int(tgt.get("done_yesterday") or 0), int(tgt.get("on_file") or 0)
+
+    where = (f"Where this stands: {done} done today of {per} asked for, so {left} "
+             f"still to go. Yesterday: {yday}. On file altogether: {on_file}.")
+    if not yday and on_file:
+        where += (" Nothing at all came in yesterday — if today comes back empty "
+                  "too, say why on the task rather than closing it quietly.")
+    elif not on_file:
+        where += " Nothing on file yet, so this is the first real batch."
+
+    detail = how + "\n\n" + where
+    if owner_said:
+        detail = (f"The owner asked for this in his own words:\n"
+                  f"    \u201c{owner_said[1]}\u201d\n\n" + detail)
+
+    return {"sector": sector, "risk": "green",
+            # His own order outranks the MD's own scheduling, so a folded task
+            # keeps the urgency the standalone order task would have had.
+            "urgency": 1 if owner_said else 4,
+            "title": (f"Owner's order: {owner_said[1][:60]}" if owner_said else title),
+            "detail": detail,
+            "evidence": (f"owner asked for {per} {_unit(tgt, job, per)} today, "
+                         f"{done} so far, {yday} yesterday, {on_file} on file")}
+
+
 def plan(facts: dict) -> list:
     """
     Candidate tasks, each citing the row that justifies it.
@@ -369,7 +423,34 @@ def plan(facts: dict) -> list:
 
     # 2. WHAT THE OWNER TOLD A SECTOR TO DO. He outranks the MD outright, so this
     #    is urgency 1 and the Critic will not let it be dropped for the ceiling.
+    #
+    #    ONE TASK, NOT TWO, WHEN THE ORDER IS THE NUMBER.
+    #
+    #    "merge them into 1 task just on the base when the user will ask to find
+    #     the next leads and also the previous day's leads"
+    #
+    #    His Leads board carried both "Owner's order: find 20 leads" and
+    #    "Collect today's leads" — the same instruction twice, from two paths
+    #    that had never been introduced. With one job per sector per run that
+    #    is not merely untidy: the sector spends a whole run on the copy that
+    #    only restates the number, and does no collecting at all.
+    #
+    #    So an order that NAMES a target is folded into that target's own task
+    #    below, in his own words. An order that names no number — "focus on
+    #    Sharjah hotels" — has no target to fold into and stays its own task,
+    #    which is right: it is direction, not a quantity.
+    folded = {}
     for sector, text in (facts.get("sector_orders") or {}).items():
+        named = []
+        try:
+            named = [x["name"] for x in _targets.from_words(text, apply=False)]
+        except Exception:
+            named = []
+        covered = [n for n in named if _target(facts, n).get("per_day")]
+        if covered:
+            for n in covered:
+                folded[n] = (sector, text)
+            continue
         out.append({
             "sector": sector, "risk": "green", "urgency": 1,
             "title": f"Owner's order: {text[:60]}",
@@ -413,13 +494,11 @@ def plan(facts: dict) -> list:
 
     lead_t = _target(facts, "leads")
     if lead_t.get("per_day") and lead_t.get("remaining"):
-        out.append({
-            "sector": "Leads", "risk": "green", "urgency": 4,
-            "title": "Collect today's leads across the mapped segments",
-            "detail": ("Work the source map. Every lead carries the service that "
-                       "business needs. Dedup before storing; contact nobody."),
-            "evidence": (f"owner asked for {lead_t['per_day']} lead(s) today, "
-                         f"{lead_t['done_today']} collected")})
+        out.append(_counted_job(
+            "Leads", "leads", lead_t, folded,
+            "Collect today's leads across the mapped segments",
+            "Work the source map. Every lead carries the service that business "
+            "needs. Dedup before storing; contact nobody."))
 
     # THE POSTS TARGET HAD NOWHERE TO GO. targets.py has counted "Pages or
     # posts published" since it was written, the owner can set it, Report scores
@@ -429,15 +508,12 @@ def plan(facts: dict) -> list:
     # reason "1 content post" came back as no post.
     post_t = _target(facts, "posts")
     if post_t.get("per_day") and post_t.get("remaining"):
-        out.append({
-            "sector": "Content", "risk": "green", "urgency": 4,
-            "title": "Write the page that is next in the queue",
-            "detail": ("Take the next briefed page and write it. Real facts only, "
-                       "from the cabinet — no invented projects, no invented "
-                       "numbers. It queues for the owner's approval; nothing goes "
-                       "on the site from here."),
-            "evidence": (f"owner asked for {post_t['per_day']} post(s) today, "
-                         f"{post_t['done_today']} published")})
+        out.append(_counted_job(
+            "Content", "posts", post_t, folded,
+            "Write the page that is next in the queue",
+            "Take the next briefed page and write it. Real facts only, from the "
+            "cabinet — no invented projects, no invented numbers. It queues for "
+            "the owner's approval; nothing goes on the site from here."))
 
     if facts.get("approvals"):
         out.append({
