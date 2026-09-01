@@ -178,6 +178,35 @@ def _why_down(r) -> str:
     return " — " + "; ".join(bits[:2])
 
 
+def _single_brain(r) -> str:
+    """
+    One sector with one working brain — and WHICH of the two cases it is.
+
+    Configured-but-broken and never-configured need opposite things done about
+    them, so they get opposite sentences, and the broken one carries the
+    provider's own error rather than making him go and look for it.
+    """
+    task = r["task"]
+    chain = r.get("chain") or []
+    dead = [l for l in chain if l.get("ok") is False]
+    unproven = [l for l in chain if l.get("ok") is None]
+
+    if dead:
+        alive = next((l["name"] for l in chain if l.get("ok") is True), "the primary")
+        bits = "; ".join(f"{l['name']} — {l.get('cause') or 'no answer'}"
+                         for l in dead[:2])
+        return (f"sector '{task}' has {len(chain)} brains configured but only "
+                f"{alive} is answering. Its fallback is set up and failing, "
+                f"which is a different problem from not having one: {bits}")
+    if unproven:
+        return (f"sector '{task}' has one proven brain; "
+                f"{len(unproven)} more configured but not reached this pass, so "
+                f"whether it has a fallback is unknown rather than no")
+    return (f"sector '{task}' runs on one brain with no fallback — only one "
+            f"model is configured for it, so anything that stops that model "
+            f"stops the sector")
+
+
 def sweep(quick=False, notify=False) -> dict:
     cache = _ModelCache(quick=quick)
     brains = sweep_brains(cache)
@@ -204,8 +233,25 @@ def sweep(quick=False, notify=False) -> dict:
             "No notification route is set up — set NTFY_TOPIC or approvals have "
             "nowhere to go")
 
-    warn = [f"sector '{r['task']}' runs on one brain with no fallback"
-            for r in route if r["cover"] == SINGLE]
+    # "ONE BRAIN WITH NO FALLBACK" WAS A LIE, AND HE CAUGHT IT TWICE.
+    #
+    # "while in real only leads and Seo sector has no fallback else of it all
+    #  sectors have fallback but it said no any single one has any fallback ...
+    #  there was no any reason about why fallback not worked"
+    #
+    # He is right and the bug is one line up: SINGLE means "exactly one link in
+    # this chain ANSWERED the probe", not "only one link is configured". A
+    # sector with a primary and a fallback, whose fallback happens to be out of
+    # credit, comes back SINGLE — and was then told it had never configured a
+    # fallback at all. Two completely different problems, one sentence, and the
+    # sentence described the one that was not happening. Worse, the actual
+    # error — the thing that would let him fix it in a minute — was sitting
+    # right there in the chain and was thrown away.
+    #
+    # A dead fallback is usually one broken key shared by every sector, which
+    # is exactly why all seven lit up at once on a machine where five of them
+    # were configured perfectly well.
+    warn = [_single_brain(r) for r in route if r["cover"] == SINGLE]
     warn += [f"shelf '{s['shelf']}' has one API and no fallback"
              for s in shelf if s["cover"] == SINGLE]
     warn += [f"shelf '{s['shelf']}' is configured but every API on it failed"

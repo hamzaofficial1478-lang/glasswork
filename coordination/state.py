@@ -301,13 +301,43 @@ def _health(c, key, match, day0, now):
     score = 0
 
     # DID IT RUN — and did the running work.
+    #
+    # TURNING UP IS NOT AN ACHIEVEMENT, and scoring it like one produced the
+    # number he could not account for:
+    #
+    #   "no any sector did any work but agency health is still 40 why? when
+    #    there is no any work happened on which bases the secore is 40?"
+    #
+    # It was 30 for running cleanly plus 10 for not having been judged yet.
+    # Exactly 40, on a day where every sector produced nothing. Both halves
+    # were defensible on their own and together they said the agency was
+    # fine — and a health score that reads 40 on a day nothing happened is
+    # worse than no score, because he checks it instead of checking the work.
+    #
+    # A clean run is now a PRECONDITION worth a few marks, and the rest of
+    # those marks are only earned if something came of it. Producing nothing
+    # and finishing nothing is a run that happened, not a run that worked.
+    finished = _one(c, "SELECT count(*) FROM tasks WHERE lower(sector)=?"
+                       " AND status='done' AND COALESCE(finished_at,0)>=?",
+                    (match, day0))
     if ran:
         clean = ran - bad
-        pts = round(30 * (clean / ran))
+        showed_up = round(10 * (clean / ran))
+        got_somewhere = round(20 * (clean / ran)) if (made or finished) else 0
+        pts = showed_up + got_somewhere
         score += pts
-        why.append({"label": "Ran and finished cleanly", "points": pts,
-                    "detail": f"{clean} of {ran} run(s) today ended without error."
-                              + (f" {bad} crashed." if bad else "")})
+        detail = f"{clean} of {ran} run(s) today ended without error."
+        if bad:
+            detail += f" {bad} crashed."
+        if not (made or finished):
+            detail += (" Nothing was produced and no task was finished, so this "
+                       "scores as turning up rather than as working — a clean "
+                       "run that changes nothing has changed nothing.")
+        else:
+            detail += f" {finished} task(s) finished."
+        why.append({"label": ("Ran and finished cleanly" if (made or finished)
+                              else "Turned up, but nothing came of it"),
+                    "points": pts, "detail": detail})
     else:
         why.append({"label": "Did not run today", "points": 0,
                     "detail": "No agent in this sector recorded a run today. "
@@ -353,11 +383,24 @@ def _health(c, key, match, day0, now):
         why.append({"label": "Its calls came off", "points": pts,
                     "detail": f"{good} of {scored} scored decision(s) worked."})
     else:
-        score += 10          # neutral: not yet judged, and not punished for it
-        why.append({"label": "Not yet judged", "points": 10,
-                    "detail": "No decision from this sector has been scored yet, "
-                              "so this is a neutral half-mark rather than a "
-                              "verdict either way."})
+        # A HALF-MARK FOR BEING UNJUDGED IS ONLY FAIR WHILE THE QUEUE IS SHORT.
+        # He had 45 calls waiting to be scored; handing out ten free points on
+        # that basis is not neutrality, it is a backlog paying itself a
+        # dividend. Ten while the sector is genuinely new, nothing once the
+        # unscored pile is deep enough to be the problem itself.
+        pending = _one(c, "SELECT count(*) FROM decisions WHERE outcome IS NULL"
+                          " AND lower(cycle) LIKE ?", (match + "%",))
+        pts = 0 if pending >= 5 else 10
+        score += pts
+        why.append({"label": "Not yet judged", "points": pts,
+                    "detail": ("No decision from this sector has been scored yet, "
+                               "so this is a neutral half-mark rather than a "
+                               "verdict either way." if pts else
+                               f"{pending} decision(s) from this sector are still "
+                               f"unscored. That is too many to keep paying a "
+                               f"benefit of the doubt on — the scorecard cannot "
+                               f"tell you whether this sector is any good until "
+                               f"its calls are settled.")})
 
     return _clamp(score, 0, 100), why
 

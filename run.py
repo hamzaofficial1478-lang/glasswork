@@ -359,6 +359,19 @@ def day(force=False, quick=False):
 
 def tests():
     head("Every test suite")
+    # THE SUITE RUNS AGAINST THE PROGRAM, NOT AGAINST HIS SETTINGS.
+    #
+    # it_release runs this and refuses to touch the website unless it is green,
+    # so anything that makes it red on his machine and green on a clean
+    # checkout permanently blocks every change to his site. His own .env did
+    # exactly that: a test proving "with no SMTP it refuses to send" pops the
+    # variable out of the environment, .env supplies it again underneath, and
+    # the assertion fails on the one machine where it matters.
+    #
+    # Set here rather than in each suite so a test written next month cannot
+    # forget it. Tests that exist to prove .env behaviour pass an explicit path
+    # and are unaffected. See providers/integrations.read_env.
+    os.environ["AGENCY_IGNORE_DOTENV"] = "1"
     mods = ["coordination.cabinet_tests", "coordination.floor_tests",
             "coordination.targets_tests", "coordination.hook_tests",
             "coordination.faults_tests", "coordination.comms_tests",
@@ -372,6 +385,7 @@ def tests():
             "coordination.uae_tests",
             "coordination.inbox_tests",
             "coordination.daygate_tests",
+            "coordination.honest_tests",
             "providers.tests", "providers.retry_tests",
             "providers.ladder_tests", "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",

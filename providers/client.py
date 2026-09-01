@@ -191,10 +191,21 @@ def _content_text(body_text):
         return ""
 
 
-def chat(cred, model, messages, max_tokens=512, timeout=180, extra=None):
-    """Production LLM call. Shares build_chat_request with the probe path."""
+def chat(cred, model, messages, max_tokens=512, timeout=180, extra=None,
+         tries=MOST_TRIES):
+    """
+    Production LLM call. Shares build_chat_request with the probe path.
+
+    `tries=1` for a PROBE. A probe asks "what is this model doing right now",
+    and retrying that question three times with backoff does not make the
+    answer truer — it makes the answer late. Every failing model in the
+    routing sweep was costing three attempts plus about seven seconds of
+    sleeps, times two calls for the multimodal check, times every shelf: the
+    owner watched CHECK EVERYTHING take over fifteen minutes, and this was a
+    good part of why. See preflight._ModelCache.
+    """
     url, headers, body = build_chat_request(cred, model["api_model_id"], messages, max_tokens, extra)
-    res = _execute(cred, url, headers, body, timeout)
+    res = _execute(cred, url, headers, body, timeout, tries=tries)
     res["output"] = _content_text(res["text"]) if res["ok"] else ""
     return res
 
@@ -219,7 +230,7 @@ def fetch_models(cred, timeout=90):
                 "raw": {"url": url, "response_body": str(e)}}
 
 
-def probe_model(cred, model, timeout=120):
+def probe_model(cred, model, timeout=120, tries=1):
     """
     Test & detect for a model, using a request VALID FOR ITS CATEGORY:
       LLM       -> a tiny chat completion (+ a multimodal image probe)
@@ -238,7 +249,7 @@ def probe_model(cred, model, timeout=120):
         if sig:
             caps.update({k: v for k, v in sig["caps"].items() if k in caps})
         res = chat(cred, model, [{"role": "user", "content": "Reply with the single word: ok"}],
-                   max_tokens=5, timeout=timeout)
+                   max_tokens=5, timeout=timeout, tries=tries)
         caps["chat"] = bool(res["ok"])
         result = {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
                   "output": res.get("output", ""), "raw": res["raw"]}
@@ -246,14 +257,15 @@ def probe_model(cred, model, timeout=120):
             mm = [{"role": "user", "content": [
                 {"type": "text", "text": "what colour is this? one word"},
                 {"type": "image_url", "image_url": {"url": _TINY_PNG}}]}]
-            caps["multimodal"] = bool(chat(cred, model, mm, max_tokens=5, timeout=timeout)["ok"])
+            caps["multimodal"] = bool(chat(cred, model, mm, max_tokens=5,
+                                           timeout=timeout, tries=tries)["ok"])
         return {"capabilities": caps, "detect": diag, "test": result}
 
     if category == "IMAGE":
         url, headers, body = build_request(cred, "images/generations", {
             "model": model["api_model_id"], "prompt": "a small blue circle on a white background",
             "n": 1, "size": "256x256"})
-        res = _execute(cred, url, headers, body, timeout)
+        res = _execute(cred, url, headers, body, timeout, tries=tries)
         diag["endpoint"] = url
         return {"capabilities": {"images": bool(res["ok"])}, "detect": diag,
                 "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
@@ -262,7 +274,7 @@ def probe_model(cred, model, timeout=120):
     if category == "EMBEDDING":
         url, headers, body = build_request(cred, "embeddings", {
             "model": model["api_model_id"], "input": "ping"})
-        res = _execute(cred, url, headers, body, timeout)
+        res = _execute(cred, url, headers, body, timeout, tries=tries)
         diag["endpoint"] = url
         return {"capabilities": {"embeddings": bool(res["ok"])}, "detect": diag,
                 "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),

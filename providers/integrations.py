@@ -96,6 +96,31 @@ def read_env(path=None) -> dict:
     Mirrored in server.js's readEnv() so the two never disagree again.
     """
     env = {}
+    # THE TEST SUITE IS THE RELEASE GATE, AND HIS OWN SETTINGS WERE TURNING IT
+    # RED.
+    #
+    # "the test suite is red — nothing goes on the website until it is green
+    #  again: FAIL coordination.hook_tests; FAIL pipelines.leads_tests;
+    #  FAIL pipelines.site_tests"
+    #
+    # Those suites pass on a clean checkout and fail on his machine, and the
+    # reason is this file. A test that wants to prove "with no SMTP configured
+    # it refuses to send" pops SMTP_HOST out of os.environ — which is correct
+    # and which does nothing, because .env still has it and precedence falls
+    # through to the file. So the assertion fails, the suite goes red, and
+    # it_release refuses every change to the website. For ever. The better his
+    # configuration, the more of the gate it breaks.
+    #
+    # AGENCY_IGNORE_DOTENV makes the file invisible for the process that sets
+    # it, leaving the real environment as the only source. run.py sets it for
+    # the whole suite. An explicit `path=` still wins, so the handful of tests
+    # that exist to prove .env behaviour point this at a temp file of their own
+    # and are unaffected.
+    if path is None and str(os.environ.get("AGENCY_IGNORE_DOTENV", "")).strip().lower() \
+            in ("1", "true", "yes", "on"):
+        return {k: str(v).strip() for k in ENV_KEYS
+                if (v := os.environ.get(k)) is not None and str(v).strip()}
+
     p = Path(path) if path else ENV_PATH
     try:
         if p.exists():
