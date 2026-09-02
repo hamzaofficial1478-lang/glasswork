@@ -275,14 +275,36 @@ def tests_pass(timeout=TEST_TIMEOUT) -> dict:
     except Exception as e:                                   # pragma: no cover
         return {"ok": False, "took_s": 0, "why": f"could not run the tests: {e}"}
     out = (p.stdout or "") + (p.stderr or "")
-    failing = [l.strip() for l in out.splitlines()
-               if l.strip().startswith("FAIL") or "suite(s) failing" in l]
+    lines = [l.rstrip() for l in out.splitlines()]
+    # Which suites went red...
+    # Only the lines that NAME a suite. A detail line also starts with FAIL,
+    # and letting it in put the same sentence in the headline and the body.
+    suites = [l.strip() for l in lines
+              if (l.strip().startswith("FAIL  ") and not l.startswith("        ")
+                  and "." in l.split()[-1] and " " not in l.strip()[6:].strip())
+              or "suite(s) failing" in l]
+    # ...and WHY. run.py now prints the failing check under its suite, indented.
+    # Carrying it through is the difference between "a file is unhappy" and a
+    # sentence he can act on without going back to a terminal.
+    why_lines, grab = [], False
+    for l in lines:
+        s = l.strip()
+        if s.startswith("FAIL  ") and not l.startswith("        "):
+            grab = True
+            continue
+        if grab:
+            if l.startswith("        ") and s:
+                why_lines.append(s)
+            elif s:
+                grab = False
+    head = ("the test suite is red — nothing goes on the website until it is "
+            "green again: " + ("; ".join(suites[:3]) or f"exit {p.returncode}"))
+    if why_lines:
+        head += "\n\nWhat actually failed:\n" + "\n".join(
+            "    " + w[:200] for w in why_lines[:10])
     return {"ok": p.returncode == 0, "took_s": int(time.time() - t0),
-            "failing": failing[:6],
-            "why": ("all suites green" if p.returncode == 0 else
-                    "the test suite is red — nothing goes on the website until "
-                    "it is green again: " + ("; ".join(failing[:3]) or
-                                             f"exit {p.returncode}"))}
+            "failing": suites[:6], "detail": why_lines[:20],
+            "why": "all suites green" if p.returncode == 0 else head}
 
 
 def confirm(page, needle, s=None) -> bool:

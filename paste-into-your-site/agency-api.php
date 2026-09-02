@@ -299,15 +299,58 @@ if ($route === '/health' && $method === 'GET') {
 }
 
 // --- what pages are there --------------------------------------------------
-if ($route === '/pages' && $method === 'GET') {
+//
+// THE TOP LEVEL IS NOT THE WEBSITE.
+//
+// "why home.php and other pages and tasks are not getting traced?"
+//
+// Because this listed SITE_ROOT/*.{php,html,htm} and stopped there. Anything
+// in a folder — services/, blog/, includes/ — did not exist as far as the
+// agency was concerned: not watched for changes, not audited, not counted,
+// never written to. The one include it did see, includes/header.php, was only
+// there because site_watch guesses at the usual locations, and a guess that
+// sometimes fails to read is what told him his header had vanished.
+//
+// So it walks the site now. The skips are the folders that are never pages and
+// would swamp the list — dependency trees, version control, uploads and caches
+// — plus anything NEVER_TOUCH already forbids. The depth and count caps are
+// there so a site with a huge media tree cannot turn one request into a
+// minute of disk walking.
+const SKIP_DIRS = ['.git', '.svn', 'node_modules', 'vendor', 'wp-content',
+                   'wp-includes', 'wp-admin', 'cache', 'uploads', 'backups',
+                   'agency-api', 'assets', 'images', 'img', 'fonts', 'css', 'js'];
+const MAX_PAGES = 400;
+const MAX_DEPTH = 4;
+
+function list_pages(string $dir, string $prefix = '', int $depth = 0): array {
+    if ($depth > MAX_DEPTH) { return []; }
     $out = [];
-    foreach ((array)glob(SITE_ROOT . '/*.{php,html,htm}', GLOB_BRACE) as $f) {
-        $rel = relative_to_site($f);
+    $entries = @scandir($dir);
+    if ($entries === false) { return []; }
+    foreach ($entries as $name) {
+        if ($name === '.' || $name === '..' || $name[0] === '.') { continue; }
+        $full = $dir . '/' . $name;
+        $rel  = $prefix === '' ? $name : $prefix . '/' . $name;
+        if (is_dir($full)) {
+            if (in_array(strtolower($name), SKIP_DIRS, true)) { continue; }
+            $out = array_merge($out, list_pages($full, $rel, $depth + 1));
+            if (count($out) >= MAX_PAGES) { break; }
+            continue;
+        }
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        if (!in_array($ext, ['php', 'html', 'htm'], true)) { continue; }
         if (in_array($rel, NEVER_TOUCH, true)) { continue; }
-        $out[] = ['page' => $rel, 'bytes' => filesize($f),
-                  'changed' => date('c', (int)filemtime($f))];
+        $out[] = ['page' => $rel, 'bytes' => filesize($full),
+                  'changed' => date('c', (int)filemtime($full))];
+        if (count($out) >= MAX_PAGES) { break; }
     }
-    reply(['ok' => true, 'pages' => $out]);
+    return $out;
+}
+
+if ($route === '/pages' && $method === 'GET') {
+    $out = list_pages(SITE_ROOT);
+    reply(['ok' => true, 'pages' => $out, 'counted' => count($out),
+           'capped' => count($out) >= MAX_PAGES]);
 }
 
 // --- read one page ---------------------------------------------------------

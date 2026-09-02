@@ -403,12 +403,45 @@ def tests():
             "pipelines.site_tests", "pipelines.seo_tests",
             "pipelines.answers_tests", "pipelines.intel_tests",
             "pipelines.report_tests", "pipelines.run_tests"]
-    bad = []
+    # SAY WHAT ACTUALLY FAILED, NOT JUST WHICH FILE.
+    #
+    # "why program not giving the actaul fatal reason?"
+    #
+    # Because of the underscore on the line below. Each suite prints the exact
+    # check that broke — the name, what it got, what it wanted — and this threw
+    # every line of it away and printed the module name. So the release refusal
+    # he has been staring at for days could only ever say "FAIL
+    # coordination.hook_tests", which tells him a file is unhappy and nothing
+    # about why. On a machine I cannot reach, that difference is the whole
+    # difference between him being able to fix it and not.
+    bad, detail = [], {}
     for m in mods:
-        code, _ = sh([PY, "-m", m], timeout=420)
+        code, out = sh([PY, "-m", m], timeout=420)
         say(f"  {'PASS' if code == 0 else 'FAIL'}  {m}")
-        if code:
-            bad.append(m)
+        if not code:
+            continue
+        bad.append(m)
+        lines = [l.rstrip() for l in (out or "").splitlines()]
+        # The check name, then the got/want pair under it, plus any traceback
+        # tail — the three things that let somebody act without re-running it.
+        picked, i = [], 0
+        while i < len(lines) and len(picked) < 12:
+            s = lines[i].strip()
+            if s.startswith("FAIL") or s.startswith("Traceback") \
+                    or s.startswith("got:") or s.startswith("want:") \
+                    or "Error:" in s:
+                picked.append(lines[i])
+                # carry the two indented lines that follow a FAIL
+                for j in (i + 1, i + 2):
+                    if j < len(lines) and lines[j].startswith("    "):
+                        picked.append(lines[j])
+                i += 2
+            i += 1
+        if not picked:
+            picked = [l for l in lines[-6:] if l.strip()]
+        detail[m] = picked
+        for l in picked:
+            say("        " + l.strip()[:160])
     say()
     say("All green." if not bad else f"{len(bad)} suite(s) failing: {', '.join(bad)}")
     return not bad
