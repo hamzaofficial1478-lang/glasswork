@@ -1,33 +1,51 @@
-# Re-uploading `agency-api.php` — replacing one file
+# Re-uploading `agency-api.php` — the same three minutes, one more time
 
-You already did the hard part months ago: the folder is there, the token is
-there, the setup screen is filled in. **None of that changes.** This is one file
-swapped for a newer one, and it takes about three minutes.
-
-## What changed, and why it is worth doing
-
-The old file answered "what pages are on this site?" by looking at the top level
-and stopping:
-
-```php
-glob(SITE_ROOT . '/*.{php,html,htm}')      // top level only
-```
-
-So anything in a folder — `services/`, `blog/`, `includes/` — did not exist as
-far as the agency was concerned. Not watched for changes, not audited, not
-counted, never written to. That is why you saw 14 pages, and why the only
-include it knew about was `includes/header.php`, which it was only finding
-because the change-watcher *guesses* at the usual locations. A guess that
-sometimes fails to read is what told you your header had vanished from a site
-you had not touched.
-
-The new file walks the whole site. Tested on a tree shaped like yours it found
-11 pages instead of 5, including `home.php`, `services/*.php` and
-`blog/*.php`, while correctly skipping `node_modules`, `uploads` and `assets`.
+Sorry. You did this last week and it worked; you have to do it again, and it is
+my fault, not yours. Same folder, same file, same steps. Read the next section
+so you know what you are fixing, then it is Step 1.
 
 ---
 
-## Step 1 — get the new file onto your PC
+## Why again
+
+Making the listing walk your whole site was the right fix — it is why you went
+from 14 pages to 32, and why `home.php`, `services/` and `blog/` are finally
+visible. But look at what came back in that list of 32:
+
+```
+admin/login.php          admin/dashboard.php      admin/settings.php  (…17 files)
+config/config.php        config/db.php
+```
+
+That is your admin panel and the file holding your database password. They
+should never have been on that list. When I went to fix it I found three
+things, and the last two were worse than the first:
+
+**1. The listing and the door disagreed.** Reads and writes matched a filename
+anywhere in a path, the listing matched only exact names. So `config/db.php`
+was correctly refused for reading and cheerfully listed. Names only — nothing
+was read.
+
+**2. Hiding a folder is not protecting it.** The skip list only ever applied to
+the listing. `admin/login.php` was hidden from the list *and perfectly readable
+and writable* to anything holding your token. I proved it: I read your admin
+login page and overwrote your dashboard on a test copy.
+
+**3. Your token file was not protected.** The never-touch list has `token.txt`
+on it. But `/health` tells you to move your token **out** of `token.txt` and
+**into** `token.php`, because `.txt` is readable by anyone who guesses the
+address. So the file we tell you to use was the only one a write could replace.
+A test write replaced it — which would have locked the agency out of your own
+site until you noticed and put it back by hand.
+
+All three are fixed, with one rule that the listing and the door now share, so
+they cannot drift apart again. The agency's end refuses these pages too, not
+just your server's end — which means **you are already protected as of today's
+run**, even before you upload anything. The upload closes it at the server.
+
+---
+
+## Step 1 — get the new file
 
 PowerShell:
 
@@ -36,85 +54,80 @@ cd "C:\Users\ammar laptops\Desktop\glasswork"
 git pull origin claude/code-agency-setup-owmsxv
 ```
 
-The new file is at `paste-into-your-site\agency-api.php`. Open that folder in
-Explorer and leave the window open.
+The file is `paste-into-your-site\agency-api.php`. Open that folder in Explorer
+and leave the window open.
 
-## Step 2 — work out which name yours is called
+## Step 2 — delete `index-old.php` FIRST
 
-You had a choice when you installed it, and the answer decides what you replace.
-Look at the **Admin API address** on your setup screen:
+This is the new step, and it matters more than the upload does.
 
-| Your saved address ends in | The file on the server is | Replace |
-|---|---|---|
-| `/agency-api` | you renamed it | `public_html/agency-api/index.php` |
-| `/agency-api/agency-api.php` | you did not rename it | `public_html/agency-api/agency-api.php` |
+Last time you renamed the old file to `index-old.php` and kept it, because I
+told you to. That was sensible then. It is a problem now: **it is still a
+working door.** A `.php` file in a web folder runs when someone asks for it, so
+`…/agency-api/index-old.php` is a complete, token-checking copy of the old API
+— the one that will happily hand over your admin panel.
 
-If you cannot remember and cannot find the setting, open File Manager and look
-inside the `agency-api` folder — whichever of the two names is sitting in there
-is the one to replace.
+hPanel → File Manager → `public_html/agency-api` → right-click
+`index-old.php` → **Delete**.
 
-## Step 3 — keep the old one, just in case
+Your website does not use that file. Nothing links to it. Deleting it changes
+nothing except closing the old door.
 
-In **hPanel → File Manager** (Hostinger; it is **cPanel → File Manager** on some
-hosts), open `public_html/agency-api`.
+While you are in there, if you see `agency-api-old.php` or anything else ending
+in `-old.php`, delete those too. Same reason.
 
-Right-click the file from step 2 → **Rename** → put `-old` before the `.php`:
+## Step 3 — replace the live one
 
-- `index.php` → `index-old.php`
-- `agency-api.php` → `agency-api-old.php`
+Whatever file is left in that folder besides `token.php` is the one being
+served. It is one of these two:
 
-Thirty seconds, and it means a bad upload is one rename away from being undone
-rather than a problem. Delete it in a week once you are happy.
-
-## Step 4 — upload the new one
-
-Still inside `public_html/agency-api`:
+| The file in your folder | That is your live API |
+|---|---|
+| `index.php` | replace this |
+| `agency-api.php` | replace this |
 
 1. Click **Upload**
 2. Choose `paste-into-your-site\agency-api.php` from your PC
-3. If your file needs to be called `index.php` (the left-hand row of the table
-   in step 2), right-click the file you just uploaded → **Rename** →
-   `index.php`
+3. If the file you are replacing is called `index.php`, right-click the one you
+   just uploaded → **Rename** → `index.php`
+
+File Manager will ask whether to overwrite. Say yes.
 
 **Do not touch `token.php`.** It is your password and it has not changed.
 
-You should end up with exactly this:
+You should end up with exactly two files:
 
 ```
 public_html/agency-api/
-├── index.php          <- the file you just uploaded (or agency-api.php)
-├── index-old.php      <- the previous one, kept for a week
-└── token.php          <- untouched
+├── index.php     <- the one you just uploaded (or agency-api.php)
+└── token.php     <- untouched
 ```
 
-## Step 5 — prove it worked
+No `-old` files this time. If the upload goes wrong, `git pull` gives you the
+file again — the copy on your server was never the only one.
 
-PowerShell, in the glasswork folder:
-
-```powershell
-python -m pipelines.site_api --health
-```
-
-Want to see:
-
-```
-Mode    : full  (agents may change the site)
-Token   : set
-  ok  your site answered. PHP 8.x, folder writable
-```
-
-Then the one that actually shows the change:
+## Step 4 — prove it worked
 
 ```powershell
 python -m pipelines.site_api --pages
 ```
 
-**Before**, this listed about 14 files, all at the top level.
-**After**, it should list `home.php`, everything in `services/`, everything in
-`blog/`, and `includes/header.php` — noticeably more than before.
+**Before:** 32 pages, including 17 under `admin/` and 2 under `config/`.
+**After:** noticeably fewer — around 13 — and **no `admin/` or `config/` line
+at all**.
 
-If the count is the same as before, the upload did not land. Check you replaced
-the right one of the two names in step 2.
+This is the one time a *smaller* number is the right answer. You should still
+see `home.php`, everything in `services/`, everything in `blog/`, and
+`includes/header.php`. Those are your pages. The ones that vanished were never
+pages.
+
+Then check the door is shut:
+
+```powershell
+python -m pipelines.site_api --read config/db.php
+```
+
+Want to see: `config/db.php is inside config/, which is not the website`.
 
 ---
 
@@ -122,20 +135,50 @@ the right one of the two names in step 2.
 
 | It says | What happened | Fix |
 |---|---|---|
-| `404` or `no such page` | wrong file replaced, or wrong folder | Check step 2 again |
-| `401` or `token` | you replaced `token.php` by mistake | Put your token file back — it is `<?php return 'yourtoken';` |
-| `500` | the upload was cut off part-way | Upload it again; File Manager sometimes truncates on a slow line |
-| Page count unchanged | the old file is still live | The file you replaced was not the one being served |
+| `404` or `no such page` | the file you replaced was not the live one | Look in the folder again — whichever name is there is the live one |
+| `401` or `token` | `token.php` got overwritten | Put it back: `<?php return 'yourtoken';` — the token itself is on your setup screen |
+| `500` | the upload was cut off part-way | Upload again; File Manager truncates on a slow line |
+| Still lists `admin/` | old file still being served | Check `index-old.php` really is deleted |
 
-**To undo entirely:** rename the new file to anything, rename `index-old.php`
-back to `index.php`. You are exactly where you started, and nothing on your
-actual website was ever touched — this folder is a side door, not a page.
+**To undo:** there is no `-old` file to fall back to this time, on purpose. If
+you need the previous version it is one command away on your PC:
+
+```powershell
+git show HEAD~1:paste-into-your-site/agency-api.php > old-api.php
+```
+
+Nothing on your actual website is touched either way. `agency-api` is a side
+door with its own address — a visitor never reaches it and Google never indexes
+it.
 
 ---
 
-## What this does not do
+## What was actually at risk
 
-It does not change a single page of your website. It does not change how your
-site looks, loads or reads. `agency-api` is a separate folder with its own
-address that only the agency talks to; a visitor never reaches it and Google
-never indexes it.
+Straight answer, with the bit I can prove separated from the bit you should
+check yourself.
+
+**What I can prove:** your database credentials were never readable. Reads of
+`config/db.php` were refused even by the old file — I tested it against a copy
+of your file, not by reading the code. The listing exposed filenames, nothing
+more.
+
+**What you should check:** whether anything of ours ever wrote into `admin/`.
+Every write the agency makes is logged at the moment it happens, so the answer
+is one command:
+
+```powershell
+python -m coordination.changelog --all
+```
+
+Every line should be one of your real pages — `index.php`, `home.php`,
+something under `services/` or `blog/`, or `includes/header.php`. If you see
+`admin/` or `config/` anywhere in that list, tell me and I will put it back
+from the backup the server kept. I do not expect you to find one: nothing in
+the agency had a reason to go there, and the only path that reaches those
+folders is a page name typed by hand.
+
+What it would have cost if left alone is duller than a break-in: seventeen
+admin files in the change-watcher's queue, eating IT's entire daily allowance
+re-reading pages nobody was ever going to edit. That, and a rewrite landing
+somewhere it had no business being.

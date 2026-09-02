@@ -135,6 +135,86 @@ PAGE = "<html><head><title>x</title>\n</head><body>hi</body></html>"
 
 # ---------------------------------------------------------------------------
 
+def test_his_admin_panel_is_not_the_website():
+    """
+    Making the page listing walk the whole site was right, and it immediately
+    handed back seventeen files of his ADMIN PANEL and two CONFIG files holding
+    his database credentials.
+
+    Three separate faults, all found by actually calling the thing rather than
+    reading it:
+
+      1. The listing tested an exact filename match while reads and writes
+         tested the name at the end of a path — so config/db.php was correctly
+         refused for reading and cheerfully listed.
+      2. The folder skip list existed only in the listing. admin/login.php was
+         hidden from the list and still perfectly readable and writable.
+         Hidden is not protected.
+      3. Only token.txt was on the never-touch list, and /health tells him to
+         move his token INTO token.php. The one file we tell him to use was the
+         one file a write could replace — and a test write did replace it.
+
+    Nothing in a rankings report or a page rewrite has any business inside
+    admin/. This is the rule that says so, on our side of the wire as well as
+    his, because his server runs whatever copy he last uploaded by hand.
+    """
+    print("\nNot ours, and the reason says which rule caught it:")
+    for page, expect in (("admin/login.php", "inside admin/"),
+                         ("config/db.php", "inside config/"),
+                         ("config/config.php", "inside config/"),
+                         ("agency-api/token.php", "inside agency-api/"),
+                         ("blog/admin/notes.php", "inside admin/"),
+                         ("db.php", "it is configuration"),
+                         ("wp-config.php", "it is configuration"),
+                         ("../secrets.php", "climbs out")):
+        check(page, expect in S.not_ours(page), True)
+
+    print("\n...and his actual pages are untouched by the rule:")
+    for page in ("index.php", "home.php", "services/glass-partitions.php",
+                 "blog/pergola-costs.php", "includes/header.php",
+                 "contact.html"):
+        check(page, S.not_ours(page), "")
+
+    print("\nA server still running the OLD file cannot feed us his admin panel:")
+    site = _Site({"home.php": PAGE, "services/glass.php": PAGE,
+                  "admin/login.php": PAGE, "admin/dashboard.php": PAGE,
+                  "config/db.php": "<?php $pass='secret';"})
+    r = _with_site(site, lambda: S.pages(FULL))
+    check("only his pages come back",
+          sorted(x["page"] for x in r["pages"]),
+          ["home.php", "services/glass.php"])
+    check("counted matches what came back", r["counted"], 2)
+    print("  ...and it says what it dropped, rather than swallowing it:")
+    check("named", r["not_ours"],
+          ["admin/dashboard.php", "admin/login.php", "config/db.php"])
+
+    print("\nReading one is refused before the site is even called:")
+    before = len(site.calls)
+    r = _with_site(site, lambda: S.read_page("config/db.php", s=FULL))
+    check("refused", r["ok"], False)
+    check("and his credentials were never fetched", len(site.calls), before)
+
+    print("\nAnd the Releaser — the one agent allowed to write — is refused too:")
+    with _Cabinet():
+        r = _with_site(site, lambda: S.put_page(
+            "admin/dashboard.php", "<h1>x</h1>", agent="it-releaser", s=FULL))
+        check("refused", r["ok"], False)
+        check("the file is untouched", site.pages["admin/dashboard.php"], PAGE)
+        print("  ...and NOT queued for the owner — this is not his to approve:")
+        check("no queue entry", r.get("queued"), None)
+
+        r = _with_site(site, lambda: S.put_head_block(
+            "config/db.php", "lb", LB, agent="it-releaser", s=FULL))
+        check("no schema block into his config",
+              site.pages["config/db.php"], "<?php $pass='secret';")
+
+    print("\n...while a real page still goes through:")
+    with _Cabinet():
+        r = _with_site(site, lambda: S.put_page(
+            "services/glass.php", "<h1>glass</h1>", agent="it-releaser", s=FULL))
+        check("written", r["ok"], True)
+
+
 def test_the_two_setup_boxes_finally_lead_somewhere():
     """
     The setup screen has always saved SITE_API_BASE and SITE_API_TOKEN, and
@@ -790,7 +870,8 @@ def main():
 
 
 def _run_all():
-    for t in (test_the_two_setup_boxes_finally_lead_somewhere,
+    for t in (test_his_admin_panel_is_not_the_website,
+              test_the_two_setup_boxes_finally_lead_somewhere,
               test_only_the_releaser_may_change_the_site,
               test_running_it_every_night_leaves_one_copy,
               test_it_refuses_to_publish_the_placeholder_address,

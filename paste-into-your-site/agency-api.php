@@ -65,8 +65,66 @@ define('BACKUP_DIR', __DIR__ . '/backups');
 const ALLOWED_EXT = ['php', 'html', 'htm'];
 
 // Never, under any circumstances, even with a valid token.
+//
+// token.php is on this list now and it is the important addition. /health
+// tells you to move your token OUT of token.txt and INTO token.php, and only
+// token.txt was ever protected — so the file we tell you to use was the one
+// file a write could quietly replace, locking the agency out of your own site
+// until you went and looked at it by hand.
 const NEVER_TOUCH = ['agency-api/index.php', 'agency-api/token.txt',
+                     'agency-api/token.php', 'token.php',
                      '.htaccess', 'wp-config.php', 'config.php', 'db.php'];
+
+// Folders that are not the public website, and are therefore not the agency's
+// business — not to list, not to read, not to write. A visitor never loads
+// these; there is no version of "improve the site" that involves editing them.
+//
+// The first two are why this list exists. Walking the site turned up seventeen
+// files of the owner's ADMIN PANEL and two CONFIG files holding his database
+// credentials. Blocking a couple of filenames was never enough: rename
+// db.php to database.php and the old rule waved it through.
+//
+// The rest are folders that hold no pages at all — dependency trees, version
+// control, uploads, caches, static assets. Skipping them keeps the listing
+// honest and keeps a big media tree from turning one request into a minute of
+// disk walking.
+const OFF_LIMIT_DIRS = ['admin', 'config', 'private', 'logs', 'tmp',
+                        'agency-api', '.git', '.svn', 'node_modules', 'vendor',
+                        'wp-content', 'wp-includes', 'wp-admin', 'cache',
+                        'uploads', 'backups', 'assets', 'images', 'img',
+                        'fonts', 'css', 'js'];
+
+/**
+ * Is this page off limits? ONE rule, used by the listing and by every read and
+ * every write, because the two disagreeing is exactly what went wrong.
+ *
+ * The listing used to test in_array($rel, NEVER_TOUCH, true) — an exact match
+ * — while reads and writes tested the same name at the END of a path. So
+ * 'config/db.php' was correctly refused for reading and cheerfully LISTED,
+ * which put the owner's database credentials on a screen by name and dropped
+ * his admin panel into the change-watcher's queue.
+ *
+ * And the folder rule lived only in the listing, so admin/login.php was hidden
+ * from the list and still readable and writable to anyone holding the token.
+ * Hidden is not protected. Both halves are here now, in one function, so the
+ * door and the window cannot drift apart again.
+ */
+function is_forbidden(string $rel): bool {
+    foreach (NEVER_TOUCH as $forbidden) {
+        if (strcasecmp($rel, $forbidden) === 0
+            || str_ends_with(strtolower($rel), '/' . strtolower($forbidden))) {
+            return true;
+        }
+    }
+    // Any folder on the path, not just the first — blog/admin/notes.php is as
+    // much somebody's admin panel as admin/notes.php is.
+    $parts = explode('/', strtolower($rel));
+    array_pop($parts);                       // the filename is not a folder
+    foreach ($parts as $folder) {
+        if (in_array($folder, OFF_LIMIT_DIRS, true)) { return true; }
+    }
+    return false;
+}
 
 function reply(array $data, int $code = 200): void {
     http_response_code($code);
@@ -193,12 +251,7 @@ function resolve_page(string $raw): string {
         || strpos($rel, '\\') !== false || preg_match('#^[a-zA-Z]:#', $rel)) {
         fail(400, 'bad page name');
     }
-    foreach (NEVER_TOUCH as $forbidden) {
-        if (strcasecmp($rel, $forbidden) === 0
-            || str_ends_with(strtolower($rel), '/' . strtolower($forbidden))) {
-            fail(403, "$rel is off limits");
-        }
-    }
+    if (is_forbidden($rel)) { fail(403, "$rel is off limits"); }
     $ext = strtolower(pathinfo($rel, PATHINFO_EXTENSION));
     if (!in_array($ext, ALLOWED_EXT, true)) {
         fail(400, 'only .php, .html and .htm pages — nothing else');
@@ -316,9 +369,9 @@ if ($route === '/health' && $method === 'GET') {
 // — plus anything NEVER_TOUCH already forbids. The depth and count caps are
 // there so a site with a huge media tree cannot turn one request into a
 // minute of disk walking.
-const SKIP_DIRS = ['.git', '.svn', 'node_modules', 'vendor', 'wp-content',
-                   'wp-includes', 'wp-admin', 'cache', 'uploads', 'backups',
-                   'agency-api', 'assets', 'images', 'img', 'fonts', 'css', 'js'];
+// The folders to walk past are OFF_LIMIT_DIRS, defined up top with the rest of
+// the safety rules. The listing does not keep its own copy of that list any
+// more — a second copy is a second thing to forget to update.
 const MAX_PAGES = 400;
 const MAX_DEPTH = 4;
 
@@ -332,14 +385,14 @@ function list_pages(string $dir, string $prefix = '', int $depth = 0): array {
         $full = $dir . '/' . $name;
         $rel  = $prefix === '' ? $name : $prefix . '/' . $name;
         if (is_dir($full)) {
-            if (in_array(strtolower($name), SKIP_DIRS, true)) { continue; }
+            if (in_array(strtolower($name), OFF_LIMIT_DIRS, true)) { continue; }
             $out = array_merge($out, list_pages($full, $rel, $depth + 1));
             if (count($out) >= MAX_PAGES) { break; }
             continue;
         }
         $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
         if (!in_array($ext, ['php', 'html', 'htm'], true)) { continue; }
-        if (in_array($rel, NEVER_TOUCH, true)) { continue; }
+        if (is_forbidden($rel)) { continue; }
         $out[] = ['page' => $rel, 'bytes' => filesize($full),
                   'changed' => date('c', (int)filemtime($full))];
         if (count($out) >= MAX_PAGES) { break; }

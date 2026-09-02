@@ -207,6 +207,59 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# NOT OURS
+# ---------------------------------------------------------------------------
+#
+# His site has an admin panel and a config folder holding database credentials.
+# None of it is a page a visitor reads and none of it is the agency's business,
+# so this end refuses it too — not just the server end.
+#
+# Two reasons for the belt as well as the braces. The obvious one: the server
+# file only stops what it knows about, and it is a file he has to upload by
+# hand, so there is always a window where his server is running the old one.
+# The less obvious one, and the one that actually bit: a listing that includes
+# admin/ hands seventeen files to the change-watcher, which then spends the
+# sector's whole daily allowance re-reading pages nobody will ever edit.
+#
+# Kept deliberately in step with NEVER_TOUCH and OFF_LIMIT_DIRS in
+# paste-into-your-site/agency-api.php. If you add to one, add to the other.
+
+NOT_OURS_DIRS = {"admin", "config", "private", "logs", "tmp", "agency-api",
+                 ".git", ".svn", "node_modules", "vendor", "wp-content",
+                 "wp-includes", "wp-admin", "cache", "uploads", "backups",
+                 "assets", "images", "img", "fonts", "css", "js"}
+
+NOT_OURS_FILES = {"config.php", "db.php", "wp-config.php", ".htaccess",
+                  "token.php", "token.txt", "index.php"}
+
+
+def not_ours(page) -> str:
+    """
+    Why the agency must not touch this page — empty string if it may.
+
+    Returns the reason rather than True/False so a refusal can say which rule
+    caught it. 'admin/login.php is off limits' is a fact he can check; a bare
+    False is something he has to come and ask me about.
+    """
+    rel = str(page or "").strip().lstrip("/").replace("\\", "/")
+    if not rel:
+        return "no page named"
+    bits = [b.lower() for b in rel.split("/") if b not in ("", ".")]
+    if ".." in bits:
+        return f"{rel} climbs out of the website folder"
+    for folder in bits[:-1]:
+        if folder in NOT_OURS_DIRS:
+            return f"{rel} is inside {folder}/, which is not the website"
+    # index.php at the top level is his home page and perfectly ours; it is
+    # only off limits inside agency-api/, and the folder rule above has that.
+    if len(bits) > 1 and bits[-1] in NOT_OURS_FILES:
+        return f"{rel} is not a page — it is configuration"
+    if len(bits) == 1 and bits[-1] in (NOT_OURS_FILES - {"index.php"}):
+        return f"{rel} is not a page — it is configuration"
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # READ — anybody may
 # ---------------------------------------------------------------------------
 
@@ -215,10 +268,34 @@ def health(s=None) -> dict:
 
 
 def pages(s=None) -> dict:
-    return call("/pages", s=s)
+    """
+    What pages are on the site — his pages, not his server's insides.
+
+    The filter here is what keeps an old copy of agency-api.php on the server
+    from feeding admin/ and config/ into the watcher.
+    """
+    r = call("/pages", s=s)
+    if not r.get("ok") or not isinstance(r.get("pages"), list):
+        return r
+    keep, dropped = [], []
+    for row in r["pages"]:
+        name = row.get("page") if isinstance(row, dict) else row
+        (dropped if not_ours(name) else keep).append(name)
+    if dropped:
+        r = dict(r)
+        r["pages"] = [x for x in r["pages"]
+                      if (x.get("page") if isinstance(x, dict) else x) in keep]
+        r["counted"] = len(r["pages"])
+        # Named, not silently swallowed. If a page he expects to see is missing
+        # this line is where he finds out why.
+        r["not_ours"] = sorted(dropped)
+    return r
 
 
 def read_page(page, s=None) -> dict:
+    why = not_ours(page)
+    if why:
+        return {"ok": False, "page": page, "error": why}
     return call("/pages/" + urllib.parse.quote(page.lstrip("/")), s=s)
 
 
@@ -331,6 +408,13 @@ def put_head_block(page, block_id, html, agent=AGENT, s=None) -> dict:
     Idempotent by design: the endpoint wraps it in a marker comment, so the
     hundredth nightly run leaves exactly one copy and reports 'unchanged'.
     """
+    # Off-limits first, and it is NOT queued for the owner. A refusal on
+    # grounds of who you are means "ask him"; a refusal on grounds of what the
+    # file is means nobody may, including him via the approval queue.
+    why = not_ours(page)
+    if why:
+        return _log_write("head_block", page, agent,
+                          {"ok": False, "error": why}, block_id=block_id)
     refused = _may_write(agent)
     if refused:
         cid = board.queue_site_change(agent, "head_block",
@@ -355,6 +439,10 @@ def put_page(page, html, agent=AGENT, s=None, _action="page", _block="") -> dict
     read "took the viewport block back out of header.php" instead of the
     literally-true but useless "rewrote header.php".
     """
+    why = not_ours(page)
+    if why:
+        return _log_write(_action, page, agent,
+                          {"ok": False, "error": why}, block_id=_block)
     refused = _may_write(agent)
     if refused:
         cid = board.queue_site_change(agent, "page",
@@ -1240,6 +1328,18 @@ def main():
             return _say(r)
         for p in r["pages"]:
             print(f"   {p['page']:22} {p['bytes']:>8} bytes   {p['changed']}")
+        # Say what was left out, so a page he expects and cannot see has a
+        # visible reason rather than being quietly absent.
+        if r.get("not_ours"):
+            print(f"\n   walked past {len(r['not_ours'])} file(s) that are not "
+                  "the website — your admin panel, your config, and the like:")
+            for name in r["not_ours"][:12]:
+                print(f"     {name}")
+            if len(r["not_ours"]) > 12:
+                print(f"     ...and {len(r['not_ours']) - 12} more")
+            print("\n   These are still listed by your server, which means it "
+                  "is running the\n   old agency-api.php. See "
+                  "paste-into-your-site/RE-UPLOAD-agency-api.md.")
         return 0
     if a.read:
         r = read_page(a.read, s)
