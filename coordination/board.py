@@ -806,7 +806,26 @@ def next_open_task(sector, agent, skip=()):
 
 
 def finish_task(task_id, agent, result, status="done"):
-    """Only the owner may finish its own task."""
+    """
+    Only the owner may finish its own task.
+
+    AND THE ASKER IS TOLD. A task filed from a request carries
+    about='requests:<id>', and inbox.answer_when_done exists to close that
+    thread — but nothing called it, so every request a sector filed as work
+    stayed 'claimed' for ever, however completely the work was done.
+
+    That was not cosmetic. state.py scores a sector on
+
+        SELECT count(*) FROM requests WHERE to_sector=? AND status IN ('open','claimed')
+
+    so each ask became a permanent -5 no amount of work could clear, the
+    Overseer chased something that could never become true, and one ask was
+    charged twice — once as an unanswered thread and again as a board item.
+    Sectors sat at 2/100 while running cleanly.
+
+    Best-effort on purpose: telling the asker is a courtesy owed after the work,
+    and a failure here must never make a finished task look unfinished.
+    """
     with _conn() as c:
         cur = c.execute(
             "UPDATE tasks SET status=?, result=?, finished_at=?"
@@ -815,6 +834,16 @@ def finish_task(task_id, agent, result, status="done"):
         )
         if cur.rowcount != 1:
             raise PermissionError(f"{agent} does not own task {task_id}")
+
+    if status == "done":
+        try:
+            from . import inbox                    # local: inbox imports board
+            inbox.answer_when_done(
+                task_id, agent,
+                f"Done — {agent} finished the work this was filed as. "
+                f"Closing the thread.")
+        except Exception:
+            pass
 
 
 def withdraw_task(task_id, by, reason):

@@ -277,6 +277,49 @@ def test_finishing_a_filed_task_answers_the_original_asker():
         check("with the result", _thread(rid)[-1]["body"], "Done — schema is on all six.")
 
 
+def test_finishing_the_task_closes_the_thread_without_being_asked_to():
+    """
+    The test above proves answer_when_done WORKS. This one proves it RUNS.
+
+    It did not. The function existed, was tested, and was called from nowhere
+    in the whole codebase, so a filed request stayed 'claimed' for ever however
+    completely the work was done. state.py counts open AND claimed as
+    unanswered, so every ask became a permanent penalty no work could clear:
+    sectors sat at 2/100 while running cleanly, and the Overseer chased threads
+    that could never come right.
+
+    So this asserts the wiring, not the helper — finish_task is called the way
+    an ordinary pipeline calls it, and nothing else.
+    """
+    print("\nFinishing the work is what answers the asker — no extra call:")
+    with _Cabinet():
+        rid = board.post_request("SEO", "IT", "Add the schema", "six pages")
+        inbox.work_the_inbox("IT", "it-watcher")
+        tid = _open_tasks("IT")[0]["id"]
+
+        board.claim_task(tid, "it-fixer")
+        check("still waiting while the work is in hand", _status(rid), "claimed")
+        check("and the Overseer can see that", len(inbox.unanswered("IT")), 0)
+
+        board.finish_task(tid, "it-fixer", {"pages": 6})     # the only call
+
+        check("the thread closes on its own", _status(rid), "closed")
+        check("the asker is told who did it", "it-fixer" in _thread(rid)[-1]["body"], True)
+        check("and it no longer scores against the sector",
+              len(inbox.unanswered("IT")), 0)
+
+
+def test_an_unfinished_task_leaves_the_thread_alone():
+    print("\nBut a task that failed or was blocked answers nobody yet:")
+    with _Cabinet():
+        rid = board.post_request("SEO", "IT", "Add the schema", "six pages")
+        inbox.work_the_inbox("IT", "it-watcher")
+        tid = _open_tasks("IT")[0]["id"]
+        board.claim_task(tid, "it-fixer")
+        board.finish_task(tid, "it-fixer", {"why": "no access"}, status="blocked")
+        check("a blocked task does not claim to have answered", _status(rid), "claimed")
+
+
 def test_a_task_that_did_not_come_from_a_request_answers_nobody():
     print("\nAnd it does not invent a thread for ordinary work:")
     with _Cabinet():
