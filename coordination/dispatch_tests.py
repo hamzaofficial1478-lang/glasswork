@@ -79,6 +79,41 @@ def _desk_tests():
     check("'contact nobody' does not make it an outreach task",
           desks.best_desk(hunt, "Leads")[0], "leads-hunter")
 
+    print("\nA sector can never be left with a task no desk will take:")
+    # THIS JAMMED THE OWNER'S LEADS SECTOR FOR DAYS.
+    #
+    # SEO asked Leads a question; Leads' inbox filed the question as work. SEO's
+    # own wording mentioned what customers say when they REPLY, and every Leads
+    # collector has 'reply' on its never list. So every desk refused a task that
+    # asked nobody to reply to anything. It was the ONLY task on the Leads
+    # board, the collectors work from the board, and the result was no leads
+    # collected at all — outreach then failed with "no leads on file".
+    #
+    # A never word in the DETAIL is context, so it is a signal now, not a veto.
+    # In the TITLE it is still absolute: that is the instruction.
+    asked = {"title": "No customer wording on file yet",
+             "detail": "The strongest signal is the words customers use when "
+                       "they reply. There is nothing on file to read."}
+    takers = [d for d in desks.sector_desks("Leads") if desks.can(d, asked)]
+    check("somebody in the sector can take it", bool(takers), True)
+    check("and the Hunter is not the one who wants it",
+          desks.verdict("leads-hunter", asked)["score"], 0)
+    check("the desk that does deal with replies ranks top",
+          max(desks.sector_desks("Leads"),
+              key=lambda d: desks.verdict(d, asked)["score"]), "leads-responder")
+
+    print("\nBut the instruction itself is still an absolute refusal:")
+    check("the Hunter may not be TOLD to reply",
+          desks.can("leads-hunter", {"title": "Reply to that lead", "detail": ""}),
+          False)
+    check("and the Watcher may not be TOLD to deploy",
+          desks.can("it-watcher", {"title": "Deploy the new build", "detail": ""}),
+          False)
+    check("a desk that positively wants the work still outranks one that does not",
+          desks.best_desk({"title": "Find leads in Al Quoz",
+                           "detail": "do not reply to any of them"}, "Leads")[0],
+          "leads-hunter")
+
     print("\nA named desk is a decision, not a hint:")
     named = dict(fix, desk="it-releaser")
     check("the named desk gets it", desks.can("it-releaser", named), True)

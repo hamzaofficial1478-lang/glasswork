@@ -140,7 +140,20 @@ check("the real file that could not be pushed now can",
       run("mcp__github__push_files",
           {"branch": "claude/some-feature",
            "files": [{"path": "coordination/board.py",
-                      "content": open("/home/user/glasswork/coordination/board.py").read()}]}),
+                      # Relative to this file, and utf-8 named outright. It was
+                      # written as an absolute /home/user/glasswork/... path,
+                      # which is one developer's sandbox: it passes there and on
+                      # any machine that happens to share the layout, and cannot
+                      # work anywhere else. On the owner's Windows box it took
+                      # the whole suite down — and a red suite stops the IT
+                      # Releaser shipping, so a hardcoded path in a TEST was
+                      # holding every real change off his website.
+                      #
+                      # The encoding is not optional either: board.py has
+                      # em-dashes in it, and open() on Windows defaults to
+                      # cp1252, which cannot decode them.
+                      "content": (Path(__file__).parents[1] / "coordination"
+                                  / "board.py").read_text(encoding="utf-8")}]}),
       ALLOW)
 
 # TRUNK is the branch a release hangs off; GITP the command that puts work there.

@@ -362,10 +362,47 @@ def verdict(desk, task) -> dict:
     # 3. The title was silent. Now the detail counts, at a third of the weight —
     #    enough to break a tie between two indifferent desks, not enough to
     #    outrank a desk the title actually named the work of.
+    #
+    #    AND A FORBIDDEN WORD DOWN HERE IS A SIGNAL, NOT A VETO.
+    #
+    #    The rule above says it plainly: the title is the instruction, the
+    #    detail is context. The `does` side already honours that — a match in
+    #    the detail earns a third of the credit. The `never` side did not: a
+    #    single word anywhere in the context refused the desk outright, exactly
+    #    as hard as if the task had asked for it. That asymmetry jammed a whole
+    #    sector on the owner's machine.
+    #
+    #    What happened: SEO asked Leads a question, and Leads' inbox filed the
+    #    question as work. SEO's own wording mentioned what customers say when
+    #    they REPLY. Every Leads collector has 'reply' on its never list — a
+    #    hunter must not write to a lead — so every desk refused a task that
+    #    asked nobody to reply to anything. It was the only task on the Leads
+    #    board, the collectors work from the board, and so no lead was
+    #    collected at all: outreach then failed with "no leads on file".
+    #
+    #    This is the third time this codebase has met the same trap. The
+    #    Watcher was once refused a read-only check because the sentence
+    #    FORBIDDING a fix contained the word "fix" — that is the incident the
+    #    rule above was written for. The red-line hook learned it twice more,
+    #    on "produced"/"product" and on a warning refused for carrying the
+    #    warning. Its note applies here word for word: a rule that cries wolf
+    #    on ordinary work is a rule that gets switched off.
+    #
+    #    Safe, because this decides WHO CLAIMS A TASK and nothing else. The
+    #    real red lines are enforced where the work happens — the hook refuses
+    #    the command, _may_write refuses the write, and only the Releaser holds
+    #    the door to production. A desk claiming a task it cannot act on gets
+    #    stopped there, in the one place that can actually see what it is doing.
+    #
+    #    The invariant this protects: a task must never be unclaimable by every
+    #    desk in its sector. That is not a preference, it is the difference
+    #    between a slow board and a stopped one.
     bad = _hits(detail, sp["never"])
     if bad:
-        return {"desk": d, "allowed": False, "score": 0, "named": False,
-                "why": f"this desk never does {bad[0]!r} — {sp['never_why']}"}
+        return {"desk": d, "allowed": True, "score": 0, "named": False,
+                "why": (f"the detail mentions {bad[0]!r}, which this desk never "
+                        f"does — {sp['never_why']}. Taking it only if no better "
+                        "desk does, since nothing in the instruction asks for it")}
     good = _hits(detail, sp["does"])
     if good:
         return {"desk": d, "allowed": True, "score": 3 * len(good), "named": False,
