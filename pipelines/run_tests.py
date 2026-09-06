@@ -533,7 +533,33 @@ def _lane_tests(day_run):
     # is the owner's actual requirement — "if an agent is taking more time it
     # should be put into the other line so it doesn't hold up the others" — and
     # it is a fact about the interleaving, not about how fast the machine is.
-    slow_running, during = [False], set()
+    #
+    # "still going" means the slow step has not finished — not that it has
+    # already started. The slow step and the fast lanes are all released by the
+    # same event (the 'open' lane closing), so a fast step that pips it by a
+    # millisecond is thread jitter, not a lane failing to overlap, and counting
+    # that as a miss would make this flaky in the other direction. That two
+    # things genuinely ran at once is proved by `peak` a few lines down.
+    slow_over, during = [False], set()
+
+    # AND THE SLOW STEP IS NOT ON A STOPWATCH EITHER.
+    #
+    # It used to sleep a flat 0.30s while the other lanes did 0.02s each, and
+    # then the test asserted all six IT steps had got through. That is a
+    # stopwatch wearing a disguise: six steps inside 300ms is a claim that the
+    # machine adds under 30ms of database writing and file opening per step.
+    # A Windows box with a virus scanner on the repo does not, and the check
+    # failed there on a run where the lanes were behaving perfectly.
+    #
+    # So the slow step now stops when the other lanes have overtaken it —
+    # which IS the property under test — and only gives up on the clock at a
+    # ceiling no merely slow machine can reach. If lanes ever stop overlapping,
+    # nothing sets the event, the ceiling expires, and the check below fails
+    # for the real reason instead of for the hardware.
+    overtaken = threading.Event()
+    must_pass = ({day_run.STEPS[i][1] for i in plan["it"]}
+                 | {day_run.STEPS[i][1] for i in plan["leads"]})
+    SLOW_CEILING = 8.0
 
     # A FAKE Popen, NOT A FAKE run(). The step runner used subprocess.run,
     # which blocks until the child is finished — and that is precisely what
@@ -543,14 +569,13 @@ def _lane_tests(day_run):
     class _Fake:
         def __init__(self, mod, sink):
             self.mod, self.sink, self.returncode = mod, sink, None
-            self.dur = 0.30 if mod == slow else 0.02
+            self.dur = 0.02
             self.t0 = time.time()
+            self.ceiling = self.t0 + SLOW_CEILING
             with lock:
                 started.append(mod)
                 live[0] += 1
                 peak[0] = max(peak[0], live[0])
-                if mod == slow:
-                    slow_running[0] = True
 
         def _finish(self, code=0):
             if self.returncode is not None:
@@ -563,12 +588,24 @@ def _lane_tests(day_run):
             with lock:
                 live[0] -= 1
                 if self.mod == slow:
-                    slow_running[0] = False
-                elif slow_running[0]:
+                    slow_over[0] = True
+                elif not slow_over[0]:
                     during.add(self.mod)
+                    if must_pass <= during:
+                        overtaken.set()
             return code
 
         def wait(self, timeout=None):
+            if self.mod == slow:
+                # Held open until the other lanes have got past it, or until
+                # the ceiling says they never will.
+                left = self.ceiling - time.time()
+                hop = left if timeout is None else min(timeout, left)
+                if hop > 0 and overtaken.wait(timeout=hop):
+                    return self._finish()
+                if time.time() >= self.ceiling:
+                    return self._finish()
+                raise subprocess.TimeoutExpired(self.mod, timeout)
             left = self.dur - (time.time() - self.t0)
             if left <= 0:
                 return self._finish()
