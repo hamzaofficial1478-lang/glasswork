@@ -497,22 +497,48 @@ def run(agent="leads-hunter", segment=None, area=None, limit=20, per_segment=1,
 PLACES_PAGE = 20
 MOST_SEARCHES = 12
 
+# How much of one page of search results survives to become a NEW stored lead.
+#
+# The old sizing assumed all of it — twenty results, twenty leads — and that is
+# not what happens. Three filters run in series afterwards and they multiply:
+# already in the cabinet, closed down, no way to contact them. On a segment
+# that has been swept once already, most of a page is businesses we collected
+# last week.
+#
+# A third is the honest figure from what the cabinet actually stores per pass,
+# and it is deliberately a floor rather than an average: sizing a hunt on an
+# optimistic yield is how you ask for twenty and stop after finding six.
+FOUND_PER_PAGE = PLACES_PAGE / 3.0
+
 
 def _sized(wanted, limit, max_searches):
     """
     Turn "find 20 leads" into a page size and a number of searches.
 
-    Twenty is one page. Sixty is three. Not every result becomes a stored lead
-    — most are duplicates or get screened out — so the searches are rounded up
-    rather than down, and capped, because a job typed as "500" is a typo and
-    not a mandate to spend the month's Places budget in one pass.
+    ASKING FOR MORE USED TO GET YOU LESS. The old sum floored the search count
+    at max_searches only while `wanted` fitted in a single page, and at ONE
+    above it:
+
+        ask for 20  ->  6 searches
+        ask for 30  ->  2 searches
+        ask for 40  ->  2 searches
+
+    So "find 30 leads this week" ran a third of the hunt that "find 20" ran,
+    and a Leads sector that looked lazy was doing exactly what it was told.
+    Nothing in the output said so, because a hunt that runs two searches and
+    finds four businesses reports four businesses, not a budget it never had.
+
+    The floor is now the floor in both directions, and the target is divided by
+    what a page really yields rather than by the page size. Still capped: a job
+    typed as "500" is a typo, not a mandate to spend the month's Places budget
+    in one pass.
     """
     if not wanted:
         return limit, max_searches
     wanted = max(1, int(wanted))
     page = min(PLACES_PAGE, wanted)
-    searches = min(MOST_SEARCHES, -(-wanted // PLACES_PAGE))
-    return page, max(max_searches if wanted <= PLACES_PAGE else 1, searches)
+    needed = -(-wanted // int(FOUND_PER_PAGE))     # round up
+    return page, min(MOST_SEARCHES, max(max_searches, needed))
 
 
 EMIRATES = tuple(uae.EMIRATES)

@@ -729,6 +729,45 @@ def test_locals_come_first():
     check("the search plan starts local", t[0]["area"], "Business Bay")
 
 
+def test_asking_for_more_does_not_get_you_less():
+    """
+    "find 20 leads" ran six searches. "find 30 leads" ran two.
+
+    The floor was applied only while the target fitted inside one page of
+    results, and dropped to ONE above it — so raising the ask shrank the hunt
+    to a third of its size. Nothing in the output could show it: a hunt given
+    two searches finds what two searches find and reports that honestly.
+
+    Two properties, and the first is the one that bit:
+      - more asked for is never fewer searches, at any target;
+      - the target is divided by what a page actually YIELDS, not by the page
+        size, because most of a page is already in the cabinet by the second
+        sweep of a segment.
+    """
+    from . import leads_hunt as lh
+    print("\nMore asked for is never fewer searches:")
+    asks = [1, 5, 10, 20, 21, 25, 30, 40, 60, 80, 100, 200, 500]
+    sizes = [lh._sized(n, 20, 6)[1] for n in asks]
+    drops = [(a, b) for a, b, sa, sb in zip(asks, asks[1:], sizes, sizes[1:])
+             if sb < sa]
+    check("no ask is punished for being bigger", drops, [])
+    check("the old cliff at 21 is gone — 30 gets at least what 20 got",
+          lh._sized(30, 20, 6)[1] >= lh._sized(20, 20, 6)[1], True)
+
+    print("\nThe floor holds and the ceiling holds:")
+    check("a small ask still gets the standing budget", lh._sized(5, 20, 6)[1], 6)
+    check("nothing asked for keeps the caller's own numbers",
+          lh._sized(None, 20, 6), (20, 6))
+    check("a typo does not spend the month's budget",
+          lh._sized(5000, 20, 6)[1], lh.MOST_SEARCHES)
+
+    print("\nA bigger ask really does buy a bigger hunt:")
+    check("60 needs more searching than 20",
+          lh._sized(60, 20, 6)[1] > lh._sized(20, 20, 6)[1], True)
+    check("...and the page never exceeds what one search returns",
+          max(lh._sized(n, 20, 6)[0] for n in asks), lh.PLACES_PAGE)
+
+
 def main():
     with _store.isolated():
         _main()
@@ -746,6 +785,7 @@ def _main():
     test_the_hunt_spreads_across_the_market()
     test_hunting_for_one_service()
     test_locals_come_first()
+    test_asking_for_more_does_not_get_you_less()
     test_hunt_without_a_key_explains_itself()
     test_hunt_stores_screens_and_dedupes()
     test_never_collected_twice()

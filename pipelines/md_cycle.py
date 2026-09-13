@@ -388,10 +388,52 @@ def _who_should_act(item):
 # REASON — turn facts into candidate work. Each carries the fact behind it.
 # ---------------------------------------------------------------------------
 
+# Jobs that go ahead on the SUGGESTED number when the owner has set none.
+#
+# THIS IS WHY LEADS AND CONTENT PRODUCED NOTHING, EVERY RUN, IN SILENCE.
+#
+# The plan posts a Leads task only when the leads target has a per_day above
+# zero, and the same for Content and posts. A target the owner has never opened
+# Setup and typed a number into reads per_day = 0. So:
+#
+#   MD posts no Leads task -> the board is empty -> the collectors say
+#   "Nothing open on the Leads board. This desk works from the board, never on
+#   its own initiative." -> they EXIT 0 -> the day run records a clean pass.
+#
+# Every part of that is behaving exactly as designed and the result is a sector
+# that has never once collected a lead. Worse, targets.py has carried a
+# `suggested` number for each of these since it was written — leads 20, posts 1
+# — sitting one field away from the check that was reading zero.
+#
+# Collecting and drafting are safe to start on their own: a collected lead
+# contacts nobody (Security clears it first, then Outreach, separately), and a
+# drafted page goes to the owner's queue, not to the website.
+#
+# MAILS IS DELIBERATELY NOT ON THIS LIST. It is the one number that can do
+# permanent damage — targets.py says so itself: "A young domain pushing volume
+# gets filed as spam for good, and that takes every future lead with it." A
+# suggested 10 is a suggestion to HIM, never a default the agency grants itself.
+# Nothing is emailed until he sets that number by hand.
+SELF_STARTING = ("leads", "posts", "site_checks")
+
+
 def _target(facts, name):
+    """
+    Where a job stands — and, when the owner has set no number, the suggested
+    one, marked as suggested so the task can say whose idea it was.
+    """
     for j in (facts.get("targets") or {}).get("jobs") or []:
-        if j["name"] == name:
+        if j["name"] != name:
+            continue
+        if j.get("per_day") or j.get("set_by_owner") or name not in SELF_STARTING:
             return j
+        proposed = int(j.get("suggested") or 0)
+        if not proposed:
+            return j
+        done = int(j.get("done_today") or 0)
+        return {**j, "per_day": proposed,
+                "remaining": max(0, proposed - done),
+                "on_suggestion": True}
     return {}
 
 
@@ -433,10 +475,30 @@ def _counted_job(sector, job, tgt, folded, title, how) -> dict:
     elif not on_file:
         where += " Nothing on file yet, so this is the first real batch."
 
+    # Say whose number this is. A sector working to a figure the owner never
+    # typed should be honest that it picked the figure itself, and say where he
+    # changes it \u2014 otherwise the first he knows of it is twenty leads appearing.
+    suggested = bool(tgt.get("on_suggestion"))
+    if suggested:
+        where += (f" Nobody has set a number for this, so the agency is working "
+                  f"to the suggested {per}. Setup \u2192 Targets changes it, and "
+                  f"setting it to 0 stops this job entirely.")
+
     detail = how + "\n\n" + where
     if owner_said:
         detail = (f"The owner asked for this in his own words:\n"
                   f"    \u201c{owner_said[1]}\u201d\n\n" + detail)
+
+    if owner_said:
+        evidence = (f"owner asked for {per} {_unit(tgt, job, per)} today, "
+                    f"{done} so far, {yday} yesterday, {on_file} on file")
+    elif suggested:
+        evidence = (f"no {job} target set, so the suggested {per} "
+                    f"{_unit(tgt, job, per)} applies \u2014 {done} so far, "
+                    f"{yday} yesterday, {on_file} on file")
+    else:
+        evidence = (f"owner asked for {per} {_unit(tgt, job, per)} today, "
+                    f"{done} so far, {yday} yesterday, {on_file} on file")
 
     return {"sector": sector, "risk": "green",
             # His own order outranks the MD's own scheduling, so a folded task
@@ -444,8 +506,7 @@ def _counted_job(sector, job, tgt, folded, title, how) -> dict:
             "urgency": 1 if owner_said else 4,
             "title": (f"Owner's order: {owner_said[1][:60]}" if owner_said else title),
             "detail": detail,
-            "evidence": (f"owner asked for {per} {_unit(tgt, job, per)} today, "
-                         f"{done} so far, {yday} yesterday, {on_file} on file")}
+            "evidence": evidence}
 
 
 def plan(facts: dict) -> list:
@@ -581,7 +642,30 @@ def plan(facts: dict) -> list:
 # ---------------------------------------------------------------------------
 
 # What each sector needs on the shelf before its work can possibly succeed.
-NEEDS = {"Leads": "maps"}
+#
+# THIS WAS {"Leads": "maps"}, AND IT IS THE SECOND REASON LEADS NEVER PRODUCED.
+#
+# With no Google Places key the Critic rejected every Leads task as "doomed for
+# want of a key" — before the task ever reached the board. So even once the
+# target was set, the sector stayed empty, and the rejection read like the
+# system being careful rather than the system being wrong.
+#
+# It was wrong. Leads has needed no key since the OpenStreetMap path was added:
+# 'Leads collects from OpenStreetMap' is a step in the day run, it asks for
+# nothing on the shelf, and on a plain run here it collected 18 real UAE
+# businesses with contact routes. leads_hunt's own no-key message has said so
+# in as many words for months — "you do not need one to get leads" — while this
+# line went on cancelling the work that message was pointing at.
+#
+# Places is an upgrade, not a prerequisite: it carries opening hours, ratings
+# and categories OSM does not. An upgrade belongs in the output of a hunt that
+# ran, not in a gate that stops it running.
+#
+# The mechanism stays — a proposal can still name the shelf it genuinely cannot
+# run without, via its own `needs`. What is gone is the standing assumption
+# about a whole sector. Third time this codebase has met this trap: a rule that
+# cries wolf on ordinary work is a rule that stops the work.
+NEEDS = {}
 
 
 def critic_check(candidates: list, facts: dict) -> tuple:

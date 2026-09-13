@@ -138,12 +138,36 @@ def test_amber_work_goes_to_the_owner_not_the_board():
 
 
 def test_impossible_work_is_not_posted():
-    print("Work that would fail the moment it ran:")
+    """
+    Work that would fail the moment it ran is refused — but ONLY work that
+    would actually fail.
+
+    This check used to say the opposite of what it says now: that collecting
+    leads without a Google Places key was doomed and must not be posted. That
+    was the standing assumption in NEEDS, and it cancelled every Leads task the
+    MD ever wrote on a machine with no key. It was not true. The OpenStreetMap
+    step needs nothing on the shelf and collected 18 real UAE businesses on a
+    plain run, and leads_hunt's own no-key message has said "you do not need
+    one to get leads" the whole time.
+
+    So the first half guards the fix, and the second half keeps the safeguard
+    the fix did not touch: a task that names a shelf it truly cannot run
+    without is still refused, and the refusal still names the shelf.
+    """
+    print("A missing maps key does NOT stop leads being collected:")
     facts = {"missing": ["maps"], "open_titles": set(), "recent_failures": []}
-    doomed = [{"sector": "Leads", "title": "Collect today's leads", "detail": "d",
+    collecting = [{"sector": "Leads", "title": "Collect today's leads",
+                   "detail": "d", "evidence": "owner asked for 20 leads today"}]
+    kept, rejected = MD.critic_check(collecting, facts)
+    check("the task reaches the board", len(kept), 1)
+    check("and nothing was rejected for a key", rejected, [])
+
+    print("\n...but work that really does need an empty shelf is refused:")
+    doomed = [{"sector": "Leads", "title": "Rank today's leads by map distance",
+               "detail": "d", "needs": "maps",
                "evidence": "owner asked for 20 leads today"}]
     kept, rejected = MD.critic_check(doomed, facts)
-    check("no maps key -> not posted", kept, [])
+    check("not posted", kept, [])
     check("and the reason names the empty shelf", "maps" in rejected[0]["why"], True)
 
 
@@ -231,12 +255,17 @@ def test_the_sector_can_actually_claim_what_the_md_posted():
     try:
         _issue(board.DB, "critical")
         out = MD.run()
-        it_task = next((p for p in out["posted"] if p["sector"] == "IT"), None)
-        check("an IT task was posted", bool(it_task), True)
+        it_posted = [p for p in out["posted"] if p["sector"] == "IT"]
+        check("an IT task was posted", bool(it_posted), True)
 
         claimed = board.next_open_task("IT", "it-watcher")
         check("the IT Watcher can claim it", bool(claimed), True)
-        check("and it is the MD's task", claimed["id"], it_task["task_id"])
+        # Which one it picks is the dispatcher's call — it ranks by urgency, and
+        # IT can hold more than one task now that the daily diagnostic starts on
+        # its own. The property here is the handover: what the Watcher picks up
+        # came from the MD.
+        check("and it is one of the MD's tasks",
+              claimed["id"] in [p["task_id"] for p in it_posted], True)
         check("the evidence travelled with it",
               "[MD evidence]" in (claimed["detail"] or ""), True)
         check("it is credited to the MD", claimed["created_by"], "MD")
@@ -281,7 +310,23 @@ def test_the_card_measures_management_not_just_outcome():
 
         _issue(board.DB, "critical")
         targets.set_target("site_checks", 1)
-        MD.run()
+        # Collecting and writing now start on their own suggested numbers when
+        # nobody has set one — which is what finally got leads out of the
+        # Leads sector. This check is about a SMALL plan not being dressed up
+        # as a percentage, so switch those two off the way the owner would, and
+        # keep the two-task sample the check was written for. Setting a target
+        # to 0 is recorded as his choice, so it stops the job outright.
+        targets.set_target("leads", 0)
+        targets.set_target("posts", 0)
+        # Staged, for the same reason as in test_the_owner_outranks_the_md: no
+        # real sector is key-blocked any more, and the measure below is about
+        # how the card TREATS a blocked sector, not about which one it is.
+        real_needs = MD.NEEDS
+        MD.NEEDS = {"Leads": "maps"}
+        try:
+            MD.run()
+        finally:
+            MD.NEEDS = real_needs
         card = scorecard.build()
         check("it counts the cycle", card["cycles_run"], 1)
         check("grounding is measured against what the Critic threw out",
@@ -420,13 +465,25 @@ def test_the_owner_outranks_the_md():
               any("Owner's order" in p["title"] for p in out["posted"]), True)
 
         # an order that cannot run is NEWS, not a quiet rejection
+        #
+        # Leads no longer needs a key for anything — the OpenStreetMap path
+        # collects without one, and the standing assumption that it could not
+        # was itself starving the sector. So the blocking is staged here rather
+        # than borrowed from a real sector: what is under test is the MECHANISM
+        # (a shelf a task genuinely cannot run without stops it, loudly), not
+        # the claim that Leads is the sector it applies to.
         board.DB = targets.DB = _fresh_db()
-        P.set_orders("Leads", "focus on Sharjah hotels today")
-        out = MD.run()
-        check("a blocked order is surfaced, not binned",
-              len(out.get("owner_blocked") or []), 1)
-        check("in words the owner will notice",
-              "CANNOT RUN" in out["summary"], True)
+        real_needs = MD.NEEDS
+        MD.NEEDS = {"Leads": "maps"}
+        try:
+            P.set_orders("Leads", "focus on Sharjah hotels today")
+            out = MD.run()
+            check("a blocked order is surfaced, not binned",
+                  len(out.get("owner_blocked") or []), 1)
+            check("in words the owner will notice",
+                  "CANNOT RUN" in out["summary"], True)
+        finally:
+            MD.NEEDS = real_needs
     finally:
         board.DB, targets.DB = real_b, real_t
 
@@ -614,6 +671,81 @@ def test_the_wording_is_right_for_one():
     check("singular", "asked for 1 post today" in d["evidence"], True)
 
 
+def test_a_sector_is_never_starved_by_a_number_nobody_set():
+    """
+    THE REASON LEADS AND CONTENT NEVER PRODUCED ANYTHING.
+
+    Proven on a real run, not read out of the code. With an empty board the
+    collector says:
+
+        "Nothing open on the Leads board. This desk works from the board,
+         never on its own initiative."
+
+    and exits 0, so the day records a clean pass. The board was empty because
+    the MD posts a collection task only when the leads target has a per_day
+    above zero, and a target the owner has never typed a number into is zero.
+    targets.py has carried a suggested 20 since it was written, one field away
+    from the check that was reading the zero.
+
+    With a task on the board the same pipeline collected 18 real UAE leads from
+    OpenStreetMap in one pass. Nothing was broken. Nothing was ever asked.
+
+    MAILS IS THE EXCEPTION AND STAYS THE EXCEPTION. Collecting contacts nobody;
+    sending can burn the domain permanently. A suggested 10 mails is a
+    suggestion to him, never a default the agency grants itself.
+    """
+    print("\nNo targets set at all — the sectors still get work:")
+    unset = {"jobs": [
+        {"name": "leads", "unit": "leads", "per_day": 0, "set_by_owner": False,
+         "suggested": 20, "done_today": 0, "done_yesterday": 0, "on_file": 0,
+         "remaining": 0},
+        {"name": "posts", "unit": "posts", "per_day": 0, "set_by_owner": False,
+         "suggested": 1, "done_today": 0, "done_yesterday": 0, "on_file": 0,
+         "remaining": 0},
+        {"name": "mails", "unit": "mails", "per_day": 0, "set_by_owner": False,
+         "suggested": 10, "done_today": 0, "done_yesterday": 0, "on_file": 0,
+         "remaining": 0},
+    ]}
+    facts = {"targets": unset, "sector_orders": {}, "site": {},
+             "proposals": [], "source_map_done": True, "approvals": 0}
+    got = MD.plan(facts)
+    leads = [c for c in got if c["sector"] == "Leads"]
+    content = [c for c in got if c["sector"] == "Content"]
+    check("Leads is given something to collect", len(leads), 1)
+    check("Content is given something to write", len(content), 1)
+
+    print("  ...and each says whose number it is working to:")
+    check("the task admits nobody set it",
+          "no leads target set" in leads[0]["evidence"], True)
+    check("and says where he changes it",
+          "Setup" in leads[0]["detail"], True)
+    check("and that zero switches it off",
+          "0 stops this job" in leads[0]["detail"], True)
+
+    print("\nMail is NOT started on a suggestion — it can burn the domain:")
+    everything = " ".join((c["title"] + c["detail"]).lower() for c in got)
+    check("nothing was posted to send mail",
+          any(w in everything for w in ("send the", "email them", "outreach email")),
+          False)
+    from pipelines import md_cycle
+    check("mails is deliberately off the self-starting list",
+          "mails" in md_cycle.SELF_STARTING, False)
+
+    print("\nA number he DID set is his, in both directions:")
+    his = {"jobs": [dict(j) for j in unset["jobs"]]}
+    his["jobs"][0].update(per_day=5, remaining=5, set_by_owner=True)
+    his["jobs"][1].update(per_day=0, remaining=0, set_by_owner=True)   # switched off
+    facts = {**facts, "targets": his}
+    got = MD.plan(facts)
+    lead_task = [c for c in got if c["sector"] == "Leads"][0]
+    check("his 5 is used, not the suggested 20",
+          "5 leads" in lead_task["evidence"], True)
+    check("and it is not described as a suggestion",
+          "no leads target set" in lead_task["evidence"], False)
+    check("a target he set to 0 stays off",
+          [c for c in got if c["sector"] == "Content"], [])
+
+
 def main():
     with _store.isolated():
         _main()
@@ -625,6 +757,7 @@ def _main():
     test_an_empty_yesterday_is_called_out_rather_than_buried()
     test_an_order_with_no_number_stays_its_own_task()
     test_the_wording_is_right_for_one()
+    test_a_sector_is_never_starved_by_a_number_nobody_set()
     test_two_minds_on_the_allocation()
     test_security_clearance_fails_safe()
     test_the_sector_proposal_queue()
