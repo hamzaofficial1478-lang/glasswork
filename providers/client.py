@@ -204,6 +204,18 @@ def chat(cred, model, messages, max_tokens=512, timeout=180, extra=None,
     owner watched CHECK EVERYTHING take over fifteen minutes, and this was a
     good part of why. See preflight._ModelCache.
     """
+    # A LOCAL MODEL IS STILL A MODEL. It has no URL, no key and no headers, so
+    # it cannot go through _execute — but it returns the same shape, and every
+    # caller above here (the cascade, the load ladder, the failover trail, the
+    # usage counter) is unchanged because of that.
+    # Imported here, not at the top: providers/__init__ pulls in this module,
+    # so a package-level import would make `python -m providers.local_cli`
+    # warn about being loaded twice — which looks like a fault on a command he
+    # is meant to run.
+    from . import local_cli
+    if local_cli.is_local(cred):
+        return local_cli.chat(cred, model, messages,
+                              max_tokens=max_tokens, timeout=timeout)
     url, headers, body = build_chat_request(cred, model["api_model_id"], messages, max_tokens, extra)
     res = _execute(cred, url, headers, body, timeout, tries=tries)
     res["output"] = _content_text(res["text"]) if res["ok"] else ""
@@ -253,6 +265,15 @@ def probe_model(cred, model, timeout=120, tries=1):
         caps["chat"] = bool(res["ok"])
         result = {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
                   "output": res.get("output", ""), "raw": res["raw"]}
+        # A LOCAL MODEL IS TEXT IN, TEXT OUT. The image probe sends a data: URI
+        # inside the message content; local_cli keeps the text parts and drops
+        # the picture, so the model would answer "white" from the wording alone
+        # and the shelf would record vision it has not got. Claimed-but-absent
+        # is worse than absent: something later routes an image at it.
+        from . import local_cli
+        if local_cli.is_local(cred):
+            caps["multimodal"] = False
+            return {"capabilities": caps, "detect": diag, "test": result}
         if res["ok"] and caps.get("multimodal") is None:  # Vision = an LLM capability, detected here
             mm = [{"role": "user", "content": [
                 {"type": "text", "text": "what colour is this? one word"},

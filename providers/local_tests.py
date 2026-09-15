@@ -1,0 +1,305 @@
+"""
+local_tests.py — run: python3 -m providers.local_tests
+
+The model that runs on this machine instead of over an API key.
+
+WHAT THIS IS GUARDING
+
+"each time one or 2 keys remains unanswerable that making program failure."
+
+A cascade needs somewhere to fall to. These checks are about the floor under
+it: that a dead key lands on the local model instead of failing the step, that
+the local model is LAST so his paid keys are still tried first, and that it
+never pretends to be something it is not.
+
+Nothing here shells out to the real CLI except one check that skips itself when
+Claude Code is not installed — so the suite is honest on a machine that has it
+and still passes on one that does not.
+"""
+import shutil
+import sys
+
+from . import client, local_cli, routing
+from . import store as _store
+
+_fail = []
+
+
+def check(name, got, want):
+    if got == want:
+        print(f"  ok  {name}")
+    else:
+        print(f"FAIL  {name}\n        got:  {got!r}\n        want: {want!r}")
+        _fail.append(name)
+
+
+CRED = {"id": "c-local", "name": local_cli.NAME,
+        "base_url": local_cli.MARKER, "api_key": ""}
+MODEL = {"id": "m-local", "api_model_id": "sonnet", "category": "LLM",
+         "enabled": True, "cost_tier": "included"}
+
+
+def test_it_is_recognised_without_being_called():
+    print("\nA local credential is told apart by its base URL alone:")
+    check("the marker is local", local_cli.is_local(CRED), True)
+    check("a real endpoint is not",
+          local_cli.is_local({"base_url": "https://api.openai.com/v1"}), False)
+    check("a trailing slash makes no difference",
+          local_cli.is_local({"base_url": local_cli.MARKER + "/"}), True)
+    check("case makes no difference",
+          local_cli.is_local({"base_url": local_cli.MARKER.upper()}), True)
+    check("an empty credential is not local", local_cli.is_local({}), False)
+    check("and neither is nothing at all", local_cli.is_local(None), False)
+
+
+def test_a_conversation_becomes_one_prompt():
+    """
+    The CLI takes one system prompt and one prompt, not a messages array. The
+    labels matter: strip them and a two-turn exchange reads as one run-on
+    paragraph, and the model answers the wrong half of it.
+    """
+    print("\nSystem turns are separated from the conversation:")
+    sysmsg, prompt = local_cli.split_messages([
+        {"role": "system", "content": "You are terse."},
+        {"role": "user", "content": "First question"},
+        {"role": "assistant", "content": "First answer"},
+        {"role": "user", "content": "Second question"}])
+    check("the system prompt is lifted out", sysmsg, "You are terse.")
+    check("the turns keep their labels",
+          prompt, "User: First question\n\nAssistant: First answer\n\nUser: Second question")
+
+    print("\n...but a single question is asked plainly, not as a transcript:")
+    sysmsg, prompt = local_cli.split_messages(
+        [{"role": "user", "content": "What is 2+2?"}])
+    check("no label on a lone question", prompt, "What is 2+2?")
+    check("and no system prompt invented", sysmsg, "")
+
+    print("\nTwo system turns are joined, not the last one kept:")
+    sysmsg, _ = local_cli.split_messages([
+        {"role": "system", "content": "Be terse."},
+        {"role": "system", "content": "Answer in British English."},
+        {"role": "user", "content": "hello"}])
+    check("both survive", sysmsg, "Be terse.\n\nAnswer in British English.")
+
+    print("\nThe multimodal shape does not crash it — the text is kept:")
+    _, prompt = local_cli.split_messages([{"role": "user", "content": [
+        {"type": "text", "text": "what colour is this?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}])
+    check("the words come through", prompt, "what colour is this?")
+
+    print("\nEmpty and malformed messages are dropped, not passed on:")
+    _, prompt = local_cli.split_messages(
+        [None, {"role": "user", "content": ""}, "nonsense",
+         {"role": "user", "content": "  real  "}])
+    check("only the real one survives", prompt, "real")
+
+
+def test_it_fails_like_an_api_so_the_cascade_understands_it():
+    """
+    routing.call_task, load.py and the failover trail all read the same keys off
+    a result. A local call that returned a different shape would break the
+    cascade at the moment it is most needed — when something else has failed.
+    """
+    print("\nEvery failure carries the keys the cascade reads:")
+    res = local_cli.chat(CRED, MODEL, [], timeout=5)        # empty messages
+    for key in ("ok", "status", "text", "output", "error", "cause",
+                "attempts", "waited", "raw"):
+        check(f"'{key}' is present", key in res, True)
+    check("it failed", res["ok"], False)
+    check("and said why in words", "empty" in res["cause"], True)
+
+    print("\nprobe_model reads res['raw'] on every path, so it is always there:")
+    check("raw has a url", res["raw"]["url"], local_cli.MARKER)
+    check("and a body", "response_body" in res["raw"], True)
+
+    print("\nA missing CLI is a sentence, not a stack trace:")
+    real = local_cli.cli_path
+    local_cli.cli_path = lambda: ""
+    try:
+        res = local_cli.chat(CRED, MODEL, [{"role": "user", "content": "hi"}])
+        check("refused", res["ok"], False)
+        check("and names the fix", "npm install" in res["error"], True)
+        check("the cause is readable",
+              res["cause"], "claude code is not installed here")
+    finally:
+        local_cli.cli_path = real
+
+
+def test_the_provider_words_are_the_cli_s_own():
+    print("\nThe CLI's own complaint is what reaches the failover trail:")
+    check("not signed in",
+          local_cli._cause_from("Error: not logged in. Run `claude login`."),
+          "claude code is not signed in on this machine")
+    check("allowance gone",
+          local_cli._cause_from("Usage limit reached for your plan"),
+          "the Claude plan's usage allowance is used up")
+    check("bad model name",
+          local_cli._cause_from("Unknown model: gpt-9"),
+          "that model name is not one the CLI knows")
+    check("anything else is not dressed up",
+          local_cli._cause_from("something odd"), "the local model refused")
+
+
+def test_a_dead_key_falls_through_to_it():
+    """
+    THE WHOLE POINT. A key that will not answer must cost a slower step, not a
+    failed one — and the local model must be the thing underneath.
+    """
+    print("\nA key that cannot answer falls through to the local model:")
+    calls = {"n": 0}
+
+    def fake_chat(cred, model, messages, max_tokens=512, timeout=180, extra=None,
+                  tries=3):
+        calls["n"] += 1
+        if local_cli.is_local(cred):
+            return {"ok": True, "status": 200, "text": "Dubai", "output": "Dubai",
+                    "attempts": 1, "waited": [1.2], "raw": {"url": local_cli.MARKER}}
+        return {"ok": False, "status": 429, "text": "", "output": "",
+                "cause": "429 — rate limited or out of credit.",
+                "attempts": 3, "waited": [1.0, 2.0], "raw": {"url": "x"}}
+
+    real = client.chat
+    client.chat = fake_chat
+    try:
+        with _store.isolated():
+            dead = _store.upsert_credential({"name": "Rate-limited key",
+                                             "base_url": "https://api.example.com/v1",
+                                             "api_key": "sk-x"})
+            _store.upsert_model(dead["id"], {"api_model_id": "their-model",
+                                             "category": "LLM", "enabled": True,
+                                             "cost_tier": "free"})
+            # The dead key is his primary FIRST, then the local model is
+            # installed under it. Order matters: install only takes the primary
+            # slot for a sector that has nothing, so a sector with a real key
+            # keeps it and gets this appended.
+            dead_m = _store.get_credential(dead["id"])["models"][0]["id"]
+            _store.set_route("md", {"primary": dead_m, "enabled": True})
+            local_cli.install(_store, tasks=["md"])
+
+            r = routing.call_task("md", [{"role": "user", "content": "one emirate"}])
+            check("the task still succeeded", r["ok"], True)
+            check("on the local model", r["used"]["credential"], local_cli.NAME)
+            check("and the dead key is named in the trail",
+                  r["failovers"][0]["cause"].startswith("429"), True)
+            check("both were tried", calls["n"], 2)
+    finally:
+        client.chat = real
+
+
+def test_his_own_keys_are_still_tried_first():
+    """
+    A safety net that jumped the queue would spend his Claude allowance on work
+    a key he already pays for could have done — and it is slower per call.
+    """
+    print("\nInstalling puts it LAST, never first:")
+    with _store.isolated():
+        paid = _store.upsert_credential({"name": "His paid key",
+                                         "base_url": "https://api.example.com/v1",
+                                         "api_key": "sk-x"})
+        _store.upsert_model(paid["id"], {"api_model_id": "good-model",
+                                         "category": "LLM", "enabled": True,
+                                         "cost_tier": "paid"})
+        paid_m = _store.get_credential(paid["id"])["models"][0]["id"]
+        for task in local_cli.SECTOR_MODEL:
+            _store.set_route(task, {"primary": paid_m, "enabled": True})
+
+        local_cli.install(_store)
+        routes = _store.get_routing()
+        check("his key is still primary everywhere",
+              {t: routes[t]["primary"] for t in local_cli.SECTOR_MODEL},
+              {t: paid_m for t in local_cli.SECTOR_MODEL})
+        check("and the local model is the last fallback, in every sector",
+              all(routes[t]["fallback"] and routes[t]["fallback"][-1] != paid_m
+                  for t in local_cli.SECTOR_MODEL), True)
+
+        print("\n  ...and the two he named get the strongest model:")
+        cid = [c for c in _store.redacted_view()["credentials"]
+               if c["base_url"] == local_cli.MARKER][0]["id"]
+        names = {m["id"]: m["api_model_id"]
+                 for m in _store.get_credential(cid)["models"]}
+        check("MD", names[routes["md"]["fallback"][-1]], "opus")
+        check("IT", names[routes["it"]["fallback"][-1]], "opus")
+
+        print("\nRunning it twice changes nothing:")
+        before = _store.get_routing()["md"]["fallback"]
+        local_cli.install(_store)
+        check("no duplicate in the chain",
+              _store.get_routing()["md"]["fallback"], before)
+        check("and no second credential",
+              len([c for c in _store.redacted_view()["credentials"]
+                   if c["base_url"] == local_cli.MARKER]), 1)
+
+
+def test_a_sector_with_nothing_gets_it_as_its_only_model():
+    """A fallback chain under an empty primary never runs."""
+    print("\nA sector with no model at all gets this as its primary:")
+    with _store.isolated():
+        local_cli.install(_store)
+        route = _store.get_routing()["leads"]
+        check("it has a primary now", bool(route["primary"]), True)
+        check("and is not left only in the fallback list",
+              route["primary"] in (route["fallback"] or []), False)
+
+
+def test_it_never_claims_to_see_pictures():
+    """
+    The image probe puts a data: URI in the message content. split_messages
+    keeps the text and drops the picture, so the model would answer from the
+    wording alone and the shelf would record vision it has not got — and
+    something later would route an image at it.
+    """
+    print("\nVision is reported as absent, not guessed:")
+    real = client.chat
+    client.chat = lambda *a, **k: {"ok": True, "status": 200, "text": "ok",
+                                   "output": "ok", "raw": {}, "attempts": 1,
+                                   "waited": []}
+    try:
+        out = client.probe_model(CRED, MODEL, timeout=5)
+        check("chat works", out["capabilities"]["chat"], True)
+        check("multimodal is False, not None and not True",
+              out["capabilities"]["multimodal"], False)
+    finally:
+        client.chat = real
+
+
+def test_it_really_answers_on_this_machine():
+    """
+    The one check that shells out. Skipped, loudly, where Claude Code is not
+    installed — a suite that silently passes on a machine that cannot run the
+    thing is worse than one that says it did not try.
+    """
+    print("\nEnd to end, against the real CLI:")
+    if not shutil.which("claude") and not shutil.which("claude.cmd"):
+        print("  --  skipped: Claude Code is not installed on this machine")
+        return
+    res = local_cli.chat(CRED, {"api_model_id": "haiku"},
+                         [{"role": "system", "content": "Answer with one word."},
+                          {"role": "user", "content": "Reply with exactly: ALIVE"}],
+                         timeout=180)
+    if not res["ok"] and "signed in" in (res.get("cause") or ""):
+        print("  --  skipped: Claude Code is installed but not signed in here")
+        return
+    check("it answered", res["ok"], True)
+    check("with the word asked for", "ALIVE" in res["output"].upper(), True)
+    check("and reported how long it took", bool(res["waited"]), True)
+
+
+def main():
+    test_it_is_recognised_without_being_called()
+    test_a_conversation_becomes_one_prompt()
+    test_it_fails_like_an_api_so_the_cascade_understands_it()
+    test_the_provider_words_are_the_cli_s_own()
+    test_a_dead_key_falls_through_to_it()
+    test_his_own_keys_are_still_tried_first()
+    test_a_sector_with_nothing_gets_it_as_its_only_model()
+    test_it_never_claims_to_see_pictures()
+    test_it_really_answers_on_this_machine()
+    print()
+    if _fail:
+        print(f"{len(_fail)} FAILED: " + ", ".join(_fail))
+        sys.exit(1)
+    print("all local model tests passed")
+
+
+if __name__ == "__main__":
+    main()
