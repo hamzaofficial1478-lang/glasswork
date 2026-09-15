@@ -268,6 +268,105 @@ def test_by_default_it_goes_to_md_and_it_and_nowhere_else():
             check("and listed the real ones", "leads" in str(exc), True)
 
 
+def test_running_it_again_with_fewer_sectors_takes_it_off_the_rest():
+    """
+    HE CAUGHT THIS ONE FROM THE OUTPUT ALONE.
+
+        python -m providers.local_cli --install
+          ok  added 'Claude Code (this machine)' to the shelf
+                opus
+              left alone, still on your own keys: content, it, leads, md, ...
+
+    Every sector listed as being on his own keys, including the two he had just
+    asked to be on Claude — and no "last-resort model for" line at all. He had
+    run the earlier version, which defaulted to all seven; the second run added
+    nothing because they were already there, and the report was built from what
+    it had just DONE rather than from the routing.
+
+    Two faults. The report described an action as though it were a state. And
+    asking for md,it did not take it off the other five, so he had seven
+    sectors quietly spending one Claude allowance when he had asked for two.
+    """
+    print("\nHis exact sequence: all seven, then 'only MD and IT':")
+    with _store.isolated():
+        paid = _store.upsert_credential({"name": "His key",
+                                         "base_url": "https://api.example.com/v1",
+                                         "api_key": "sk-x"})
+        _store.upsert_model(paid["id"], {"api_model_id": "his-model",
+                                         "category": "LLM", "enabled": True,
+                                         "cost_tier": "paid"})
+        his = _store.get_credential(paid["id"])["models"][0]["id"]
+        for s in local_cli.SECTOR_MODEL:
+            _store.set_route(s, {"primary": his, "enabled": True})
+
+        local_cli.install(_store, tasks=sorted(local_cli.SECTOR_MODEL))
+        check("all seven on it to begin with",
+              all(local_cli.on_board(_store, s) for s in local_cli.SECTOR_MODEL),
+              True)
+
+        r = local_cli.install(_store)           # the default: md, it
+        check("MD and IT are on it", sorted(r["routed"]), ["it", "md"])
+        check("and they are reported as already on, not newly added",
+              sorted(r["already"]), ["it", "md"])
+        check("the other five were taken back off",
+              r["removed"], ["content", "leads", "report", "security", "seo"])
+
+        print("\n  ...and the ROUTING agrees, which is the thing that matters:")
+        on = sorted(s for s in local_cli.SECTOR_MODEL
+                    if local_cli.on_board(_store, s))
+        check("exactly two sectors on the Claude brain", on, ["it", "md"])
+        check("his own key is still primary in all seven",
+              all((_store.get_routing()[s]["primary"] == his)
+                  for s in local_cli.SECTOR_MODEL), True)
+
+
+def test_it_will_not_switch_a_sector_off_to_tidy_up():
+    """
+    Pruning must not leave a sector with no model at all. A sector that had
+    nothing got the local model as its PRIMARY; taking that away because it is
+    no longer in --sectors would silently stop the sector working.
+    """
+    print("\nA sector whose only model is this one keeps it, loudly:")
+    with _store.isolated():
+        local_cli.install(_store, tasks=sorted(local_cli.SECTOR_MODEL))
+        r = local_cli.install(_store)           # narrow to md, it
+        check("the rest are named as stranded, not silently emptied",
+              r["stranded"], ["content", "leads", "report", "security", "seo"])
+        check("and none of them was actually emptied",
+              all((_store.get_routing()[s] or {}).get("primary")
+                  for s in r["stranded"]), True)
+
+    print("\nBut with a real key behind them, pruning promotes that key:")
+    with _store.isolated():
+        paid = _store.upsert_credential({"name": "His key",
+                                         "base_url": "https://api.example.com/v1",
+                                         "api_key": "sk-x"})
+        _store.upsert_model(paid["id"], {"api_model_id": "his-model",
+                                         "category": "LLM", "enabled": True})
+        his = _store.get_credential(paid["id"])["models"][0]["id"]
+        # the awkward shape: local model primary, his key only a fallback
+        local_cli.install(_store, tasks=["seo"])
+        route = dict(_store.get_routing()["seo"])
+        route["fallback"] = [his]
+        _store.set_route("seo", route)
+
+        r = local_cli.install(_store, tasks=["md"])
+        check("seo came off it", "seo" in r["removed"], True)
+        check("nothing was stranded", r["stranded"], [])
+        check("and his key was promoted into the empty primary slot",
+              _store.get_routing()["seo"]["primary"], his)
+
+
+def test_keep_others_adds_without_taking_anything_away():
+    print("\n--keep-others widens without narrowing:")
+    with _store.isolated():
+        local_cli.install(_store, tasks=["md", "it"])
+        local_cli.install(_store, tasks=["seo"], prune=False)
+        on = sorted(s for s in local_cli.SECTOR_MODEL
+                    if local_cli.on_board(_store, s))
+        check("all three are on it", on, ["it", "md", "seo"])
+
+
 def test_every_tool_is_off_not_just_the_dangerous_ones():
     """
     --restricted removes the code-running tools, which is the safety half. The
@@ -349,6 +448,9 @@ def main():
     test_a_dead_key_falls_through_to_it()
     test_his_own_keys_are_still_tried_first()
     test_by_default_it_goes_to_md_and_it_and_nowhere_else()
+    test_running_it_again_with_fewer_sectors_takes_it_off_the_rest()
+    test_it_will_not_switch_a_sector_off_to_tidy_up()
+    test_keep_others_adds_without_taking_anything_away()
     test_every_tool_is_off_not_just_the_dangerous_ones()
     test_a_sector_with_nothing_gets_it_as_its_only_model()
     test_it_never_claims_to_see_pictures()

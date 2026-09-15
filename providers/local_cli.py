@@ -373,22 +373,58 @@ SECTOR_MODEL = {
 DEFAULT_SECTORS = ("md", "it")
 
 
-def install(store, tasks=None, as_last_resort=True) -> dict:
-    """
-    Add the local model to the shelf and put it under the named sectors.
+def our_model_ids(store, cid=None) -> set:
+    """Every model id belonging to the local credential."""
+    if cid is None:
+        c = next((c for c in store.redacted_view().get("credentials", [])
+                  if (c.get("base_url") or "").lower().rstrip("/") == MARKER), None)
+        if not c:
+            return set()
+        cid = c["id"]
+    full = store.get_credential(cid) or {}
+    return {m["id"] for m in full.get("models", [])}
 
-    `tasks` defaults to DEFAULT_SECTORS — MD and IT. Pass a longer list to
-    cover more. `store` is passed in rather than imported so a test can hand in
-    an isolated one. Idempotent: run it twice and nothing doubles.
+
+def on_board(store, task, mine=None) -> bool:
+    """Is the local model anywhere in this sector's chain — primary or not?"""
+    mine = our_model_ids(store) if mine is None else mine
+    if not mine:
+        return False
+    r = store.get_routing().get(task) or {}
+    return (r.get("primary") in mine or r.get("secondary") in mine
+            or bool(set(r.get("fallback") or []) & mine))
+
+
+def install(store, tasks=None, as_last_resort=True, prune=True) -> dict:
+    """
+    Make the routing MATCH the sectors asked for: present on those, absent
+    from the rest.
+
+    IT USED TO ONLY ADD, AND THEN REPORT ON WHAT IT HAD ADDED.
+
+    He ran it once on the version that defaulted to all seven sectors, pulled,
+    and ran it again asking for md,it. The second run added nothing — they were
+    already there — so `routed` came back empty, no "last-resort model for"
+    line printed at all, and every sector was listed as "left alone, still on
+    your own keys" while all seven were in fact wired to Claude. The report was
+    the exact opposite of the truth, and he spotted it.
+
+    Two faults, and the second is the one that mattered:
+
+      - "added just now" was being reported as though it meant "is on board".
+        Nothing distinguished it from "was already there".
+      - asking for md,it did not REMOVE it from the other five. He said he
+        wanted two sectors on it; he had seven, each quietly spending the same
+        Claude allowance.
+
+    So this is now a declaration of the state he wants, not a one-way add. Pass
+    prune=False to add without taking it off anywhere.
     """
     tasks = list(tasks or DEFAULT_SECTORS)
     unknown = [t for t in tasks if t not in SECTOR_MODEL]
     if unknown:
         raise ValueError("not a sector: " + ", ".join(unknown)
                          + ". One of: " + ", ".join(sorted(SECTOR_MODEL)))
-    # Only the models those sectors will actually reach for. Adding opus to the
-    # shelf for a run that only needs sonnet leaves an entry the owner has to
-    # wonder about on the Shelf screen.
     wanted = sorted({SECTOR_MODEL[t] for t in tasks})
     existing = next((c for c in store.redacted_view().get("credentials", [])
                      if (c.get("base_url") or "").lower().rstrip("/") == MARKER), None)
@@ -416,28 +452,96 @@ def install(store, tasks=None, as_last_resort=True) -> dict:
         })
         by_name[alias] = m["id"]
 
-    touched = []
+    mine = our_model_ids(store, cid)
+    added, already_on, removed, stranded = [], [], [], []
+
     if as_last_resort:
-        routes = store.get_routing()
         for task in tasks:
             mid = by_name.get(SECTOR_MODEL.get(task, "sonnet"))
             if not mid:
                 continue
-            route = dict(routes.get(task) or {})
+            route = dict(store.get_routing().get(task) or {})
             chain = list(route.get("fallback") or [])
             if mid in chain or route.get("primary") == mid or route.get("secondary") == mid:
+                already_on.append(task)
                 continue
+            # Any OTHER local model on this sector goes — a sector should reach
+            # for one of ours, not two.
+            chain = [x for x in chain if x not in mine]
             chain.append(mid)                      # LAST. His keys go first.
             route["fallback"] = chain
             # A sector with no model at all gets this as its primary, because a
             # fallback chain under an empty primary never runs.
-            if not route.get("primary"):
+            if not route.get("primary") or route.get("primary") in mine:
                 route["primary"] = mid
                 route["fallback"] = [x for x in chain if x != mid]
             store.set_route(task, route)
-            touched.append(task)
+            added.append(task)
 
-    return {"ok": True, "credential": cid, "models": by_name, "routed": touched}
+    if prune and mine:
+        for task in SECTOR_MODEL:
+            if task in tasks:
+                continue
+            route = dict(store.get_routing().get(task) or {})
+            if not route:
+                continue
+            chain = [x for x in (route.get("fallback") or []) if x not in mine]
+            changed = chain != list(route.get("fallback") or [])
+            # Taking it out of the PRIMARY slot needs somewhere for the sector
+            # to go. Promote its first real fallback; if there is none, the
+            # sector would be left with no model at all, so leave it and say so
+            # rather than silently switching a sector off.
+            if route.get("primary") in mine:
+                if chain:
+                    route["primary"], chain = chain[0], chain[1:]
+                    changed = True
+                else:
+                    stranded.append(task)
+                    continue
+            if route.get("secondary") in mine:
+                route["secondary"] = ""
+                changed = True
+            if changed:
+                route["fallback"] = chain
+                store.set_route(task, route)
+                removed.append(task)
+
+    return {"ok": True, "credential": cid, "models": by_name,
+            "routed": sorted(added + already_on), "added": sorted(added),
+            "already": sorted(already_on), "removed": sorted(removed),
+            "stranded": sorted(stranded)}
+
+
+def _where(store) -> int:
+    """
+    Where the local model actually is, read back off the routing.
+
+    Printed after every install, and available on its own with --where, because
+    the previous version reported what it had just DONE and called that the
+    state. Running it twice made it claim every sector was on its own keys
+    while all seven were wired to Claude. A report that cannot be wrong about
+    this has to read the routes, not remember the last action.
+    """
+    mine = our_model_ids(store)
+    if not mine:
+        print("Claude Code is not on the shelf at all. Add it with --install.")
+        return 0
+    routes = store.get_routing()
+    on, off, nothing = [], [], []
+    for task in sorted(SECTOR_MODEL):
+        r = routes.get(task) or {}
+        if not r.get("primary") and not (r.get("fallback") or []):
+            nothing.append(task)
+        elif on_board(store, task, mine):
+            first = "primary" if r.get("primary") in mine else "last resort"
+            on.append(f"{task} ({first})")
+        else:
+            off.append(task)
+    print("On the Claude brain      : " + (", ".join(on) if on else "nothing"))
+    print("On your own keys only    : " + (", ".join(off) if off else "nothing"))
+    if nothing:
+        print("No model at all          : " + ", ".join(nothing))
+    return 0
 
 
 def main(argv=None):
@@ -452,29 +556,47 @@ def main(argv=None):
                     help="add it to the shelf as a last-resort model")
     ap.add_argument("--sectors", default=",".join(DEFAULT_SECTORS),
                     help="which sectors fall back to it (default: md,it). "
-                         "'all' for every sector. One of: "
-                         + ", ".join(sorted(SECTOR_MODEL)))
+                         "'all' for every sector, 'none' to take it off "
+                         "everything. One of: " + ", ".join(sorted(SECTOR_MODEL)))
+    ap.add_argument("--keep-others", action="store_true",
+                    help="add to --sectors without removing it from any sector "
+                         "it is already on")
+    ap.add_argument("--where", action="store_true",
+                    help="which sectors are on it right now, and which are not")
     ap.add_argument("--model", default="sonnet", help="which model --check asks")
     a = ap.parse_args(argv)
 
+    if a.where:
+        return _where(_store)
+
     if a.install:
-        picked = (sorted(SECTOR_MODEL) if a.sectors.strip().lower() == "all"
+        asked = a.sectors.strip().lower()
+        picked = ([] if asked == "none"
+                  else sorted(SECTOR_MODEL) if asked == "all"
                   else [s.strip().lower() for s in a.sectors.split(",") if s.strip()])
         try:
-            r = install(_store, tasks=picked)
+            r = install(_store, tasks=picked, prune=not a.keep_others)
         except ValueError as exc:
             print("  --  " + str(exc))
             return 1
-        print(f"  ok  added '{NAME}' to the shelf")
+        print(f"  ok  '{NAME}' is on the shelf")
         for alias in sorted(r["models"]):
             print(f"        {alias}")
-        if r["routed"]:
-            print("      last-resort model for: "
-                  + ", ".join(f"{t} ({SECTOR_MODEL[t]})" for t in sorted(r["routed"])))
-        untouched = [s for s in sorted(SECTOR_MODEL) if s not in r["routed"]]
-        if untouched:
-            print("      left alone, still on your own keys: "
-                  + ", ".join(untouched))
+        if r["added"]:
+            print("      newly on: " + ", ".join(
+                f"{t} ({SECTOR_MODEL[t]})" for t in r["added"]))
+        if r["already"]:
+            print("      already on: " + ", ".join(
+                f"{t} ({SECTOR_MODEL[t]})" for t in r["already"]))
+        if r["removed"]:
+            print("      taken back off: " + ", ".join(r["removed"]))
+        if r["stranded"]:
+            print("      !!  left on " + ", ".join(r["stranded"])
+                  + " — it is the only model those sectors have, and removing "
+                    "it\n          would leave them with nothing. Give them a "
+                    "key first.")
+        print()
+        return _where(_store)
         print("\n      Your own keys are still tried first everywhere. This one\n"
               "      answers only when they do not.")
         return 0
