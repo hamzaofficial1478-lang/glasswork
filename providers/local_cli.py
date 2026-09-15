@@ -176,6 +176,51 @@ def _likely_homes():
     return out
 
 
+def _run_quietly(argv, timeout=20) -> str:
+    """One short command's stdout, or '' — never raises, never blocks for long."""
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True,
+                           timeout=timeout, encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+    return (p.stdout or "").strip() if p.returncode == 0 else ""
+
+
+def npm_bin() -> str:
+    """
+    npm's REAL global bin directory, asked of npm rather than guessed.
+
+    The guessed locations cover a default install. They do not cover a custom
+    prefix, a Node version manager, or a machine where npm was configured by
+    somebody else years ago — and on a machine that has Node (this one runs the
+    office server on it) npm is the only thing that actually knows.
+    """
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm:
+        return ""
+    prefix = _run_quietly(_launcher(npm) + ["prefix", "-g"])
+    if not prefix:
+        prefix = _run_quietly(_launcher(npm) + ["config", "get", "prefix"])
+    if not prefix:
+        return ""
+    # npm puts binaries in <prefix> on Windows and <prefix>/bin everywhere else.
+    return prefix if os.name == "nt" else os.path.join(prefix, "bin")
+
+
+def toolchain() -> dict:
+    """
+    What this machine has, so 'not found' can say WHICH problem it is.
+
+    Not installed at all, and installed somewhere unexpected, need completely
+    different answers, and the search list alone cannot tell them apart.
+    """
+    node = shutil.which("node") or shutil.which("node.exe")
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    return {"node": node or "", "npm": npm or "",
+            "node_version": _run_quietly(_launcher(node) + ["--version"]) if node else "",
+            "npm_bin": npm_bin() if npm else ""}
+
+
 def find_candidates() -> list:
     """Every place the CLI was looked for, and whether it was there — for --check."""
     rows = []
@@ -188,7 +233,18 @@ def find_candidates() -> list:
         rows.append((f"PATH: {name}", bool(found)))
     for p in _likely_homes():
         rows.append((p, os.path.isfile(p)))
+    for p in _npm_installed():
+        rows.append((p + "   (npm's own global folder)", os.path.isfile(p)))
     return rows
+
+
+def _npm_installed() -> list:
+    """Candidate paths inside npm's real global bin, if npm is here at all."""
+    binroot = npm_bin()
+    if not binroot:
+        return []
+    names = ("claude.cmd", "claude.exe", "claude") if os.name == "nt" else ("claude",)
+    return [os.path.join(binroot, n) for n in names]
 
 
 def cli_path() -> str:
@@ -214,6 +270,12 @@ def cli_path() -> str:
         if found:
             return found
     for p in _likely_homes():
+        if os.path.isfile(p):
+            return p
+    # Last, because it costs a subprocess: ask npm where it actually puts
+    # things. Covers a custom prefix or a version manager, which no list of
+    # guessed paths can.
+    for p in _npm_installed():
         if os.path.isfile(p):
             return p
     return ""
@@ -242,15 +304,29 @@ def available() -> tuple:
                        "there. Correct it, or clear it and let the agency find "
                        "Claude Code itself.")
     if not cli_path():
-        where = "%APPDATA%\\npm" if os.name == "nt" else "~/.local/bin"
+        kit = toolchain()
+        if not kit["npm"]:
+            return False, (
+                "Claude Code is not on this machine, and neither is npm, so it "
+                "cannot be installed the usual way.\n"
+                "Install Node.js from nodejs.org (it brings npm with it), then "
+                "run:  npm install -g @anthropic-ai/claude-code")
         return False, (
-            "Claude Code was not found on this machine. It was looked for on "
-            f"PATH and in the usual places ({where} among them).\n"
-            "If you DO have it — you are running it — the office server's PATH "
-            "is not your terminal's. Run  where claude  in PowerShell, then put "
-            f"the full path it prints into .env as {CLI_ENV}=<path> and restart "
-            "the server.\n"
-            "If you have not got it: npm install -g @anthropic-ai/claude-code")
+            "Claude Code is not installed on this machine.\n"
+            "It was looked for on PATH, in the usual install folders, and in "
+            f"npm's own global folder ({kit['npm_bin'] or 'unknown'}). Nothing "
+            "there.\n\n"
+            "IF YOU USE CLAUDE THROUGH THE WEBSITE OR THE DESKTOP APP, THAT IS "
+            "WHY. Those are not this. This needs the command-line tool on this "
+            "machine, and installing it does not change how you use the others:"
+            "\n\n"
+            "    npm install -g @anthropic-ai/claude-code\n"
+            "    claude            (once, to sign in — then close it)\n"
+            f"    python -m providers.local_cli --check\n\n"
+            f"Node {kit['node_version'] or '?'} and npm are already here, so "
+            "the install is a couple of minutes and needs nothing else.\n"
+            "If it IS installed and you know where, put that path into .env as "
+            f"{CLI_ENV}=<path> and restart the server.")
     return True, ""
 
 
@@ -720,6 +796,12 @@ def main(argv=None):
         print(f"Launched: {' '.join(_launcher(path))}")
     ready, why = available()
     if not ready:
+        kit = toolchain()
+        print(f"Node    : {kit['node'] or '(not found)'}"
+              + (f"  {kit['node_version']}" if kit["node_version"] else ""))
+        print(f"npm     : {kit['npm'] or '(not found)'}")
+        if kit["npm_bin"]:
+            print(f"npm puts global tools in: {kit['npm_bin']}")
         print("\nLooked in:")
         for where, found in find_candidates():
             print(f"   {'FOUND' if found else '  -  '}  {where}")

@@ -384,8 +384,9 @@ def test_it_is_found_when_PATH_is_no_help():
     """
     print("\nThe search order is his setting, then PATH, then the usual places:")
     import os
-    real_setting, real_which, real_isfile = (
-        local_cli._setting, local_cli.shutil.which, local_cli.os.path.isfile)
+    real_setting, real_which, real_isfile, real_run = (
+        local_cli._setting, local_cli.shutil.which, local_cli.os.path.isfile,
+        local_cli._run_quietly)
     try:
         # 1. what he set wins over everything
         local_cli._setting = lambda n: "/somewhere/claude" if n == local_cli.CLI_ENV else ""
@@ -412,22 +413,74 @@ def test_it_is_found_when_PATH_is_no_help():
         check("the install locations are the safety net",
               local_cli.cli_path(), homes[0])
 
-        # 5. genuinely absent
+        # 5. genuinely absent. With which() stubbed to None there is no npm
+        #    either, so this is the "you have not got Node" answer — checked
+        #    properly in test_npm_is_asked_where_it_puts_things.
         local_cli.os.path.isfile = lambda p: False
+        local_cli._run_quietly = lambda argv, timeout=20: ""
         check("and absent is still absent", local_cli.cli_path(), "")
         ready, why = local_cli.available()
-        check("the message tells him to run 'where claude'",
-              "where claude" in why, True)
-        check("and how to write it down", local_cli.CLI_ENV in why, True)
+        check("it does not pretend to be ready", ready, False)
+        check("and points at the thing that has to come first",
+              "nodejs.org" in why, True)
     finally:
         local_cli._setting = real_setting
         local_cli.shutil.which = real_which
         local_cli.os.path.isfile = real_isfile
+        local_cli._run_quietly = real_run
 
     print("\nEvery place looked in is listed, so the answer is checkable:")
     rows = local_cli.find_candidates()
     check("PATH is named", any("PATH:" in w for w, _ in rows), True)
     check("and so are the install locations", len(rows) > 3, True)
+
+
+def test_npm_is_asked_where_it_puts_things():
+    """
+    His --check came back empty on every guessed path AND on PATH:
+
+        -    C:\\Users\\ammar laptops\\AppData\\Roaming\\npm\\claude.cmd
+        -    C:\\Program Files\\nodejs\\claude.cmd
+        ...
+
+    A list of guessed folders covers a default install and nothing else — not a
+    custom npm prefix, not a Node version manager. On a machine that has Node
+    (his runs the office server on it) npm is the only thing that actually
+    knows where it puts global tools, so it gets asked.
+
+    And the answer has to tell two situations apart, because they need opposite
+    advice: installed somewhere unexpected, versus not installed at all.
+    """
+    print("\nnpm's own global folder is searched, not just the guesses:")
+    real_which, real_run, real_isfile = (
+        local_cli.shutil.which, local_cli._run_quietly, local_cli.os.path.isfile)
+    try:
+        local_cli.shutil.which = lambda n: "/usr/bin/npm" if n == "npm" else None
+        local_cli._run_quietly = lambda argv, timeout=20: "/custom/prefix"
+        found = "/custom/prefix/bin/claude"
+        local_cli.os.path.isfile = lambda p: p == found
+        check("it is found where npm actually put it", local_cli.cli_path(), found)
+        check("and the folder is named in the search list",
+              any("npm's own global folder" in w for w, _ in
+                  local_cli.find_candidates()), True)
+
+        print("\n'not installed' says so, and does not send him hunting:")
+        local_cli.os.path.isfile = lambda p: False
+        ready, why = local_cli.available()
+        check("it is plain about it", "not installed on this machine" in why, True)
+        check("it names the one command", "npm install -g" in why, True)
+        check("and explains why the web app is not this",
+              "WEBSITE OR THE DESKTOP APP" in why, True)
+
+        print("\nNo npm at all is a different problem and says so:")
+        local_cli.shutil.which = lambda n: None
+        local_cli._run_quietly = lambda argv, timeout=20: ""
+        ready, why = local_cli.available()
+        check("Node comes first", "nodejs.org" in why, True)
+    finally:
+        local_cli.shutil.which = real_which
+        local_cli._run_quietly = real_run
+        local_cli.os.path.isfile = real_isfile
 
 
 def test_a_windows_cmd_shim_is_run_through_cmd_exe():
@@ -540,6 +593,7 @@ def main():
     test_it_will_not_switch_a_sector_off_to_tidy_up()
     test_keep_others_adds_without_taking_anything_away()
     test_it_is_found_when_PATH_is_no_help()
+    test_npm_is_asked_where_it_puts_things()
     test_a_windows_cmd_shim_is_run_through_cmd_exe()
     test_every_tool_is_off_not_just_the_dangerous_ones()
     test_a_sector_with_nothing_gets_it_as_its_only_model()
