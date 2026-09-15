@@ -367,6 +367,94 @@ def test_keep_others_adds_without_taking_anything_away():
         check("all three are on it", on, ["it", "md", "seo"])
 
 
+def test_it_is_found_when_PATH_is_no_help():
+    """
+    HIS "Test & detect" SAID IT WAS NOT INSTALLED. IT WAS.
+
+        X no HTTP response (couldn't connect) — claude code is not installed here
+        "command": "(not started)"
+
+    He runs Claude Code every day. The lookup was shutil.which() and nothing
+    else, and the process doing the looking is the Python the office server
+    spawns — a Node service whose PATH is whatever it was started with, not the
+    one his PowerShell has. On Windows the npm shim lives in %APPDATA%\\npm,
+    which is on an interactive user's PATH and often not on a service's.
+
+    So: what he set, then PATH, then the real install locations.
+    """
+    print("\nThe search order is his setting, then PATH, then the usual places:")
+    import os
+    real_setting, real_which, real_isfile = (
+        local_cli._setting, local_cli.shutil.which, local_cli.os.path.isfile)
+    try:
+        # 1. what he set wins over everything
+        local_cli._setting = lambda n: "/somewhere/claude" if n == local_cli.CLI_ENV else ""
+        local_cli.os.path.isfile = lambda p: p == "/somewhere/claude"
+        local_cli.shutil.which = lambda n: "/on/path/claude"
+        check("his setting beats PATH", local_cli.cli_path(), "/somewhere/claude")
+
+        # 2. a setting pointing at nothing is an error, not a reason to guess
+        local_cli.os.path.isfile = lambda p: False
+        local_cli.shutil.which = lambda n: None
+        check("a wrong setting finds nothing", local_cli.cli_path(), "")
+        ready, why = local_cli.available()
+        check("and says so by name", "is set to" in why, True)
+
+        # 3. nothing set: PATH is used
+        local_cli._setting = lambda n: ""
+        local_cli.shutil.which = lambda n: "/on/path/claude" if n == "claude" else None
+        check("PATH is next", local_cli.cli_path(), "/on/path/claude")
+
+        # 4. PATH empty: the usual install locations rescue it
+        local_cli.shutil.which = lambda n: None
+        homes = local_cli._likely_homes()
+        local_cli.os.path.isfile = lambda p: p == homes[0]
+        check("the install locations are the safety net",
+              local_cli.cli_path(), homes[0])
+
+        # 5. genuinely absent
+        local_cli.os.path.isfile = lambda p: False
+        check("and absent is still absent", local_cli.cli_path(), "")
+        ready, why = local_cli.available()
+        check("the message tells him to run 'where claude'",
+              "where claude" in why, True)
+        check("and how to write it down", local_cli.CLI_ENV in why, True)
+    finally:
+        local_cli._setting = real_setting
+        local_cli.shutil.which = real_which
+        local_cli.os.path.isfile = real_isfile
+
+    print("\nEvery place looked in is listed, so the answer is checkable:")
+    rows = local_cli.find_candidates()
+    check("PATH is named", any("PATH:" in w for w, _ in rows), True)
+    check("and so are the install locations", len(rows) > 3, True)
+
+
+def test_a_windows_cmd_shim_is_run_through_cmd_exe():
+    """
+    npm on Windows installs a .cmd shim. CreateProcess — which is what
+    subprocess uses — cannot execute a batch file directly: it fails with
+    "%1 is not a valid Win32 application" even when the path is exactly right.
+    That reads as "not installed" and is nothing of the kind.
+    """
+    print("\nA .cmd shim goes through cmd.exe; anything else runs as itself:")
+    import os
+    real = os.name
+    try:
+        os.name = "nt"
+        launched = local_cli._launcher(r"C:\Users\x\AppData\Roaming\npm\claude.cmd")
+        check("cmd.exe is the launcher", launched[0].lower().endswith("cmd.exe"), True)
+        check("with /c", launched[1], "/c")
+        check("and the shim last", launched[2].endswith("claude.cmd"), True)
+        check("a .exe is run directly",
+              local_cli._launcher(r"C:\claude.exe"), [r"C:\claude.exe"])
+        os.name = "posix"
+        check("and so is a unix binary",
+              local_cli._launcher("/usr/local/bin/claude"), ["/usr/local/bin/claude"])
+    finally:
+        os.name = real
+
+
 def test_every_tool_is_off_not_just_the_dangerous_ones():
     """
     --restricted removes the code-running tools, which is the safety half. The
@@ -451,6 +539,8 @@ def main():
     test_running_it_again_with_fewer_sectors_takes_it_off_the_rest()
     test_it_will_not_switch_a_sector_off_to_tidy_up()
     test_keep_others_adds_without_taking_anything_away()
+    test_it_is_found_when_PATH_is_no_help()
+    test_a_windows_cmd_shim_is_run_through_cmd_exe()
     test_every_tool_is_off_not_just_the_dangerous_ones()
     test_a_sector_with_nothing_gets_it_as_its_only_model()
     test_it_never_claims_to_see_pictures()

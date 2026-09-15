@@ -120,24 +120,137 @@ def is_local(cred) -> bool:
     return base == MARKER
 
 
-def cli_path() -> str:
-    """Where the CLI is, or '' if this machine has not got it."""
-    named = (os.environ.get(CLI_ENV) or "").strip()
+def _setting(name: str) -> str:
+    """
+    The environment first, then .env — the same order every other setting in
+    this codebase uses, and the reason this needed fixing.
+
+    "Test & detect" runs inside the Python the office server spawns, not inside
+    his PowerShell. A Node service does not necessarily hand its child the PATH
+    a login shell has, so `claude` can be perfectly installed and perfectly
+    invisible to the process that goes looking for it. Reading .env means he
+    can write the path down once on the Setup screen and every process finds
+    it, whatever its PATH looks like.
+    """
+    got = (os.environ.get(name) or "").strip()
+    if got:
+        return got
+    try:
+        from . import integrations
+        return (integrations.read_env().get(name) or "").strip()
+    except Exception:
+        return ""
+
+
+def _likely_homes():
+    """
+    Where Claude Code actually installs itself, for when PATH is no help.
+
+    Not guesswork for its own sake: the npm global bin on Windows is
+    %APPDATA%\\npm, which is on an interactive user's PATH and frequently not
+    on a service's. Checking the handful of real locations turns "not installed"
+    into "found it" without him having to configure anything.
+    """
+    home = os.path.expanduser("~")
+    out = []
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
+        local = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+        out += [
+            os.path.join(appdata, "npm", "claude.cmd"),
+            os.path.join(appdata, "npm", "claude.exe"),
+            os.path.join(local, "Programs", "claude", "claude.exe"),
+            os.path.join(home, ".claude", "local", "claude.cmd"),
+            os.path.join(home, ".claude", "local", "claude.exe"),
+            os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
+                         "nodejs", "claude.cmd"),
+        ]
+    else:
+        out += [
+            os.path.join(home, ".claude", "local", "claude"),
+            os.path.join(home, ".local", "bin", "claude"),
+            "/usr/local/bin/claude",
+            "/opt/homebrew/bin/claude",
+            "/usr/bin/claude",
+        ]
+    return out
+
+
+def find_candidates() -> list:
+    """Every place the CLI was looked for, and whether it was there — for --check."""
+    rows = []
+    named = _setting(CLI_ENV)
     if named:
-        return named if os.path.isfile(named) else (shutil.which(named) or "")
-    # claude.cmd on Windows, claude everywhere else; shutil.which handles both
-    # when PATHEXT is set, but name it explicitly for the case where it is not.
-    return shutil.which("claude") or shutil.which("claude.cmd") or ""
+        rows.append((f"{CLI_ENV}={named}", os.path.isfile(named)
+                     or bool(shutil.which(named))))
+    for name in ("claude", "claude.cmd", "claude.exe"):
+        found = shutil.which(name)
+        rows.append((f"PATH: {name}", bool(found)))
+    for p in _likely_homes():
+        rows.append((p, os.path.isfile(p)))
+    return rows
+
+
+def cli_path() -> str:
+    """
+    Where the CLI is, or '' if this machine really has not got it.
+
+    Four places, in order: what he set, PATH, the usual install locations, and
+    nothing. The third is the one that rescues the office server, whose PATH is
+    whatever Node was started with.
+    """
+    named = _setting(CLI_ENV)
+    if named:
+        if os.path.isfile(named):
+            return named
+        found = shutil.which(named)
+        if found:
+            return found
+        # He named something that is not there. Say so rather than quietly
+        # searching elsewhere and running a different binary than he asked for.
+        return ""
+    for name in ("claude", "claude.cmd", "claude.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    for p in _likely_homes():
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def _launcher(path: str) -> list:
+    """
+    The argv prefix that will actually start it.
+
+    On Windows the npm installer leaves a .cmd shim, and CreateProcess — which
+    is what subprocess uses — cannot execute a batch file directly. It fails
+    with "%1 is not a valid Win32 application" even when the path is exactly
+    right, which reads as "not installed" and is nothing of the kind. Batch
+    files go through cmd.exe; everything else is run as itself.
+    """
+    if os.name == "nt" and path.lower().endswith((".cmd", ".bat")):
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", path]
+    return [path]
 
 
 def available() -> tuple:
     """(ready, why_not) — checked before a call so the reason is a sentence."""
-    path = cli_path()
-    if not path:
-        return False, ("Claude Code is not on this machine's PATH, so there is "
-                       "no local model to call. Install it with "
-                       "'npm install -g @anthropic-ai/claude-code', or set "
-                       f"{CLI_ENV} to the full path of the command.")
+    named = _setting(CLI_ENV)
+    if named and not cli_path():
+        return False, (f"{CLI_ENV} is set to '{named}' and there is nothing "
+                       "there. Correct it, or clear it and let the agency find "
+                       "Claude Code itself.")
+    if not cli_path():
+        where = "%APPDATA%\\npm" if os.name == "nt" else "~/.local/bin"
+        return False, (
+            "Claude Code was not found on this machine. It was looked for on "
+            f"PATH and in the usual places ({where} among them).\n"
+            "If you DO have it — you are running it — the office server's PATH "
+            "is not your terminal's. Run  where claude  in PowerShell, then put "
+            f"the full path it prints into .env as {CLI_ENV}=<path> and restart "
+            "the server.\n"
+            "If you have not got it: npm install -g @anthropic-ai/claude-code")
     return True, ""
 
 
@@ -231,9 +344,9 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
         return _answer(False, [], error="nothing to ask — the messages were empty",
                        cause="empty prompt")
 
-    cmd = [cli_path(), "-p",
-           "--output-format", "json",
-           "--model", _model_flag(model.get("api_model_id"))] + LEAN
+    cmd = _launcher(cli_path()) + [
+        "-p", "--output-format", "json",
+        "--model", _model_flag(model.get("api_model_id"))] + LEAN
     if system:
         cmd += ["--system-prompt", system]
 
@@ -596,14 +709,20 @@ def main(argv=None):
                     "it\n          would leave them with nothing. Give them a "
                     "key first.")
         print()
-        return _where(_store)
         print("\n      Your own keys are still tried first everywhere. This one\n"
-              "      answers only when they do not.")
-        return 0
+              "      answers only when they do not.\n")
+        return _where(_store)
 
+    # --check, and the default when nothing else is asked for.
+    path = cli_path()
+    print(f"Command : {path or '(not found)'}")
+    if path:
+        print(f"Launched: {' '.join(_launcher(path))}")
     ready, why = available()
-    print(f"Command : {cli_path() or '(not found)'}")
     if not ready:
+        print("\nLooked in:")
+        for where, found in find_candidates():
+            print(f"   {'FOUND' if found else '  -  '}  {where}")
         print("\n  --  " + why)
         return 1
     print("Model   : " + a.model)
@@ -615,6 +734,9 @@ def main(argv=None):
     print("\n  --  " + (res.get("cause") or "it did not answer"))
     if res.get("error"):
         print("      " + res["error"][:300])
+    if "signed in" in (res.get("cause") or ""):
+        print("\n      Run  claude  once in a terminal and sign in. The agency\n"
+              "      uses that same login; there is nothing separate to set up.")
     return 1
 
 
