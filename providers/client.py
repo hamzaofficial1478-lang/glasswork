@@ -114,11 +114,44 @@ def _wait_before(attempt, asked=0.0) -> float:
                FIRST_WAIT * (2 ** attempt) * (0.75 + random.random() * 0.5))
 
 
-def _execute(cred, url, headers, body, timeout, tries=MOST_TRIES, sleep=None):
+def _execute(cred, url, headers, body, timeout, tries=MOST_TRIES, sleep=None,
+             clock=None):
     """
     HTTP execution with backoff on the transient statuses. Returns a dict with
     ok/status/text/raw (redacted), plus `attempts` and, when it retried, a
     `waited` trail so the failover screen can show what it actually did.
+
+    THE TIMEOUT IS A BUDGET FOR THIS MODEL, NOT A BUDGET PER ATTEMPT.
+
+    "the apis response time reading or writing time seems to be slow."
+
+    It was, and this loop was most of the reason. `timeout` was applied to each
+    attempt, so three attempts meant three times the wait. Measured against a
+    socket that accepts a connection and then says nothing — which is how a sick
+    endpoint actually behaves, a refused connection being the easy case:
+
+        route timeout  10s -> gave up after  33.6s
+        route timeout  30s -> gave up after  93.1s
+
+    A real route uses 120s. So one hanging key cost about SIX MINUTES before the
+    cascade was allowed to try the next model, and a sector with two models on
+    the same sick provider spent twelve before reporting that everything failed.
+    Nothing was slow except us, waiting.
+
+    Now the whole model gets `timeout` seconds. Each attempt is given what is
+    left, and when the budget is gone there is no next attempt, whatever `tries`
+    says. That keeps the retry where it earns its place and removes it where it
+    never did:
+
+      a 429 or a 503 comes back in a fraction of a second, so the budget is
+      barely touched and it still gets its three goes — which is the whole
+      point of the ladder, and the case the owner originally reported;
+
+      a timeout has by definition consumed the budget, so it is not retried
+      into oblivion. Retrying something that already waited two minutes, in the
+      hope it answers within another two, was never a real hope.
+
+    Worst case for one model drops from about 3x the timeout to about 1x.
     """
     raw = {
         "url": url,
@@ -128,12 +161,26 @@ def _execute(cred, url, headers, body, timeout, tries=MOST_TRIES, sleep=None):
         "response_body": None,
     }
     nap = sleep or time.sleep
+    now = clock or time.monotonic
     waited = []
     tries = max(1, int(tries))
+    budget = max(1.0, float(timeout))
+    deadline = now() + budget
     for attempt in range(tries):
         pause = None
+        left = deadline - now()
+        if left <= 0 and attempt:
+            # Out of time. Report the last thing that actually happened rather
+            # than inventing a new failure on top of it.
+            return {"ok": False, "status": raw["status"] or 0,
+                    "text": raw["response_body"] or "timed out",
+                    "cause": _likely_cause(raw["status"] or 0,
+                                           raw["response_body"] or "timed out"),
+                    "raw": raw, "attempts": attempt, "waited": waited,
+                    "spent": round(budget, 1)}
         try:
-            r = requests.post(url, headers=headers, data=body, timeout=timeout)
+            r = requests.post(url, headers=headers, data=body,
+                              timeout=max(1.0, left))
             raw["status"] = r.status_code
             text = r.text
             raw["response_body"] = text[:4000]
@@ -166,6 +213,9 @@ def _execute(cred, url, headers, body, timeout, tries=MOST_TRIES, sleep=None):
                         "cause": _likely_cause(0, str(e)), "raw": raw,
                         "attempts": attempt + 1, "waited": waited}
             pause = _wait_before(attempt)
+        # The wait counts against the budget too — otherwise a provider that
+        # fails fast three times could still sleep its way past the ceiling.
+        pause = max(0.0, min(pause, deadline - now()))
         waited.append(round(pause, 2))
         nap(pause)
     # Unreachable: every branch above returns on the last attempt. Kept so a

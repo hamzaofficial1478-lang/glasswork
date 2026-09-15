@@ -203,7 +203,7 @@ def test_his_own_keys_are_still_tried_first():
         for task in local_cli.SECTOR_MODEL:
             _store.set_route(task, {"primary": paid_m, "enabled": True})
 
-        local_cli.install(_store)
+        local_cli.install(_store, tasks=sorted(local_cli.SECTOR_MODEL))
         routes = _store.get_routing()
         check("his key is still primary everywhere",
               {t: routes[t]["primary"] for t in local_cli.SECTOR_MODEL},
@@ -222,7 +222,7 @@ def test_his_own_keys_are_still_tried_first():
 
         print("\nRunning it twice changes nothing:")
         before = _store.get_routing()["md"]["fallback"]
-        local_cli.install(_store)
+        local_cli.install(_store, tasks=sorted(local_cli.SECTOR_MODEL))
         check("no duplicate in the chain",
               _store.get_routing()["md"]["fallback"], before)
         check("and no second credential",
@@ -230,12 +230,69 @@ def test_his_own_keys_are_still_tried_first():
                    if c["base_url"] == local_cli.MARKER]), 1)
 
 
+def test_by_default_it_goes_to_md_and_it_and_nowhere_else():
+    """
+    "i only want to assign the claude to MD and IT the rest of sectors will use
+     the modules already added."
+
+    Right, and not only because he said so: every sector that falls to this
+    spends the same Claude allowance, and spread across seven it runs out
+    before the two that matter have finished. MD and IT are where a failed call
+    costs the whole day — no plan posted, or no release.
+    """
+    print("\nOut of the box it touches two sectors:")
+    with _store.isolated():
+        r = local_cli.install(_store)
+        check("exactly MD and IT", sorted(r["routed"]), ["it", "md"])
+        routes = _store.get_routing()
+        others = [s for s in local_cli.SECTOR_MODEL if s not in ("md", "it")]
+        check("every other sector is left completely alone",
+              [s for s in others if routes.get(s)], [])
+
+        print("  ...and only the model those two need is put on the shelf:")
+        check("no sonnet entry nobody asked for", sorted(r["models"]), ["opus"])
+
+    print("\nHe can widen it if he wants to:")
+    with _store.isolated():
+        r = local_cli.install(_store, tasks=["md", "it", "security"])
+        check("three sectors", sorted(r["routed"]), ["it", "md", "security"])
+
+    print("\nA typo names the sectors rather than silently doing nothing:")
+    with _store.isolated():
+        try:
+            local_cli.install(_store, tasks=["md", "marketing"])
+            check("it refused", False, True)
+        except ValueError as exc:
+            check("it refused", True, True)
+            check("and named the bad one", "marketing" in str(exc), True)
+            check("and listed the real ones", "leads" in str(exc), True)
+
+
+def test_every_tool_is_off_not_just_the_dangerous_ones():
+    """
+    --restricted removes the code-running tools, which is the safety half. The
+    speed half is that a tool the model can never use still ships its
+    description on every call. Measured on this machine, same prompt, same
+    model: 28,473 tokens -> 22,738 with tools denied -> 20,324 with slash
+    commands off. Nearly a third off the floor of every call.
+    """
+    print("\nThe command carries the lean flags, not just --restricted:")
+    for flag in ("--restricted", "--disallowedTools", "--disable-slash-commands"):
+        check(flag, flag in local_cli.LEAN, True)
+    check("Bash is denied by name", "Bash" in local_cli.DENY_TOOLS, True)
+    check("and so is WebFetch", "WebFetch" in local_cli.DENY_TOOLS, True)
+
+    print("\n--bare is NOT used, and must not be:")
+    check("it would force an API key and break the whole point",
+          "--bare" in local_cli.LEAN, False)
+
+
 def test_a_sector_with_nothing_gets_it_as_its_only_model():
     """A fallback chain under an empty primary never runs."""
     print("\nA sector with no model at all gets this as its primary:")
     with _store.isolated():
-        local_cli.install(_store)
-        route = _store.get_routing()["leads"]
+        local_cli.install(_store)                 # MD and IT, with no keys set
+        route = _store.get_routing()["md"]
         check("it has a primary now", bool(route["primary"]), True)
         check("and is not left only in the fallback list",
               route["primary"] in (route["fallback"] or []), False)
@@ -291,6 +348,8 @@ def main():
     test_the_provider_words_are_the_cli_s_own()
     test_a_dead_key_falls_through_to_it()
     test_his_own_keys_are_still_tried_first()
+    test_by_default_it_goes_to_md_and_it_and_nowhere_else()
+    test_every_tool_is_off_not_just_the_dangerous_ones()
     test_a_sector_with_nothing_gets_it_as_its_only_model()
     test_it_never_claims_to_see_pictures()
     test_it_really_answers_on_this_machine()

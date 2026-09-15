@@ -64,7 +64,16 @@ class _Bench:
     def __exit__(self, *a):
         client.requests.post = self.real
 
-    def run(self, tries=client.MOST_TRIES, timeout=5):
+    # A REAL ROUTE TIMEOUT, not an arbitrary small one.
+    #
+    # This was 5, which stopped mattering the moment the timeout became a
+    # budget for the whole model rather than a limit per attempt: a provider
+    # asking us to wait 7 seconds cannot be obeyed inside a 5-second budget, so
+    # the Retry-After checks below started failing on a clamp that was doing
+    # its job. Their subject is whether the provider's own number is honoured,
+    # and 120 is what a route actually carries, so that is what they get. The
+    # budget's own behaviour is checked separately, where it is the point.
+    def run(self, tries=client.MOST_TRIES, timeout=120):
         return client._execute({"name": "test", "api_key": "sk-secret"},
                                "https://example.test/v1/chat/completions",
                                {"Authorization": "Bearer sk-secret"},
@@ -187,6 +196,89 @@ def test_one_attempt_is_still_allowed():
     check("asked once", p.calls, 1)
     check("no waits", b.slept, [])
     check("reported as one attempt", res["attempts"], 1)
+
+
+def test_the_timeout_is_a_budget_for_the_model_not_for_each_try():
+    """
+    "the apis response time reading or writing time seems to be slow."
+
+    It was, and this loop was most of it. The timeout was applied per ATTEMPT,
+    so three attempts meant three times the wait. Measured against a socket
+    that accepts a connection and then says nothing — how a sick endpoint
+    actually behaves, a refused connection being the easy case:
+
+        route timeout  10s -> gave up after 33.6s
+        route timeout  30s -> gave up after 93.1s
+
+    A real route uses 120s, so ONE hanging key cost about six minutes before
+    the cascade was allowed to try the next model. Nothing was slow except us,
+    waiting.
+
+    The budget must cut that without touching the case the ladder was built
+    for: a 429 comes back in a fraction of a second, barely dents the budget,
+    and still gets all three goes.
+    """
+    print("\nA fast 429 still gets the full ladder — that is the point of it:")
+    clock = _Clock()
+    r = _with_post(_always(429), lambda: client._execute(
+        {"api_key": "k"}, "http://x/v1/chat/completions", {}, "{}",
+        timeout=120, sleep=clock.sleep, clock=clock))
+    check("all three attempts", r["attempts"], 3)
+    check("and it slept between them", len(r["waited"]), 2)
+
+    print("\nA tight budget stops the ladder rather than sleeping past it:")
+    clock = _Clock()
+    r = _with_post(_always(429), lambda: client._execute(
+        {"api_key": "k"}, "http://x/v1/chat/completions", {}, "{}",
+        timeout=2, sleep=clock.sleep, clock=clock))
+    check("the sleeping stayed inside the budget", sum(r["waited"]) <= 2.001, True)
+    check("and it gave up early rather than overrun", r["attempts"] < 3, True)
+
+    print("\nA hanging endpoint costs the budget ONCE, not three times:")
+    clock = _Clock()
+
+    def hang(url, headers=None, data=None, timeout=None):
+        clock.t += timeout            # the request burns the whole timeout
+        raise client.requests.exceptions.Timeout()
+
+    r = _with_post(hang, lambda: client._execute(
+        {"api_key": "k"}, "http://x/v1/chat/completions", {}, "{}",
+        timeout=120, sleep=clock.sleep, clock=clock))
+    check("it did not try again on a spent budget", r["attempts"], 1)
+    check("total time is about one timeout, not three",
+          round(clock.t), 120)
+    check("and it still says what went wrong",
+          "timed out" in (r["cause"] or "").lower(), True)
+
+
+class _Clock:
+    """A clock the fake sleep moves, so the budget behaves as it does in life."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, n):
+        self.t += n
+
+
+def _always(status):
+    class _R:
+        status_code = status
+        text = '{"error":"slow down"}'
+        headers = {}
+    return lambda url, headers=None, data=None, timeout=None: _R()
+
+
+def _with_post(fake, fn):
+    real = client.requests.post
+    client.requests.post = fake
+    try:
+        return fn()
+    finally:
+        client.requests.post = real
 
 
 def main():

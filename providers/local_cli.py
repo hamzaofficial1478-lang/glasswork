@@ -87,6 +87,32 @@ DEFAULT_TIMEOUT = 180
 # by a service.
 CLI_ENV = "CLAUDE_CLI"
 
+# EVERY TOOL OFF, NOT JUST THE DANGEROUS ONES.
+#
+# --restricted alone removes the code-running tools, which is the safety half.
+# The speed and cost half is that a tool the model can never use still has its
+# description sent on every single call. Measured on this machine, same prompt,
+# same model:
+#
+#     --restricted only ............. 28,473 tokens of context
+#     + every tool denied ........... 22,738
+#     + slash commands off .......... 20,324
+#
+# Nearly a third off the floor of every call. The first call of the day pays
+# that in full; after that it is cached and read back, so the saving is largest
+# exactly where it is felt most — the first thing the MD does each morning.
+#
+# The remaining 20k is Claude Code's own system prompt. --bare would drop it,
+# and must not be used: it makes the CLI read ANTHROPIC_API_KEY only and never
+# the subscription login, so the one provider that needs no key would suddenly
+# need one.
+DENY_TOOLS = ("Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,Task,"
+              "TodoWrite,NotebookEdit,BashOutput,KillShell,SlashCommand,Agent")
+
+LEAN = ["--restricted",
+        "--disallowedTools", DENY_TOOLS,
+        "--disable-slash-commands"]
+
 
 def is_local(cred) -> bool:
     """Is this credential a local CLI rather than an HTTP endpoint?"""
@@ -207,10 +233,7 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
 
     cmd = [cli_path(), "-p",
            "--output-format", "json",
-           "--model", _model_flag(model.get("api_model_id")),
-           # No Bash, no file writes, no WebFetch. A model on the shelf answers
-           # questions; it does not act.
-           "--restricted"]
+           "--model", _model_flag(model.get("api_model_id"))] + LEAN
     if system:
         cmd += ["--system-prompt", system]
 
@@ -328,24 +351,45 @@ def probe(cred, model, timeout=120) -> dict:
 
 NAME = "Claude Code (this machine)"
 
-# Which CLI model each sector gets when it falls this far. The two he named
-# get the strongest one; the rest get the one that is quick and cheap enough to
-# be a genuine safety net rather than a second bill.
+# Which CLI model a sector gets when it falls this far.
 SECTOR_MODEL = {
     "md": "opus", "it": "opus",
     "content": "sonnet", "seo": "sonnet", "leads": "sonnet",
     "report": "sonnet", "security": "opus",
 }
 
+# WHERE IT GOES BY DEFAULT: the two he asked for, and only those.
+#
+# "i only want to assign the claude to MD and IT the rest of sectors will use
+#  the modules already added."
+#
+# He is right, and not only because he said so. Every sector that falls to this
+# spends his Claude allowance, and an allowance spread across seven sectors
+# runs out before the two that matter have finished thinking. MD and IT are
+# where a failed call costs the whole day: no plan posted, or no release. A
+# keyword pass that fails is a keyword pass retried tomorrow.
+#
+# --sectors all puts it everywhere for anyone who wants that.
+DEFAULT_SECTORS = ("md", "it")
+
 
 def install(store, tasks=None, as_last_resort=True) -> dict:
     """
-    Add the local model to the shelf and put it under every sector.
+    Add the local model to the shelf and put it under the named sectors.
 
-    `store` is passed in rather than imported so a test can hand in an isolated
-    one. Idempotent: run it twice and nothing doubles.
+    `tasks` defaults to DEFAULT_SECTORS — MD and IT. Pass a longer list to
+    cover more. `store` is passed in rather than imported so a test can hand in
+    an isolated one. Idempotent: run it twice and nothing doubles.
     """
-    wanted = sorted(set(SECTOR_MODEL.values()))
+    tasks = list(tasks or DEFAULT_SECTORS)
+    unknown = [t for t in tasks if t not in SECTOR_MODEL]
+    if unknown:
+        raise ValueError("not a sector: " + ", ".join(unknown)
+                         + ". One of: " + ", ".join(sorted(SECTOR_MODEL)))
+    # Only the models those sectors will actually reach for. Adding opus to the
+    # shelf for a run that only needs sonnet leaves an entry the owner has to
+    # wonder about on the Shelf screen.
+    wanted = sorted({SECTOR_MODEL[t] for t in tasks})
     existing = next((c for c in store.redacted_view().get("credentials", [])
                      if (c.get("base_url") or "").lower().rstrip("/") == MARKER), None)
     cred = store.upsert_credential({
@@ -375,7 +419,7 @@ def install(store, tasks=None, as_last_resort=True) -> dict:
     touched = []
     if as_last_resort:
         routes = store.get_routing()
-        for task in (tasks or SECTOR_MODEL):
+        for task in tasks:
             mid = by_name.get(SECTOR_MODEL.get(task, "sonnet"))
             if not mid:
                 continue
@@ -405,19 +449,34 @@ def main(argv=None):
     ap.add_argument("--check", action="store_true",
                     help="is it installed, signed in, and answering?")
     ap.add_argument("--install", action="store_true",
-                    help="add it to the shelf, last in every sector's chain")
+                    help="add it to the shelf as a last-resort model")
+    ap.add_argument("--sectors", default=",".join(DEFAULT_SECTORS),
+                    help="which sectors fall back to it (default: md,it). "
+                         "'all' for every sector. One of: "
+                         + ", ".join(sorted(SECTOR_MODEL)))
     ap.add_argument("--model", default="sonnet", help="which model --check asks")
     a = ap.parse_args(argv)
 
     if a.install:
-        r = install(_store)
+        picked = (sorted(SECTOR_MODEL) if a.sectors.strip().lower() == "all"
+                  else [s.strip().lower() for s in a.sectors.split(",") if s.strip()])
+        try:
+            r = install(_store, tasks=picked)
+        except ValueError as exc:
+            print("  --  " + str(exc))
+            return 1
         print(f"  ok  added '{NAME}' to the shelf")
-        for alias, mid in sorted(r["models"].items()):
+        for alias in sorted(r["models"]):
             print(f"        {alias}")
         if r["routed"]:
-            print("      last-resort model for: " + ", ".join(sorted(r["routed"])))
-        print("\n      Your own keys are still tried first. This one answers "
-              "only\n      when they do not.")
+            print("      last-resort model for: "
+                  + ", ".join(f"{t} ({SECTOR_MODEL[t]})" for t in sorted(r["routed"])))
+        untouched = [s for s in sorted(SECTOR_MODEL) if s not in r["routed"]]
+        if untouched:
+            print("      left alone, still on your own keys: "
+                  + ", ".join(untouched))
+        print("\n      Your own keys are still tried first everywhere. This one\n"
+              "      answers only when they do not.")
         return 0
 
     ready, why = available()
