@@ -293,6 +293,71 @@ def test_hunt_without_a_key_explains_itself():
         board.DB = real
 
 
+def test_the_collection_task_reaches_the_collector_that_can_do_it():
+    """
+    WHY LEADS NEVER COLLECTED, ON ANY RUN HE HAS EVER DONE.
+
+    Read off the cabinet of real day runs, three traps in a row:
+
+      1. The map step ran as "leads-hunter", first in the Leads lane, so the
+         dispatcher gave it the Hunter's job. It closed "Collect today's leads"
+         with a source map as the result. Zero leads, task marked done.
+      2. Had it not, the Places desk would have claimed it, found no Places
+         key and closed it BLOCKED — with a message saying OpenStreetMap runs
+         right after — while closing the task OpenStreetMap needed.
+      3. One task per sector per run, so OpenStreetMap, the collector that
+         works with no key at all, never got a turn.
+
+    With the fixes, on a fresh cabinet: run 1 maps, run 2 collected 40 leads.
+    """
+    from coordination import desks
+    from . import md_cycle
+    print("\nThe map step and the collectors are different desks:")
+    map_t = {"title": "Map the lead sources across every buying segment",
+             "detail": "Collect nothing yet.", "sector": "Leads", "desk": ""}
+    col_t = {"title": "Collect today's leads across the mapped segments",
+             "detail": "Work the source map.", "sector": "Leads", "desk": ""}
+    check("the mapper can never take collection, even unaddressed",
+          desks.verdict("leads-mapper", col_t)["allowed"], False)
+    check("and the map step runs as the mapper, not the Hunter",
+          ls.run.__defaults__[0], "leads-mapper")
+
+    print("\n...and the MD addresses each task to the desk that does it:")
+    facts = {"targets": {"jobs": [{"name": "leads", "unit": "leads", "per_day": 20,
+                                   "set_by_owner": True, "done_today": 0,
+                                   "done_yesterday": 0, "on_file": 0, "remaining": 20}]},
+             "sector_orders": {}, "site": {}, "proposals": [],
+             "source_map_done": False, "approvals": 0}
+    plan = {c["title"]: c for c in md_cycle.plan(facts) if c["sector"] == "Leads"}
+    check("the map is for the mapper",
+          plan["Map the lead sources across every buying segment"].get("desk"),
+          "leads-mapper")
+    check("collection is for a collector",
+          plan["Collect today's leads across the mapped segments"].get("desk"),
+          "leads-hunter")
+    check("so a collector cannot take the map",
+          desks.verdict("leads-hunter", dict(map_t, desk="leads-mapper"))["allowed"],
+          False)
+
+    print("\nNo Places key: the Places desk does not claim a job it cannot do:")
+    for var in ("GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_API_KEY"):
+        os.environ.pop(var, None)
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        tid = board.post_task("Leads", col_t["title"], col_t["detail"],
+                              created_by="MD", desk="leads-hunter")
+        r = lh.run(agent="leads-hunter")
+        check("it stood aside, idle", r.get("idle"), True)
+        check("and says who it left it for", "OpenStreetMap" in r.get("left_for", ""), True)
+        task = board.get_task(tid)
+        check("the task is still open for OpenStreetMap", task["status"], "open")
+        check("and was never claimed, so the run's one job is still free",
+              task["claimed_at"], None)
+    finally:
+        board.DB = real
+
+
 def test_hunt_stores_screens_and_dedupes():
     print("A full hunt, with the network faked:")
     real = board.DB
@@ -787,6 +852,7 @@ def _main():
     test_locals_come_first()
     test_asking_for_more_does_not_get_you_less()
     test_hunt_without_a_key_explains_itself()
+    test_the_collection_task_reaches_the_collector_that_can_do_it()
     test_hunt_stores_screens_and_dedupes()
     test_never_collected_twice()
     test_the_mail_is_about_one_service()

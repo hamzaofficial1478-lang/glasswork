@@ -602,15 +602,22 @@ def plan(facts: dict) -> list:
             "detail": ("Build the source map: which directories and segments to work, "
                        "each tied to the service that segment actually buys. "
                        "Collect nothing yet."),
+            # For the map step and nobody else — otherwise a collector, whose
+            # `does` list has "source" and "segment" in it, can take it.
+            "desk": "leads-mapper",
             "evidence": "no leads-sources decision on file — the map has never been built"})
 
     lead_t = _target(facts, "leads")
     if lead_t.get("per_day") and lead_t.get("remaining"):
-        out.append(_counted_job(
+        collect = _counted_job(
             "Leads", "leads", lead_t, folded,
             "Collect today's leads across the mapped segments",
             "Work the source map. Every lead carries the service that business "
-            "needs. Dedup before storing; contact nobody."))
+            "needs. Dedup before storing; contact nobody.")
+        # For a collector. The map step runs first in the Leads lane and used
+        # to take this, close it with a source map, and leave zero leads.
+        collect["desk"] = "leads-hunter"
+        out.append(collect)
 
     # THE POSTS TARGET HAD NOWHERE TO GO. targets.py has counted "Pages or
     # posts published" since it was written, the owner can set it, Report scores
@@ -808,9 +815,14 @@ def _cycle(agent, dry_run):
         # it is an instruction. The item is recorded as skipped, with the reason,
         # rather than crashing the cycle or silently disappearing.
         try:
+            # A candidate may name the ONE desk it is for. The dispatcher
+            # enforces that, which is the only reliable way to stop a desk that
+            # runs earlier in the lane taking work meant for one that runs
+            # later — see the leads-mapper note in coordination/desks.py.
             tid = board.post_task(c["sector"], c["title"],
                                   c["detail"] + f"\n\n[MD evidence] {c['evidence']}",
-                                  risk=c.get("risk", "green"), created_by="MD")
+                                  risk=c.get("risk", "green"), created_by="MD",
+                                  desk=c.get("desk"))
         except board.SectorOff as e:
             rejected.append({"sector": c["sector"], "title": c["title"],
                              "why": str(e)})

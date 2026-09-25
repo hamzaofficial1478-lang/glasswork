@@ -473,6 +473,25 @@ def run(agent="leads-hunter", segment=None, area=None, limit=20, per_segment=1,
     caller's default, so a plain scheduled run behaves exactly as before.
     """
     with board.agent_run(agent) as run_row:
+        # NO KEY, NO CLAIM.
+        #
+        # This desk used to claim the collection task first and THEN discover
+        # there was no Places key — and job.cannot() closes a task BLOCKED. So
+        # the step whose own message says "OpenStreetMap finds real UAE
+        # businesses with no key at all, and it runs right after this step"
+        # closed the one task OpenStreetMap needed, and used the sector's one
+        # job per run doing it. The free path could never get a turn.
+        #
+        # A desk that cannot do the work without a key does not pick up the
+        # work. It says why, as before, and leaves the task on the board for
+        # the collector that can.
+        if not dry_run and not _places_key()[0]:
+            out = _hunt(agent, segment, area, limit, per_segment, max_searches,
+                        dry_run, enrich_sites, run_row, service)
+            out["idle"] = True
+            out["left_for"] = "Leads collects from OpenStreetMap"
+            run_row.note(out.get("error") or "no Places key — left for OpenStreetMap")
+            return out
         with deskwork.at_the_desk("Leads", agent, run_row) as job:
             if job:
                 limit, max_searches = _sized(job.how_many(None),

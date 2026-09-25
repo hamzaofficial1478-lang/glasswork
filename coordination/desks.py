@@ -172,6 +172,35 @@ DESKS = {
     },
 
     # ---- Leads: find, dedup, clear, only then make contact ----------------
+    #
+    # THE MAPPER IS ITS OWN DESK, AND THIS IS WHY LEADS NEVER COLLECTED.
+    #
+    # The source-map step ran as "leads-hunter" — the same name as both
+    # collectors — and it runs FIRST in the Leads lane. So when it asked for
+    # work, the dispatcher saw the Hunter and handed it the Hunter's job:
+    # "Collect today's leads". The map step did the only thing it knows, built
+    # a source map, and closed the collection task with the map as its result.
+    # Read off the cabinet of a real day run:
+    #
+    #     Collect today's leads   claimed + done by leads-hunter
+    #                             result: {"segments": {"fitout_contractor": ...
+    #
+    # Zero leads, the task marked done, and with one task per sector per run
+    # the collectors never got a turn — on that run or, because the map step
+    # always goes first, on any other. Every run he has ever done.
+    #
+    # A desk of its own, whose `never` list holds the collectors' verbs, means
+    # the map step can only ever take map work.
+    "leads-mapper": {
+        "sector": "Leads",
+        "job": "builds the source map, once — which segments and directories to work",
+        "does": ("map the lead sources", "source map", "lead sources", "map",
+                 "sources", "buying segment"),
+        "never": ("collect", "hunt", "find leads", "email", "mail", "send",
+                  "contact", "write to them") + CONCESSION,
+        "never_why": "mapping is setup; collecting is the Hunter's job, and a "
+                     "map closed against a collection task collects nothing",
+    },
     "leads-hunter": {
         "sector": "Leads",
         "job": "finds UAE service-relevant leads and files them",

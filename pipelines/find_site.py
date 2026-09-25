@@ -52,6 +52,7 @@ the reason, and stay walk-in leads. A collector that quietly guesses on those
 is a collector that eventually mails the wrong company.
 """
 import re
+import time
 import urllib.parse
 
 from . import fetcher
@@ -279,19 +280,28 @@ def find(company: str, timeout=12, tlds=TLDS, allow_paid=False,
             "why": f"tried {len(tried)} domain(s), none of them theirs"}
 
 
-def fill_in(cands, limit=25, timeout=12) -> dict:
+def fill_in(cands, limit=25, timeout=12, deadline=None) -> dict:
     """
     Give a website to the leads that have a name and nothing else.
 
     Only the ones with no website AND no email — a lead we can already reach
     has nothing to gain and the fetch would be spent for nothing.
+
+    `deadline` is a wall-clock time (time.time()) to stop by. Each look can try
+    five domains at `timeout` seconds apiece, so twenty-five of them could run
+    for twenty-five minutes — inside a day-run step that is killed at seven,
+    taking every lead the pass had found with it. Whatever is not reached is
+    counted as not reached, and is still there for tomorrow.
     """
     todo = [c for c in cands
             if not (c.get("website") or "").strip()
             and not (c.get("email") or "").strip()]
     attempting = todo[:max(0, int(limit))]
-    found, too_generic, missed = 0, [], []
+    found, too_generic, missed, tried = 0, [], [], 0
     for c in attempting:
+        if deadline and time.time() >= deadline:
+            break
+        tried += 1
         r = find(c.get("company", ""), timeout=timeout, hints=hints_for(c))
         if r["ok"]:
             c["website"] = r["website"]
@@ -301,10 +311,10 @@ def fill_in(cands, limit=25, timeout=12) -> dict:
             too_generic.append(c.get("company"))
         else:
             missed.append(c.get("company"))
-    return {"looked_for": len(attempting), "sites_found": found,
+    return {"looked_for": tried, "sites_found": found,
             "too_generic_to_guess": too_generic, "no_site_found": missed,
-            "not_reached_this_pass": len(todo) - len(attempting),
-            "head": (f"looked for {len(attempting)} missing site(s), found "
+            "not_reached_this_pass": len(todo) - tried,
+            "head": (f"looked for {tried} missing site(s), found "
                      f"{found}"
                      + (f", {len(too_generic)} names too generic to guess from"
                         if too_generic else ""))}

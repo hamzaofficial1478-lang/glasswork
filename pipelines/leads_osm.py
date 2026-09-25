@@ -93,6 +93,35 @@ BBOX = {
     "Al Ain":           "24.13,55.66,24.30,55.86",
     "Fujairah":         "25.08,56.28,25.20,56.40",
 }
+# THE PASS WORKS TO A CLOCK.
+#
+# A full day run handed this collector its task for the first time — once the
+# map step stopped taking it — and it ran for over fifteen minutes and stored
+# nothing. Every business on the map, then a website looked up for each one
+# that had none (five domains tried at twelve seconds apiece, twenty-five
+# businesses), then every site read — and the leads written only at the very
+# END. The day kills this step at seven minutes. Killed, it stores nothing and
+# leaves the task held.
+#
+# So the pass takes most of its step's ceiling, read from the runner rather
+# than copied, stops looking and reading when that is spent, and always keeps
+# enough back to store what it has. The same rule seo_intel follows, for the
+# same reason: partial and honest beats complete and killed.
+OF_THE_CEILING = 0.80
+WRITE_RESERVE = 45       # screening, dedup and storing, with room for a bad day
+OSM_BUDGET = 330         # only if the runner's ceiling cannot be read
+
+
+def pass_budget() -> int:
+    """Seconds this whole pass may take, from the day run's own step limit."""
+    try:
+        from . import day_run
+        return max(90, int(day_run.step_timeout_for("pipelines.leads_osm")
+                           * OF_THE_CEILING))
+    except Exception:
+        return OSM_BUDGET
+
+
 DEFAULT_AREAS = ("Dubai", "Sharjah", "Abu Dhabi")
 
 # Our segments, in OSM's vocabulary. Only tags that genuinely exist in the UAE
@@ -158,8 +187,18 @@ OSM_TAGS = {
 
 
 def segments_covered():
-    """Which of the agency's segments this collector can actually find."""
-    return sorted(k for k in OSM_TAGS if k in ls.SEGMENTS)
+    """
+    Which of the agency's segments this collector can actually find — in the
+    agency's order of value, not the alphabet's.
+
+    This was sorted(), so the collector worked BANKS first: "bank" sorts before
+    "builder" and everything else. The first time a day run let it collect,
+    every one of its fifteen leads was a bank — chains that buy centrally, with
+    one phone number between them. ls.SEGMENTS is ordered on purpose, fit-out
+    contractors and interior designers at the top, and the Places hunter
+    already follows it; now both collectors do.
+    """
+    return [k for k in ls.SEGMENTS if k in OSM_TAGS]
 
 
 # ---------------------------------------------------------------------------
@@ -690,7 +729,8 @@ def reach_line(reach) -> str:
             f"{reach['walk_in']} walk-in only")
 
 
-def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True) -> dict:
+def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True,
+           deadline=None) -> dict:
     """
     Read the websites we found and take the email the business published.
 
@@ -706,8 +746,13 @@ def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True) -> dict:
             if (c.get("website") or "").strip()
             and not (c.get("email") or "").strip()]
     attempting = todo[:max(0, int(limit))]
-    read, gained, failed, spend = 0, 0, [], 0.0
+    read, gained, failed, spend, tried = 0, 0, [], 0.0, 0
     for c in attempting:
+        # The pass's clock — see OSM_BUDGET. A site not read today is still
+        # worth reading tomorrow; a pass killed mid-read stores nothing at all.
+        if deadline and time.time() >= deadline:
+            break
+        tried += 1
         try:
             h = harvest.harvest(c["website"], timeout=timeout,
                                 allow_paid=allow_paid)
@@ -740,7 +785,7 @@ def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True) -> dict:
     # What the cap kept us from trying — NOT the ones we tried and lost. A site
     # that was read and had no email is a closed question; one we never got to
     # is still worth a pass tomorrow, and they must not be counted together.
-    skipped = len(todo) - len(attempting)
+    skipped = len(todo) - tried
     return {"sites_read": read, "emails_found": gained,
             "no_email_on_site": failed, "not_reached_this_pass": skipped,
             "spend": round(spend, 4),
@@ -753,7 +798,7 @@ def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True) -> dict:
 # ---------------------------------------------------------------------------
 
 def run(agent=AGENT, segment=None, area=None, per_segment=1, dry_run=False,
-        chains=False, read_sites=True, contactable_only=False,
+        chains=False, read_sites=True, contactable_only=True,
         guess_sites=True):
     with board.agent_run(agent) as row:
         out = _run(agent, segment, area, per_segment, dry_run, chains,
@@ -798,9 +843,14 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
         # More asked for than one segment will give: widen the search rather
         # than returning fifteen banks and calling it twenty leads.
         segs = segments_covered()[:max(1, min(6, -(-int(wanted) // 15)))]
-    collected, errors = [], []
+    started = time.time()
+    stop_looking = started + pass_budget() - WRITE_RESERVE
+    collected, errors, cut_short = [], [], False
     for s in segs:
         for a in areas:
+            if time.time() >= stop_looking:
+                cut_short = True
+                break
             r = find(s, a, chains=chains, contactable_only=contactable_only)
             if not r.get("ok"):
                 errors.append(f"{s}/{a}: {r.get('error')}")
@@ -833,14 +883,15 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     guessed = ({"looked_for": 0, "sites_found": 0, "too_generic_to_guess": [],
                 "no_site_found": [], "not_reached_this_pass": 0,
                 "head": "missing sites not looked for this pass"}
-               if not guess_sites else find_site.fill_in(collected))
+               if not guess_sites else find_site.fill_in(collected,
+                                                          deadline=stop_looking))
 
     # THE STEP THAT WAS MISSING. Without it every OSM lead was filed with an
     # empty email column and the mail runner had nobody to write to.
     enriched = ({"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
                  "not_reached_this_pass": 0, "spend": 0.0,
                  "head": "sites not read this pass"}
-                if not read_sites else enrich(collected))
+                if not read_sites else enrich(collected, deadline=stop_looking))
 
     # Same gate as every other collector: screened, deduped, never contacted.
     res = ls.intake(collected, agent=agent, sector=SECTOR)
@@ -923,10 +974,18 @@ def main():
     ap.add_argument("--chains", action="store_true",
                     help="keep the franchises too (dropped by default: they buy "
                          "centrally, usually abroad)")
-    ap.add_argument("--contactable", action="store_true",
-                    help="ask OSM only for the ones that have a phone, site or "
-                         "email tag — spends the result cap on businesses we "
-                         "can actually reach")
+    # CONTACTABLE IS THE DEFAULT NOW. The day run calls this with no flags,
+    # so the default is what actually happens every day — and it was "every
+    # business on the map". The first time Leads was allowed to collect, it
+    # stored fifteen businesses and one had any way in. The same collector
+    # asked for contactable ones only gave twenty-two mailable out of
+    # twenty-five. A lead nobody can phone, message or write to is not a lead.
+    # --everyone is there for a hand-run survey of a whole area.
+    ap.add_argument("--contactable", action="store_true", default=True,
+                    help="(the default) ask OSM only for businesses with a "
+                         "phone, site or email tag")
+    ap.add_argument("--everyone", dest="contactable", action="store_false",
+                    help="include businesses the map gives no way to reach")
     ap.add_argument("--no-read-sites", dest="read_sites", action="store_false",
                     help="skip reading the businesses' websites for an email "
                          "address (faster, but the leads stay unmailable)")

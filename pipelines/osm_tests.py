@@ -872,7 +872,7 @@ def test_a_name_and_nothing_else_still_gets_a_website():
                             "area": "Dubai", "segment": seg,
                             "source": "openstreetmap:node/9"}]}
 
-        def fake_fill(cands, limit=25, timeout=12):
+        def fake_fill(cands, limit=25, timeout=12, deadline=None):
             cands[0]["website"] = "https://daffodilsadvertising.ae/"
             return {"looked_for": 1, "sites_found": 1, "too_generic_to_guess": [],
                     "no_site_found": [], "not_reached_this_pass": 0,
@@ -901,8 +901,76 @@ def test_a_name_and_nothing_else_still_gets_a_website():
               cab.sql("SELECT count(*) n FROM outreach_log")[0]["n"], 0)
 
 
+def test_it_works_the_valuable_segments_first_and_only_reachable_businesses():
+    """
+    The first time a day run let this collector work, all fifteen leads were
+    banks and one had any way in. Two defaults did that: segments were
+    sorted() — alphabetical, so "bank" came first — and the day run's call
+    asked for every business on the map, not the ones with a phone, site or
+    email. With both fixed, a fresh cabinet's second run: 40 leads, 39 with a
+    phone, 25 with a published email — property managers and estate agents.
+    """
+    print("\nSegments follow the agency's order of value, not the alphabet:")
+    covered = O.segments_covered()
+    ordered = [k for k in ls.SEGMENTS if k in covered]
+    check("same order as the agency's own list", covered, ordered)
+    check("banks are not first any more", covered[0] != "bank", True)
+
+    print("\n...and the day's call asks for reachable businesses only:")
+    import argparse, inspect
+    check("run() defaults to contactable",
+          inspect.signature(O.run).parameters["contactable_only"].default, True)
+    src = inspect.getsource(O.main)
+    check("the command line defaults to it too", "default=True" in src, True)
+    check("and --everyone is there to opt out", "--everyone" in src, True)
+
+
+def test_the_pass_stops_in_time_to_store_what_it_found():
+    """
+    Handed its task for the first time, the collector ran for over fifteen
+    minutes and stored nothing: a website looked up for every business with
+    none (five domains at twelve seconds each, twenty-five businesses), then
+    every site read — and the leads written only at the very end. The day
+    kills this step at seven minutes.
+    """
+    from . import find_site
+    print("\nBoth slow steps stop at the deadline and count what they left:")
+    cands = [{"company": f"Firm {i}"} for i in range(10)]
+    calls = {"n": 0}
+    real_find = find_site.find
+
+    def slow_find(name, timeout=12, hints=None):
+        calls["n"] += 1
+        return {"ok": False, "tried": ["x.ae"], "website": "", "why": ""}
+
+    find_site.find = slow_find
+    try:
+        r = find_site.fill_in(cands, deadline=time.time() - 1)
+        check("a spent clock looks up nothing", calls["n"], 0)
+        check("and says all ten are still waiting", r["not_reached_this_pass"], 10)
+        r = find_site.fill_in(cands, deadline=time.time() + 60)
+        check("with time left it works through them", calls["n"], 10)
+    finally:
+        find_site.find = real_find
+
+    sites = [{"company": f"Firm {i}", "website": f"https://f{i}.ae"} for i in range(5)]
+    r = O.enrich(sites, deadline=time.time() - 1)
+    check("reading stops at the deadline too", r["sites_read"], 0)
+    check("and counts them for tomorrow", r["not_reached_this_pass"], 5)
+
+    print("\nThe budget comes from the runner, with room kept back to store:")
+    from . import day_run
+    ceiling = day_run.step_timeout_for("pipelines.leads_osm")
+    check("it fits inside the step's ceiling",
+          O.pass_budget() < ceiling, True)
+    check("and leaves time to write up after looking",
+          O.pass_budget() - O.WRITE_RESERVE > 0, True)
+
+
 def main():
-    for t in (test_the_query_asks_for_what_is_actually_mapped,
+    for t in (test_it_works_the_valuable_segments_first_and_only_reachable_businesses,
+              test_the_pass_stops_in_time_to_store_what_it_found,
+              test_the_query_asks_for_what_is_actually_mapped,
               test_an_osm_point_becomes_a_lead,
               test_phone_shapes_collapse_to_one_number,
               test_it_only_asks_for_segments_the_agency_has,

@@ -635,7 +635,11 @@ def critic_check(smap, env_ready):
     return (not reasons, reasons)
 
 
-def run(agent="leads-hunter"):
+def run(agent="leads-mapper"):
+    # ITS OWN NAME, NOT THE HUNTER'S. Running as "leads-hunter" at the head of
+    # the Leads lane, this step was handed the Hunter's collection task every
+    # run and closed it with a source map — zero leads, task marked done, the
+    # collectors starved. See the leads-mapper desk in coordination/desks.py.
     with board.agent_run(agent) as run_row:
         # Leads reads its post first — this is the sector's one reader, and it
         # runs at the head of the Leads lane so anything filed as work can be
