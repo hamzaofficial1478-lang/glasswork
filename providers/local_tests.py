@@ -483,6 +483,101 @@ def test_npm_is_asked_where_it_puts_things():
         local_cli.os.path.isfile = real_isfile
 
 
+def test_a_half_finished_npm_install_is_named_and_the_fix_given():
+    """
+    What he got from `npm install -g @anthropic-ai/claude-code` on npm 12:
+
+        npm warn install-scripts ... @anthropic-ai/claude-code@2.1.281
+          (postinstall: node install.cjs)
+        PS> claude
+        Program 'claude.exe' failed to run: The specified executable is not a
+          valid application for this OS platform.
+
+    Read off the 2.1.281 tarball: bin/claude.exe ships as a 500-byte TEXT FILE
+    of echo lines. install.cjs copies the real 237 MB binary over it from the
+    platform package, and npm 12 blocked install.cjs. Windows was asked to run
+    a text file, and said so in words that point nowhere near npm.
+    """
+    import os
+    import tempfile
+    print("\nThe placeholder is recognised by size and content, not by running it:")
+    root = tempfile.mkdtemp()
+    pkg = os.path.join(root, "@anthropic-ai", "claude-code")
+    os.makedirs(os.path.join(pkg, "bin"))
+    with open(os.path.join(pkg, "install.cjs"), "w") as fh:
+        fh.write("// the step npm refused to run\n")
+    stub = os.path.join(pkg, "bin", "claude.exe")
+    with open(stub, "w") as fh:
+        fh.write('echo "Error: claude native binary not installed." >&2\n'
+                 'echo "Either postinstall did not run" >&2\nexit 1\n')
+
+    real = local_cli._npm_root
+    local_cli._npm_root = lambda: root
+    try:
+        half = local_cli.half_installed()
+        check("half-installed is detected", bool(half), True)
+        check("and the installer is found", half["installer"].endswith("install.cjs"), True)
+        ready, why = local_cli.available()
+        check("it is not called ready", ready, False)
+        check("the reason is the real one", "placeholder" in why, True)
+        check("the command is quoted, for a user folder with a space in it",
+              f'node "{half["installer"]}"' in why, True)
+        check("and the reinstall alternative is given too",
+              "--allow-scripts=@anthropic-ai/claude-code" in why, True)
+        check("the Shelf screen's red line says which problem",
+              local_cli._unavailable_cause(why),
+              "claude code is half-installed — its setup step was blocked")
+
+        print("\nOnce the real binary is in place, it is no longer flagged:")
+        with open(stub, "wb") as fh:
+            fh.write(b"\0" * (local_cli.PLACEHOLDER_MAX + 1))
+        check("the full-size binary passes", local_cli.half_installed(), {})
+    finally:
+        local_cli._npm_root = real
+
+    print("\nWindows' own wording is translated if it ever gets that far:")
+    check("'not a valid application'",
+          local_cli._cause_from("The specified executable is not a valid "
+                                "application for this OS platform."),
+          "claude code is half-installed — its setup step was blocked")
+
+
+def test_the_floor_is_given_time_to_finish():
+    """
+    The Content writer's real prompt through this provider on sonnet took 85
+    seconds. The route allowed 120; the first attempt in a full day run went
+    over it, every rung after it was empty, and the page was held with
+    "Content's brain did not answer". This provider is installed LAST — when
+    it is cut off there is nothing after it, so a slow answer became none.
+    """
+    print("\nA local call gets at least the floor, whatever the route says:")
+    seen = {}
+    real_run, real_avail = local_cli.subprocess.run, local_cli.available
+
+    class _Done:
+        returncode, stdout, stderr = 0, '{"result": "ok"}', ""
+
+    def fake_run(cmd, **kw):
+        seen["timeout"] = kw.get("timeout")
+        return _Done()
+
+    local_cli.subprocess.run = fake_run
+    local_cli.available = lambda: (True, "")
+    real_path = local_cli.cli_path
+    local_cli.cli_path = lambda: "/usr/local/bin/claude"
+    try:
+        local_cli.chat(CRED, MODEL, [{"role": "user", "content": "hi"}], timeout=120)
+        check("a 120-second route still gets the floor",
+              seen["timeout"], local_cli.FLOOR_TIMEOUT)
+        local_cli.chat(CRED, MODEL, [{"role": "user", "content": "hi"}], timeout=900)
+        check("a longer route keeps its own, longer number", seen["timeout"], 900)
+        check("and the floor is long enough for a page on a slower model",
+              local_cli.FLOOR_TIMEOUT >= 300, True)
+    finally:
+        local_cli.subprocess.run, local_cli.available = real_run, real_avail
+        local_cli.cli_path = real_path
+
+
 def test_a_windows_cmd_shim_is_run_through_cmd_exe():
     """
     npm on Windows installs a .cmd shim. CreateProcess — which is what
@@ -594,6 +689,8 @@ def main():
     test_keep_others_adds_without_taking_anything_away()
     test_it_is_found_when_PATH_is_no_help()
     test_npm_is_asked_where_it_puts_things()
+    test_a_half_finished_npm_install_is_named_and_the_fix_given()
+    test_the_floor_is_given_time_to_finish()
     test_a_windows_cmd_shim_is_run_through_cmd_exe()
     test_every_tool_is_off_not_just_the_dangerous_ones()
     test_a_sector_with_nothing_gets_it_as_its_only_model()

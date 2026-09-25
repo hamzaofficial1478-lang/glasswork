@@ -82,6 +82,27 @@ MARKER = "local://claude-code"
 # subprocess, not on the model's thinking.
 DEFAULT_TIMEOUT = 180
 
+# THE FLOOR IS GIVEN TIME TO FINISH.
+#
+# A route's timeout is right for an API key: a key that has not answered in
+# two minutes is not going to, and the cascade should move on to the next one.
+# It is wrong for this provider, because this provider IS the next one — it is
+# installed last, so when it runs out of time there is nothing after it and a
+# slow answer becomes no answer at all.
+#
+# Measured, not assumed. The Content writer's real prompt for "Aluminium Doors
+# across the UAE", through this provider on sonnet: 85 seconds. The route
+# allowed 120, and the first attempt in a full run went over it — every rung
+# after it (shelf, the Director's model) was empty, so the page was held with
+# "Content's brain did not answer". Opus, which MD and IT use, is slower than
+# sonnet, and MD's plan is the one call that decides the whole day.
+#
+# So a local call gets at least this long, whatever the route says. His API
+# keys are unaffected — they are still cut off at the route's timeout and the
+# cascade still moves on quickly. This is a ceiling, not a wait: a short
+# question still comes back in seconds.
+FLOOR_TIMEOUT = 360
+
 # What to run. Overridable for a machine where the CLI is not on PATH under
 # this name — a Windows install is claude.cmd, and PATH is not always inherited
 # by a service.
@@ -296,8 +317,95 @@ def _launcher(path: str) -> list:
     return [path]
 
 
+# ---------------------------------------------------------------------------
+# INSTALLED, BUT HALF-INSTALLED
+# ---------------------------------------------------------------------------
+#
+# What he got from `npm install -g @anthropic-ai/claude-code`:
+#
+#     npm warn install-scripts 1 package had install scripts blocked because
+#       they are not covered by allowScripts:
+#       @anthropic-ai/claude-code@2.1.281 (postinstall: node install.cjs)
+#     PS> claude
+#     Program 'claude.exe' failed to run: The specified executable is not a
+#       valid application for this OS platform.
+#
+# Read off the 2.1.281 tarball itself, not guessed: the package ships
+# bin/claude.exe as a FIVE-HUNDRED-BYTE TEXT FILE of `echo` lines saying "claude
+# native binary not installed". The real program arrives in a second package,
+# @anthropic-ai/claude-code-win32-x64, and install.cjs is the step that copies
+# it over the placeholder. npm 12 blocks install scripts that are not on an
+# allow-list, so the copy never ran, and Windows was asked to execute a text
+# file.
+#
+# Both halves are on his disk. Only the copy is missing, and the fix is one
+# command — the one the placeholder itself prints, once it is given a path.
+
+# A real Claude Code binary is tens of megabytes. The placeholder is 500 bytes.
+# Anything under this is not the program, whatever its name says.
+PLACEHOLDER_MAX = 64 * 1024
+
+
+def _npm_root() -> str:
+    """npm's global node_modules folder, or ''."""
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm:
+        return ""
+    return _run_quietly(_launcher(npm) + ["root", "-g"])
+
+
+def half_installed() -> dict:
+    """
+    {'installer': path} when the package is there but its binary is still the
+    placeholder, else {}.
+
+    Checked by SIZE and CONTENT rather than by trying to run it, because
+    running it is exactly the thing that fails, and the failure message is
+    Windows' ("not a valid application"), which says nothing about npm.
+    """
+    root = _npm_root()
+    if not root:
+        return {}
+    pkg = os.path.join(root, "@anthropic-ai", "claude-code")
+    installer = os.path.join(pkg, "install.cjs")
+    for name in ("claude.exe", "claude"):
+        binary = os.path.join(pkg, "bin", name)
+        try:
+            size = os.path.getsize(binary)
+        except OSError:
+            continue
+        if size > PLACEHOLDER_MAX:
+            return {}                          # the real thing is in place
+        try:
+            with open(binary, "rb") as fh:
+                head = fh.read(400).decode("utf-8", "replace").lower()
+        except OSError:
+            head = ""
+        if "not installed" in head or head.startswith("echo") or size < 4096:
+            return {"installer": installer if os.path.isfile(installer) else "",
+                    "binary": binary, "size": size}
+    return {}
+
+
+def repair_command(info: dict) -> str:
+    """The exact line to paste. Quoted, because his user folder has a space in it."""
+    return f'node "{info.get("installer") or "install.cjs"}"'
+
+
 def available() -> tuple:
     """(ready, why_not) — checked before a call so the reason is a sentence."""
+    half = half_installed()
+    if half:
+        return False, (
+            "Claude Code is installed but its last setup step never ran, so "
+            "the 'claude.exe' on disk is a 500-byte placeholder, not the "
+            "program. npm blocked the step because install scripts are not "
+            "allowed by default any more.\n\n"
+            "Run this once, then check again:\n\n"
+            f"    {repair_command(half)}\n\n"
+            "Or reinstall with the step allowed:\n\n"
+            "    npm install -g @anthropic-ai/claude-code "
+            "--allow-scripts=@anthropic-ai/claude-code")
     named = _setting(CLI_ENV)
     if named and not cli_path():
         return False, (f"{CLI_ENV} is set to '{named}' and there is nothing "
@@ -328,6 +436,15 @@ def available() -> tuple:
             "If it IS installed and you know where, put that path into .env as "
             f"{CLI_ENV}=<path> and restart the server.")
     return True, ""
+
+
+def _unavailable_cause(why: str) -> str:
+    """The one-line cause the Shelf screen shows in red, matched to the reason."""
+    if "placeholder" in why:
+        return "claude code is half-installed — its setup step was blocked"
+    if "is set to" in why:
+        return "CLAUDE_CLI points at nothing"
+    return "claude code is not installed here"
 
 
 def split_messages(messages) -> tuple:
@@ -412,8 +529,7 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
     started = time.perf_counter()
     ready, why = available()
     if not ready:
-        return _answer(False, [], error=why,
-                       cause="claude code is not installed here")
+        return _answer(False, [], error=why, cause=_unavailable_cause(why))
 
     system, prompt = split_messages(messages)
     if not prompt.strip():
@@ -438,14 +554,16 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
         return _answer(False, cmd, error=f"could not make a scratch directory: {exc}",
                        cause="no scratch directory")
 
+    # At least FLOOR_TIMEOUT — see its note. The route's number is for keys.
+    allowed = max(FLOOR_TIMEOUT, int(timeout or 0))
     try:
         proc = subprocess.run(
             cmd, input=prompt, capture_output=True, text=True,
-            timeout=max(10, int(timeout)), cwd=workdir,
+            timeout=allowed, cwd=workdir,
             encoding="utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         return _answer(False, cmd, status=408,
-                       error=f"the local model did not answer within {int(timeout)}s",
+                       error=f"the local model did not answer within {allowed}s",
                        cause="timed out",
                        waited=[round(time.perf_counter() - started, 1)])
     except Exception as exc:                                  # pragma: no cover
@@ -496,6 +614,11 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
 def _cause_from(detail: str) -> str:
     """Turn the CLI's own words into the short cause the failover trail shows."""
     low = (detail or "").lower()
+    # Windows' words for "that file is not a program", and the placeholder's
+    # own words. Both mean the npm setup step was blocked, and neither says so.
+    if ("not a valid application" in low or "not a valid win32" in low
+            or "native binary not installed" in low):
+        return "claude code is half-installed — its setup step was blocked"
     if "not logged in" in low or "unauthor" in low or "authenticate" in low:
         return "claude code is not signed in on this machine"
     if "usage limit" in low or "rate limit" in low or "quota" in low:
@@ -516,7 +639,7 @@ def probe(cred, model, timeout=120) -> dict:
     ready, why = available()
     if not ready:
         return {"ok": False, "status": 0, "error": why,
-                "cause": "claude code is not installed here", "output": ""}
+                "cause": _unavailable_cause(why), "output": ""}
     res = chat(cred, model,
                [{"role": "user", "content": "Reply with exactly: OK"}],
                max_tokens=16, timeout=timeout)
