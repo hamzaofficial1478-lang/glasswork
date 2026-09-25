@@ -350,7 +350,13 @@ def _suggestion_tests():
                              ("al reef aluminium contact number", "al reef"),
                              ("glass partition dubai price", ""),
                              ("shower glass installation cost", ""),
-                             ("aluminium windows near me", "")):
+                             ("aluminium windows near me", ""),
+                             # Both put in front of him by a full day run as
+                             # rivals to approve: his own trade from a job
+                             # seeker's search, and a name left hanging on its
+                             # connector.
+                             ("glass work jobs in dubai", ""),
+                             ("jawad aluminium and glass works ajman photos", "jawad")):
             check(f"{phrase!r}", seo_gap.rival_name_in(phrase), want)
 
         print("\nPut forward, with the reason attached:")

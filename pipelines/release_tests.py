@@ -182,6 +182,66 @@ def test_nothing_he_has_not_approved_is_ever_touched():
     check("and it is not counted as waiting on him", r["waiting_on_you"], 0)
 
 
+def test_nothing_to_release_is_grey_not_red():
+    """
+    WHY A SUCCESSFUL RUN HAD NEVER HAPPENED.
+
+    A full day run on a fresh cabinet, against his real site:
+
+        failed   IT carries out what you approved
+                 IT RELEASER — Nothing to put on the site — nobody has
+                 approved anything since the last pass.
+
+    ok:false with no idle flag, so exit_code() gave the shell a 1 and the run
+    painted it red. On a day with nothing approved — most days — every run
+    therefore ended with a failed step however well the rest of the agency did.
+    The Releaser looked, found nothing to put on the site, and put nothing on
+    the site. That is the job done, not failed.
+
+    The runner already has the grey state for exactly this. The Releaser just
+    never asked for it.
+    """
+    from coordination import deskwork
+    print("\nNothing approved, nothing waiting — grey, and exits clean:")
+    _fresh_db()
+    with _Stub() as site:
+        r = R.run()
+    check("still reports it did not release", r["ok"], False)
+    check("but says it was idle, not broken", r.get("idle"), True)
+    check("so the shell sees success", deskwork.exit_code(r), 0)
+    check("and nothing was written", site.writes, [])
+
+    print("\nChanges waiting on HIM — still grey, still counted for him:")
+    _fresh_db()
+    _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                      "block": "viewport", "html": VIEWPORT}},
+           status="pending")
+    with _Stub() as site:
+        r = R.run()
+    check("idle — the Releaser is not the thing holding it up",
+          deskwork.exit_code(r), 0)
+    check("and the count he can act on is still there", r["waiting_on_you"], 1)
+
+    print("\nThe site watcher follows the same rule — not set up is grey:")
+    from pipelines import site_watch
+    s = site_api.settings({"SITE_MODE": "readonly"})
+    r = site_watch.look(s)
+    check("read-only is idle, not a failure", r.get("idle"), True)
+    check("so the day run does not paint it red", deskwork.exit_code(r), 0)
+    check("and it still says why it could not look",
+          "cannot see your files" in r.get("why", ""), True)
+    s = site_api.settings({"SITE_MODE": "full"})
+    check("a box not filled in is idle too",
+          site_watch.look(s).get("idle"), True)
+
+    print("\nA site it cannot reach is STILL red — that one is broken:")
+    from pipelines import day_run
+    check("the runner's verdict for a crash is unchanged",
+          day_run._verdict("", 1), "failed")
+    check("and an idle step is grey",
+          day_run._verdict(json.dumps({"ok": False, "idle": True}), 0), "idle")
+
+
 def test_a_red_suite_stops_everything():
     """
     Handbook: a change goes out after the tests pass, not before. Asserted here
@@ -427,6 +487,7 @@ def main():
     _fresh_db()
     try:
         test_nothing_he_has_not_approved_is_ever_touched()
+        test_nothing_to_release_is_grey_not_red()
         test_a_red_suite_stops_everything()
         test_only_the_named_routines_may_be_run()
         test_the_happy_path_end_to_end()

@@ -348,8 +348,22 @@ def _work(agent, limit, dry_run, skip_tests):
 
     waiting = board.approved_site_changes(limit=limit)
     if not waiting:
+        # NOTHING APPROVED IS NOT A FAILURE, AND IT WAS BEING SCORED AS ONE.
+        #
+        # This returned ok:false with no idle flag, so exit_code() handed the
+        # shell a 1 and the day run painted the step red: "IT carries out what
+        # you approved — failed". On a fresh day, with no approvals waiting —
+        # which is most days — every single run therefore finished with a
+        # failed step, and "a successful run" could not happen however well
+        # every other sector did. He has been asking why it never has.
+        #
+        # The Releaser did its job: it looked, there was nothing to put on the
+        # site, it put nothing on the site. That is idle — the grey state the
+        # runner already has for a desk that did nothing wrong and had nothing
+        # to do. When changes ARE queued for his yes, the summary still says so
+        # by count, because that is the one thing here he can act on.
         pending = len(board.pending_site_changes())
-        return {"ok": False, "agent": agent,
+        return {"ok": False, "idle": True, "agent": agent,
                 "waiting_on_you": pending,
                 "error": ("Nothing to put on the site — "
                           + (f"{pending} change(s) are still waiting for your "

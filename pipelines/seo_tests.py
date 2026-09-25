@@ -40,6 +40,56 @@ def _fresh_db():
     return db
 
 
+def test_a_rival_learned_mid_pass_does_not_throw_the_batch_away():
+    """
+    WHY CONTENT HAD NEVER WRITTEN A PAGE.
+
+    A full day run on a fresh cabinet: the gap desk found 137 phrases and
+    stored none. Reproduced by hand:
+
+        gaps_found 137 · critic rejected · "2 out-of-scope phrases"
+        keywords table: 0 rows
+
+    _in_scope() reads the competitors table. The filter ran against it as it
+    stood, then the SAME pass suggested new rivals into it, and the Critic —
+    calling the same function — judged against a different rule than the
+    filter had used. It found the two phrases naming a now-known rival and
+    rejected all 137. The keywords table stayed empty, the briefs desk read
+    that empty table, and Content had nothing to write, every single run.
+
+    The Critic was right about the two. The fix drops them against the rule as
+    it now stands and keeps the other 135; the Critic stays as strict as it was.
+    """
+    real_db, real_suggest = board.DB, seo._suggest
+    board.DB = _fresh_db()
+    try:
+        print("\nA pass that discovers rivals as it goes still stores its gaps:")
+        # Every seed answers with the same handful — ordinary demand, plus a
+        # branded lookup the pass will learn a rival from ("photos" gives it
+        # away), plus the SAME firm searched without the tell, which passes the
+        # filter because febtech is not known yet when the filter runs.
+        answers = ["glass partition price dubai",
+                   "glass partition installation sharjah",
+                   "febtech glass works dubai photos",
+                   "febtech glass works dubai"]
+        seo._suggest = lambda q: list(answers)
+        out = seo.run(max_seeds=18)
+        check("the Critic passed", out.get("critic"), "passed")
+        check("the good phrases were stored", out.get("stored", 0) >= 2, True)
+        check("the rival was put forward to him", "febtech" in out["rivals_put_forward"], True)
+        check("the rival's search was dropped, not stored as a gap",
+              "febtech glass works dubai" in out.get("dropped_as_rival_lookups", []), True)
+        with sqlite3.connect(board.DB) as con:
+            stored = {r[0] for r in con.execute("SELECT phrase FROM keywords")}
+        check("the table holds real demand", "glass partition price dubai" in stored, True)
+        check("and not the rival lookup", "febtech glass works dubai" in stored, False)
+
+        print("\nThe day's summary leads with what happened, not five numbers:")
+        check("a stored pass says so in words", out.get("note", "").startswith("Stored"), True)
+    finally:
+        board.DB, seo._suggest = real_db, real_suggest
+
+
 def test_backlinks_and_guest_posts():
     """
     The owner asked for backlink building and guest posting. Both are worth
@@ -103,6 +153,7 @@ def main():
     _scope_tests()
     _critic_tests()
     _full_cycle_tests()
+    test_a_rival_learned_mid_pass_does_not_throw_the_batch_away()
     test_backlinks_and_guest_posts()
     test_seo_answers_content_s_clearance_from_its_own_table()
     test_cleared_from_reads_our_own_titles_not_seo_s_wording()

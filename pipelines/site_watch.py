@@ -46,7 +46,13 @@ def look(s=None) -> dict:
     """Read every page, hand the lot to the log, and report what it said."""
     why = site_api.why_not_ready(s)
     if why:
-        return {"ok": False, "error": why,
+        # Not set up is idle, not failed — the same rule Algolia with no keys
+        # and Places with no key already follow. Read-only is a mode he chose;
+        # a missing address or token is a box not yet filled in. Neither is the
+        # watcher breaking, and scoring it red put a failed step in every run
+        # on a machine without full access. The branch below — configured, and
+        # the site will not answer — IS a failure and stays one.
+        return {"ok": False, "idle": True, "error": why,
                 "why": ("The agency cannot see your files, so it cannot tell "
                         "you what changed in them. " + why)}
     listing = site_api.pages(s=s)

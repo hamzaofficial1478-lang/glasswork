@@ -161,9 +161,23 @@ def _rival_names():
 
 
 # Words too common in this trade to identify anybody.
-_TRADE_WORDS = {"glass", "aluminium", "aluminum", "works", "dubai", "sharjah",
-                "technical", "services", "contracting", "trading", "company",
-                "industries", "emirates", "national", "general", "decor"}
+#
+# "work" is here as well as "works" because a full day run put GLASS WORK in
+# front of him as a competitor to approve — lifted from "glass work jobs in
+# dubai", a job-seeker's search, with only the plural on the list. His own
+# trade offered to him as a rival firm is the kind of line that makes the whole
+# list look untrustworthy.
+_TRADE_WORDS = {"glass", "aluminium", "aluminum", "works", "work", "dubai",
+                "sharjah", "technical", "services", "contracting", "trading",
+                "company", "industries", "emirates", "national", "general",
+                "decor"}
+
+# Small words and company suffixes that sit between a name and the trade words
+# after it, and must be trimmed with them. Without "and", the same run offered
+# him "JAWAD ALUMINIUM AND" — the trimming reached the connector in "jawad
+# aluminium and glass works ajman" and stopped, leaving it hanging.
+_CONNECTORS = {"in", "near", "the", "and", "of", "llc", "co", "fze", "fzco",
+               "fzc", "est", "l.l.c"}
 
 
 def rival_name_in(phrase) -> str:
@@ -197,7 +211,7 @@ def rival_name_in(phrase) -> str:
     # brand like "al reef" intact.
     while words:
         last = words[-1]
-        if last in _TRADE_WORDS or uae.place_in(last) or last in {"in", "near", "the"}:
+        if last in _TRADE_WORDS or uae.place_in(last) or last in _CONNECTORS:
             words.pop()
             continue
         break
@@ -509,14 +523,50 @@ def _gap(agent, max_seeds, cost_ceiling, job=None):
             except Exception:
                 break
 
+        # THE RULE CHANGED UNDER THE FILTER, AND THE CRITIC THREW EVERYTHING OUT.
+        #
+        # _in_scope() reads the competitors table. The loop above filtered the
+        # gaps against that table as it stood; the block just above then WROTE
+        # new rivals into it. So the Critic, calling the same _in_scope(), was
+        # judging against a different rule than the filter had used — found
+        # the two phrases that named a now-known rival, and rejected the whole
+        # batch. Reproduced from a full day run on a fresh cabinet:
+        #
+        #     gaps_found 137 · critic rejected · "2 out-of-scope phrases"
+        #     keywords table: 0 rows
+        #
+        # 135 good phrases thrown away for 2, every run. The keywords table
+        # stayed empty, the Content briefs desk read that empty table, and
+        # Content had nothing to write — which is the "Content never delivers
+        # anything" he has been reporting since the start.
+        #
+        # The Critic was RIGHT about those two: "jawad aluminium glass works
+        # ajman" is somebody looking for a named firm, not a customer. So they
+        # come out here, against the rule as it now stands — the filter
+        # catching up with what this very pass just learned — and the Critic
+        # stays exactly as strict as it was. If it ever rejects again, the
+        # filter is genuinely broken rather than merely out of date.
+        now_rivals = [g for g in gaps if not _in_scope(g["phrase"])]
+        if now_rivals:
+            gaps = [g for g in gaps if _in_scope(g["phrase"])]
+
         ok, reasons = critic_check(gaps, seeds_used)
         result = {"ok": True, "agent": agent, "source": source, "source_kind": source_kind,
                   "borrow_approval": approval, "seeds_tried": len(seeds),
                   "seeds_answered": len(seeds_used), "suggestions_seen": len(fetched),
                   "gaps_found": len(gaps),
-                  "rivals_put_forward": put_forward}
+                  "rivals_put_forward": put_forward,
+                  "dropped_as_rival_lookups": [g["phrase"] for g in now_rivals]}
         if not ok:
-            result.update({"posted": False, "critic": "rejected", "critic_reasons": reasons})
+            # A rejection is the headline, not a sixth number. The day run
+            # builds a step's summary from its first five counts, so without a
+            # note this read "gaps found 137" — which sounds like success — and
+            # the rejection that emptied Content's week was cut off the end.
+            result.update({"posted": False, "critic": "rejected",
+                           "critic_reasons": reasons,
+                           "note": ("The Critic rejected the gap list, so nothing "
+                                    "was stored and Content has nothing new: "
+                                    + "; ".join(reasons))})
             return result
 
         top = gaps[:40]
@@ -550,7 +600,11 @@ def _gap(agent, max_seeds, cost_ceiling, job=None):
             # unrelated page the owner asked for by hand scores this list.
             evidence={"keyword_ids": keyword_ids,
                       "phrases": [g["phrase"] for g in top]})
-        result.update({"posted": True, "critic": "passed", "stored": len(top),
+        result.update({"note": (f"Stored {len(top)} new keyword gaps and handed "
+                                f"them to Content"
+                                + (f"; dropped {len(now_rivals)} that were "
+                                   "searches for a named rival" if now_rivals else "")),
+                       "posted": True, "critic": "passed", "stored": len(top),
                        "request_id": rid, "decision_id": did, "top_buy": buy})
         return result
     finally:
