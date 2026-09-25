@@ -1,15 +1,13 @@
 """
 tests.py — run: python3 -m providers.tests
 
-Covers the two things that caused real bugs: URL joining across awkward inputs,
-and the guarantee that the probe/test path and the production path build a
-byte-identical URL + headers for the same credential.
+The shelf tools' key checks, the preflight's verdicts, and the routes to the
+owner. The Claude team has its own suite (providers/team_tests.py); the URL
+joining and request-shape tests went with the API-key model providers.
 """
 import sys
 
 from . import auth
-from .request import build_chat_request
-from .urls import chat_endpoint, join_url, models_endpoint, normalize_base
 
 _fail = []
 
@@ -20,21 +18,6 @@ def check(name, got, want):
     else:
         print(f"FAIL  {name}\n        got:  {got!r}\n        want: {want!r}")
         _fail.append(name)
-
-
-def test_urls():
-    print("URL joiner:")
-    check("normalize host/v1", normalize_base("https://h/v1"), "https://h/v1")
-    check("normalize host/v1/", normalize_base("https://h/v1/"), "https://h/v1")
-    check("normalize full endpoint", normalize_base("https://h/v1/chat/completions"), "https://h/v1")
-    check("normalize host", normalize_base("https://h"), "https://h")
-    check("normalize host/", normalize_base("https://h/"), "https://h")
-    check("normalize /models endpoint", normalize_base("https://h/v1/models"), "https://h/v1")
-    check("chat endpoint from full paste", chat_endpoint("https://h/v1/chat/completions"),
-          "https://h/v1/chat/completions")
-    check("join no double slash", join_url("https://h/v1/", "/chat/completions"),
-          "https://h/v1/chat/completions")
-    check("models endpoint", models_endpoint("https://h/v1"), "https://h/v1/models")
 
 
 def test_auth():
@@ -126,7 +109,7 @@ def test_preflight_cover():
     """
     print("Fallback cover verdicts:")
     from .preflight import (_cover, _verdict, COVERED, SINGLE, DOWN, EMPTY,
-                            UNKNOWN, _ModelCache)
+                            UNKNOWN)
     check("two of two work -> COVERED", _cover(2, 2), COVERED)
     check("two of three work -> COVERED", _cover(2, 3), COVERED)
     check("primary works, fallback dead -> SINGLE", _cover(1, 2), SINGLE)
@@ -144,14 +127,6 @@ def test_preflight_cover():
           _verdict([{"ok": True}, {"ok": None}]), SINGLE)
     check("one dead, one untested -> UNKNOWN",
           _verdict([{"ok": False}, {"ok": None}]), UNKNOWN)
-
-    # a brain shared by five sectors must cost one call, not five
-    calls = []
-    cache = _ModelCache(quick=True)
-    for _ in range(5):
-        cache.test({"id": "c"}, {"id": "m1"})
-        calls.append(len(cache.seen))
-    check("shared model tested once", (len(cache.seen), calls[-1]), (1, 1))
 
 
 def test_integrations_unconfigured():
@@ -217,152 +192,13 @@ def test_the_owner_can_always_be_reached():
         v.encode("latin-1")     # raises if any header is unsendable
 
 
-def test_probe_equals_production():
-    print("Probe == production request shape:")
-    cred = {"base_url": "https://h/v1/chat/completions",  # deliberately pasted full
-            "api_key": "K", "auth_style": "bearer"}
-    msgs = [{"role": "user", "content": "ok"}]
-    # both paths build the request via the same function
-    prod_url, prod_h, _ = build_chat_request(cred, "the-model", msgs, max_tokens=5)
-    probe_url, probe_h, _ = build_chat_request(cred, "the-model", msgs, max_tokens=5)
-    check("identical URL", prod_url, probe_url)
-    check("identical headers", prod_h, probe_h)
-    check("URL from normalized base", prod_url, "https://h/v1/chat/completions")
-    check("single auth header", [k for k in prod_h if k.lower() in ("authorization", "x-api-key")],
-          ["Authorization"])
-
-
-def test_a_bare_host_gets_its_version_path():
-    """
-    The bug that silently cost the agency every model call it ever made.
-
-    The store held 'https://api.openai.com' — which is what you get if you type
-    the provider's website address, and it is the obvious thing to type. Calls
-    went to /chat/completions, came back 404, the cascade tried the fallback and
-    got 404 there too, and every desk quietly fell back to reading its own rows
-    out. Nothing anywhere said the base URL was missing two characters.
-    """
-    print("\nA base URL with no version path is completed, not 404'd:")
-    check("openai", chat_endpoint("https://api.openai.com"),
-          "https://api.openai.com/v1/chat/completions")
-    check("anthropic", chat_endpoint("https://api.anthropic.com"),
-          "https://api.anthropic.com/v1/chat/completions")
-    check("a trailing slash is the same thing",
-          chat_endpoint("https://api.openai.com/"),
-          "https://api.openai.com/v1/chat/completions")
-    check("and models too", models_endpoint("https://api.openai.com"),
-          "https://api.openai.com/v1/models")
-
-    print("\n...and a base that already has a path is left exactly as set:")
-    for base, want in (
-            ("https://api.openai.com/v1", "https://api.openai.com/v1/chat/completions"),
-            ("https://x.ai/openai/v1", "https://x.ai/openai/v1/chat/completions"),
-            ("https://generativelanguage.googleapis.com/v1beta",
-             "https://generativelanguage.googleapis.com/v1beta/chat/completions"),
-            ("http://localhost:11434/v1", "http://localhost:11434/v1/chat/completions"),
-            ("https://api.openai.com/v1/chat/completions",
-             "https://api.openai.com/v1/chat/completions")):
-        check(f"  {base}", chat_endpoint(base), want)
-
-    print("\n...and the owner is told what was added:")
-    from .urls import derived_note
-    check("said out loud", "/v1 was added" in derived_note("https://api.openai.com"), True)
-    check("and not said when nothing was",
-          "/v1 was added" in derived_note("https://api.openai.com/v1"), False)
-
-
-def test_load_splits_across_both_apis():
-    """
-    A busy primary yields to a free fallback, and to nothing else.
-
-    The owner asked for the load to be divided between both APIs instead of
-    everything queueing on the first one. Four things have to hold, and the
-    last two matter as much as the first: it must not reorder when there is
-    nothing to gain, and it must not invent a provider.
-    """
-    import sqlite3
-    import tempfile
-    import time
-    from pathlib import Path
-    from coordination import board
-    from . import load
-
-    print("\nWhen the primary is busy, the fallback answers:")
-    d = Path(tempfile.mkdtemp())
-    db = d / "agency.db"
-    con = sqlite3.connect(db)
-    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8"))
-    con.commit()
-    con.close()
-    was, board.DB = board.DB, db
-    try:
-        cands = [{"model_id": "m-primary", "api_model_id": "big"},
-                 {"model_id": "m-spare", "api_model_id": "spare"}]
-        names = lambda o: [c["api_model_id"] for c in o]     # noqa: E731
-
-        order, note = load.order(cands)
-        check("nothing in flight -> the route's own order", names(order), ["big", "spare"])
-        check("and nothing to explain", note, "")
-
-        tok = load.begin("m-primary", "c1", "seo", ttl=60)
-        order, note = load.order(cands)
-        check("primary mid-call -> the spare goes first", names(order), ["spare", "big"])
-        check("and it says why", "1 call(s) in flight" in note, True)
-
-        tok2 = load.begin("m-spare", "c2", "it", ttl=60)
-        order, note = load.order(cands)
-        check("both busy -> back to the route's order", names(order), ["big", "spare"])
-        check("nothing claimed about it", note, "")
-
-        load.end(tok)
-        load.end(tok2)
-        check("ending a call clears the ledger", load.busy(), {})
-
-        # A killed process leaves its row behind. It must not make a healthy
-        # model look busy for ever.
-        load.begin("m-primary", "c1", "seo", ttl=1)
-        time.sleep(2.2)
-        check("a row from a dead process expires", load.busy(), {})
-
-        check("one candidate is never reordered",
-              names(load.order([cands[0]])[0]), ["big"])
-        check("nor is an empty list", load.order([])[0], [])
-    finally:
-        board.DB = was
-
-
-def test_load_never_reaches_past_the_route():
-    """
-    The reordering must be exactly that — a reordering. Same members, same
-    count, every time. If this ever fails, something is picking providers the
-    route did not approve, and the cost-tier guard has been bypassed.
-    """
-    from . import load
-    print("\nReordering is never re-selecting:")
-    cands = [{"model_id": f"m{i}", "api_model_id": f"model-{i}"} for i in range(4)]
-    fake = {"m0": 3, "m1": 0, "m2": 9, "m3": 1}
-    order, _ = load.order(cands, load=fake)
-    check("same providers, no more and no fewer",
-          sorted(c["model_id"] for c in order), ["m0", "m1", "m2", "m3"])
-    check("least busy first", [c["model_id"] for c in order],
-          ["m1", "m3", "m0", "m2"])
-    tied, _ = load.order(cands, load={"m0": 2, "m1": 2, "m2": 2, "m3": 2})
-    check("all equally busy -> route order untouched",
-          [c["model_id"] for c in tied], ["m0", "m1", "m2", "m3"])
-
-
 def main():
-    test_urls()
     test_auth()
     test_405_retry()
     test_400_means_key_accepted()
     test_preflight_cover()
     test_integrations_unconfigured()
     test_the_owner_can_always_be_reached()
-    test_probe_equals_production()
-    test_a_bare_host_gets_its_version_path()
-    test_load_splits_across_both_apis()
-    test_load_never_reaches_past_the_route()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

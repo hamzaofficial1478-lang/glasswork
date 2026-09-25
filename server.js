@@ -2,7 +2,7 @@
  * server.js — the one Node app you host. Serves the UIs and the shared state.
  *   /          -> the Virtual Office (front of house)
  *   /control   -> the Control Room dashboard (back office)
- *   /setup     -> the setup screen (website, AI providers, routing, optional)
+ *   /setup     -> the setup screen (website, the Claude team, integrations, shelf)
  *   /status    -> plain-language "what's connected" view
  *
  * AI provider config is owned by the Python module in providers/*.py. This server
@@ -209,16 +209,17 @@ app.post("/api/logout", (req, res) => {
 
    The API routes below are gated too, not just the page. A lock on the door
    with the window open is not a lock: /api/settings hands back the ntfy topic
-   and the SMTP user, and /api/providers hands back the model routing. --------- */
+   and the SMTP user, /api/team changes which Claude model a sector uses (and
+   its test spends allowance), and /api/providers lists the shelf. ---------- */
 const SETUP_COOKIE = "glasswork_setup";
 const SETUP_TICKETS = new Map();      // token -> { expires, navUsed }
 const SETUP_TTL_MS = 10 * 60 * 1000;  // long enough to finish, short enough to matter
 
 // Everything the Setup screen reads or writes. Prefix match, so
-// /api/providers/credential is covered by /api/providers.
+// /api/providers/tool is covered by /api/providers and /api/team/set by /api/team.
 const SETUP_API = [
   "/api/settings", "/api/website", "/api/optional", "/api/integration",
-  "/api/providers", "/api/routing", "/api/preflight", "/api/shelves",
+  "/api/providers", "/api/team", "/api/preflight", "/api/shelves",
 ];
 
 function setupToken(req) {
@@ -391,17 +392,6 @@ const GSC_SA_PATH = path.join(__dirname, "config", "gsc-service-account.local.js
 const INTEGRATIONS = {
   email: { fields: ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_FROM_NAME"], secret: ["SMTP_PASS"] },
 };
-
-// the agency's tasks — each binds to a provider on the Routing screen
-const AGENCY_TASKS = [
-  { task: "md", label: "Managing Director & Critic" },
-  { task: "it", label: "IT sector" },
-  { task: "content", label: "Content sector" },
-  { task: "seo", label: "SEO sector" },
-  { task: "leads", label: "Leads sector" },
-  { task: "report", label: "Report sector" },
-  { task: "security", label: "Security sector" },
-];
 
 // read .env into a { KEY: value } map (used only to report what's filled)
 // The settings the agency reads by name. Only these may be overridden from the
@@ -788,14 +778,16 @@ app.post("/api/integration", (req, res) => {
   }
 });
 
-// ---- AI providers (each credential saves independently) --------------------
+// ---- the Claude team: which Claude model each sector thinks with ----------
+// Every sector's brain is a Claude model (providers/claude_team.py). One row
+// saves on its own; the test makes one tiny real call per model, so it gets
+// the long timeout — Opus can take a while to say "OK" on a cold start.
+app.get("/api/team", (_q, res) => res.json(pyProvider("team", {})));
+app.post("/api/team/set", (req, res) => res.json(pyProvider("team_set", req.body)));
+app.post("/api/team/test", (req, res) => res.json(pyProvider("team_test", req.body, 600000)));
+app.post("/api/team/forget", (req, res) => res.json(pyProvider("team_forget", {})));
+// The shelf's saved tools (keys masked) — the Setup page's shelf section reads it.
 app.get("/api/providers", (_q, res) => res.json(pyProvider("view", {})));
-app.post("/api/providers/credential", (req, res) => res.json(pyProvider("save_credential", req.body)));
-app.post("/api/providers/credential/delete", (req, res) => res.json(pyProvider("delete_credential", req.body)));
-app.post("/api/providers/model", (req, res) => res.json(pyProvider("save_model", req.body)));
-app.post("/api/providers/model/delete", (req, res) => res.json(pyProvider("delete_model", req.body)));
-app.post("/api/providers/fetch-models", (req, res) => res.json(pyProvider("fetch_models", req.body)));
-app.post("/api/providers/test", (req, res) => res.json(pyProvider("test_model", req.body)));
 
 // ---- the shelf (shared API cabinet) ----------------------------------------
 // Tool APIs (SEO data, stock graphics, email, crawler…) are shelf items; the
@@ -981,8 +973,14 @@ app.post("/api/run/start", (req, res) => {
       if (text) orders[String(k).slice(0, 40)] = text;
     }
   }
+  // This run only: which sectors work. A short list of plain names or nothing;
+  // Python always adds the essential four and ignores anything it does not know.
+  const only = Array.isArray(b.only)
+    ? b.only.filter((x) => typeof x === "string").map((x) => x.slice(0, 20)).slice(0, 10)
+    : [];
   const payload = JSON.stringify({
     orders,
+    only,
     note: String(b.note || "").slice(0, 4000),
     // Strictly true, not merely truthy. force overrides a check that said a
     // sector cannot run, so the string "no" must not be enough to trip it.
@@ -1223,10 +1221,6 @@ app.post("/api/targets", (req, res) => {
 app.post("/api/site-services", (_q, res) =>
   res.json(pyModule("pipelines.site_services", ["--json"], 180000)));
 
-// ---- per-task routing ------------------------------------------------------
-app.get("/api/routing", (_q, res) => res.json(pyProvider("get_routing", {})));
-app.post("/api/routing", (req, res) => res.json(pyProvider("save_route", req.body)));
-app.get("/api/tasks", (_q, res) => res.json({ ok: true, tasks: AGENCY_TASKS }));
 
 // ---- current settings (to pre-fill the setup form) -------------------------
 // Returns only non-secret values, plus a boolean for each secret so the form can
@@ -1280,17 +1274,14 @@ app.get("/api/status", (_q, res) => {
   const mode = String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly";
   const fullReady = has("SITE_API_BASE") && has("SITE_API_TOKEN");
 
-  // which provider + model each task (MD + sectors) resolves to
-  const ps = pyProvider("status", {});
-  const tasks = (ps && ps.tasks) || {};
-  const brains = AGENCY_TASKS.map((t) => {
-    const s = tasks[t.task];
-    const ok = !!(s && s.ok);
-    return {
-      key: t.task, label: t.label, ok,
-      detail: ok ? s.detail : ((s && s.detail) || "No provider chosen yet — pick one on the Routing screen"),
-    };
-  });
+  // which Claude model each sector thinks with, and whether Claude is ready
+  const team = pyProvider("team", {});
+  const signedIn = !!(team && team.ready && (team.accounts || []).some((a) => a.ok));
+  const brains = ((team && team.team) || []).map((t) => ({
+    key: t.sector, label: t.label, ok: signedIn,
+    detail: signedIn ? `${t.model_label} on Claude`
+      : ((team && team.why) || "Claude is not signed in on this machine — run  claude  once and sign in"),
+  }));
   const brainsReady = brains.filter((b) => b.ok).length;
   const brainsTotal = brains.length;
 

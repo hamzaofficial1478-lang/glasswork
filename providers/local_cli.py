@@ -1,5 +1,9 @@
 """
-local_cli.py — a model that runs on this machine instead of over an API key.
+local_cli.py — how the agency talks to Claude: the Claude Code command on this
+machine, signed in with the owner's own account.
+
+Which sector uses which model is providers/claude_team.py. This file finds the
+command, runs one call safely, and reports what happened.
 
 WHY THIS EXISTS
 
@@ -49,20 +53,18 @@ FOUR THINGS THIS DOES DELIBERATELY
                           argument. Anything in argv is visible to every other
                           process on the machine via the process list.
 
-  FAILS LIKE AN API       Returns the same shape client._execute returns —
-                          ok/status/text/cause/attempts — so routing, the load
-                          ladder, the failover trail and the usage counter all
-                          treat it as one more provider and none of them needed
-                          changing.
+  ONE RETURN SHAPE        ok/status/text/cause/attempts on every path, success
+                          or failure, so the Claude team can read any result
+                          the same way.
 
 THE HONEST LIMITS, BECAUSE HE SHOULD KNOW THEM BEFORE RELYING ON IT
 
   - It only works on a machine with Claude Code installed AND signed in. On a
-    server with neither, this provider reports that plainly and the cascade
-    moves on to the next one.
+    machine with neither, every sector reports that plainly, in one sentence,
+    with the command that fixes it.
   - On a Pro or Max subscription it draws on that plan's usage allowance. It is
-    not free and it is not unlimited; a heavy day can exhaust it, and then this
-    provider starts refusing like any other.
+    not free and it is not unlimited; a heavy day can exhaust it. That is what
+    the backup account in claude_team.py is for.
   - One call is a process start, so it carries about a second of overhead an
     HTTP call does not. Fine for a sector's thinking; wrong for something in a
     tight loop.
@@ -135,11 +137,27 @@ LEAN = ["--restricted",
         "--disallowedTools", DENY_TOOLS,
         "--disable-slash-commands"]
 
+# AND THEN MOST OF THE REST.
+#
+# Measured again when every sector moved onto Claude and the per-call floor
+# started to matter ten times a day, same one-line question, Haiku:
+#
+#     LEAN as above ........................ 19,289 tokens of context
+#     + --tools= (no built-in tools at all)   3,979
+#     + our own short system prompt ...........   820
+#
+# Ninety-six per cent of every call was Claude Code describing tools and
+# coding habits to a model that is only ever asked to write, rank or judge.
+# `--tools=` is written with the equals sign on purpose: an empty "" argument
+# can be dropped on its way through claude.cmd on Windows, and then --tools
+# would swallow the next flag as its value.
+TRIM = ["--tools=", "--strict-mcp-config", "--no-session-persistence"]
+_trim_ok = True      # an older Claude Code that rejects them gets LEAN alone
 
-def is_local(cred) -> bool:
-    """Is this credential a local CLI rather than an HTTP endpoint?"""
-    base = ((cred or {}).get("base_url") or "").strip().lower().rstrip("/")
-    return base == MARKER
+# Used when the caller gave no system prompt of its own. Anything is better
+# than Claude Code's default, which tells the model it is a coding agent.
+PLAIN_SYSTEM = ("Answer the request directly and completely, in exactly the "
+                "format it asks for. Write in British English.")
 
 
 def _setting(name: str) -> str:
@@ -393,8 +411,19 @@ def repair_command(info: dict) -> str:
     return f'node "{info.get("installer") or "install.cjs"}"'
 
 
+OFF_ENV = "CLAUDE_TEAM_OFF"
+
+
+def switched_off() -> bool:
+    """Set by run.py --tests: the suite must never spend the owner's allowance."""
+    return str(os.environ.get(OFF_ENV, "")).strip().lower() in ("1", "true", "yes", "on")
+
+
 def available() -> tuple:
     """(ready, why_not) — checked before a call so the reason is a sentence."""
+    if switched_off():
+        return False, (f"Claude is switched off for this run ({OFF_ENV}) — the "
+                       "test suite never spends the owner's Claude allowance.")
     half = half_installed()
     if half:
         return False, (
@@ -440,7 +469,9 @@ def available() -> tuple:
 
 
 def _unavailable_cause(why: str) -> str:
-    """The one-line cause the Shelf screen shows in red, matched to the reason."""
+    """The one-line cause shown in red, matched to the reason."""
+    if OFF_ENV in why:
+        return "claude is switched off for this run"
     if "placeholder" in why:
         return "claude code is half-installed — its setup step was blocked"
     if "is set to" in why:
@@ -485,40 +516,22 @@ def split_messages(messages) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# WHICH CLAUDE, CALL BY CALL
+# NEVER ABOVE OPUS 5
 # ---------------------------------------------------------------------------
 #
-# "for claude we can use sonnet ... if the tasks are simple program can use
-#  sonnet and if tasks are complex the program can use opus 4.8 — not the
-#  higher model than opus 4.8"
+# Which model a sector uses is the owner's choice, made on the Setup page and
+# kept by providers/claude_team.py. This is only the hard stop under it.
 #
-# THE ALIAS WAS THE WRONG MODEL. Checked against the CLI on this machine, by
-# what the reply said actually ran, not by what the name suggests:
-#
-#     --model opus             ran claude-opus-5-5     (higher than he allows)
-#     --model claude-opus-4-8  ran claude-opus-4-8
-#     --model sonnet           ran claude-sonnet-5
-#
-# 'opus' follows the newest Opus. The installer had given MD and IT exactly
-# that, so both were on a model above his ceiling. The ceiling is now a full,
-# pinned name, and anything above it is brought down to it wherever it comes
-# from — a shelf entry typed by hand, an old install, a new alias next year.
+# THE ALIAS IS NOT THE MODEL. Checked against the CLI by what the reply said
+# actually ran: `--model opus` ran claude-opus-5-5, which is above what he
+# allows. So a floating alias for a line above the ceiling, a Fable or Mythos
+# name, or a later Opus typed by hand all come down to Opus 5, wherever they
+# come from.
 
 SIMPLE_MODEL = "sonnet"
-COMPLEX_MODEL = "claude-opus-4-8"
-CEILING = COMPLEX_MODEL
-CEILING_VERSION = (4, 8)
-
-# The shelf entry that means "decide per call".
-AUTO = "auto"
-
-# Size signals, used alongside the explicit one (effort.demanding). About 3,000
-# tokens of prompt, or an answer asked to run past ~2,000 tokens, is a task a
-# person would call heavy whatever it is about. Words are deliberately NOT
-# used: guessing difficulty from vocabulary is the trap this codebase has hit
-# three times — a rule that fires on ordinary wording is a rule that is wrong.
-LONG_PROMPT_CHARS = 12000
-LONG_ANSWER_TOKENS = 2000
+# "for MD, Security we will use opus 5, not higher than this".
+CEILING = "claude-opus-5"
+CEILING_VERSION = (5, 0)
 
 # Aliases that always mean "the newest of a line above the ceiling".
 _ABOVE_CEILING_ALIASES = {"opus", "fable", "best", "opusplan"}
@@ -528,13 +541,14 @@ def clamp(model: str) -> str:
     """
     The model as asked for, or the ceiling if it is above it.
 
-    Sonnet and Haiku are below it and pass. Opus 4.x at or under 4.8 passes.
-    Any later Opus, any Fable, and the floating aliases for them come down to
-    Opus 4.8.
+    Sonnet and Haiku are below it and pass. Opus at or under 5 passes. Any
+    later Opus, any Fable or Mythos, and the floating aliases come down to
+    Opus 5.
     """
     m = (model or SIMPLE_MODEL).strip()
     low = m.lower()
-    if low in _ABOVE_CEILING_ALIASES or low.startswith(("claude-fable", "fable")):
+    if low in _ABOVE_CEILING_ALIASES or low.startswith(
+            ("claude-fable", "fable", "claude-mythos", "mythos")):
         return CEILING
     hit = re.match(r"claude-opus-(\d+)(?:-(\d+))?", low)
     if hit:
@@ -544,41 +558,11 @@ def clamp(model: str) -> str:
     return m
 
 
-def choose(api_model_id, messages=None, max_tokens=0) -> tuple:
-    """
-    (model to run, why) for one call.
-
-    A shelf entry of AUTO decides here: Opus 4.8 when the caller marked the
-    task demanding (routing.deliberate does, for the MD's allocation and
-    Security's clearances) or when the task is simply big; Sonnet otherwise.
-    Anything else is the owner's explicit choice, honoured up to the ceiling.
-    """
-    asked = (api_model_id or "").strip()
-    if asked.lower() != AUTO:
-        final = clamp(asked or SIMPLE_MODEL)
-        why = ("as set on the shelf" if final == (asked or SIMPLE_MODEL)
-               else f"{asked} is above the Opus 4.8 ceiling, so {final}")
-        return final, why
-    from . import effort
-    because = effort.why_demanding()
-    if because:
-        return COMPLEX_MODEL, f"demanding: {because}"
-    size = sum(len(str(m.get("content") or "")) for m in (messages or [])
-               if isinstance(m, dict))
-    if size > LONG_PROMPT_CHARS:
-        return COMPLEX_MODEL, f"a long task ({size:,} characters of prompt)"
-    if int(max_tokens or 0) >= LONG_ANSWER_TOKENS:
-        return COMPLEX_MODEL, f"a long answer asked for ({max_tokens} tokens)"
-    return SIMPLE_MODEL, "an ordinary task"
-
-
 def _model_flag(api_model_id: str) -> str:
     """
-    What to pass to --model, never above the ceiling.
-
-    The CLI takes an alias or a full model name, and anything it does not know
-    is passed through so its own error — which names the models it does know —
-    reaches him. The one thing never passed through is a model above Opus 4.8.
+    What to pass to --model, never above the ceiling. Anything the CLI does not
+    know is passed through so its own error — which names the models it does
+    know — reaches him.
     """
     return clamp((api_model_id or SIMPLE_MODEL).strip())
 
@@ -604,39 +588,35 @@ def _answer(ok, cmd, *, status=0, text="", error="", cause="", waited=None,
     return out
 
 
-def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
-    """
-    One call, shaped exactly like client._execute's return so the cascade,
-    the load ladder and the failover trail need no special case.
-
-    Which Claude runs is decided per call — see choose(). And if Opus 4.8 has
-    used up the plan's allowance, the same call is put to Sonnet once rather
-    than failing: "the program can shift according to the usage". A slightly
-    lesser answer beats the MD having none, and the step down is written on the
-    result so it is never silent.
-    """
-    name, why = choose((model or {}).get("api_model_id"), messages, max_tokens)
-    res = _chat_as(cred, name, messages, max_tokens, timeout)
-    stepped = ""
-    if (not res["ok"] and name != SIMPLE_MODEL
-            and "allowance" in (res.get("cause") or "")):
-        stepped = (f"{name} has used up the plan's allowance, so this was put "
-                   f"to {SIMPLE_MODEL} instead")
-        res = _chat_as(cred, SIMPLE_MODEL, messages, max_tokens, timeout)
-        name = SIMPLE_MODEL
-    local = dict(res.get("local") or {})
-    local.update({"model": name, "why": why})
-    if stepped:
-        local["stepped_down"] = stepped
-    res["local"] = local
-    return res
+# Sign-in that lives in the environment rather than in a login folder. A backup
+# account is a separate login FOLDER (CLAUDE_CONFIG_DIR); if any of these were
+# passed down, the child would sign in with them instead and the "backup" call
+# would quietly spend the main account.
+_ENV_SIGN_IN = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 
-def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
+def child_env(config_dir: str = "") -> dict:
+    """The environment for one call: this one's, or a backup account's."""
+    env = dict(os.environ)
+    if config_dir:
+        for k in _ENV_SIGN_IN:
+            env.pop(k, None)
+        env["CLAUDE_CONFIG_DIR"] = config_dir
+    return env
+
+
+def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT,
+             *, config_dir="", fallback=(), effort="", exact=False):
     """
     One call to one named model. max_tokens is accepted and not passed on: the
     CLI has no equivalent flag, and that is named in the note on the way back.
+
+    `config_dir` runs it as the backup account (its own login folder).
+    `fallback` is handed to the CLI's own --fallback-model, which steps down
+    inside the same call when the model is overloaded or unavailable — no
+    second process start. `effort` is the CLI's --effort.
     """
+    global _trim_ok
     started = time.perf_counter()
     ready, why = available()
     if not ready:
@@ -647,11 +627,16 @@ def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT
         return _answer(False, [], error="nothing to ask — the messages were empty",
                        cause="empty prompt")
 
+    trimmed = _trim_ok
     cmd = _launcher(cli_path()) + [
         "-p", "--output-format", "json",
-        "--model", _model_flag(model_name)] + LEAN
-    if system:
-        cmd += ["--system-prompt", system]
+        "--model", _model_flag(model_name)] + LEAN + (TRIM if trimmed else [])
+    fallback = [_model_flag(m) for m in (fallback or ()) if m]
+    if fallback:
+        cmd += ["--fallback-model", ",".join(fallback)]
+    if effort:
+        cmd += ["--effort", effort]
+    cmd += ["--system-prompt", system or PLAIN_SYSTEM]
 
     # A SCRATCH DIRECTORY, NOT THE PROJECT.
     #
@@ -666,11 +651,15 @@ def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT
                        cause="no scratch directory")
 
     # At least FLOOR_TIMEOUT — see its note. The route's number is for keys.
-    allowed = max(FLOOR_TIMEOUT, int(timeout or 0))
+    # `exact` is the Claude team's own clock: it shares one budget across
+    # every attempt, so the second attempt gets what is left, not a fresh six
+    # minutes the day's step does not have.
+    allowed = max(1, int(timeout or 0)) if exact else max(FLOOR_TIMEOUT,
+                                                           int(timeout or 0))
     try:
         proc = subprocess.run(
             cmd, input=prompt, capture_output=True, text=True,
-            timeout=allowed, cwd=workdir,
+            timeout=allowed, cwd=workdir, env=child_env(config_dir),
             encoding="utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         return _answer(False, cmd, status=408,
@@ -689,6 +678,14 @@ def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT
         # logged in", "usage limit reached", "unknown model". Pass it through
         # rather than replacing it with a category.
         detail = (proc.stderr or proc.stdout or "").strip()
+        if trimmed and "unknown option" in detail.lower():
+            # An older Claude Code without --tools or --strict-mcp-config.
+            # Dearer per call, but it answers; asked once, then remembered.
+            _trim_ok = False
+            return _chat_as(cred, model_name, messages, max_tokens,
+                            max(1, int(timeout or 0) - int(took)) if exact
+                            else timeout, config_dir=config_dir,
+                            fallback=fallback, effort=effort, exact=exact)
         return _answer(False, cmd,
                        error=detail[:600] or f"claude exited {proc.returncode}",
                        cause=_cause_from(detail), waited=[took], body=detail)
@@ -718,14 +715,35 @@ def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT
                    extra={"local": {
                        "seconds": took,
                        "session": data.get("session_id", ""),
-                       # What the CLI says actually ran — the check that caught
-                       # 'opus' running Opus 5.5. Claude Code also uses a small
-                       # model for its own housekeeping; that is not the answer.
-                       "ran": [m for m in (data.get("modelUsage") or {})
-                               if "haiku" not in m.lower()]
-                              or list(data.get("modelUsage") or {}),
+                       "ran": ran_models(data.get("modelUsage"), model_name),
+                       "usage": usage_of(data),
                        "note": ("max_tokens is not enforced on a local call — "
                                 "the CLI has no such flag")}})
+
+
+def ran_models(model_usage, asked="") -> list:
+    """
+    What the CLI says actually answered — the check that caught 'opus' running
+    Opus 5.5. Claude Code also uses a small model for its own housekeeping, so
+    Haiku is ignored UNLESS Haiku is what was asked for; Report runs on it.
+    """
+    names = list(model_usage or {})
+    if "haiku" in (asked or "").lower():
+        return names
+    return [m for m in names if "haiku" not in m.lower()] or names
+
+
+def usage_of(data: dict) -> dict:
+    """Tokens and the notional cost, from the CLI's own report of the call."""
+    u = (data or {}).get("usage") or {}
+    return {"input": int(u.get("input_tokens") or 0),
+            "output": int(u.get("output_tokens") or 0),
+            "cache_read": int(u.get("cache_read_input_tokens") or 0),
+            "cache_write": int(u.get("cache_creation_input_tokens") or 0),
+            # What the same tokens would cost on the API. On a subscription
+            # nothing is billed per call; it is still the fairest way to
+            # compare one sector's appetite with another's.
+            "api_equivalent_usd": float(data.get("total_cost_usd") or 0.0)}
 
 
 def _cause_from(detail: str) -> str:
@@ -736,348 +754,44 @@ def _cause_from(detail: str) -> str:
     if ("not a valid application" in low or "not a valid win32" in low
             or "native binary not installed" in low):
         return "claude code is half-installed — its setup step was blocked"
-    if "not logged in" in low or "unauthor" in low or "authenticate" in low:
+    if "not logged in" in low or "unauthor" in low or "authenticate" in low \
+            or "please run /login" in low or "invalid api key" in low:
         return "claude code is not signed in on this machine"
-    if "usage limit" in low or "rate limit" in low or "quota" in low:
+    if "usage limit" in low or "rate limit" in low or "quota" in low \
+            or "limit reached" in low or "limit will reset" in low:
         return "the Claude plan's usage allowance is used up"
-    if "unknown model" in low or "invalid model" in low:
+    if "overloaded" in low or "529" in low or "capacity" in low:
+        return "the model is overloaded right now"
+    if "unknown model" in low or "invalid model" in low or "not_found" in low \
+            or "not available" in low or "does not have access" in low:
         return "that model name is not one the CLI knows"
     return "the local model refused"
 
 
-def probe(cred, model, timeout=120) -> dict:
-    """
-    Is this usable right now? Same question the shelf asks of every provider.
-
-    Deliberately cheap and deliberately NOT retried, for the reason written on
-    client.probe_model: asking three times does not make the answer truer, it
-    makes CHECK EVERYTHING take fifteen minutes.
-    """
+def check(model=SIMPLE_MODEL, timeout=120) -> dict:
+    """Is it installed, signed in, and answering? One tiny real call."""
     ready, why = available()
     if not ready:
-        return {"ok": False, "status": 0, "error": why,
-                "cause": _unavailable_cause(why), "output": ""}
-    res = chat(cred, model,
-               [{"role": "user", "content": "Reply with exactly: OK"}],
-               max_tokens=16, timeout=timeout)
-    return {"ok": res["ok"], "status": res.get("status", 0),
-            "error": res.get("error", ""), "cause": res.get("cause", ""),
-            "output": res.get("output", "")}
-
-
-# ---------------------------------------------------------------------------
-# PUTTING IT ON THE SHELF
-# ---------------------------------------------------------------------------
-#
-# He should not need me to wire this in. One command adds the credential, the
-# models, and — the part that actually fixes his complaint — puts the local
-# model at the END of every sector's fallback chain.
-#
-# LAST, never first. His paid keys stay primary: they are faster per call and
-# they do not spend his Claude plan's allowance. This is the floor under the
-# cascade, so "one or two keys not answering" stops being a failed step and
-# becomes a slower one.
-
-NAME = "Claude Code (this machine)"
-
-# Which CLI model a sector gets when it falls this far.
-# MD, IT and Security decide per call (AUTO): Sonnet for ordinary work, Opus
-# 4.8 for the judgements that cost money and for big tasks. The rest are on
-# Sonnet. This used to say "opus" for the first three, which on this machine
-# ran Opus 5.5 — above the owner's ceiling.
-SECTOR_MODEL = {
-    "md": AUTO, "it": AUTO,
-    "content": "sonnet", "seo": "sonnet", "leads": "sonnet",
-    "report": "sonnet", "security": AUTO,
-}
-
-# Shelf entries an earlier install left that must not stay: a floating alias
-# that can land above the ceiling. Their routes move to AUTO and they go.
-RETIRED = ("opus",)
-
-# WHERE IT GOES BY DEFAULT: the two he asked for, and only those.
-#
-# "i only want to assign the claude to MD and IT the rest of sectors will use
-#  the modules already added."
-#
-# He is right, and not only because he said so. Every sector that falls to this
-# spends his Claude allowance, and an allowance spread across seven sectors
-# runs out before the two that matter have finished thinking. MD and IT are
-# where a failed call costs the whole day: no plan posted, or no release. A
-# keyword pass that fails is a keyword pass retried tomorrow.
-#
-# --sectors all puts it everywhere for anyone who wants that.
-DEFAULT_SECTORS = ("md", "it")
-
-
-def our_model_ids(store, cid=None) -> set:
-    """Every model id belonging to the local credential."""
-    if cid is None:
-        c = next((c for c in store.redacted_view().get("credentials", [])
-                  if (c.get("base_url") or "").lower().rstrip("/") == MARKER), None)
-        if not c:
-            return set()
-        cid = c["id"]
-    full = store.get_credential(cid) or {}
-    return {m["id"] for m in full.get("models", [])}
-
-
-def on_board(store, task, mine=None) -> bool:
-    """Is the local model anywhere in this sector's chain — primary or not?"""
-    mine = our_model_ids(store) if mine is None else mine
-    if not mine:
-        return False
-    r = store.get_routing().get(task) or {}
-    return (r.get("primary") in mine or r.get("secondary") in mine
-            or bool(set(r.get("fallback") or []) & mine))
-
-
-def install(store, tasks=None, as_last_resort=True, prune=True) -> dict:
-    """
-    Make the routing MATCH the sectors asked for: present on those, absent
-    from the rest.
-
-    IT USED TO ONLY ADD, AND THEN REPORT ON WHAT IT HAD ADDED.
-
-    He ran it once on the version that defaulted to all seven sectors, pulled,
-    and ran it again asking for md,it. The second run added nothing — they were
-    already there — so `routed` came back empty, no "last-resort model for"
-    line printed at all, and every sector was listed as "left alone, still on
-    your own keys" while all seven were in fact wired to Claude. The report was
-    the exact opposite of the truth, and he spotted it.
-
-    Two faults, and the second is the one that mattered:
-
-      - "added just now" was being reported as though it meant "is on board".
-        Nothing distinguished it from "was already there".
-      - asking for md,it did not REMOVE it from the other five. He said he
-        wanted two sectors on it; he had seven, each quietly spending the same
-        Claude allowance.
-
-    So this is now a declaration of the state he wants, not a one-way add. Pass
-    prune=False to add without taking it off anywhere.
-    """
-    tasks = list(tasks or DEFAULT_SECTORS)
-    unknown = [t for t in tasks if t not in SECTOR_MODEL]
-    if unknown:
-        raise ValueError("not a sector: " + ", ".join(unknown)
-                         + ". One of: " + ", ".join(sorted(SECTOR_MODEL)))
-    wanted = sorted({SECTOR_MODEL[t] for t in tasks})
-    existing = next((c for c in store.redacted_view().get("credentials", [])
-                     if (c.get("base_url") or "").lower().rstrip("/") == MARKER), None)
-    cred = store.upsert_credential({
-        "id": existing["id"] if existing else "",
-        "name": NAME, "base_url": MARKER, "api_key": "",
-        "credit_note": ("Runs the Claude Code CLI already signed in on this "
-                        "machine. No API key. Draws on that plan's usage "
-                        "allowance, so it is a safety net, not a free lunch."),
-    })
-    cid = cred["id"]
-
-    by_name = {}
-    for alias in wanted:
-        full = store.get_credential(cid) or {}
-        already = next((m for m in full.get("models", [])
-                        if m.get("api_model_id") == alias), None)
-        m = store.upsert_model(cid, {
-            "id": already["id"] if already else "",
-            "api_model_id": alias, "category": "LLM", "enabled": True,
-            # Not "free" — it spends his subscription allowance. Calling it free
-            # would let a route marked paid_allowed=False spend it without
-            # meaning to, which is precisely the guard that flag exists for.
-            "cost_tier": "included",
-        })
-        by_name[alias] = m["id"]
-
-    # MOVE OFF THE RETIRED ENTRIES FIRST. His shelf has an "opus" entry from
-    # the earlier install, routed to MD and IT, and that alias runs Opus 5.5.
-    # Any route pointing at it is pointed at AUTO instead — the same place in
-    # the chain, so his own keys still go first — and the entry is removed.
-    migrated = []
-    full = store.get_credential(cid) or {}
-    retired = {m["id"]: m["api_model_id"] for m in full.get("models", [])
-               if (m.get("api_model_id") or "").lower() in RETIRED}
-    if retired:
-        auto_id = by_name.get(AUTO)
-        if not auto_id:
-            auto_id = store.upsert_model(cid, {"api_model_id": AUTO, "category": "LLM",
-                                               "enabled": True,
-                                               "cost_tier": "included"})["id"]
-            by_name[AUTO] = auto_id
-        for task, route in list(store.get_routing().items()):
-            r = dict(route)
-            touched = False
-            if r.get("primary") in retired:
-                r["primary"], touched = auto_id, True
-            if r.get("secondary") in retired:
-                r["secondary"], touched = auto_id, True
-            chain = [auto_id if x in retired else x for x in (r.get("fallback") or [])]
-            chain = list(dict.fromkeys(chain))          # no double entry
-            if chain != list(r.get("fallback") or []):
-                r["fallback"], touched = chain, True
-            if touched:
-                store.set_route(task, r)
-                migrated.append(task)
-        for mid in retired:
-            store.delete_model(cid, mid)
-
-    mine = our_model_ids(store, cid)
-    added, already_on, removed, stranded = [], [], [], []
-
-    if as_last_resort:
-        for task in tasks:
-            mid = by_name.get(SECTOR_MODEL.get(task, "sonnet"))
-            if not mid:
-                continue
-            route = dict(store.get_routing().get(task) or {})
-            chain = list(route.get("fallback") or [])
-            if mid in chain or route.get("primary") == mid or route.get("secondary") == mid:
-                already_on.append(task)
-                continue
-            # Any OTHER local model on this sector goes — a sector should reach
-            # for one of ours, not two.
-            chain = [x for x in chain if x not in mine]
-            chain.append(mid)                      # LAST. His keys go first.
-            route["fallback"] = chain
-            # A sector with no model at all gets this as its primary, because a
-            # fallback chain under an empty primary never runs.
-            if not route.get("primary") or route.get("primary") in mine:
-                route["primary"] = mid
-                route["fallback"] = [x for x in chain if x != mid]
-            store.set_route(task, route)
-            added.append(task)
-
-    if prune and mine:
-        for task in SECTOR_MODEL:
-            if task in tasks:
-                continue
-            route = dict(store.get_routing().get(task) or {})
-            if not route:
-                continue
-            chain = [x for x in (route.get("fallback") or []) if x not in mine]
-            changed = chain != list(route.get("fallback") or [])
-            # Taking it out of the PRIMARY slot needs somewhere for the sector
-            # to go. Promote its first real fallback; if there is none, the
-            # sector would be left with no model at all, so leave it and say so
-            # rather than silently switching a sector off.
-            if route.get("primary") in mine:
-                if chain:
-                    route["primary"], chain = chain[0], chain[1:]
-                    changed = True
-                else:
-                    stranded.append(task)
-                    continue
-            if route.get("secondary") in mine:
-                route["secondary"] = ""
-                changed = True
-            if changed:
-                route["fallback"] = chain
-                store.set_route(task, route)
-                removed.append(task)
-
-    return {"ok": True, "credential": cid, "models": by_name,
-            "migrated_off_opus": sorted(set(migrated)),
-            "routed": sorted(added + already_on), "added": sorted(added),
-            "already": sorted(already_on), "removed": sorted(removed),
-            "stranded": sorted(stranded)}
-
-
-def _where(store) -> int:
-    """
-    Where the local model actually is, read back off the routing.
-
-    Printed after every install, and available on its own with --where, because
-    the previous version reported what it had just DONE and called that the
-    state. Running it twice made it claim every sector was on its own keys
-    while all seven were wired to Claude. A report that cannot be wrong about
-    this has to read the routes, not remember the last action.
-    """
-    mine = our_model_ids(store)
-    if not mine:
-        print("Claude Code is not on the shelf at all. Add it with --install.")
-        return 0
-    routes = store.get_routing()
-    on, off, nothing = [], [], []
-    for task in sorted(SECTOR_MODEL):
-        r = routes.get(task) or {}
-        if not r.get("primary") and not (r.get("fallback") or []):
-            nothing.append(task)
-        elif on_board(store, task, mine):
-            first = "primary" if r.get("primary") in mine else "last resort"
-            on.append(f"{task} ({first})")
-        else:
-            off.append(task)
-    print("On the Claude brain      : " + (", ".join(on) if on else "nothing"))
-    print("On your own keys only    : " + (", ".join(off) if off else "nothing"))
-    if nothing:
-        print("No model at all          : " + ", ".join(nothing))
-    return 0
+        return {"ok": False, "error": why, "cause": _unavailable_cause(why),
+                "output": ""}
+    res = _chat_as(None, model, [{"role": "user", "content": "Reply with exactly: OK"}],
+                   16, timeout, exact=True)
+    return {"ok": res["ok"], "error": res.get("error", ""),
+            "cause": res.get("cause", ""), "output": res.get("output", ""),
+            "ran": (res.get("local") or {}).get("ran") or []}
 
 
 def main(argv=None):
     import argparse
-    from . import store as _store
 
     ap = argparse.ArgumentParser(
-        description="Use the Claude Code CLI on this machine as a model on the shelf.")
+        description="Is the Claude Code command on this machine ready to think "
+                    "for the agency?")
     ap.add_argument("--check", action="store_true",
-                    help="is it installed, signed in, and answering?")
-    ap.add_argument("--install", action="store_true",
-                    help="add it to the shelf as a last-resort model")
-    ap.add_argument("--sectors", default=",".join(DEFAULT_SECTORS),
-                    help="which sectors fall back to it (default: md,it). "
-                         "'all' for every sector, 'none' to take it off "
-                         "everything. One of: " + ", ".join(sorted(SECTOR_MODEL)))
-    ap.add_argument("--keep-others", action="store_true",
-                    help="add to --sectors without removing it from any sector "
-                         "it is already on")
-    ap.add_argument("--where", action="store_true",
-                    help="which sectors are on it right now, and which are not")
-    ap.add_argument("--model", default="sonnet", help="which model --check asks")
+                    help="is it installed, signed in, and answering? (the default)")
+    ap.add_argument("--model", default=SIMPLE_MODEL, help="which model to ask")
     a = ap.parse_args(argv)
 
-    if a.where:
-        return _where(_store)
-
-    if a.install:
-        asked = a.sectors.strip().lower()
-        picked = ([] if asked == "none"
-                  else sorted(SECTOR_MODEL) if asked == "all"
-                  else [s.strip().lower() for s in a.sectors.split(",") if s.strip()])
-        try:
-            r = install(_store, tasks=picked, prune=not a.keep_others)
-        except ValueError as exc:
-            print("  --  " + str(exc))
-            return 1
-        print(f"  ok  '{NAME}' is on the shelf")
-        for alias in sorted(r["models"]):
-            print(f"        {alias}")
-        if r.get("migrated_off_opus"):
-            print("      moved off 'opus' (it runs Opus 5.5, above your ceiling): "
-                  + ", ".join(r["migrated_off_opus"]))
-        if AUTO in r["models"]:
-            print(f"      'auto' = {SIMPLE_MODEL} for ordinary work, {COMPLEX_MODEL} for "
-                  "the MD's day plan, Security's\n"
-                  "               clearances and big tasks. Never above Opus 4.8.")
-        if r["added"]:
-            print("      newly on: " + ", ".join(
-                f"{t} ({SECTOR_MODEL[t]})" for t in r["added"]))
-        if r["already"]:
-            print("      already on: " + ", ".join(
-                f"{t} ({SECTOR_MODEL[t]})" for t in r["already"]))
-        if r["removed"]:
-            print("      taken back off: " + ", ".join(r["removed"]))
-        if r["stranded"]:
-            print("      !!  left on " + ", ".join(r["stranded"])
-                  + " — it is the only model those sectors have, and removing "
-                    "it\n          would leave them with nothing. Give them a "
-                    "key first.")
-        print()
-        print("\n      Your own keys are still tried first everywhere. This one\n"
-              "      answers only when they do not.\n")
-        return _where(_store)
-
-    # --check, and the default when nothing else is asked for.
     path = cli_path()
     print(f"Command : {path or '(not found)'}")
     if path:
@@ -1096,19 +810,17 @@ def main(argv=None):
         print("\n  --  " + why)
         return 1
     print("Model   : " + a.model)
-    res = probe({"base_url": MARKER}, {"api_model_id": a.model})
+    res = check(a.model)
     if res["ok"]:
         print(f"\n  ok  it answered: {res['output'][:60]!r}")
-        print("      No API key involved. Nothing to rotate, nothing to run out.")
+        print("      Which sector uses which model: python -m providers.claude_team")
         return 0
     print("\n  --  " + (res.get("cause") or "it did not answer"))
     if res.get("error"):
-        print("      " + res["error"][:300])
-    if "signed in" in (res.get("cause") or ""):
-        print("\n      Run  claude  once in a terminal and sign in. The agency\n"
-              "      uses that same login; there is nothing separate to set up.")
+        print("      " + res["error"][:400])
     return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import sys
+    sys.exit(main())

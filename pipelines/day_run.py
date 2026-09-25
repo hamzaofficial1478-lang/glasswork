@@ -424,15 +424,49 @@ def preflight(quick=False) -> dict:
 # THE RUN ITSELF
 # ---------------------------------------------------------------------------
 
-def _open_run(note, forced, blocking):
+# ---------------------------------------------------------------------------
+# THIS RUN ONLY
+# ---------------------------------------------------------------------------
+#
+# "i will not every time run the whole program, sometimes i will only run
+#  content sector with MD and IT and Security because these 3 are the main,
+#  we cannot disable them ... will save my token usage"
+#
+# The permanent switches (board.set_sector) are for "stop doing this until I
+# say". This is for "today, just these" — it lives on the run row and is gone
+# when the run ends, so nothing he picks for one run leaks into the next.
+# The essential sectors always run: the MD plans, IT holds the door, Security
+# clears, Report scores. See board.ESSENTIAL_SECTORS.
+
+def pick_sectors(only) -> list:
+    """The rooms that run this time, essentials always in; [] means every one."""
+    if not only:
+        return []
+    rooms = sorted({room for _l, _m, room, _lane in STEPS})
+    want = {str(x).strip().lower() for x in (only or []) if str(x).strip()}
+    picked = [r for r in rooms if r.lower() in want or board.sector_essential(r)]
+    return [] if set(picked) == set(rooms) else picked
+
+
+def _only_for(rid) -> list:
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            r = c.execute("SELECT only_sectors FROM day_runs WHERE id=?", (rid,)).fetchone()
+        return json.loads(r[0]) if r and r[0] else []
+    except Exception:
+        return []
+
+
+def _open_run(note, forced, blocking, only=None):
     rid = uuid.uuid4().hex[:12]
     board.ensure_schema()
     with sqlite3.connect(board.DB, timeout=30) as c:
         c.execute("INSERT INTO day_runs(id,started_at,status,started_by,note,forced,"
-                  "blocking,steps_total,steps_done,pid,host)"
-                  " VALUES(?,?,?,?,?,?,?,?,0,?,?)",
+                  "blocking,only_sectors,steps_total,steps_done,pid,host)"
+                  " VALUES(?,?,?,?,?,?,?,?,?,0,?,?)",
                   (rid, _now(), "running", "owner", (note or "")[:2000],
-                   1 if forced else 0, json.dumps(blocking or []), len(STEPS),
+                   1 if forced else 0, json.dumps(blocking or []),
+                   json.dumps(only) if only else None, len(STEPS),
                    os.getpid(), board._this_host()))
         for i, (label, mod, room, lane) in enumerate(STEPS):
             c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane)"
@@ -637,6 +671,13 @@ def _one_step(rid, seq, stop=None) -> str:
                               "sector off, so it did no work today")
         _tick(rid)
         return "skipped"
+    only = _only_for(rid)
+    if only and room not in only:
+        _step(rid, seq, status="skipped", started_at=_now(), ended_at=_now(),
+              code=0, summary=f"{room} is not in this run — you picked "
+                              f"{', '.join(only)} this time, so it spent nothing")
+        _tick(rid)
+        return "skipped"
 
     _step(rid, seq, status="running", started_at=_now())
     code, out, cut_short = _run_child(mod, stop)
@@ -809,7 +850,8 @@ def _run_lanes(rid, stop=None):
     return len(failed), stopping()
 
 
-def start(orders=None, note="", force=False, quick=False, skip_check=False) -> dict:
+def start(orders=None, note="", force=False, quick=False, skip_check=False,
+          only=None) -> dict:
     """
     Check, take the owner's instructions, then work. Returns when the day is done.
 
@@ -865,7 +907,8 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False) -> d
     # going now"; there isn't one yet.
     board.clear_stop(LOCK)
 
-    rid = _open_run(note, force and not pre["ready"], pre.get("blocking"))
+    only = pick_sectors(only)
+    rid = _open_run(note, force and not pre["ready"], pre.get("blocking"), only)
     stopped = False
     try:
         with _StopWatch() as watch:
@@ -1029,6 +1072,19 @@ def status(run_id=None) -> dict:
         run["blocking"] = json.loads(run.get("blocking") or "[]")
     except Exception:
         run["blocking"] = []
+    try:
+        run["only_sectors"] = json.loads(run.get("only_sectors") or "[]")
+    except Exception:
+        run["only_sectors"] = []
+    # How much Claude this run used, per sector, from Claude's own report of
+    # each call — so "running only Content saves tokens" is something he can
+    # see rather than take on trust.
+    try:
+        from providers import claude_team
+        run["claude_usage"] = claude_team.usage_since(run.get("started_at") or 0,
+                                                      run.get("ended_at") or None)
+    except Exception:
+        run["claude_usage"] = {}
     # PLURAL, now that lanes run side by side. Reading the first 'running' row
     # and calling that "what the agency is doing" was honest when the day was
     # one queue; with three lanes going it would name one of them and hide the
@@ -1251,11 +1307,14 @@ def main():
     ap.add_argument("--quick", action="store_true", help="skip the live API calls")
     ap.add_argument("--skip-check", action="store_true", help="run without checking first")
     ap.add_argument("--note", default="", help="what you want out of today")
+    ap.add_argument("--only", default="",
+                    help="this run only: the sectors to work, comma-separated "
+                         "(MD, IT, Security and Report always run), e.g. --only content")
     ap.add_argument("--order", nargs=2, action="append", metavar=("SECTOR", "TEXT"),
                     default=[], help="today's order for one sector (repeatable)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--stdin", action="store_true",
-                    help="read {orders, note, force, quick} as JSON on stdin")
+                    help="read {orders, note, force, quick, only} as JSON on stdin")
     a = ap.parse_args()
 
     body = {}
@@ -1291,7 +1350,8 @@ def main():
               note=body.get("note", a.note),
               force=bool(body.get("force")) or a.force,
               quick=bool(body.get("quick")) or a.quick,
-              skip_check=bool(body.get("skip_check")) or a.skip_check)
+              skip_check=bool(body.get("skip_check")) or a.skip_check,
+              only=(body.get("only") or [s for s in a.only.split(",") if s.strip()]))
     if a.json or a.stdin:
         print(json.dumps(r))
     else:

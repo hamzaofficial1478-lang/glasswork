@@ -1,307 +1,61 @@
 """
-routing.py — per-task provider binding. There is NO global "AI provider": each
-task binds independently to primary / secondary / fallback models, with a hard
-cost-tier guard and visible failover.
+routing.py — the doors every sector knocks on for an answer.
+
+Behind them is the Claude team (providers/claude_team.py): each sector thinks
+with the Claude model the owner chose for it, steps down a model or over to
+the backup account when it has to, and says so on the result.
+
+This file used to be a cascade over API keys from any provider — primary,
+secondary, fallbacks, a cost-tier guard and a load balancer. The owner retired
+all of it: "each time one or 2 models always give message of failure, so we
+will remove all of them and will integrate the Claude". The function names and
+the shapes they return are kept exactly, because two dozen callers ask through
+them and none of them needed to know what answers.
 """
-from . import client, load, store
-
-
-def _ordered_ids(route: dict):
-    ids = []
-    if route.get("primary"):
-        ids.append(route["primary"])
-    # secondary counts as a fallback here unless the task marks it as fusion
-    if route.get("secondary") and route.get("secondary_mode", "fallback") == "fallback":
-        ids.append(route["secondary"])
-    ids += list(route.get("fallback") or [])
-    seen, out = set(), []
-    for i in ids:
-        if i and i not in seen:
-            seen.add(i)
-            out.append(i)
-    return out
-
-
-def _candidates(task: str):
-    route = store.get_routing().get(task)
-    if not route:
-        return [], None
-    out = []
-    for mid in _ordered_ids(route):
-        cred, model = store.find_model(mid)
-        if cred and model and model.get("enabled", True):
-            out.append((cred, model))
-    return out, route
+from . import claude_team, local_cli
 
 
 def resolve_task(task: str) -> dict:
     """
-    Ordered, usable (credential, model) candidates for a task, after the enable
-    toggle and the cost-tier guard. This is the clean read interface other code
-    uses; it never returns a secret.
+    Who would answer for this sector, in order — without asking anything.
+    Never returns a secret; there are none to return.
     """
-    cands, route = _candidates(task)
-    if route is None:
-        return {"ok": False, "error": f"no routing configured for task '{task}'", "candidates": []}
-    if not route.get("enabled", True):
-        return {"ok": False, "error": f"task '{task}' is disabled", "candidates": []}
-    paid_allowed = route.get("paid_allowed", True)
-    usable = [(c, m) for c, m in cands if paid_allowed or m.get("cost_tier") != "paid"]
-    if not usable:
-        if cands and not paid_allowed:
-            return {"ok": False,
-                    "error": f"task '{task}' allows only free providers, but only paid ones are configured",
-                    "candidates": []}
-        return {"ok": False, "error": f"task '{task}' has no usable provider yet", "candidates": []}
+    s = claude_team.normalise(task)
+    if s not in claude_team.DEFAULT_TEAM:
+        return {"ok": False, "task": s, "candidates": [],
+                "error": (f"'{task}' is not a sector the Claude team has. "
+                          f"It has: {', '.join(claude_team.SECTORS)}")}
+    ready, why = local_cli.available()
+    if not ready:
+        return {"ok": False, "task": s, "error": why, "candidates": []}
+    labels = {a["id"]: a["label"] for a in claude_team.accounts()}
     return {
-        "ok": True, "task": task, "route": route,
+        "ok": True, "task": s,
+        "route": {"primary": claude_team.model_for(s), "enabled": True,
+                  "timeout": claude_team.BUDGET},
         "candidates": [
-            {"credential_id": c["id"], "credential_name": c["name"], "model_id": m["id"],
-             "api_model_id": m["api_model_id"], "cost_tier": m.get("cost_tier")}
-            for c, m in usable
-        ],
+            {"credential_id": f"claude:{aid}", "credential_name": labels[aid],
+             "model_id": m, "api_model_id": m, "cost_tier": "plan"}
+            for aid, m in claude_team.candidates(s)],
     }
 
 
 def call_task(task: str, messages, max_tokens: int = 512, timeout: int = 0) -> dict:
-    """
-    Run a task: try its candidates in order, cascade on failure/timeout/rate-limit,
-    and return the output plus a visible failover trail. The cost-tier guard is
-    hard — if paid isn't allowed and only paid providers exist, it refuses rather
-    than spending.
-    """
-    r = resolve_task(task)
-    if not r["ok"]:
-        return {"ok": False, "task": task, "error": r["error"], "failovers": []}
-    route = r["route"]
-    # A CALLER MAY ASK FOR LESS PATIENCE.
-    #
-    # The route's timeout is right for a pipeline: a keyword pass can afford to
-    # wait two minutes for the good model. It is wrong for somebody standing in
-    # front of the screen having clicked an agent to ask it a question — that
-    # waits the full two minutes on a slow primary before it even TRIES the
-    # second model, and the owner reported exactly that as the drawer hanging
-    # while a sector was busy.
-    #
-    # An interactive caller passes a short timeout, so a primary that is slow
-    # (usually because the same model is mid-run for a pipeline) is abandoned
-    # quickly and the fallback answers. The route's own value is still the
-    # ceiling — this can only ask for LESS time, never more, or one screen could
-    # hold a model open longer than the operator allowed.
-    timeout = min(int(route.get("timeout", 120)),
-                  int(timeout) if timeout else int(route.get("timeout", 120)))
-
-    # A BUSY PRIMARY IS NOT A FAILED PRIMARY, AND IT USED TO BE TREATED AS ONE.
-    #
-    # The cascade below only moves on when a provider FAILS, so two agents
-    # asking the same model at the same moment both queued on it and the second
-    # one waited out the whole timeout before trying a fallback that had been
-    # idle throughout. Harmless when the day ran one step at a time; the normal
-    # case now that day_run.py runs three sectors side by side.
-    #
-    # providers/load.py reorders — never re-selects. Same candidates, same
-    # cost-tier guard, same cascade; a provider that is mid-call simply goes
-    # second. With one model configured nothing happens at all.
-    cands, load_note = load.order(r["candidates"])
-
-    failovers = []
-    for cand in cands:
-        cred, model = store.find_model(cand["model_id"])
-        token = load.begin(model["id"], cred.get("id", ""), task,
-                           holder=task, ttl=max(30, int(timeout) + 30))
-        try:
-            res = client.chat(cred, model, messages, max_tokens=max_tokens,
-                              timeout=timeout)
-        finally:
-            # ALWAYS cleared, including on an exception on the way out. A row
-            # left behind makes a healthy model look busy to everyone else,
-            # and the expiry backstop would take minutes to notice.
-            load.end(token)
-        if res["ok"]:
-            store.record_usage(task, cred["id"], model["id"], calls=1, spend=0.0)
-            return {"ok": True, "task": task,
-                    "used": {"credential": cred["name"], "model": model["api_model_id"]},
-                    "output": res["output"], "failovers": failovers,
-                    "load": load_note}
-        # attempts/waited come from client._execute's backoff. Showing them is
-        # the difference between "the fallback did not work" and "the fallback
-        # was tried three times over seven seconds and the provider was still
-        # rate-limiting" — the owner could not tell those apart before, and
-        # they need completely different fixes.
-        failovers.append({"model": model["api_model_id"], "status": res["status"],
-                          "cause": res.get("cause"),
-                          "attempts": res.get("attempts", 1),
-                          "waited": res.get("waited") or []})
-    return {"ok": False, "task": task, "error": "all providers for this task failed",
-            "failovers": failovers, "load": load_note}
-
-
-# ---------------------------------------------------------------------------
-# TWO MINDS ON ONE QUESTION
-# ---------------------------------------------------------------------------
-#
-# call_task() is a CASCADE: try the primary, fall back only when it fails. That
-# is right for ordinary work — a second opinion on drafting an email is money
-# spent for nothing.
-#
-# deliberate() is different. It asks the primary AND the second model the same
-# question and compares them, for the handful of judgements where being wrong
-# costs real money: how the MD allocates the day, and whether Security clears
-# something to be acted on. The value is not a better answer, it is the
-# DISAGREEMENT. Two models reaching the same verdict is weak evidence it is
-# right; two models splitting is strong evidence the question is genuinely hard
-# and a human should see it.
-#
-# What it deliberately does NOT do:
-#
-#   it does not vote. Two opinions cannot outvote anything, and picking the
-#   "majority" of two is just picking the first one with extra steps. On a
-#   split it reports the split and lets the caller decide, which for Security
-#   means failing safe and for the MD means asking the owner.
-#
-#   it does not run when only one model is configured. It says so — agreed=None
-#   — rather than asking the same model twice and calling that agreement, which
-#   would be the most expensive way possible of learning nothing.
-#
-# Cost: two calls instead of one, on a small number of decisions. The daily
-# spend cap in coordination/cabinet.py is the backstop.
-
-def call_spare(agent, messages, sector=None, reason="", max_tokens=512,
-               timeout=120, wait=True) -> dict:
-    """
-    Borrow a SPARE brain off the llm_extra shelf, use it, hand it back.
-
-    For when an agent needs reasoning beyond its own sector's brain. It never
-    touches a routed model: those belong to their sector, and taking a shelf
-    lock on one would block that sector from its own brain — which is exactly
-    why routed models are not on any shelf (see store.routed_model_ids).
-
-    Turn-taking is the cabinet's, like every other shared thing: one holder,
-    the rest queue. If the pool is empty it says so and spends nothing, rather
-    than quietly reaching for a sector's model instead.
-    """
-    if not (reason or "").strip():
-        return {"ok": False, "error": "a borrow needs a reason"}
-    # Models live in the CATALOGUE (filed by category), not in the tools list,
-    # so resolve_shelf — which reads tools — finds nothing here. The catalogue
-    # already drops anything routed to a sector, so whatever comes back is
-    # genuinely spare, and it comes back priority-ordered like any other chain.
-    spare = (store.shelf_catalogue().get("llm_extra") or [])
-    usable = [m for m in spare
-              if m.get("kind") == "model" and m.get("enabled", True)]
-    if not usable:
-        return {"ok": False, "error":
-                "no spare brain on the 'llm_extra' shelf. Add a model with "
-                "category 'llm_extra' on /setup and agents can borrow it. "
-                "Models routed to a sector are deliberately not offered here — "
-                "borrowing one would lock that sector out of its own brain."}
-
-    try:
-        from coordination import cabinet
-    except Exception as e:
-        return {"ok": False, "error": f"cabinet unavailable: {e}"}
-
-    b = cabinet.borrow("llm_extra", agent, sector, reason=reason,
-                       data_class="internal", wait=wait)
-    if not b.get("ok"):
-        return {"ok": False, "error": b.get("error", "could not borrow a spare brain")}
-
-    failovers, used, out = [], None, None
-    try:
-        for item in usable:
-            cred, model = store.find_model(item["id"])
-            if not model:
-                continue
-            res = client.chat(cred, model, messages, max_tokens=max_tokens,
-                              timeout=timeout)
-            if res["ok"]:
-                used = {"credential": cred["name"], "model": model["api_model_id"]}
-                out = res["output"]
-                store.record_usage("llm_extra", cred["id"], model["id"], calls=1, spend=0.0)
-                break
-            failovers.append({"model": model["api_model_id"], "status": res["status"],
-                              "cause": res.get("cause")})
-    finally:
-        cabinet.release("llm_extra", agent, borrow_id=b.get("borrow_id"),
-                        item=(used or {}).get("model", ""), usd_cost=0.0)
-
-    if out is None:
-        return {"ok": False, "error": "every spare brain failed",
-                "failovers": failovers}
-    return {"ok": True, "used": used, "output": out, "failovers": failovers,
-            "shelf": "llm_extra"}
+    """Ask this sector's Claude. See claude_team.call for the full story."""
+    return claude_team.call(task, messages, max_tokens, timeout)
 
 
 def deliberate(task: str, messages, max_tokens: int = 512, verdict_of=None) -> dict:
     """
-    Put one question to two different models. Returns both answers and whether
-    they agree.
+    Put one question to two different Claude models — the sector's own and the
+    Critic's — and report whether they agree. For the handful of judgements
+    where being wrong costs real money: how the MD allocates the day, and
+    whether Security clears something. The value is the DISAGREEMENT; a split
+    goes to the owner, never to a vote.
 
-    Every call made in here is marked DEMANDING (providers/effort.py). These
-    are, by this module's own definition, the judgements where being wrong
-    costs real money — so a model that picks its strength by the task, the
-    local Claude model among them, gives these its strongest permitted model.
+    Every call in here is marked demanding (providers/effort.py), so it thinks
+    harder than an ordinary one.
     """
     from . import effort
     with effort.demanding(f"a judgement where being wrong costs money ({task})"):
-        return _deliberate(task, messages, max_tokens, verdict_of)
-
-
-def _deliberate(task, messages, max_tokens=512, verdict_of=None) -> dict:
-    """
-    The body of deliberate(). Put one question to two different models.
-
-    `verdict_of` reduces an answer to the thing worth comparing — for a
-    clear/refuse decision that is the word, not the prose around it. Without it
-    the whole trimmed output is compared, which is only meaningful for short
-    structured replies.
-    """
-    r = resolve_task(task)
-    if not r["ok"]:
-        return {"ok": False, "task": task, "error": r["error"], "consulted": 0,
-                "agreed": None, "answers": []}
-
-    route = r["route"]
-    timeout = int(route.get("timeout", 120))
-    pair = r["candidates"][:2]
-
-    answers, failovers = [], []
-    for cand in pair:
-        cred, model = store.find_model(cand["model_id"])
-        res = client.chat(cred, model, messages, max_tokens=max_tokens, timeout=timeout)
-        if res["ok"]:
-            store.record_usage(task, cred["id"], model["id"], calls=1, spend=0.0)
-            answers.append({"model": model["api_model_id"],
-                            "credential": cred["name"],
-                            "output": (res["output"] or "").strip()})
-        else:
-            failovers.append({"model": model["api_model_id"], "status": res["status"],
-                              "cause": res.get("cause")})
-
-    if not answers:
-        return {"ok": False, "task": task, "error": "no model answered",
-                "consulted": 0, "agreed": None, "answers": [], "failovers": failovers}
-
-    def _v(a):
-        raw = a["output"]
-        return (verdict_of(raw) if verdict_of else raw).strip().lower()
-
-    if len(answers) < 2:
-        # One model available, or the second failed. Say so plainly: a single
-        # answer is not a cross-check, and pretending otherwise is worse than
-        # not having one, because it buys false confidence.
-        return {"ok": True, "task": task, "consulted": len(answers), "agreed": None,
-                "answers": answers, "verdict": _v(answers[0]),
-                "why": ("only one model is configured for this task, so this was "
-                        "not cross-checked" if len(pair) < 2
-                        else "the second model failed, so this was not cross-checked"),
-                "failovers": failovers}
-
-    v1, v2 = _v(answers[0]), _v(answers[1])
-    agreed = v1 == v2
-    return {"ok": True, "task": task, "consulted": 2, "agreed": agreed,
-            "answers": answers, "verdict": v1 if agreed else None,
-            "split": None if agreed else [v1, v2],
-            "why": ("both models reached the same verdict" if agreed else
-                    f"the two models disagreed: {v1!r} vs {v2!r}"),
-            "failovers": failovers}
+        return claude_team.deliberate(task, messages, max_tokens, verdict_of)

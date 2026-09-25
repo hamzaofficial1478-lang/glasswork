@@ -1,33 +1,28 @@
 """
-client.py — actually talk to a provider. Probe/test and production both go through
-_execute() with a request built by request.py, so there is one code path.
+client.py — test a shelf tool's key against its own endpoint.
 
-Every failure returns a full, key-redacted diagnostic (url, headers, payload,
-status, body) and a plain-language likely cause — that one feature makes almost
+Every failure returns a key-redacted diagnostic (url, headers, method, status,
+body) and a plain-language likely cause — the one feature that makes almost
 every misconfiguration obvious at a glance.
+
+This used to be the client for every AI provider too: chat, model lists,
+retries with backoff. Every sector thinks with Claude now
+(providers/claude_team.py), so only the tool half is left.
 """
 import json
-import random
-import time
 
 import requests
 
-from . import auth, signatures
-from .request import build_chat_request, build_request, redact_headers
-from .urls import chat_endpoint, models_endpoint
-
-# a 1x1 transparent PNG, for the multimodal probe
-_TINY_PNG = ("data:image/png;base64,"
-             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+from . import auth
 
 
 def _likely_cause(status, err_text):
     if status == 401 or status == 403:
         return "401/403 — auth problem: check the API key and auth style."
     if status == 404:
-        return "404 — wrong URL: check the base URL and that this model id exists here."
+        return "404 — wrong URL: check the address you saved for this tool."
     if status == 402:
-        return "402 — the provider needs payment/credit for this model. A billing issue on their side, not your setup; sort it out with the provider."
+        return "402 — the provider needs payment or credit. A billing issue on their side, not your setup."
     if status == 429:
         return "429 — rate limited or out of credit."
     if status == 0 and "timed out" in (err_text or "").lower():
@@ -39,321 +34,16 @@ def _likely_cause(status, err_text):
     return f"HTTP {status}."
 
 
-# ---------------------------------------------------------------------------
-# COMING BACK AFTER A MOMENT
-# ---------------------------------------------------------------------------
-#
-# "if an api module hit error there is no time increasing thing?"
-#
-# There was not. One HTTP call per model, and any failure — including a 429,
-# which literally means 'you are going too fast, come back shortly' — burned
-# that model and moved the cascade to the next one. When a sector's primary and
-# fallback sit on the same provider and the same key, which is the normal case,
-# one rate limit burned both inside the same second and the sector reported
-# 'all providers for this task failed'. The owner read that as the fallback not
-# existing. The fallback existed; it was spent in the same breath as the primary.
-#
-# So: transient failures are retried on the SAME model, with the wait growing
-# each time, before the cascade is allowed to give up on it.
-#
-#   429  rate limited        retry — and honour Retry-After if the provider
-#                            sends one, because the provider knows better than
-#                            any formula here
-#   408/409/425              retry
-#   500 502 503 504          provider-side wobble, retry
-#   0    timeout / no socket retry
-#
-# Never retried, because trying again cannot change the answer and only wastes
-# the owner's time and quota:
-#
-#   400 422  malformed request — a bug here
-#   401 403  wrong key
-#   402      out of credit
-#   404      wrong URL or model id
-#
-# Waits are 1s, 2s, 4s with a little jitter, so two agents that hit the same
-# limit in the same second do not come back in the same second either. Total
-# added delay in the worst case is about seven seconds — cheap next to a sector
-# going dark for the day.
-
-RETRY_STATUSES = {0, 408, 409, 425, 429, 500, 502, 503, 504}
-MOST_TRIES = 3
-FIRST_WAIT = 1.0
-LONGEST_WAIT = 20.0
-
-
-def _retry_after(r) -> float:
-    """Seconds the provider asked us to wait, or 0. Its number beats ours."""
-    try:
-        v = (r.headers.get("Retry-After") or "").strip()
-    except Exception:
-        return 0.0
-    if not v:
-        return 0.0
-    try:
-        return max(0.0, min(LONGEST_WAIT, float(v)))
-    except ValueError:
-        pass
-    try:                                   # the HTTP-date form
-        from email.utils import parsedate_to_datetime
-        import datetime
-        when = parsedate_to_datetime(v)
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=datetime.timezone.utc)
-        secs = (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
-        return max(0.0, min(LONGEST_WAIT, secs))
-    except Exception:
-        return 0.0
-
-
-def _wait_before(attempt, asked=0.0) -> float:
-    """1s, 2s, 4s, with jitter — unless the provider named its own number."""
-    if asked > 0:
-        return asked
-    return min(LONGEST_WAIT,
-               FIRST_WAIT * (2 ** attempt) * (0.75 + random.random() * 0.5))
-
-
-def _execute(cred, url, headers, body, timeout, tries=MOST_TRIES, sleep=None,
-             clock=None):
-    """
-    HTTP execution with backoff on the transient statuses. Returns a dict with
-    ok/status/text/raw (redacted), plus `attempts` and, when it retried, a
-    `waited` trail so the failover screen can show what it actually did.
-
-    THE TIMEOUT IS A BUDGET FOR THIS MODEL, NOT A BUDGET PER ATTEMPT.
-
-    "the apis response time reading or writing time seems to be slow."
-
-    It was, and this loop was most of the reason. `timeout` was applied to each
-    attempt, so three attempts meant three times the wait. Measured against a
-    socket that accepts a connection and then says nothing — which is how a sick
-    endpoint actually behaves, a refused connection being the easy case:
-
-        route timeout  10s -> gave up after  33.6s
-        route timeout  30s -> gave up after  93.1s
-
-    A real route uses 120s. So one hanging key cost about SIX MINUTES before the
-    cascade was allowed to try the next model, and a sector with two models on
-    the same sick provider spent twelve before reporting that everything failed.
-    Nothing was slow except us, waiting.
-
-    Now the whole model gets `timeout` seconds. Each attempt is given what is
-    left, and when the budget is gone there is no next attempt, whatever `tries`
-    says. That keeps the retry where it earns its place and removes it where it
-    never did:
-
-      a 429 or a 503 comes back in a fraction of a second, so the budget is
-      barely touched and it still gets its three goes — which is the whole
-      point of the ladder, and the case the owner originally reported;
-
-      a timeout has by definition consumed the budget, so it is not retried
-      into oblivion. Retrying something that already waited two minutes, in the
-      hope it answers within another two, was never a real hope.
-
-    Worst case for one model drops from about 3x the timeout to about 1x.
-    """
-    raw = {
-        "url": url,
-        "headers": redact_headers(cred, headers),
-        "payload": json.loads(body) if body else None,
-        "status": None,
-        "response_body": None,
-    }
-    nap = sleep or time.sleep
-    now = clock or time.monotonic
-    waited = []
-    tries = max(1, int(tries))
-    budget = max(1.0, float(timeout))
-    deadline = now() + budget
-    for attempt in range(tries):
-        pause = None
-        left = deadline - now()
-        if left <= 0 and attempt:
-            # Out of time. Report the last thing that actually happened rather
-            # than inventing a new failure on top of it.
-            return {"ok": False, "status": raw["status"] or 0,
-                    "text": raw["response_body"] or "timed out",
-                    "cause": _likely_cause(raw["status"] or 0,
-                                           raw["response_body"] or "timed out"),
-                    "raw": raw, "attempts": attempt, "waited": waited,
-                    "spent": round(budget, 1)}
-        try:
-            r = requests.post(url, headers=headers, data=body,
-                              timeout=max(1.0, left))
-            raw["status"] = r.status_code
-            text = r.text
-            raw["response_body"] = text[:4000]
-            ok = 200 <= r.status_code < 300
-            if ok or r.status_code not in RETRY_STATUSES or attempt == tries - 1:
-                return {"ok": ok, "status": r.status_code, "text": text,
-                        "cause": None if ok else _likely_cause(r.status_code, text),
-                        "raw": raw, "attempts": attempt + 1,
-                        "waited": waited}
-            pause = _wait_before(attempt, _retry_after(r))
-        except requests.exceptions.Timeout:
-            raw["status"] = 0
-            raw["response_body"] = "timed out"
-            if attempt == tries - 1:
-                return {"ok": False, "status": 0, "text": "timed out",
-                        "cause": _likely_cause(0, "timed out"), "raw": raw,
-                        "attempts": attempt + 1, "waited": waited}
-            pause = _wait_before(attempt)
-        except Exception as e:
-            raw["status"] = 0
-            raw["response_body"] = str(e)
-            # A connection that was refused or reset is worth another go; a
-            # malformed URL or a missing library is not, and retrying it three
-            # times just triples how long the owner waits for the same message.
-            transient = any(w in str(e).lower() for w in
-                            ("connection", "reset", "temporarily", "unreachable",
-                             "broken pipe", "eof occurred"))
-            if not transient or attempt == tries - 1:
-                return {"ok": False, "status": 0, "text": str(e),
-                        "cause": _likely_cause(0, str(e)), "raw": raw,
-                        "attempts": attempt + 1, "waited": waited}
-            pause = _wait_before(attempt)
-        # The wait counts against the budget too — otherwise a provider that
-        # fails fast three times could still sleep its way past the ceiling.
-        pause = max(0.0, min(pause, deadline - now()))
-        waited.append(round(pause, 2))
-        nap(pause)
-    # Unreachable: every branch above returns on the last attempt. Kept so a
-    # future edit to the loop cannot fall out of it returning None.
-    return {"ok": False, "status": raw["status"] or 0, "text": "",
-            "cause": "gave up after retries", "raw": raw,
-            "attempts": tries, "waited": waited}
-
-
-def _content_text(body_text):
-    """Pull the assistant text out of an OpenAI/Anthropic-ish chat response."""
-    try:
-        d = json.loads(body_text)
-    except Exception:
-        return ""
-    try:
-        return d["choices"][0]["message"]["content"]
-    except Exception:
-        pass
-    try:  # anthropic-style
-        return d["content"][0]["text"]
-    except Exception:
-        return ""
-
-
-def chat(cred, model, messages, max_tokens=512, timeout=180, extra=None,
-         tries=MOST_TRIES):
-    """
-    Production LLM call. Shares build_chat_request with the probe path.
-
-    `tries=1` for a PROBE. A probe asks "what is this model doing right now",
-    and retrying that question three times with backoff does not make the
-    answer truer — it makes the answer late. Every failing model in the
-    routing sweep was costing three attempts plus about seven seconds of
-    sleeps, times two calls for the multimodal check, times every shelf: the
-    owner watched CHECK EVERYTHING take over fifteen minutes, and this was a
-    good part of why. See preflight._ModelCache.
-    """
-    # A LOCAL MODEL IS STILL A MODEL. It has no URL, no key and no headers, so
-    # it cannot go through _execute — but it returns the same shape, and every
-    # caller above here (the cascade, the load ladder, the failover trail, the
-    # usage counter) is unchanged because of that.
-    # Imported here, not at the top: providers/__init__ pulls in this module,
-    # so a package-level import would make `python -m providers.local_cli`
-    # warn about being loaded twice — which looks like a fault on a command he
-    # is meant to run.
-    from . import local_cli
-    if local_cli.is_local(cred):
-        return local_cli.chat(cred, model, messages,
-                              max_tokens=max_tokens, timeout=timeout)
-    url, headers, body = build_chat_request(cred, model["api_model_id"], messages, max_tokens, extra)
-    res = _execute(cred, url, headers, body, timeout, tries=tries)
-    res["output"] = _content_text(res["text"]) if res["ok"] else ""
-    return res
-
-
-def fetch_models(cred, timeout=90):
-    """GET <base>/models. Convenience only — failure must never block manual entry."""
-    url, headers, _ = build_request(cred, "models")
-    try:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        ids = []
-        if 200 <= r.status_code < 300:
-            try:
-                d = r.json()
-                rows = d.get("data", d if isinstance(d, list) else [])
-                ids = [m.get("id") for m in rows if isinstance(m, dict) and m.get("id")]
-            except Exception:
-                ids = []
-        return {"ok": 200 <= r.status_code < 300, "status": r.status_code,
-                "models": ids, "raw": {"url": url, "response_body": r.text[:2000]}}
-    except Exception as e:
-        return {"ok": False, "status": 0, "models": [], "error": str(e),
-                "raw": {"url": url, "response_body": str(e)}}
-
-
-def probe_model(cred, model, timeout=120, tries=1):
-    """
-    Test & detect for a model, using a request VALID FOR ITS CATEGORY:
-      LLM       -> a tiny chat completion (+ a multimodal image probe)
-      Image     -> a tiny image-generation request
-      Embedding -> a tiny embeddings request
-    Signature table gives instant flags for known vendors; the live probe confirms.
-    Anything undetectable is reported as None (unknown) and degrades off — never blocks.
-    """
-    category = (model.get("category") or "LLM").upper()
-    sig = signatures.match(cred.get("base_url", ""), model.get("api_model_id", ""))
-    diag = {"category": category, "vendor": sig["vendor"] if sig else "unknown",
-            "endpoint": chat_endpoint(cred.get("base_url", ""))}
-
-    if category == "LLM":
-        caps = {"chat": None, "multimodal": None}
-        if sig:
-            caps.update({k: v for k, v in sig["caps"].items() if k in caps})
-        res = chat(cred, model, [{"role": "user", "content": "Reply with the single word: ok"}],
-                   max_tokens=5, timeout=timeout, tries=tries)
-        caps["chat"] = bool(res["ok"])
-        result = {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
-                  "output": res.get("output", ""), "raw": res["raw"]}
-        # A LOCAL MODEL IS TEXT IN, TEXT OUT. The image probe sends a data: URI
-        # inside the message content; local_cli keeps the text parts and drops
-        # the picture, so the model would answer "white" from the wording alone
-        # and the shelf would record vision it has not got. Claimed-but-absent
-        # is worse than absent: something later routes an image at it.
-        from . import local_cli
-        if local_cli.is_local(cred):
-            caps["multimodal"] = False
-            return {"capabilities": caps, "detect": diag, "test": result}
-        if res["ok"] and caps.get("multimodal") is None:  # Vision = an LLM capability, detected here
-            mm = [{"role": "user", "content": [
-                {"type": "text", "text": "what colour is this? one word"},
-                {"type": "image_url", "image_url": {"url": _TINY_PNG}}]}]
-            caps["multimodal"] = bool(chat(cred, model, mm, max_tokens=5,
-                                           timeout=timeout, tries=tries)["ok"])
-        return {"capabilities": caps, "detect": diag, "test": result}
-
-    if category == "IMAGE":
-        url, headers, body = build_request(cred, "images/generations", {
-            "model": model["api_model_id"], "prompt": "a small blue circle on a white background",
-            "n": 1, "size": "256x256"})
-        res = _execute(cred, url, headers, body, timeout, tries=tries)
-        diag["endpoint"] = url
-        return {"capabilities": {"images": bool(res["ok"])}, "detect": diag,
-                "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
-                         "output": "image generated" if res["ok"] else "", "raw": res["raw"]}}
-
-    if category == "EMBEDDING":
-        url, headers, body = build_request(cred, "embeddings", {
-            "model": model["api_model_id"], "input": "ping"})
-        res = _execute(cred, url, headers, body, timeout, tries=tries)
-        diag["endpoint"] = url
-        return {"capabilities": {"embeddings": bool(res["ok"])}, "detect": diag,
-                "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
-                         "output": "embedding returned" if res["ok"] else "", "raw": res["raw"]}}
-
-    return {"capabilities": {"supported": None}, "detect": diag,
-            "test": {"ok": None, "status": None, "output": "",
-                     "cause": f"No live probe for {category}; leaving it as unknown.", "raw": diag}}
+def redact_headers(cred: dict, headers: dict) -> dict:
+    """Copy of headers with the auth value replaced by a redaction — safe to show."""
+    out = dict(headers)
+    key = cred.get("api_key", "")
+    for name, val in list(out.items()):
+        if key and key in val:
+            out[name] = val.replace(key, auth.redact(key))
+        elif name.lower() in ("authorization", "x-api-key") or name == cred.get("auth_header_name"):
+            out[name] = auth.redact(key)
+    return out
 
 
 def _is_extract_api(tool) -> bool:
@@ -378,7 +68,6 @@ def _probe_extract_api(tool, timeout):
       401  the key is wrong — and the hint says Basic, never 'raw'.
       429  the key WORKS; it is only rate-limited or out of quota.
     """
-    from . import auth
     url = (tool.get("base_url") or "https://api.zyte.com/v1/extract").strip()
     key = (tool.get("api_key") or "").strip()
     if not key:
@@ -442,7 +131,6 @@ def probe_tool(tool, timeout=90):
       400/422  the host READ the key and objected to the REQUEST. Auth passed; we
                retry with a sample query so a working API shows live data.
     """
-    from . import auth
     url = (tool.get("base_url") or "").strip()
     if not url:
         return {"ok": False, "status": 0, "cause": "No base URL saved for this tool."}

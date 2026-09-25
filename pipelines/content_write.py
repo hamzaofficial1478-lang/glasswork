@@ -224,11 +224,10 @@ def next_brief(con, limit=MAX_PER_PASS, only_id=None) -> list:
 
 def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
     """The Content brain writes the body. Returns {ok, page|error, brain}."""
-    # THE LADDER, NOT A BARE CALL. "No model routed means no page is written"
-    # is true of Content in a way it is not of the sectors whose brains only
-    # word things — the page IS the model's output. So when Content's own chain
-    # is down this climbs: a spare off the shelf first, and the Director's own
-    # model as a last resort, capped and logged. See providers/ladder.py.
+    # "No brain means no page" is true of Content in a way it is not of the
+    # sectors whose brains only word things — the page IS the model's output.
+    # Content's own Claude call already steps down the models and over to the
+    # backup account when it has to (providers/claude_team.py).
     try:
         from providers import think
     except Exception as e:                                    # pragma: no cover
@@ -438,14 +437,8 @@ def _write(agent, dry_run, only_id, limit, job=None):
 
         # THE BRAIN IS CHECKED BEFORE ANY WORK IS DONE, not after. Finding out
         # there is no writer AFTER borrowing a shelf and reading the cabinet is
-        # how a pass burns a minute to say nothing.
-        # Asked of the LADDER, not of Content's routing alone — a spare on the
-        # llm_extra shelf can write the page perfectly well, and refusing while
-        # one sits idle would be the pass giving up with help available. What
-        # it deliberately does NOT count is the Director's model: that rung is
-        # for a key that broke, not for one the owner never entered, and
-        # spending it on an unconfigured sector would use up the day's
-        # emergencies on a setting he could fix in ten seconds.
+        # how a pass burns a minute to say nothing. The check itself is cheap:
+        # is Claude Code ready on this machine. No call is made.
         try:
             from providers import ladder
             route = ladder.who_could_answer(BRAIN)
@@ -454,15 +447,14 @@ def _write(agent, dry_run, only_id, limit, job=None):
         if not route.get("ok"):
             return {"ok": False, "agent": agent, "pages": [],
                     "waiting": len(waiting),
-                    "error": ("No model is routed to Content and there is no spare "
-                              "on the shelf, so there is nothing here that can "
-                              "write a page: "
+                    "error": ("Content cannot think right now, so there is nothing "
+                              "here that can write a page: "
                               + str(route.get("own_error") or route.get("why") or "")
                               + ". Nothing was written — a template with the "
                                 "keyword slotted in four times is the page every "
                                 "other glazier already has, and it would cost him "
-                                "rather than earn. Route a model to Content on "
-                                "/setup and this writes on the next run.")}
+                                "rather than earn. Once Claude is signed in on "
+                                "this machine it writes on the next run.")}
 
         include = _include_of_his_site()
         pages, held = [], []

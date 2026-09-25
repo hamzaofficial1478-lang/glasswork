@@ -1255,6 +1255,9 @@ _ADDED_COLUMNS = (
     # (see pipelines/day_run.py) and "what was running at the same time as
     # this" is a question the run panel has to be able to answer.
     ("day_steps",    "lane",         "TEXT"),
+    # "sometimes i will only run content sector with MD and IT and Security".
+    # The sectors picked for one run, without touching the permanent switches.
+    ("day_runs",     "only_sectors", "TEXT"),
     # What the Harvester read off the business's own website — the details Maps
     # does not hold. `whatsapp` is filled ONLY from a click-to-chat button the
     # business published itself; `evidence` records where every detail came

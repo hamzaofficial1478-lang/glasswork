@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from . import board, state
-from providers import client, integrations, preflight
+from providers import integrations, preflight
 
 _fail = []
 ROOT = Path(__file__).parents[1]
@@ -105,47 +105,82 @@ def test_the_setting_helper_goes_dark_with_it_too():
                 os.environ[k] = v
 
 
-# --- the fallback warning ---------------------------------------------------
+# --- what the preflight says about the Claude team --------------------------
 
 
-def _chain(*links):
-    return {"task": "seo", "chain": list(links),
-            "working": sum(1 for l in links if l["ok"] is True),
-            "cover": preflight._verdict(list(links))}
+def _team_status(signed=True, backup=False):
+    from providers import claude_team as T
+    t = T.DEFAULT_TEAM
+    accs = [{"id": "main", "label": "main Claude account", "config_dir": "",
+             "ok": signed, "why": "" if signed else "the main Claude account is not signed in"}]
+    if backup:
+        accs.append({"id": "backup", "label": "backup Claude account",
+                     "config_dir": "/b", "ok": True, "why": ""})
+    return {"ready": True, "why": "", "ceiling": T.CEILING, "models": [],
+            "team": [{"sector": s, "label": T.SECTOR_LABEL[s], "model": t[s],
+                      "model_label": T.LABEL[t[s]], "main": s in T.MAIN,
+                      "default": t[s]} for s in T.SECTORS],
+            "accounts": accs, "backup_setting": T.BACKUP_ENV,
+            "struggling": [], "usage_today": {"sectors": {}}}
 
 
-def test_a_failing_fallback_is_not_a_missing_one():
-    print("\nThe complaint he made twice:")
-    r = _chain({"name": "main · gpt-x", "ok": True, "cause": None},
-               {"name": "backup · llama-y", "ok": False,
-                "cause": "402 — the provider needs payment/credit"})
-    check("still flagged", r["cover"], preflight.SINGLE)
-    said = preflight._single_brain(r)
-    check("it does NOT say there is no fallback",
-          "no fallback" in said, False)
-    check("it says the fallback is configured and failing",
-          "set up and failing" in said, True)
-    check("it names the model", "backup · llama-y" in said, True)
-    check("and gives the provider's own reason — the thing he asked for",
-          "402" in said, True)
+def _sweep(status, answers=None, quick=False):
+    """preflight.sweep with the Claude team stood in for; returns (result, models tested)."""
+    from providers import claude_team as T
+    tested = []
+
+    def fake_test(models=None, account="main"):
+        out = []
+        for m in (models or sorted(set(T.team().values()), key=T.rank)):
+            tested.append((account, m))
+            why = (answers or {}).get(m, "")
+            out.append({"account": account, "model": m, "label": T.LABEL[m],
+                        "ok": not why, "why": why, "seconds": 2.0, "ran": m})
+        return out
+    real = (preflight.claude_team.status, preflight.claude_team.test)
+    preflight.claude_team.status = lambda: status
+    preflight.claude_team.test = fake_test
+    try:
+        return preflight.sweep(quick=quick), tested
+    finally:
+        preflight.claude_team.status, preflight.claude_team.test = real
 
 
-def test_genuinely_one_model_still_says_so_plainly():
-    print("\nAnd where he really has only one, the old words are right:")
-    r = _chain({"name": "main · gpt-x", "ok": True, "cause": None})
-    said = preflight._single_brain(r)
-    check("named as no fallback", "no fallback" in said, True)
-    check("and says what that costs",
-          "stops the sector" in said, True)
+def test_a_model_that_does_not_answer_is_a_warning_not_a_stop():
+    print("\nOpus 5 does not answer — the MD steps down, and the check says exactly that:")
+    r, _ = _sweep(_team_status(), {"claude-opus-5": "the model is overloaded right now"})
+    check("it does not stop the day over it",
+          any("Claude" in b for b in r["blocking"]), False)
+    said = " ".join(r["warnings"])
+    check("it names the sector and the model",
+          "Managing Director: Opus 5 did not answer" in said, True)
+    check("with Claude's own reason", "overloaded" in said, True)
+    check("and where the sector goes instead", "step down to Opus 4.8" in said, True)
 
 
-def test_an_unreached_second_model_is_unknown_not_absent():
-    print("\nA model nobody managed to call is not a model he never saved:")
-    r = _chain({"name": "main · gpt-x", "ok": True, "cause": None},
-               {"name": "backup · llama-y", "ok": None, "cause": "skipped (--quick)"})
-    said = preflight._single_brain(r)
-    check("reported as unknown", "unknown rather than no" in said, True)
-    check("not as missing", "no fallback" in said, False)
+def test_no_account_signed_in_stops_the_day():
+    print("\nNobody signed in is the one thing that stops every sector:")
+    r, tested = _sweep(_team_status(signed=False))
+    check("it blocks", any("no Claude account is signed in" in b for b in r["blocking"]), True)
+    check("and nothing was called on an account that cannot answer", tested, [])
+
+
+def test_each_model_is_tested_once_and_quick_spends_nothing():
+    print("\nSonnet serves four sectors and is asked once:")
+    r, tested = _sweep(_team_status())
+    check("one call per model on the team",
+          sorted(m for _, m in tested), sorted(set(preflight.claude_team.DEFAULT_TEAM.values())))
+    print("\n--quick checks the sign-in and calls nothing:")
+    r, tested = _sweep(_team_status(), quick=True)
+    check("no model was asked", tested, [])
+    check("and it says nothing was proven",
+          any("nothing was actually called" in w for w in r["warnings"]), True)
+    print("\nNo backup account is said once, plainly:")
+    r, _ = _sweep(_team_status())
+    check("the warning is there", sum("no backup Claude account" in w for w in r["warnings"]), 1)
+    r, _ = _sweep(_team_status(backup=True))
+    check("and gone when there is one",
+          any("no backup Claude account" in w for w in r["warnings"]), False)
 
 
 # --- the health score -------------------------------------------------------
@@ -224,56 +259,6 @@ def test_a_deep_unscored_pile_stops_paying_a_dividend():
         con.close()
     finally:
         board.DB = real
-
-
-# --- the fifteen-minute check -----------------------------------------------
-
-
-def test_a_probe_asks_once():
-    print("\nA probe asks what is true now — retrying does not make it truer:")
-    calls = []
-
-    class _Reply:
-        status_code, text, headers = 429, "{}", {}
-
-    def stub(url, headers=None, data=None, timeout=None):
-        calls.append(1)
-        return _Reply()
-
-    real = client.requests.post
-    client.requests.post = stub
-    try:
-        cred = {"name": "k", "api_key": "sk-x"}
-        model = {"id": "m", "api_model_id": "m-1", "category": "LLM"}
-        client.probe_model(cred, model, timeout=1)
-        check("one call, not three", len(calls), 1)
-
-    finally:
-        client.requests.post = real
-
-
-def test_real_work_still_retries():
-    print("\nBut the work itself still comes back after a moment:")
-    calls = []
-
-    class _Reply:
-        status_code, text, headers = 429, "{}", {}
-
-    def stub(url, headers=None, data=None, timeout=None):
-        calls.append(1)
-        return _Reply()
-
-    real_post, real_sleep = client.requests.post, client.time.sleep
-    client.requests.post = stub
-    client.time.sleep = lambda s: None
-    try:
-        client.chat({"name": "k", "api_key": "sk-x"},
-                    {"id": "m", "api_model_id": "m-1"},
-                    [{"role": "user", "content": "x"}], timeout=1)
-        check("three attempts on the real path", len(calls), client.MOST_TRIES)
-    finally:
-        client.requests.post = real_post
-        client.time.sleep = real_sleep
 
 
 def main():

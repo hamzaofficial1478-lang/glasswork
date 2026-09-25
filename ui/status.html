@@ -96,7 +96,7 @@ main{max-width:720px;margin:0 auto;padding:88px 22px 64px}
     <div class="bar"><span id="barFill" style="width:0%"></span></div>
   </div>
 
-  <div class="sec-h"><b>The brains</b><span class="note">which AI provider &amp; model runs each part</span></div>
+  <div class="sec-h"><b>The brains</b><span class="note">which Claude model each part thinks with</span></div>
   <div class="rows" id="brains"><div class="empty">Loading…</div></div>
 
   <div class="sec-h"><b>Everything else</b><span class="note">website, database, and optional extras</span></div>
@@ -151,8 +151,8 @@ function checkRow(c){
 function render(j){
   $('#count').textContent = j.brainsReady + '/' + j.brainsTotal;
   $('#countLabel').textContent = j.brainsReady === j.brainsTotal
-    ? 'Every sector and the MD has a provider 🎉'
-    : (j.brainsTotal - j.brainsReady) + ' of ' + j.brainsTotal + ' still need a provider (MD + 6 sectors)';
+    ? 'Claude is signed in and thinking for every sector'
+    : (j.brainsTotal - j.brainsReady) + ' of ' + j.brainsTotal + ' cannot think yet — sign Claude in on this machine';
   $('#barFill').style.width = Math.round(j.brainsReady / j.brainsTotal * 100) + '%';
 
   const chip = $('#modeChip');

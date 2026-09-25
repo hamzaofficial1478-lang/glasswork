@@ -69,39 +69,43 @@ def _now():
 # ---------------------------------------------------------------------------
 
 def _readiness_tests():
-    print("\nConfigured is not working:")
+    print("\nThe Claude team's light, sector by sector:")
 
-    saved = {"n": 1, "verified": 0, "tested": 0, "names": ["X · m"]}
-    proven = {"n": 2, "verified": 2, "tested": 2, "names": ["X · m", "Y · n"]}
-    lone = {"n": 1, "verified": 1, "tested": 1, "names": ["X · m"]}
+    def brain(**kw):
+        b = {"ok": True, "error": "", "model": "claude-sonnet-5", "label": "Sonnet 5",
+             "proven": True, "struggling": "", "backup": True, "main": False}
+        b.update(kw)
+        return b
+    proven = brain()
 
     real = readiness._brains
     try:
-        readiness._brains = lambda task: saved
+        readiness._brains = lambda task: brain(proven=False)
         r = readiness.sector("report", "report", env={"NTFY_TOPIC": "t"}, shelf={})
-        check("saved but never called -> unchecked, not ready", r["state"], "unchecked")
+        check("a model that has not answered today -> unchecked, not ready",
+              r["state"], "unchecked")
 
         readiness._brains = lambda task: proven
         r = readiness.sector("report", "report", env={"NTFY_TOPIC": "t"}, shelf={})
-        check("two proven brains -> ready", r["state"], "ready")
+        check("answered today -> ready", r["state"], "ready")
+        check("and it says which model", "Sonnet 5" in r["says"], True)
 
-        readiness._brains = lambda task: lone
+        readiness._brains = lambda task: brain(struggling="Opus 5 was too slow to answer")
         r = readiness.sector("report", "report", env={"NTFY_TOPIC": "t"}, shelf={})
-        check("one proven brain, no fallback -> thin", r["state"], "thin")
+        check("being stepped round -> thin", r["state"], "thin")
+        check("and it says what Claude is doing about it",
+              any("next model down" in t for t in r["thin"]), True)
 
-        # MD and Security are the two that put hard calls to two models
+        readiness._brains = lambda task: brain(main=True, backup=False)
         r = readiness.sector("md", "md", env={}, shelf={})
-        check("MD on one brain -> thin (the cross-check stops silently)", r["state"], "thin")
-        check("and it says why", any("cross-check" in t for t in r["thin"]), True)
-        r = readiness.sector("security", "security", env={}, shelf={})
-        check("Security on one brain -> thin", r["state"], "thin")
+        check("a main sector with no backup account is told, not alarmed",
+              any("no backup Claude account" in n for n in r["notes"]), True)
 
-        readiness._brains = lambda task: {"n": 0, "verified": 0, "names": [],
-                                          "error": "no routing"}
+        readiness._brains = lambda task: brain(ok=False, error="Claude Code is not installed")
         r = readiness.sector("seo", "seo", env={},
                              shelf={"seo_data": {"items": 2, "working": 2},
                                     "crawler": {"items": 1, "working": 1}})
-        check("no brain -> blocked whatever the shelf says", r["state"], "blocked")
+        check("Claude cannot think -> blocked whatever the shelf says", r["state"], "blocked")
 
         print("\nA required shelf outranks everything else:")
         readiness._brains = lambda task: proven
@@ -749,6 +753,51 @@ def _lane_tests(day_run):
         proposals.set_orders, day_run.preflight = real_set, real_pre
         day_run.STEPS = real_steps
 
+    print("\nThis run only — he picks Content, and MD, IT, Security and Report come too:")
+    check("the essential four are always in",
+          day_run.pick_sectors(["content"]),
+          ["Content", "Director", "IT", "Report", "Security"])
+    check("nothing picked means every sector", day_run.pick_sectors([]), [])
+    check("every sector picked is the same as nothing picked",
+          day_run.pick_sectors(["content", "seo", "leads", "it", "report",
+                                "security", "director"]), [])
+    check("a name it does not know is ignored, not obeyed",
+          "Marketing" in day_run.pick_sectors(["content", "marketing"]), False)
+
+    real_steps, real_after, real_sub = day_run.STEPS, day_run.LANE_AFTER, day_run.subprocess
+    day_run.STEPS = [("Leads collects", "pipelines._never", "Leads", "leads"),
+                     ("Content writes", "pipelines._never", "Content", "content"),
+                     ("Report scores", "pipelines._never", "Report", "close")]
+    day_run.LANE_AFTER = {"leads": (), "content": (), "close": ("leads", "content")}
+    ran = []
+
+    def quick_popen(cmd, cwd=None, stdout=None, stderr=None, **kw):
+        ran.append(cmd)
+        return subprocess.Popen([sys.executable, "-c", "print('{}')"],
+                                stdout=stdout, stderr=stderr)
+    day_run.subprocess = types.SimpleNamespace(
+        Popen=quick_popen, STDOUT=subprocess.STDOUT,
+        TimeoutExpired=subprocess.TimeoutExpired)
+    board.clear_stop(day_run.LOCK)
+    try:
+        rid = day_run._open_run("content only", False, [],
+                                day_run.pick_sectors(["content"]))
+        with day_run._StopWatch(every=0.2) as watch:
+            day_run._run_lanes(rid, watch)
+        steps = {r["label"]: r for r in day_run.status(rid)["steps"]}
+        run = day_run.status(rid)["run"]
+    finally:
+        day_run.STEPS, day_run.LANE_AFTER, day_run.subprocess = real_steps, real_after, real_sub
+        board.clear_stop(day_run.LOCK)
+    check("Leads sat it out", steps["Leads collects"]["status"], "skipped")
+    check("and says why, in his words",
+          "not in this run" in (steps["Leads collects"]["summary"] or ""), True)
+    check("Content ran", steps["Content writes"]["status"] != "skipped", True)
+    check("Report ran — it is one of the four", steps["Report scores"]["status"] != "skipped", True)
+    check("only two processes were started", len(ran), 2)
+    check("the run remembers what he picked", "Content" in run["only_sectors"], True)
+    check("and the permanent switch was never touched", board.sector_enabled("Leads"), True)
+
     print("\nAn order for a sector that does not exist is not silently binned:")
     check("'leads' is the Leads sector", proposals.canonical_sector("leads"), "Leads")
     check("'  SeO ' too", proposals.canonical_sector("  SeO "), "SEO")
@@ -1050,13 +1099,8 @@ def main():
 
 def _fallback_and_shelf_tests():
     """
-    Two false alarms he caught on the same run, and they are the same kind of
-    bug: a screen reporting on a copy of the truth that had the answer stripped
-    out of it.
-
-      "sector 'content' runs on one brain with no fallback ... they all have
-       fallback ip ... either the tester is not testing the fallback or it is
-       only pushing fake message over the actual error"
+    A false alarm he caught: a screen reporting on a copy of the truth that
+    had the answer stripped out of it.
 
       "Content & Social — unchecked / stock_images: 2 API saved, not proven yet
        ... fix that not proven api issue"
@@ -1070,13 +1114,6 @@ def _fallback_and_shelf_tests():
     d = _P(_tf.mkdtemp())
     store.STORE = d / "providers.local.json"
 
-    def model(mid, api, tier="free", enabled=True, tested_ok=True):
-        m = {"id": mid, "api_model_id": api, "category": "LLM",
-             "cost_tier": tier, "enabled": enabled, "priority": 1}
-        if tested_ok is not None:
-            m["last_test_result"] = {"ok": tested_ok, "at": 1}
-        return m
-
     def tool(tid, name, tested_ok=True):
         t = {"id": tid, "shelf": "stock_images", "name": name,
              "base_url": "https://x/", "api_key": "k", "auth_style": "bearer",
@@ -1087,22 +1124,7 @@ def _fallback_and_shelf_tests():
 
     try:
         payload = _json.dumps({
-            "credentials": [{"id": "c", "name": "OpenRouter", "models": [
-                model("m1", "big/model"), model("m2", "small/model"),
-                model("m3", "other/model"),
-                model("m_off", "paused/model", enabled=False),
-                model("m_paid", "pricey/model", tier="paid")]}],
-            "tools": [tool("t1", "Pexels"), tool("t2", "Pixabay")],
-            "routing": {
-                "content":  {"primary": "m1", "fallback": ["m2"], "enabled": True},
-                "md":       {"primary": "m1", "secondary": "m3",
-                             "secondary_mode": "fusion", "enabled": True},
-                "it":       {"primary": "m1", "fallback": ["m_off"], "enabled": True},
-                "seo":      {"primary": "m1", "fallback": ["m_paid"],
-                             "paid_allowed": False, "enabled": True},
-                "report":   {"primary": "m1", "fallback": ["m_gone"], "enabled": True},
-                "security": {"primary": "m1", "enabled": True},
-            }}, indent=2)
+            "tools": [tool("t1", "Pexels"), tool("t2", "Pixabay")]}, indent=2)
         store.STORE.write_text(payload, encoding="utf-8")
 
         print("\nA tested shelf API reads as tested:")
@@ -1122,46 +1144,6 @@ def _fallback_and_shelf_tests():
                                                 ["stock_images"]))["notes"]),
               False)
 
-        print("\nA fallback he saved is counted as a fallback:")
-        b = readiness._brains("content")
-        check("two in the failover chain", b["n"], 2)
-        check("and nothing is held back", b["held"], [])
-        check("so the sector is not called thin",
-              readiness.sector("content", "content", env={},
-                               shelf=readiness._shelf_state(["stock_images"]))["thin"],
-              [])
-
-        print("\nA cross-check partner is a second brain, not a missing one:")
-        # md and security put hard calls to two models and treat disagreement as
-        # the signal, so a fusion secondary is deliberately NOT in the failover
-        # chain. Reading the chain told him he had configured one model when he
-        # had configured two — the loudest of the four false alarms.
-        b = readiness._brains("md")
-        check("the chain really is one", b["n"], 1)
-        check("but two models are saved", b["saved"], 2)
-        check("and the pair is recognised", b["with_partner"], 2)
-        thin = readiness.sector("md", "md", env={}, shelf={})["thin"]
-        check("so it stops claiming the cross-check has stopped",
-              any("cross-check silently stops" in x for x in thin), False)
-        check("and says what is actually true instead",
-              any("cross-check partner" in x for x in thin), True)
-
-        print("\nAnd when a fallback IS missing, it says which and why:")
-        for task, needle in (("it", "switched off"),
-                             ("seo", "paid model"),
-                             ("report", "no longer on the shelf")):
-            thin = readiness.sector(task, task,
-                                    env={"SITE_URL": "x", "SMTP_HOST": "y",
-                                         "NTFY_TOPIC": "t"},
-                                    shelf={})["thin"]
-            check(f"{task}: names the reason",
-                  any(needle in x for x in thin), True)
-            check(f"{task}: and says how many he saved",
-                  any("You saved 2" in x for x in thin), True)
-
-        print("\nOne genuinely alone is still reported as alone:")
-        thin = readiness.sector("security", "security", env={}, shelf={})["thin"]
-        check("plainly", any("one brain and no fallback" in x for x in thin), True)
     finally:
         store.STORE = real_store
 

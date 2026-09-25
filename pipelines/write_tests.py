@@ -135,22 +135,17 @@ def test_no_brain_means_no_page():
     the page every other glazier in Dubai already has; putting one on his
     domain would cost him rather than earn.
     """
-    print("\nWith no model routed to Content:")
+    print("\nWith Claude unable to think for Content:")
     db = _fresh_db()
     _queue_a_brief(db)
     import providers
-    # The shelf is emptied too: with a spare on it Content SHOULD write, and
-    # this test is about there being nothing anywhere that can.
-    with mock.patch.object(providers, "resolve_task",
-                           lambda t: {"ok": False, "error": "no routing configured"}), \
-         mock.patch.object(providers.ladder.routing, "resolve_task",
-                           lambda t: {"ok": False, "error": "no routing configured"}), \
-         mock.patch.object(providers.ladder.store, "shelf_catalogue",
-                           lambda: {"llm_extra": []}):
+    with mock.patch.object(providers.ladder, "who_could_answer",
+                           lambda s: {"ok": False, "own_error": "Claude Code is not installed"}):
         out = CW.run()
     check("it does not write", out["pages"] if out.get("pages") else [], [])
     check("and it is not called a success", out["ok"], False)
-    check("it says what is missing", "No model is routed to Content" in out["error"], True)
+    check("it says what is missing", "Content cannot think right now" in out["error"], True)
+    check("and why", "not installed" in out["error"], True)
     check("and that it deliberately did not fake one",
           "would cost him" in out["error"], True)
     with sqlite3.connect(db) as c:

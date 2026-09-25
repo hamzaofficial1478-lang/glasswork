@@ -372,6 +372,12 @@ def tests():
     # forget it. Tests that exist to prove .env behaviour pass an explicit path
     # and are unaffected. See providers/integrations.read_env.
     os.environ["AGENCY_IGNORE_DOTENV"] = "1"
+    # And the suite never spends his Claude allowance. On his machine Claude
+    # Code is installed and signed in, so a test proving "with no brain this
+    # refuses" would otherwise make a real call — slow, and paid for out of the
+    # plan the agency needs for real work. Tests of the Claude team stub the
+    # call itself. See providers/local_cli.available.
+    os.environ["CLAUDE_TEAM_OFF"] = "1"
     mods = ["coordination.cabinet_tests", "coordination.floor_tests",
             "coordination.targets_tests", "coordination.hook_tests",
             "coordination.faults_tests", "coordination.comms_tests",
@@ -387,8 +393,8 @@ def tests():
             "coordination.daygate_tests",
             "coordination.honest_tests",
             "coordination.clock_tests",
-            "providers.tests", "providers.retry_tests",
-            "providers.ladder_tests", "providers.local_tests",
+            "providers.tests", "providers.team_tests",
+            "providers.local_tests",
             "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",
             "pipelines.write_tests",

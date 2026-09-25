@@ -423,6 +423,9 @@ header>*{flex:none}
 .tick{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);margin:10px 0;cursor:pointer}
 .tick .bx{width:16px;height:16px;border-radius:4px;border:1px solid var(--line2);flex:none}
 .tick.on .bx{background:var(--danger);border-color:var(--danger)}
+/* a sector picked for this run: an ordinary choice, not a warning */
+.tick.pick{margin:6px 0;color:var(--text)}
+.tick.pick.on .bx{background:var(--glass);border-color:var(--glass);box-shadow:inset 0 0 0 3px var(--panel)}
 
 /* ---- WHAT EACH AGENT GOT, GRABBED, PUSHED, DELIVERED, BROKE ON ---- */
 .act{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12.5px}
@@ -1150,7 +1153,7 @@ async function askAgent(){
   // or something is broken.
   const foot=(txt,col)=>`<br><br><span class="dim" style="font-size:11px${col?';color:'+col:''}">${txt}</span>`;
   if(j.brain_error)   html += foot(`my model failed: ${esc(j.brain_error)} — that was my record read straight`,'var(--danger)');
-  else if(j.unrouted) html += foot(`Read straight off my record — ${esc(j.unrouted)}. Set one on Setup → Who runs what and I can talk it through.`,'var(--amber)');
+  else if(j.unrouted) html += foot(`Read straight off my record — ${esc(j.unrouted)}. Sign Claude in on this machine (Setup → The Claude team) and I can talk it through.`,'var(--amber)');
   else if(j.brain)    html += foot(`via ${esc(j.brain.model||j.brain)}`);
   bubble('a', html);
 }
@@ -1866,6 +1869,9 @@ function renderTicker(){
    silently preflights is a button people press without reading. ------------ */
 const RUN = {view:'idle', check:null, busy:false, force:false, orders:{}, note:'',
              touched:false, saved:'',
+             // This run only: the sectors he left ticked. MD, IT, Security and
+             // Report always run and are not offered as ticks at all.
+             skip:{},
              // Stop takes two presses and a few seconds; all three states are
              // visible or he presses it again while it is already stopping.
              confirmStop:false, stopping:false, stopMsg:''};
@@ -1873,6 +1879,13 @@ const RUN_SECTORS = [
   ['IT','IT & Site Health'],['Content','Content & Social'],['SEO','SEO & Rankings'],
   ['Leads','Leads & Outreach'],['Report','Reports'],['Security','Security'],
 ];
+// The ones he can leave out of a run. The other four are the agency itself.
+const RUN_OPTIONAL = ['Content','SEO','Leads'];
+const RUN_ALWAYS = ['MD','IT','Security','Report'];
+function runOnly(){
+  const off=RUN_OPTIONAL.filter(k=>RUN.skip[k]);
+  return off.length ? RUN_OPTIONAL.filter(k=>!RUN.skip[k]).concat(['Director','IT','Security','Report']) : [];
+}
 
 function renderRunButton(){
   const run=(LIVE&&LIVE.run&&LIVE.run.run)||null;
@@ -2032,7 +2045,17 @@ function runOrders(ordersOnly){
       the MD's allocation as usual.</p>
     <div class="field"><label>For the whole agency (optional)</label>
       <textarea id="runNote" placeholder="e.g. two villa jobs finished this week — get them online">${esc(RUN.note)}</textarea></div>`;
+  if(!ordersOnly){
+    H+=`<div class="field"><label>Which sectors work this time?</label>`
+      +`<p style="font-size:11.5px;color:var(--muted);margin:0 0 8px;line-height:1.6">`
+      +`${RUN_ALWAYS.join(', ')} always run. Untick a sector to leave it out of this run only — `
+      +`it spends none of your Claude allowance, and nothing changes for the next run.</p>`
+      + RUN_OPTIONAL.map(k=>`<div class="tick pick ${RUN.skip[k]?'':'on'}" onclick="collectOrders();RUN.skip['${k}']=!RUN.skip['${k}'];renderRun()">`
+          +`<span class="bx"></span><span>${esc(k)}</span></div>`).join('')
+      +`</div>`;
+  }
   RUN_SECTORS.forEach(([k,label])=>{
+    if(RUN.skip[k]) return;
     H+=`<div class="field"><label>${esc(label)}</label>`
       +`<textarea data-sec="${escA(k)}" oninput="RUN.touched=true" placeholder="today's order for ${esc(label)}">${esc(RUN.orders[k]||'')}</textarea></div>`;
   });
@@ -2053,7 +2076,11 @@ function runOrders(ordersOnly){
 
 function collectOrders(){
   RUN.note = ($('#runNote')&&$('#runNote').value||'').trim();
-  RUN.orders = {};
+  // A box hidden because its sector is unticked keeps what was typed in it,
+  // so ticking the sector back does not lose his words.
+  const kept={};
+  RUN_SECTORS.forEach(([k])=>{ if(RUN.skip[k] && RUN.orders[k]) kept[k]=RUN.orders[k]; });
+  RUN.orders = kept;
   document.querySelectorAll('#runBody textarea[data-sec]').forEach(t=>{
     const v=(t.value||'').trim(); if(v) RUN.orders[t.dataset.sec]=v;
   });
@@ -2079,7 +2106,10 @@ async function doStart(){
   let j=null;
   try{
     const r=await fetch('/api/run/start',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({orders:RUN.orders, note:RUN.note, force:RUN.force})});
+      body:JSON.stringify({note:RUN.note, force:RUN.force, only:runOnly(),
+        // an order for a sector left out of this run would sit on the board
+        // for a run it is not in — so it is not sent
+        orders:Object.fromEntries(Object.entries(RUN.orders).filter(([k])=>!RUN.skip[k]))})});
     j=await r.json();
   }catch(e){ j={ok:false,error:String(e)}; }
   RUN.busy=false;
@@ -2111,6 +2141,8 @@ function runProgress(){
     + (run.running?` · refreshing every ${Math.round(POLL_MS/1000)}s`:'')+`</p>`;
   if(run.forced) H+=`<div class="warnbox" style="margin-top:10px"><b>Forced.</b> You started this with
     ${(run.blocking||[]).length} known problem${(run.blocking||[]).length===1?'':'s'} — those sectors will do nothing.</div>`;
+  if((run.only_sectors||[]).length) H+=`<p style="font-size:12px;color:var(--muted);margin:10px 0 0">
+    This run only: <b>${esc(run.only_sectors.join(', '))}</b>. The rest sat it out and spent nothing.</p>`;
   H+=stopControl(R);
   H+=`</div><div class="pgroup">`;
   (R.steps||[]).forEach(s=>{
@@ -2119,6 +2151,19 @@ function runProgress(){
     H+=`<div class="step ${st}"><span class="n">${mark}</span><span class="t">${esc(s.label)}`
       +(s.summary?`<small>${esc(s.summary)}</small>`:'')+`</span></div>`;
   });
+  // What Claude did for each sector this run, from Claude's own report of
+  // every call — how many, how many tokens, how long, on which model.
+  const cu=run.claude_usage||{}, ck=Object.keys(cu).sort();
+  if(ck.length){
+    const NAME={md:'Managing Director',security:'Security',it:'IT',content:'Content',seo:'SEO',
+                leads:'Leads',critic:'Critic',report:'Report'};
+    const tot=ck.reduce((a,k)=>a+cu[k].tokens_in+cu[k].tokens_out,0);
+    H+=`</div><div class="pgroup"><div class="gh etch">Claude this run · ${tot.toLocaleString()} tokens</div>`
+      + ck.map(k=>{const u=cu[k];
+          return `<div class="step ok"><span class="n">·</span><span class="t">${esc(NAME[k]||k)} — `
+            +`${u.calls} call${u.calls===1?'':'s'}, ${(u.tokens_in+u.tokens_out).toLocaleString()} tokens, ${u.seconds}s`
+            +`<small>${esc((u.models||[]).join(', '))}${u.answered<u.calls?` · ${u.calls-u.answered} did not answer`:''}</small></span></div>`;}).join('');
+  }
   H+=`</div><div class="pgroup"><button class="pbtn" onclick="openActivity()">See what each agent did →</button>`;
   if(!run.running) H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
         onclick="RUN.check=null;RUN.view='idle';RUN.stopMsg='';renderRun()">Back</button>`;

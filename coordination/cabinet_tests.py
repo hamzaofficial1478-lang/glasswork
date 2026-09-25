@@ -142,8 +142,8 @@ def test_only_shelves_something_borrows():
     """
     print("Every shelf is one something actually borrows:")
     from providers import store
-    # providers/ counts too: llm_extra is borrowed by routing.call_spare, not by
-    # a pipeline. The rule is "something borrows it", not "a pipeline does".
+    # providers/ counts too. The rule is "something borrows it", not "a
+    # pipeline does".
     src = ""
     for folder in ("pipelines", "providers", "coordination"):
         for f in (ROOT / folder).glob("*.py"):
@@ -158,26 +158,26 @@ def test_only_shelves_something_borrows():
     for dead in gone:
         check(f"'{dead}' is not offered as a shelf any more",
               dead in store.SHELF_KINDS, False)
-    check("and 'image' is not a model category either",
-          "image" in store.MODEL_SHELF_KINDS, False)
+    check("and there is no spare-brain shelf any more — the brains are the Claude team",
+          "llm_extra" in store.SHELF_KINDS, False)
 
 
 def test_brains_are_not_a_shelf():
     """
     The owner asked whether agents would end up using the MD's model. They
-    cannot: a brain is ROUTED per sector, never borrowed. The board used to
-    render them under a heading that said 'shelf', which invited exactly that
-    worry, so the answer is pinned in both places.
+    cannot: every sector thinks with its own Claude model, chosen on the Claude
+    team table, and a model is never put on a shelf where an agent could take
+    a lock on it. The board says so where he reads it.
     """
-    print("A brain is routed, never lent:")
+    print("A brain is the Claude team's, never lent:")
     from providers import store, api
-    check("there is no llm TOOL shelf", "llm" in store.SHELF_KINDS, False)
+    check("there is no llm shelf", "llm" in store.SHELF_KINDS, False)
     out = api.cmd_shelves(None)
-    kinds = {s["shelf"]: s["kind"] for s in out["shelves"]}
-    if "llm" in kinds:
-        check("llm is reported as a brain, not a shelf", kinds["llm"], "model")
-    check("no empty model categories are injected any more",
-          [n for n in ("image", "embedding") if n in kinds], [])
+    check("every shelf on the board is a tool shelf",
+          sorted({s["kind"] for s in out["shelves"]}), ["tool"])
+    check("no model categories are injected",
+          [n for n in ("llm", "llm_extra", "image", "embedding")
+           if n in {s["shelf"] for s in out["shelves"]}], [])
     html = (ROOT / "ui" / "setup.html").read_text(encoding="utf-8")
     check("and the board says so where he reads it",
           "never shared" in html, True)
@@ -186,57 +186,23 @@ def test_brains_are_not_a_shelf():
 def test_a_sectors_brain_is_never_on_a_shelf():
     """
     The owner's point, and he was right: a shelf is a single-holder lock, so an
-    agent that borrowed the MD's model would BLOCK the MD from its own brain
-    until it handed it back — and would be spending the expensive model bought
-    for planning on whatever the agent felt like.
+    agent that borrowed the MD's model would BLOCK the MD from its own brain.
 
-    So a routed model is invisible to the shelf, and agents take spares from
-    'llm_extra' instead.
+    With the Claude team there is nothing to borrow: a model is not a seat, so
+    MD and IT can both use Opus 4.8 at the same moment, and the old
+    spare-brain shelf, if anything still named it, would hold nothing at all.
     """
-    print("A brain routed to a sector cannot be borrowed by anyone:")
-    from providers import store, routing, client
+    print("A brain cannot be borrowed by anyone:")
+    from providers import routing, store
     with store.isolated():
-        cid = store.upsert_credential({"name": "N", "api_key": "k",
-                                       "base_url": "https://x.test/v1"})["id"]
-        boss = store.upsert_model(cid, {"api_model_id": "big-one",
-                                        "category": "LLM"})["id"]
-        store.upsert_model(cid, {"api_model_id": "spare-one",
-                                 "category": "llm_extra"})
-        d = store._load(); d["routing"]["md"] = {"primary": boss, "enabled": True}
-        store._save(d)
-
-        check("the routed model is known to be spoken for",
-              boss in store.routed_model_ids(), True)
-        cat = store.shelf_catalogue()
-        check("and it is on NO shelf at all",
-              any(i["id"] == boss for items in cat.values() for i in items), False)
-        check("while the spare is on llm_extra",
-              [i["name"] for i in cat.get("llm_extra", [])], ["N · spare-one"])
-
-        real_db = board.DB
-        board.DB = _fresh_db()
-        real_chat = client.chat
-        client.chat = lambda cred, m, msgs, **k: {"ok": True, "output": "ok", "status": 200}
-        try:
-            r = routing.call_spare("content-writer", [{"role": "user", "content": "hi"}],
-                                   sector="Content", reason="second opinion")
-            check("an agent gets a spare", r["ok"], True)
-            check("and it is NOT the MD's brain", r["used"]["model"], "spare-one")
-            held = cabinet.borrow("llm_extra", "x", "X", reason="prove released", wait=False)
-            check("the shelf was handed back", held["ok"], True)
-            if held["ok"]:
-                cabinet.release("llm_extra", "x", borrow_id=held["borrow_id"])
-        finally:
-            client.chat = real_chat
-            board.DB = real_db
-
-    print("With no spare configured it refuses rather than reaching for a sector's:")
+        check("the catalogue holds tools only",
+              all(i.get("kind") == "tool" for items in store.shelf_catalogue().values()
+                  for i in items), True)
+    check("there is no spare-brain door left to knock on",
+          hasattr(routing, "call_spare"), False)
     with store.isolated():
-        r = routing.call_spare("seo-strategist", [], reason="x")
-        check("it refuses", r["ok"], False)
-        check("and says how to stock the pool", "category 'llm_extra'" in r["error"], True)
-        check("and why routed models are not offered",
-              "lock that sector out" in r["error"], True)
+        check("the old spare-brain shelf has nothing on it to hand out",
+              store.resolve_shelf("llm_extra")["ok"], False)
 
 
 def test_an_abandoned_waiter_is_reaped():

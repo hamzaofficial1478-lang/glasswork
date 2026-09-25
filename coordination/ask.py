@@ -54,10 +54,11 @@ try:
 except ImportError:  # pragma: no cover
     import board
 
-# Which routed brain belongs to which sector. Same task names the setup screen
-# uses on the "Who runs what" page.
+# Which brain belongs to which sector — the rows of the Claude team table on
+# the Setup page (providers/claude_team.py). The Critic has its own model now,
+# a different one from the MD it checks.
 BRAIN_OF = {
-    "director": "md", "md": "md", "overseer": "md", "critic": "md",
+    "director": "md", "md": "md", "overseer": "md", "critic": "critic",
     "it": "it", "content": "content", "seo": "seo", "leads": "leads",
     "report": "report", "reporter": "report", "security": "security",
 }
@@ -177,15 +178,9 @@ def compose(from_sector, to_sector, situation, facts,
     user = (f"SITUATION: {situation}\n\n"
             "THE FACTS YOU HAVE:\n" + "\n".join("  " + str(f) for f in (facts or []))
             + f"\n\nYour first instinct was to ask {to_sector}. Decide properly.")
-    # DELIBERATELY call_task, NOT the load ladder.
-    #
     # This only chooses the WORDING of a request another sector will read, and
     # it already degrades honestly: no answer means the template goes instead,
     # marked as a template so nobody mistakes it for the sector's own voice.
-    # Climbing to the shelf — let alone spending one of the day's three
-    # borrows of the Director's model — to make a subject line prettier would
-    # be spending the emergency rung on cosmetics, and would use it up before
-    # the sector needed it for work that cannot happen any other way.
     r = call_task(task, [
         {"role": "system",
          "content": SYSTEM.format(sector=from_sector, who_owns_what=WHO_OWNS_WHAT)},

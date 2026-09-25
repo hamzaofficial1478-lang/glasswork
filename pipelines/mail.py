@@ -400,14 +400,13 @@ def _write_copy(call_task, brief, agent=""):
     """
     Ask the sector brain (an LLM) to write the copy from the brief.
 
-    Climbs the load ladder when Leads' own chain is down. Like Content's page,
-    the mail IS the model's output — there is no template that would do — so a
-    dead key here means the lead is simply never written to, which is a job
-    lost rather than a cosmetic degradation. Rung 3 and rung 4 exist for
-    exactly this. providers/ladder.py caps and logs both.
+    Like Content's page, the mail IS the model's output — there is no template
+    that would do — so no answer here means the lead is simply never written
+    to. Leads' Claude call steps down the models and over to the backup account
+    before it gives up (providers/claude_team.py).
 
     `call_task` is still the injected argument so the existing tests can hand
-    in a stub; when it is the real one, the ladder is used instead.
+    in a stub; when it is the real one, think() is used instead.
     """
     if call_task is None:
         return {"ok": False, "error": "no provider layer available"}
