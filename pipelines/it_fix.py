@@ -492,7 +492,80 @@ def fix_unreachable(issue, ctx):
 # Order matters: the first recipe that recognises a ticket owns it. The narrow
 # ones come before the broad ones, or 'bug + the word title' would be swallowed
 # by anything matching every bug.
+def fix_seo_finding(issue, ctx):
+    """
+    A ticket from the SEO technical audit (pipelines/seo_audit.py).
+
+    FIRST IN THE LIST, ON PURPOSE. The recipes below match on words in the
+    ticket, and fix_canonical does not look at the kind at all. An audit
+    finding such as "no canonical declared" would have reached it, found every
+    canonical pointing at the right hostname, and closed the ticket as
+    "overtaken" — a real finding silently binned by the wrong recipe. Kind
+    'seo' stops here.
+
+    The audit already wrote the action and the acceptance check; this hands
+    them on as the plan rather than inventing a second opinion. Wording — a
+    title, a description, alt text for his photographs — is a claim about his
+    business, so it goes to him rather than being made up here.
+    """
+    if issue.get("kind") != "seo":
+        return None
+    text = issue.get("detail") or ""
+    m = re.search(r"\[seo-audit:([a-z0-9_]+)\]", text)
+    code = m.group(1) if m else ""
+
+    def part(label, nxt):
+        got = re.search(re.escape(label) + r"\s*(.*?)\s*(?:" + nxt + r"|$)", text, re.S)
+        return got.group(1).strip() if got else ""
+
+    why = part("Why it matters:", r"Do:")
+    do = part("Do:", r"Fixed when:")
+    done_when = part("Fixed when:", r"\[")
+    steps = [do] if do else ["See the ticket."]
+    needs = "your say-so on the wording"
+
+    if code == "two_hosts_serve_the_site":
+        # A redirect lives in the server's .htaccess, and .htaccess is on the
+        # agency endpoint's never-touch list by design — so this is his to
+        # paste, and here is exactly what to paste.
+        hosts = re.findall(r"https://([a-z0-9.-]+)/", text)
+        a, b = (hosts + ["", ""])[:2]
+        bare = a[4:] if a.startswith("www.") else a
+        steps = [
+            f"Decide which address to keep: {a or 'www'} or {b or 'non-www'}. Your "
+            "canonicals name one and your saved address the other.",
+            "To keep the address WITHOUT www, add to the top of .htaccess in your "
+            "website folder:\n"
+            "    RewriteEngine On\n"
+            f"    RewriteCond %{{HTTP_HOST}} ^www\\.{re.escape(bare)}$ [NC]\n"
+            f"    RewriteRule ^(.*)$ https://{bare}/$1 [R=301,L]",
+            "To keep the address WITH www instead:\n"
+            "    RewriteEngine On\n"
+            f"    RewriteCond %{{HTTP_HOST}} ^{re.escape(bare)}$ [NC]\n"
+            f"    RewriteRule ^(.*)$ https://www.{bare}/$1 [R=301,L]\n"
+            "  and then the canonicals must be changed to www to match.",
+            "Keep a copy of .htaccess before editing; one wrong line takes the whole "
+            "site down, and putting the copy back undoes it.",
+        ]
+        needs = ("you — .htaccess is deliberately out of the agency's reach, and "
+                 "which address to keep is your decision")
+    elif code in ("image_dimensions_review", "image_loading_conflict",
+                  "jsonld_duplicate_block", "multiple_titles",
+                  "multiple_meta_descriptions", "multiple_canonicals",
+                  "redirect_chain", "broken_internal_link"):
+        needs = "somebody editing the page's HTML — no wording to decide"
+
+    if done_when:
+        steps.append(f"It counts as fixed when: {done_when} The next SEO audit "
+                     "checks this itself and closes the ticket, or reopens it if "
+                     "the change did not take.")
+    return _advice(why or "The SEO audit found this on your site.", steps, needs=needs)
+
+
 RECIPES = (
+    # Before everything: an audit ticket must never reach a recipe that only
+    # matches on its wording. See fix_seo_finding.
+    fix_seo_finding,
     fix_unreachable,
     # Before fix_canonical: a wrong domain in a canonical tag is a wrong domain
     # EVERYWHERE, and rewriting only the canonical leaves it in every link and

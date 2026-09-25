@@ -163,6 +163,11 @@ STEPS = [
     ("Leads writes to the cleared ones", "pipelines.leads_outreach", "Leads",
      "outreach"),
 
+    # FIRST in the SEO lane: it reads fifteen pages in well under a minute and
+    # claims nothing off the board, so it costs the lane almost nothing and
+    # never takes the sector's one job for the run. What it files goes to IT's
+    # queue, and it closes or reopens yesterday's tickets by re-reading them.
+    ("SEO audits the site (technical)", "pipelines.seo_audit", "SEO", "seo"),
     ("SEO builds the keyword picture (free sources)", "pipelines.seo_intel", "SEO", "seo"),
     ("SEO finds the gaps", "pipelines.seo_gap", "SEO", "seo"),
     ("SEO watches the rivals", "pipelines.competitors", "SEO", "seo"),

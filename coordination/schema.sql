@@ -577,6 +577,18 @@ CREATE TABLE IF NOT EXISTS aeo_findings (
   UNIQUE(url, check_id)
 );
 
+-- The SEO technical audit's findings, each with its full evidence contract:
+-- what was seen and when, fact/inference/hypothesis, why it matters, the
+-- action, and the acceptance check the next audit verifies against. The ticket
+-- IT works lives in site_issues; this is the evidence behind it. Method taken
+-- from BeyondSEO — see pipelines/seo_audit.py.
+CREATE TABLE IF NOT EXISTS seo_findings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_at INTEGER, url TEXT, code TEXT, severity TEXT, claim_type TEXT,
+  issue_id INTEGER,                    -- site_issues.id, NULL if already on file
+  payload TEXT                         -- the whole finding, as JSON
+);
+
 -- KEYWORD INTELLIGENCE, BUILT FROM FREE SOURCES.
 -- Search Console impressions (the owner's own real data), autocomplete breadth
 -- from Google and Bing, the wording his own customers used when they wrote in,

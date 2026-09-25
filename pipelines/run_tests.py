@@ -648,8 +648,14 @@ def _lane_tests(day_run):
     check("the whole IT lane got through while SEO's slow step ran",
           mods("it") <= during, True)
     check("so did the whole Leads lane", mods("leads") <= during, True)
-    check("and nothing in SEO's own lane overtook it — a lane is still a queue",
-          mods("seo") & during, set())
+    # BEHIND it, not merely in the same lane. The technical audit now runs
+    # ahead of the keyword picture, so it finishing first is the queue working,
+    # not overtaking. What must never happen is a step queued AFTER the slow
+    # one finishing before it.
+    behind = {day_run.STEPS[i][1] for i in plan["seo"]
+              if plan["seo"].index(i) > [day_run.STEPS[j][1] for j in plan["seo"]].index(slow)}
+    check("and nothing queued behind it in SEO's lane overtook it — a lane is still a queue",
+          behind & during, set())
 
     print("\n...but a step never starts before what it depends on has finished:")
     at = {m: i for i, m in enumerate(started)}

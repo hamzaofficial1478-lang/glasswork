@@ -215,8 +215,13 @@ def test_an_unanswered_request_says_which_command_answers_it():
           "pipelines.content_write" in F.how_to_run("Content"), True)
     check("Security", F.how_to_run("Security"),
           "python -m pipelines.security_screen")
+    # The technical audit runs first in SEO's lane now, then the keyword
+    # picture — the order of the day run, which is the property here.
     check("a sector with several steps names them in order",
-          F.how_to_run("SEO").startswith("python -m pipelines.seo_intel"), True)
+          F.how_to_run("SEO").startswith("python -m pipelines.seo_audit"), True)
+    check("  ...the keyword picture following it",
+          F.how_to_run("SEO").index("pipelines.seo_audit")
+          < F.how_to_run("SEO").index("pipelines.seo_intel"), True)
     check("case does not matter", F.how_to_run("content"),
           F.how_to_run("Content"))
     print("  ...and a sector nobody runs says nothing rather than guessing:")
