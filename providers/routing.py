@@ -237,6 +237,20 @@ def deliberate(task: str, messages, max_tokens: int = 512, verdict_of=None) -> d
     Put one question to two different models. Returns both answers and whether
     they agree.
 
+    Every call made in here is marked DEMANDING (providers/effort.py). These
+    are, by this module's own definition, the judgements where being wrong
+    costs real money — so a model that picks its strength by the task, the
+    local Claude model among them, gives these its strongest permitted model.
+    """
+    from . import effort
+    with effort.demanding(f"a judgement where being wrong costs money ({task})"):
+        return _deliberate(task, messages, max_tokens, verdict_of)
+
+
+def _deliberate(task, messages, max_tokens=512, verdict_of=None) -> dict:
+    """
+    The body of deliberate(). Put one question to two different models.
+
     `verdict_of` reduces an answer to the thing worth comparing — for a
     clear/refuse decision that is the word, not the prose around it. Without it
     the whole trimmed output is compared, which is only meaningful for short

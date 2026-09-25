@@ -69,6 +69,7 @@ THE HONEST LIMITS, BECAUSE HE SHOULD KNOW THEM BEFORE RELYING ON IT
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -483,17 +484,103 @@ def split_messages(messages) -> tuple:
     return "\n\n".join(system), prompt
 
 
+# ---------------------------------------------------------------------------
+# WHICH CLAUDE, CALL BY CALL
+# ---------------------------------------------------------------------------
+#
+# "for claude we can use sonnet ... if the tasks are simple program can use
+#  sonnet and if tasks are complex the program can use opus 4.8 — not the
+#  higher model than opus 4.8"
+#
+# THE ALIAS WAS THE WRONG MODEL. Checked against the CLI on this machine, by
+# what the reply said actually ran, not by what the name suggests:
+#
+#     --model opus             ran claude-opus-5-5     (higher than he allows)
+#     --model claude-opus-4-8  ran claude-opus-4-8
+#     --model sonnet           ran claude-sonnet-5
+#
+# 'opus' follows the newest Opus. The installer had given MD and IT exactly
+# that, so both were on a model above his ceiling. The ceiling is now a full,
+# pinned name, and anything above it is brought down to it wherever it comes
+# from — a shelf entry typed by hand, an old install, a new alias next year.
+
+SIMPLE_MODEL = "sonnet"
+COMPLEX_MODEL = "claude-opus-4-8"
+CEILING = COMPLEX_MODEL
+CEILING_VERSION = (4, 8)
+
+# The shelf entry that means "decide per call".
+AUTO = "auto"
+
+# Size signals, used alongside the explicit one (effort.demanding). About 3,000
+# tokens of prompt, or an answer asked to run past ~2,000 tokens, is a task a
+# person would call heavy whatever it is about. Words are deliberately NOT
+# used: guessing difficulty from vocabulary is the trap this codebase has hit
+# three times — a rule that fires on ordinary wording is a rule that is wrong.
+LONG_PROMPT_CHARS = 12000
+LONG_ANSWER_TOKENS = 2000
+
+# Aliases that always mean "the newest of a line above the ceiling".
+_ABOVE_CEILING_ALIASES = {"opus", "fable", "best", "opusplan"}
+
+
+def clamp(model: str) -> str:
+    """
+    The model as asked for, or the ceiling if it is above it.
+
+    Sonnet and Haiku are below it and pass. Opus 4.x at or under 4.8 passes.
+    Any later Opus, any Fable, and the floating aliases for them come down to
+    Opus 4.8.
+    """
+    m = (model or SIMPLE_MODEL).strip()
+    low = m.lower()
+    if low in _ABOVE_CEILING_ALIASES or low.startswith(("claude-fable", "fable")):
+        return CEILING
+    hit = re.match(r"claude-opus-(\d+)(?:-(\d+))?", low)
+    if hit:
+        version = (int(hit.group(1)), int(hit.group(2) or 0))
+        if version > CEILING_VERSION:
+            return CEILING
+    return m
+
+
+def choose(api_model_id, messages=None, max_tokens=0) -> tuple:
+    """
+    (model to run, why) for one call.
+
+    A shelf entry of AUTO decides here: Opus 4.8 when the caller marked the
+    task demanding (routing.deliberate does, for the MD's allocation and
+    Security's clearances) or when the task is simply big; Sonnet otherwise.
+    Anything else is the owner's explicit choice, honoured up to the ceiling.
+    """
+    asked = (api_model_id or "").strip()
+    if asked.lower() != AUTO:
+        final = clamp(asked or SIMPLE_MODEL)
+        why = ("as set on the shelf" if final == (asked or SIMPLE_MODEL)
+               else f"{asked} is above the Opus 4.8 ceiling, so {final}")
+        return final, why
+    from . import effort
+    because = effort.why_demanding()
+    if because:
+        return COMPLEX_MODEL, f"demanding: {because}"
+    size = sum(len(str(m.get("content") or "")) for m in (messages or [])
+               if isinstance(m, dict))
+    if size > LONG_PROMPT_CHARS:
+        return COMPLEX_MODEL, f"a long task ({size:,} characters of prompt)"
+    if int(max_tokens or 0) >= LONG_ANSWER_TOKENS:
+        return COMPLEX_MODEL, f"a long answer asked for ({max_tokens} tokens)"
+    return SIMPLE_MODEL, "an ordinary task"
+
+
 def _model_flag(api_model_id: str) -> str:
     """
-    What to pass to --model.
+    What to pass to --model, never above the ceiling.
 
-    The CLI takes an alias ('opus', 'sonnet', 'haiku') or a full model name. A
-    shelf entry written the API way — 'claude-sonnet-5' — is already a full
-    name and goes straight through. Anything else is passed verbatim too: if
-    the owner typed something the CLI does not know, its own error message
-    naming the models it does know is far more use than a guess from here.
+    The CLI takes an alias or a full model name, and anything it does not know
+    is passed through so its own error — which names the models it does know —
+    reaches him. The one thing never passed through is a model above Opus 4.8.
     """
-    return (api_model_id or "sonnet").strip()
+    return clamp((api_model_id or SIMPLE_MODEL).strip())
 
 
 def _answer(ok, cmd, *, status=0, text="", error="", cause="", waited=None,
@@ -522,9 +609,33 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
     One call, shaped exactly like client._execute's return so the cascade,
     the load ladder and the failover trail need no special case.
 
-    max_tokens is accepted and not passed on: the CLI has no equivalent flag.
-    Silently ignoring a caller's ceiling would be worse than saying so, so it
-    is named in the note on the way back.
+    Which Claude runs is decided per call — see choose(). And if Opus 4.8 has
+    used up the plan's allowance, the same call is put to Sonnet once rather
+    than failing: "the program can shift according to the usage". A slightly
+    lesser answer beats the MD having none, and the step down is written on the
+    result so it is never silent.
+    """
+    name, why = choose((model or {}).get("api_model_id"), messages, max_tokens)
+    res = _chat_as(cred, name, messages, max_tokens, timeout)
+    stepped = ""
+    if (not res["ok"] and name != SIMPLE_MODEL
+            and "allowance" in (res.get("cause") or "")):
+        stepped = (f"{name} has used up the plan's allowance, so this was put "
+                   f"to {SIMPLE_MODEL} instead")
+        res = _chat_as(cred, SIMPLE_MODEL, messages, max_tokens, timeout)
+        name = SIMPLE_MODEL
+    local = dict(res.get("local") or {})
+    local.update({"model": name, "why": why})
+    if stepped:
+        local["stepped_down"] = stepped
+    res["local"] = local
+    return res
+
+
+def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
+    """
+    One call to one named model. max_tokens is accepted and not passed on: the
+    CLI has no equivalent flag, and that is named in the note on the way back.
     """
     started = time.perf_counter()
     ready, why = available()
@@ -538,7 +649,7 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
 
     cmd = _launcher(cli_path()) + [
         "-p", "--output-format", "json",
-        "--model", _model_flag(model.get("api_model_id"))] + LEAN
+        "--model", _model_flag(model_name)] + LEAN
     if system:
         cmd += ["--system-prompt", system]
 
@@ -607,6 +718,12 @@ def chat(cred, model, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT):
                    extra={"local": {
                        "seconds": took,
                        "session": data.get("session_id", ""),
+                       # What the CLI says actually ran — the check that caught
+                       # 'opus' running Opus 5.5. Claude Code also uses a small
+                       # model for its own housekeeping; that is not the answer.
+                       "ran": [m for m in (data.get("modelUsage") or {})
+                               if "haiku" not in m.lower()]
+                              or list(data.get("modelUsage") or {}),
                        "note": ("max_tokens is not enforced on a local call — "
                                 "the CLI has no such flag")}})
 
@@ -664,11 +781,19 @@ def probe(cred, model, timeout=120) -> dict:
 NAME = "Claude Code (this machine)"
 
 # Which CLI model a sector gets when it falls this far.
+# MD, IT and Security decide per call (AUTO): Sonnet for ordinary work, Opus
+# 4.8 for the judgements that cost money and for big tasks. The rest are on
+# Sonnet. This used to say "opus" for the first three, which on this machine
+# ran Opus 5.5 — above the owner's ceiling.
 SECTOR_MODEL = {
-    "md": "opus", "it": "opus",
+    "md": AUTO, "it": AUTO,
     "content": "sonnet", "seo": "sonnet", "leads": "sonnet",
-    "report": "sonnet", "security": "opus",
+    "report": "sonnet", "security": AUTO,
 }
+
+# Shelf entries an earlier install left that must not stay: a floating alias
+# that can land above the ceiling. Their routes move to AUTO and they go.
+RETIRED = ("opus",)
 
 # WHERE IT GOES BY DEFAULT: the two he asked for, and only those.
 #
@@ -764,6 +889,38 @@ def install(store, tasks=None, as_last_resort=True, prune=True) -> dict:
         })
         by_name[alias] = m["id"]
 
+    # MOVE OFF THE RETIRED ENTRIES FIRST. His shelf has an "opus" entry from
+    # the earlier install, routed to MD and IT, and that alias runs Opus 5.5.
+    # Any route pointing at it is pointed at AUTO instead — the same place in
+    # the chain, so his own keys still go first — and the entry is removed.
+    migrated = []
+    full = store.get_credential(cid) or {}
+    retired = {m["id"]: m["api_model_id"] for m in full.get("models", [])
+               if (m.get("api_model_id") or "").lower() in RETIRED}
+    if retired:
+        auto_id = by_name.get(AUTO)
+        if not auto_id:
+            auto_id = store.upsert_model(cid, {"api_model_id": AUTO, "category": "LLM",
+                                               "enabled": True,
+                                               "cost_tier": "included"})["id"]
+            by_name[AUTO] = auto_id
+        for task, route in list(store.get_routing().items()):
+            r = dict(route)
+            touched = False
+            if r.get("primary") in retired:
+                r["primary"], touched = auto_id, True
+            if r.get("secondary") in retired:
+                r["secondary"], touched = auto_id, True
+            chain = [auto_id if x in retired else x for x in (r.get("fallback") or [])]
+            chain = list(dict.fromkeys(chain))          # no double entry
+            if chain != list(r.get("fallback") or []):
+                r["fallback"], touched = chain, True
+            if touched:
+                store.set_route(task, r)
+                migrated.append(task)
+        for mid in retired:
+            store.delete_model(cid, mid)
+
     mine = our_model_ids(store, cid)
     added, already_on, removed, stranded = [], [], [], []
 
@@ -819,6 +976,7 @@ def install(store, tasks=None, as_last_resort=True, prune=True) -> dict:
                 removed.append(task)
 
     return {"ok": True, "credential": cid, "models": by_name,
+            "migrated_off_opus": sorted(set(migrated)),
             "routed": sorted(added + already_on), "added": sorted(added),
             "already": sorted(already_on), "removed": sorted(removed),
             "stranded": sorted(stranded)}
@@ -894,6 +1052,13 @@ def main(argv=None):
         print(f"  ok  '{NAME}' is on the shelf")
         for alias in sorted(r["models"]):
             print(f"        {alias}")
+        if r.get("migrated_off_opus"):
+            print("      moved off 'opus' (it runs Opus 5.5, above your ceiling): "
+                  + ", ".join(r["migrated_off_opus"]))
+        if AUTO in r["models"]:
+            print(f"      'auto' = {SIMPLE_MODEL} for ordinary work, {COMPLEX_MODEL} for "
+                  "the MD's day plan, Security's\n"
+                  "               clearances and big tasks. Never above Opus 4.8.")
         if r["added"]:
             print("      newly on: " + ", ".join(
                 f"{t} ({SECTOR_MODEL[t]})" for t in r["added"]))

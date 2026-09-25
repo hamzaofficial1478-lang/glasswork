@@ -212,13 +212,13 @@ def test_his_own_keys_are_still_tried_first():
               all(routes[t]["fallback"] and routes[t]["fallback"][-1] != paid_m
                   for t in local_cli.SECTOR_MODEL), True)
 
-        print("\n  ...and the two he named get the strongest model:")
+        print("\n  ...and the two he named decide per call, never above Opus 4.8:")
         cid = [c for c in _store.redacted_view()["credentials"]
                if c["base_url"] == local_cli.MARKER][0]["id"]
         names = {m["id"]: m["api_model_id"]
                  for m in _store.get_credential(cid)["models"]}
-        check("MD", names[routes["md"]["fallback"][-1]], "opus")
-        check("IT", names[routes["it"]["fallback"][-1]], "opus")
+        check("MD", names[routes["md"]["fallback"][-1]], local_cli.AUTO)
+        check("IT", names[routes["it"]["fallback"][-1]], local_cli.AUTO)
 
         print("\nRunning it twice changes nothing:")
         before = _store.get_routing()["md"]["fallback"]
@@ -250,7 +250,7 @@ def test_by_default_it_goes_to_md_and_it_and_nowhere_else():
               [s for s in others if routes.get(s)], [])
 
         print("  ...and only the model those two need is put on the shelf:")
-        check("no sonnet entry nobody asked for", sorted(r["models"]), ["opus"])
+        check("only the per-call entry those two use", sorted(r["models"]), [local_cli.AUTO])
 
     print("\nHe can widen it if he wants to:")
     with _store.isolated():
@@ -578,6 +578,108 @@ def test_the_floor_is_given_time_to_finish():
         local_cli.cli_path = real_path
 
 
+def test_sonnet_for_ordinary_opus_4_8_for_demanding_never_higher():
+    """
+    "if the tasks are simple program can use sonnet and if tasks are complex
+     the program can use opus 4.8 — not the higher model than opus 4.8"
+
+    Checked against the CLI by what actually ran: 'opus' ran claude-opus-5-5,
+    above his ceiling, and that alias was what MD and IT had been given.
+    """
+    from . import effort, routing
+    print("\nNothing above Opus 4.8 is ever passed to the CLI:")
+    for asked, want in (("opus", "claude-opus-4-8"), ("claude-opus-5-5", "claude-opus-4-8"),
+                        ("claude-opus-5", "claude-opus-4-8"), ("fable", "claude-opus-4-8"),
+                        ("claude-fable-5-1", "claude-opus-4-8"),
+                        ("claude-opus-4-8", "claude-opus-4-8"),
+                        ("claude-opus-4-6", "claude-opus-4-6"),
+                        ("sonnet", "sonnet"), ("haiku", "haiku")):
+        check(f"{asked} -> {want}", local_cli.clamp(asked), want)
+    check("and no sector is set to the floating 'opus' alias",
+          "opus" in local_cli.SECTOR_MODEL.values(), False)
+
+    print("\n'auto' is Sonnet for ordinary work:")
+    m, why = local_cli.choose("auto", [{"role": "user", "content": "word this note"}], 300)
+    check("sonnet", m, local_cli.SIMPLE_MODEL)
+    print("\n...and Opus 4.8 when it matters, or when it is big:")
+    with effort.demanding("the MD's day plan"):
+        m, why = local_cli.choose("auto", [{"role": "user", "content": "x"}], 300)
+    check("a demanding call", m, "claude-opus-4-8")
+    check("and it says why", "day plan" in why, True)
+    check("a long prompt",
+          local_cli.choose("auto", [{"role": "user", "content": "x" * 13000}], 300)[0],
+          "claude-opus-4-8")
+    check("a long answer asked for",
+          local_cli.choose("auto", [{"role": "user", "content": "x"}], 2500)[0],
+          "claude-opus-4-8")
+    check("the mark does not leak out of its block",
+          local_cli.choose("auto", [{"role": "user", "content": "x"}], 300)[0], "sonnet")
+
+    print("\nrouting.deliberate() — the MD's allocation, Security's clearance — is demanding:")
+    seen = []
+    real = client.chat
+    client.chat = lambda *a, **k: (seen.append(effort.why_demanding()) or
+                                  {"ok": True, "status": 200, "text": "CLEAR",
+                                   "output": "CLEAR", "raw": {}, "attempts": 1,
+                                   "waited": []})
+    try:
+        with _store.isolated():
+            local_cli.install(_store, tasks=["md"])
+            routing.deliberate("md", [{"role": "user", "content": "allocate"}])
+    finally:
+        client.chat = real
+    check("the model was asked with the demanding mark set",
+          bool(seen) and all("costs money" in w for w in seen), True)
+
+    print("\nIf Opus 4.8 has used up the allowance, the same call goes to Sonnet:")
+    asked = []
+    real_as = local_cli._chat_as
+
+    def fake_as(cred, name, messages, max_tokens=512, timeout=0):
+        asked.append(name)
+        if name == "claude-opus-4-8":
+            return {"ok": False, "status": 0, "text": "", "output": "",
+                    "cause": "the Claude plan's usage allowance is used up",
+                    "attempts": 1, "waited": [], "raw": {}}
+        return {"ok": True, "status": 200, "text": "ok", "output": "ok",
+                "attempts": 1, "waited": [], "raw": {}}
+    local_cli._chat_as = fake_as
+    try:
+        with effort.demanding("test"):
+            r = local_cli.chat(CRED, {"api_model_id": "auto"}, [{"role": "user", "content": "x"}])
+    finally:
+        local_cli._chat_as = real_as
+    check("opus first, then sonnet", asked, ["claude-opus-4-8", "sonnet"])
+    check("the call still answered", r["ok"], True)
+    check("and the step down is written on the result, not silent",
+          "allowance" in r["local"].get("stepped_down", ""), True)
+
+
+def test_the_old_opus_entry_is_moved_to_auto():
+    """His shelf carries an 'opus' entry from the earlier install, on MD and IT."""
+    print("\nRe-installing over the old shelf moves MD and IT off 'opus':")
+    with _store.isolated():
+        c = _store.upsert_credential({"name": local_cli.NAME, "base_url": local_cli.MARKER,
+                                      "api_key": ""})
+        old = _store.upsert_model(c["id"], {"api_model_id": "opus", "category": "LLM",
+                                            "enabled": True})
+        k = _store.upsert_credential({"name": "His key", "api_key": "sk",
+                                      "base_url": "https://api.example.com/v1"})
+        kk = _store.upsert_model(k["id"], {"api_model_id": "his-model", "category": "LLM",
+                                           "enabled": True})
+        for t in ("md", "it"):
+            _store.set_route(t, {"primary": kk["id"], "fallback": [old["id"]], "enabled": True})
+        r = local_cli.install(_store)
+        check("both moved", r["migrated_off_opus"], ["it", "md"])
+        names = {m["id"]: m["api_model_id"]
+                 for m in (_store.get_credential(c["id"]) or {}).get("models", [])}
+        check("the opus entry is gone", "opus" in names.values(), False)
+        route = _store.get_routing()["md"]
+        check("his key is still first", route["primary"], kk["id"])
+        check("and auto sits where opus was", [names.get(x) for x in route["fallback"]],
+              [local_cli.AUTO])
+
+
 def test_a_windows_cmd_shim_is_run_through_cmd_exe():
     """
     npm on Windows installs a .cmd shim. CreateProcess — which is what
@@ -691,6 +793,8 @@ def main():
     test_npm_is_asked_where_it_puts_things()
     test_a_half_finished_npm_install_is_named_and_the_fix_given()
     test_the_floor_is_given_time_to_finish()
+    test_sonnet_for_ordinary_opus_4_8_for_demanding_never_higher()
+    test_the_old_opus_entry_is_moved_to_auto()
     test_a_windows_cmd_shim_is_run_through_cmd_exe()
     test_every_tool_is_off_not_just_the_dangerous_ones()
     test_a_sector_with_nothing_gets_it_as_its_only_model()
