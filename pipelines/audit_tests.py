@@ -284,6 +284,59 @@ def test_filed_once_verified_later():
         board.DB = real
 
 
+def test_a_dropped_connection_is_not_a_failed_page():
+    """
+    The first full day run with this step: "Could not read any page" about a
+    site IT had read fine a minute earlier, because a connection dropped for a
+    few seconds. BeyondSEO's crawler retries; the first version of this did
+    not. Two retries on a dropped connection or a 429/5xx, 1s then 2s.
+    """
+    print("\nA connection that drops, then answers, is a page read:")
+
+    class _Resp:
+        def __init__(self, code):
+            self.status_code, self.text, self.url, self.history = code, doc(), SITE + "/", []
+            self.headers = {"Content-Type": "text/html"}
+
+    class _Session:
+        def __init__(self, script):
+            self.script, self.calls = list(script), 0
+
+        def get(self, url, **kw):
+            self.calls += 1
+            step = self.script.pop(0)
+            if isinstance(step, Exception):
+                raise step
+            return _Resp(step)
+
+    slept = []
+    s = _Session([ConnectionError("tunnel closed"), 200])
+    p = A.capture(SITE + "/", session=s, sleep=slept.append)
+    check("read on the second attempt", p.get("status"), 200)
+    check("and not recorded as an error", p.get("error"), None)
+    check("the attempts are on the evidence", p.get("attempts"), 2)
+    check("with a short wait between", slept, [1])
+
+    print("\n...a busy server gets the same patience:")
+    s = _Session([503, 503, 200])
+    slept = []
+    check("503, 503, then 200 is a page read",
+          A.capture(SITE + "/", session=s, sleep=slept.append).get("status"), 200)
+    check("waiting 1s then 2s", slept, [1, 2])
+
+    print("\n...but a page that is really gone is not retried into the ground:")
+    s = _Session([404])
+    p = A.capture(SITE + "/gone", session=s, sleep=lambda n: None)
+    check("one attempt for a 404", s.calls, 1)
+    check("and it is reported as the 404 it is", p.get("status"), 404)
+
+    print("\n...and a connection that never comes back is, after three tries, an error:")
+    s = _Session([ConnectionError("x")] * 3)
+    p = A.capture(SITE + "/", session=s, sleep=lambda n: None)
+    check("three attempts", s.calls, 3)
+    check("then the error is recorded", "ConnectionError" in (p.get("error") or ""), True)
+
+
 def test_it_reaches_the_right_recipe():
     """
     fix_canonical matches on the word "canonical" and never looks at the
@@ -332,6 +385,7 @@ def main():
               test_one_fact_is_one_ticket,
               test_every_finding_carries_the_contract,
               test_filed_once_verified_later,
+              test_a_dropped_connection_is_not_a_failed_page,
               test_it_reaches_the_right_recipe,
               test_it_is_in_the_day_and_takes_no_ones_job):
         t()

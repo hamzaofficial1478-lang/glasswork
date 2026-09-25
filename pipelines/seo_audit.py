@@ -353,18 +353,54 @@ def _other_www(host):
     return host[4:] if host.startswith("www.") else "www." + host
 
 
-def capture(url, timeout=FETCH_TIMEOUT, session=None) -> dict:
+# BeyondSEO's retry policy, taken as it is in network.py: two retries on a
+# dropped connection or a 429/5xx, waiting 1s then 2s, honouring the server's
+# Retry-After, and never waiting more than 30s. The first version here had no
+# retry at all, and a full day run lost every page to a connection that dropped
+# for a few seconds — "could not read any page" about a site that IT had read
+# fine a minute earlier. A dropped connection is not a page that failed.
+RETRIES = 2
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+LONGEST_WAIT = 30
+
+
+def _get(s, url, timeout, sleep=time.sleep):
+    """GET with BeyondSEO's retries. Returns (response or None, error, attempts)."""
+    err, r = "", None
+    for attempt in range(RETRIES + 1):
+        try:
+            r = s.get(url, timeout=timeout, allow_redirects=True,
+                      headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.8"})
+            err = ""
+        except Exception as exc:
+            r, err = None, f"{type(exc).__name__}: {str(exc)[:200]}"
+        if r is not None and r.status_code not in RETRY_STATUSES:
+            return r, "", attempt + 1
+        if attempt == RETRIES:
+            break
+        wait = 2 ** attempt
+        asked = (r.headers.get("Retry-After", "") if r is not None else "") or ""
+        try:
+            wait = max(wait, float(asked)) if asked else wait
+        except ValueError:
+            pass
+        if wait > LONGEST_WAIT:
+            break               # the server asked for longer than a run can wait
+        sleep(wait)
+    return r, err, attempt + 1
+
+
+def capture(url, timeout=FETCH_TIMEOUT, session=None, sleep=time.sleep) -> dict:
     """
     One page, exactly as the server sends it: status, the redirect hops, the
     headers and the body. The evidence every finding points back to.
     """
     s = session or requests
     page = {"url": url, "fetched_at": int(time.time())}
-    try:
-        r = s.get(url, timeout=timeout, allow_redirects=True,
-                  headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.8"})
-    except Exception as exc:
-        page["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+    r, err, attempts = _get(s, url, timeout, sleep)
+    page["attempts"] = attempts
+    if r is None:
+        page["error"] = err
         return page
     body = r.text or ""
     page.update({
