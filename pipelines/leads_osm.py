@@ -1108,7 +1108,10 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
                 use_spares()
                 if n["stored"] >= target:
                     why = "target"
-    planned = len(core) + (len(wider) if widened_to or why == "clock" else 0)
+    # The wider emirates only count once the pass actually went there — a real
+    # run cut off in its second search said "206 still untried", which was
+    # true of every search it might conceivably make and useless to him.
+    planned = len(core) + (len(wider) if widened_to else 0)
     stop_line = why_it_stopped(why, n["stored"], target, area=area,
                                rounds_run=n["rounds"],
                                untried=max(0, planned - n["rounds"]),
