@@ -838,7 +838,38 @@ def main():
         _main()
 
 
+def test_the_address_that_reaches_a_buyer_comes_first():
+    """
+    The leads repo measured it: 288 emails, 82 opens, 3 clicks, and 350 of 511
+    addresses were info@. It moved to named people; the PDPL rule here keeps
+    roles ahead of people, so the fix is WHICH role — someone who buys first.
+    """
+    print("\nRole inboxes are ranked by who they reach:")
+    for addr, tier in (("projects@x.ae", 0), ("procurement@x.ae", 0),
+                       ("owner@x.ae", 0), ("estimation.dxb@x.ae", 0),
+                       ("info@x.ae", 1), ("info.dxb@x.ae", 1), ("infouae@x.ae", 1),
+                       ("contact@x.ae", 1), ("sales@x.ae", 2), ("sales2@x.ae", 2),
+                       ("careers@x.ae", 2), ("reservations@x.ae", 2),
+                       ("ahmed.khan@x.ae", 3), ("mdahmed@x.ae", 3),
+                       ("information@x.ae", 3)):
+        check(f"{addr} is tier {tier}", ls.address_tier(addr), tier)
+
+    order = lh.rank_emails(["ahmed.khan@x.ae", "sales@x.ae", "x@gmail.com",
+                            "info@x.ae", "projects@x.ae"], "x.ae")
+    check("buyer, switchboard, not-a-buyer, a person, then a free mailbox",
+          order, ["projects@x.ae", "info@x.ae", "sales@x.ae", "ahmed.khan@x.ae",
+                  "x@gmail.com"])
+    from . import harvest as H
+    rows = [{"value": a, "how": "printed on the page"} for a in order[::-1]]
+    rows[-1]["how"] = "mailto link"
+    check("harvest ranks them the same way",
+          [r["value"] for r in H.rank_emails(rows, "x.ae")], order)
+    check("a named person is still flagged as personal data",
+          ls.contact_kind({"email": "ahmed.khan@x.ae"}), "personal")
+
+
 def _main():
+    test_the_address_that_reaches_a_buyer_comes_first()
     test_the_target_list_is_the_whole_market()
     test_every_segment_knows_what_to_sell_it()
     test_service_matching()

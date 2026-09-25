@@ -145,6 +145,13 @@ class Job:
         """
         if not self.on_the_board:
             return default
+        # A counted job from the MD says where it stands: "5 done today of 20
+        # asked for, so 15 still to go". The first number there is what is
+        # already DONE, and reading it as the ask sent the collector after five
+        # more instead of fifteen. What is left is the job.
+        left = re.search(r"(?<![\w.])(\d{1,3}) still to go", self.text)
+        if left and 1 <= int(left.group(1)) <= 500:
+            return int(left.group(1))
         for m in re.finditer(r"(?<![\w.%$-])(\d{1,3})(?![\w.%])", self.text):
             n = int(m.group(1))
             if not 1 <= n <= 500:

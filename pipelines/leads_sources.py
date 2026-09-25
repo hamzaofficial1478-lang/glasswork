@@ -449,7 +449,70 @@ RELEVANT = (
 # detail. It is also simply better outreach: info@ survives the person leaving.
 ROLE_INBOXES = ("info", "sales", "enquiry", "enquiries", "contact", "admin",
                 "office", "projects", "procurement", "purchasing", "tenders",
-                "hello", "team", "support", "estimation", "estimating")
+                "hello", "team", "support", "estimation", "estimating",
+                # decision-maker roles: still company addresses, not people
+                "owner", "manager", "director", "md", "gm", "ceo", "founder",
+                "partner", "principal", "operations", "facilities", "fm",
+                "maintenance", "purchase", "tender", "estimates")
+
+# WHICH ROLE INBOX, NOT WHETHER A ROLE INBOX.
+#
+# The leads repo the owner pointed at (kashif-developer9053/our-company)
+# measured it: 288 emails, 82 opens, 3 clicks — and 350 of its 511 addresses
+# were info@. "A role inbox gets opened and then nobody feels responsible for
+# replying." It fixed that by preferring named people.
+#
+# That half does not come across: the paragraph above is a UAE PDPL decision,
+# and preferring a named employee's address would undo it. The other half
+# does, because it was never really about people — it was about who DECIDES.
+# owner@, manager@ and, for a glazier's customers above all, projects@,
+# procurement@ and estimation@ are company addresses that reach someone who
+# buys. info@ reaches a switchboard. sales@ reaches the people selling their
+# own services, and careers@ reaches applicants. So role inboxes are ranked,
+# and a named individual still comes after every role, flagged as before.
+BUYER_ROLES = ("projects", "procurement", "purchasing", "purchase", "tenders",
+               "tender", "estimation", "estimating", "estimates", "owner",
+               "manager", "director", "md", "gm", "ceo", "founder", "partner",
+               "principal", "operations", "facilities", "fm", "maintenance")
+SWITCHBOARD = ("info", "contact", "enquiry", "enquiries", "hello", "office",
+               "admin", "team", "support", "mail", "reception", "general")
+NOT_A_BUYER = ("sales", "marketing", "careers", "jobs", "hr", "recruitment",
+               "reservations", "reservation", "bookings", "booking",
+               "accounts", "billing", "finance", "invoices",
+               "noreply", "no-reply", "donotreply", "newsletter")
+
+
+# What UAE firms tack onto a role word: info.dxb@, sales2@, infouae@. Anything
+# else glued on is treated as a different word — "mdahmed" is a person called
+# Ahmed, not the managing director's inbox.
+_ROLE_TAILS = ("uae", "dxb", "dubai", "auh", "abudhabi", "shj", "sharjah", "ae")
+
+
+def _starts(local, words):
+    for w in words:
+        if local == w:
+            return True
+        if not local.startswith(w):
+            continue
+        rest = local[len(w):]
+        if rest[0] in ".-_" or rest.isdigit() or rest in _ROLE_TAILS:
+            return True
+    return False
+
+
+def address_tier(email: str) -> int:
+    """
+    0 a buying or deciding role, 1 a switchboard, 2 a role that does not buy,
+    3 a named individual or anything unrecognised — last, per the PDPL rule.
+    """
+    local = (email or "").split("@")[0].strip().lower()
+    if _starts(local, BUYER_ROLES):
+        return 0
+    if _starts(local, SWITCHBOARD):
+        return 1
+    if _starts(local, NOT_A_BUYER):
+        return 2
+    return 3
 
 
 def contact_kind(lead: dict) -> str:
@@ -503,7 +566,10 @@ def screen_lead(c: dict) -> tuple:
     # source name into this check would wave it straight through.
     geo = (str(c.get("area") or "").strip()
            or f'{c.get("company") or ""} {c.get("name") or ""}').lower()
-    if not any(h in geo for h in UAE_HINTS):
+    # uae.is_uae as well: UAE_HINTS has no Al Ain, Mussafah or Khor Fakkan, and
+    # the OSM hunt now widens into Al Ain — every lead from there was being
+    # refused as "outside the UAE".
+    if not any(h in geo for h in UAE_HINTS) and not uae.is_uae(geo):
         return (False, "outside the UAE — not a market this business serves")
     if not any(r in blob.lower() for r in RELEVANT):
         return (False, "no connection to glass, aluminium or the trades that buy it")

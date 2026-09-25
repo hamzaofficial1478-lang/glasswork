@@ -179,9 +179,10 @@ FREE_MAILBOXES = ("gmail.", "hotmail.", "yahoo.", "outlook.", "live.", "icloud."
 
 def rank_emails(found, site_host=""):
     """
-    Best address first. A role inbox on the company's own domain beats a named
-    person on the same domain, which beats a free mailbox — and info@ still
-    works after the person who owns the named address leaves.
+    Best address first. Their own domain before a free mailbox; then by who the
+    address reaches — ls.address_tier: projects@ and owner@ (someone who buys)
+    before info@ (a switchboard), before sales@ and careers@ (nobody who buys
+    from us), and a named person after every role, per the PDPL rule.
 
     It also DROPS addresses belonging to someone else. Half the small-business
     sites in the UAE carry a "built by <web agency>" line in the footer with the
@@ -199,17 +200,11 @@ def rank_emails(found, site_host=""):
 
     def score(a):
         a = a.lower()
-        local, _, dom = a.partition("@")
-        s = 0
-        if host and host in dom:
-            s -= 4                       # their own domain
-        if any(local == r or local.startswith(r) for r in ls.ROLE_INBOXES):
-            s -= 3                       # a role inbox
-        if any(g in dom for g in FREE_MAILBOXES):
-            s += 2                       # free mailbox: works, but weaker
-        if "." in local or "_" in local:
-            s += 1                       # firstname.lastname: a person
-        return (s, len(a))
+        dom = a.partition("@")[2]
+        return (0 if host and host in dom else 1,          # their own domain
+                ls.address_tier(a),                         # who it reaches
+                1 if any(g in dom for g in FREE_MAILBOXES) else 0,
+                len(a))
 
     keep = set(a.lower() for a in found if usable_email(a))
     return sorted((a for a in keep if theirs(a)), key=score)

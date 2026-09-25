@@ -154,6 +154,16 @@ def test_the_desk_reads_what_was_actually_asked_for():
               ["leads", "quoz", "contractors", "shower", "glass"])
         job.did("read it")
 
+    print("\n...and a counted job is read for what is LEFT, not what is done:")
+    _fresh_db()
+    _post("Leads", "Collect today's leads across the mapped segments",
+          "Work the source map.\n\nWhere this stands: 5 done today of 20 asked "
+          "for, so 15 still to go. Yesterday: 3. On file altogether: 40.")
+    with deskwork.at_the_desk("Leads", "leads-hunter") as job:
+        check("fifteen still to go, not the five already done",
+              job.how_many(default=6), 15)
+        job.did("read it")
+
 
 def test_a_clean_pass_that_found_nothing_closes_honestly():
     """

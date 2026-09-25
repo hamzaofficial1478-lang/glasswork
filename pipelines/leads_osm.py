@@ -385,7 +385,11 @@ def _post(url, query, timeout=TIMEOUT):
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
-def ask(query, timeout=TIMEOUT) -> dict:
+# Not worth starting a mirror with less than this left on the pass's clock.
+LEAST_WAIT = 10
+
+
+def ask(query, timeout=TIMEOUT, deadline=None) -> dict:
     """
     Run one query against the first mirror that answers.
 
@@ -393,12 +397,24 @@ def ask(query, timeout=TIMEOUT) -> dict:
     because "OSM did not answer" and "OSM has nothing there" are completely
     different facts and the difference decides whether the owner needs to do
     anything about it.
+
+    `deadline` bounds the whole thing, not each mirror. Four mirrors at sixty
+    seconds is four minutes for one search: a real hunt on a bad day spent 328
+    seconds on two searches, and a third would have run past the day's kill.
     """
     tried = []
     for url in MIRRORS:
         host = urllib.parse.urlparse(url).netloc
+        wait = timeout
+        if deadline:
+            wait = min(timeout, deadline - time.time())
+            if wait < LEAST_WAIT:
+                return {"ok": False, "elements": [], "mirror": "", "tried": tried,
+                        "out_of_time": True,
+                        "error": "the pass's clock ran out before a mirror answered"
+                                 + (" — " + "; ".join(tried) if tried else "")}
         try:
-            d = _post(url, query, timeout)
+            d = _post(url, query, wait)
             return {"ok": True, "elements": d.get("elements") or [],
                     "mirror": host, "tried": tried}
         except urllib.error.HTTPError as e:
@@ -574,7 +590,7 @@ def to_candidate(el, segment, area="") -> dict:
 
 
 def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False,
-         contactable_only=False) -> dict:
+         contactable_only=False, deadline=None) -> dict:
     """
     Every named LOCAL business of one segment in one emirate. Reads only.
 
@@ -604,9 +620,11 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False,
     if not bbox:
         return {"ok": False, "error": f"no box for '{area}'. "
                                       f"Known: {', '.join(BBOX)}"}
-    r = ask(build_query(tags, bbox, limit, contactable_only=contactable_only))
+    q = build_query(tags, bbox, limit, contactable_only=contactable_only)
+    r = ask(q, deadline=deadline) if deadline else ask(q)
     if not r["ok"]:
-        return {"ok": False, "error": r["error"], "tried": r["tried"]}
+        return {"ok": False, "error": r["error"], "tried": r["tried"],
+                "out_of_time": bool(r.get("out_of_time"))}
     # Exactly `limit` back means Overpass stopped counting, not that Dubai has
     # exactly that many. Both his searches returned exactly 60 and neither said
     # so, which reads as "that is all there is" when it is "that is all we
@@ -794,21 +812,155 @@ def enrich(cands, limit=ENRICH_MAX, timeout=20, allow_paid=True,
 
 
 # ---------------------------------------------------------------------------
+#
+# THE HUNT — ROUNDS UNTIL THE NUMBER HE ASKED FOR
+#
+# The lead-generation repo the owner pointed at (kashif-developer9053/
+# our-company) is, underneath the dashboard, one idea done properly:
+# backend/agent1/lead_harvester.py searches in ROUNDS until a target number of
+# qualified leads is in hand, and when it falls short it knows why. This pass
+# used to do one sweep — a fixed list of segments times three emirates — and
+# stop wherever that left it, whether that was four leads or sixty.
+#
+# What comes across, in its terms and ours:
+#
+#   Work to the number     it stops the moment the target is met. So does this:
+#                          the job's count, or 20 when the job gives none.
+#   A new search a round   there, a new phrasing of the same query. OSM answers
+#                          the same question with the same sixty, so here a
+#                          round is the next (segment, emirate) — most valuable
+#                          segment first, across the emirates, then the next.
+#   Skip what we hold      it drops keys already seen before enriching. Here the
+#                          cabinet is asked before a website is looked up or
+#                          read, so a business already on file costs nothing.
+#   Barren rounds end it   N searches in a row with nothing new means the
+#                          ground is worked out — "and be far more stubborn
+#                          while the haul is still thin".
+#   Short? Widen           it re-searches the surrounding area. Here, the other
+#                          emirates — but only when the job did not name a
+#                          place. If he said Dubai, it stays in Dubai and says
+#                          which neighbours to name to go further.
+#   Say what ran out       the clock, the map, the free service, or the list of
+#                          searches — so he knows what to change.
+#
+# Two things are ours. Every round is STORED when it finishes: the repo gathers
+# everything and returns it at the end, and a pass here that did that was
+# killed at the step's ceiling with nothing stored. And a round may only fill
+# a share of the target when the pass chose the segments itself, so twenty
+# leads are not twenty of one kind — what a round had over its share is kept
+# and used before the pass gives up or goes further afield.
+#
+# NOT TAKEN: its social search (scraping search engines for Instagram and
+# Facebook pages — platform terms, and a poor fit for businesses that buy
+# glass), and its site-audit gate, which qualifies prospects for a WEB agency.
+# Ours is qualified by having a way in; ls.intake already refuses the rest.
+# ---------------------------------------------------------------------------
+
+TARGET_DEFAULT = 20       # a job with no number: the repo's "not really answered" floor
+PER_ROUND_SHARE = 3       # a round may fill a third of the target...
+PER_ROUND_FLOOR = 5       # ...and never fewer than five
+BARREN_LIMIT = 4          # searches in a row with nothing new, once the haul is decent
+BARREN_LIMIT_THIN = 8     # and while it is under half the target
+REFUSALS_LIMIT = 2        # rounds in a row where every mirror refused: stop, never hammer
+WIDEN_BEFORE = 0.75       # only go further afield with a quarter of the clock left
+
+# The other emirates, nearest first, for a pass that was not told where.
+WIDER_AREAS = ("Ajman", "Umm Al Quwain", "Al Ain", "Ras Al Khaimah", "Fujairah")
+
+# Who to name when a named emirate runs out. Said, not done: he picked the place.
+NEIGHBOURS = {
+    "Dubai": ("Sharjah", "Ajman"),
+    "Sharjah": ("Dubai", "Ajman", "Umm Al Quwain"),
+    "Abu Dhabi": ("Al Ain", "Dubai"),
+    "Ajman": ("Sharjah", "Umm Al Quwain"),
+    "Umm Al Quwain": ("Ajman", "Ras Al Khaimah"),
+    "Ras Al Khaimah": ("Umm Al Quwain", "Fujairah"),
+    "Al Ain": ("Abu Dhabi",),
+    "Fujairah": ("Ras Al Khaimah", "Sharjah"),
+}
+
+
+def per_round_cap(target) -> int:
+    return max(PER_ROUND_FLOOR, -(-int(target) // PER_ROUND_SHARE))
+
+
+def _pool_key(c) -> str:
+    """One business, however many segments found it: the OSM element id."""
+    return c.get("source") or "|".join(str(c.get(k) or "").lower()
+                                       for k in ("company", "phone", "website"))
+
+
+def _reach_rank(c) -> int:
+    """The easiest to reach first, when a round has more than its share."""
+    for i, k in enumerate(("email", "website", "phone")):
+        if (c.get(k) or "").strip():
+            return i
+    return 3
+
+
+def _tally(total: dict, part: dict) -> dict:
+    """Add one round's counts from fill_in / enrich into the pass's totals."""
+    for k, v in (part or {}).items():
+        if k == "head" or isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            total[k] = round(total.get(k, 0) + v, 4)
+        elif isinstance(v, list):
+            total.setdefault(k, []).extend(v)
+    return total
+
+
+def why_it_stopped(why, stored, target, *, area=None, rounds_run=0,
+                   untried=0, examined=0, already=0, budget=0,
+                   dry_run=False) -> str:
+    """One plain sentence on how far the pass got and which constraint ran out."""
+    got = (f"Found {stored} new of the {target} asked for (dry run, nothing stored)."
+           if dry_run else f"Stored {stored} of the {target} asked for.")
+    if why == "target":
+        return got
+    further = (f" {area} looks worked out on the map — name "
+               + " or ".join(NEIGHBOURS.get(area, ())) + " in the order to go further."
+               if area and NEIGHBOURS.get(area) else
+               " OpenStreetMap is thinner than Google in the UAE; a Places key is "
+               "what finds more.")
+    if why == "barren":
+        return (got + f" I ran out of new businesses: search after search turned up "
+                f"only ones we already hold ({already} already on file this pass)."
+                + further)
+    if why == "clock":
+        return (got + f" The pass used its {max(1, budget // 60)} minutes of the "
+                f"day's step with {untried} search(es) still untried. What it found "
+                f"is stored, and the next pass carries on.")
+    if why == "refused":
+        return (got + f" OpenStreetMap refused {REFUSALS_LIMIT} searches in a row, "
+                "so I stopped rather than hammer a free service. "
+                "`python -m pipelines.leads_osm --probe` says whether it is this "
+                "machine or them.")
+    return (got + f" I tried every search I have for this ({rounds_run}) and the map "
+            f"holds only {examined} reachable business(es) there we did not already "
+            f"have." + further)
+
+
+# ---------------------------------------------------------------------------
 # THE PASS
 # ---------------------------------------------------------------------------
 
 def run(agent=AGENT, segment=None, area=None, per_segment=1, dry_run=False,
         chains=False, read_sites=True, contactable_only=True,
-        guess_sites=True):
+        guess_sites=True, target=None):
     with board.agent_run(agent) as row:
         out = _run(agent, segment, area, per_segment, dry_run, chains,
-                   read_sites, contactable_only, guess_sites)
+                   read_sites, contactable_only, guess_sites, target)
         row.note(out.get("head") or out.get("error") or "nothing collected")
         return out
 
 
 def _run(agent, segment, area, per_segment, dry_run, chains=False,
-         read_sites=True, contactable_only=False, guess_sites=True):
+         read_sites=True, contactable_only=False, guess_sites=True, target=None):
+    """
+    `per_segment` is kept for the command line's sake and no longer limits
+    anything: the target decides how far the pass goes, not a segment count.
+    """
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off."}
     task = board.next_open_task(SECTOR, agent)
@@ -835,90 +987,199 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
         named = asked.first_mention(list(segments_covered()), None)
         if named:
             segment = named
-    wanted = asked.how_many(None)
+    target = max(1, int(target or asked.how_many(None) or TARGET_DEFAULT))
 
-    segs = [segment] if segment else segments_covered()[:max(1, int(per_segment))]
-    areas = [area] if area else list(DEFAULT_AREAS)
-    if wanted and not segment:
-        # More asked for than one segment will give: widen the search rather
-        # than returning fifteen banks and calling it twenty leads.
-        segs = segments_covered()[:max(1, min(6, -(-int(wanted) // 15)))]
+    # The rounds. Most valuable segment first, across the emirates, then the
+    # next — the agency's order, never the alphabet's (see segments_covered).
+    segs = [segment] if segment else segments_covered()
+    if area:
+        core, wider = [(s, area) for s in segs], []      # he named the place
+    else:
+        core = [(s, a) for s in segs for a in DEFAULT_AREAS]
+        wider = [(s, a) for s in segs for a in WIDER_AREAS]
+    # A share per round only when the pass chose the segments. "Twenty signage
+    # firms in Dubai" is exactly one search and must not be rationed.
+    cap = per_round_cap(target) if not (segment and area) else 0
+
+    budget = pass_budget()
     started = time.time()
-    stop_looking = started + pass_budget() - WRITE_RESERVE
-    collected, errors, cut_short = [], [], False
-    for s in segs:
-        for a in areas:
-            if time.time() >= stop_looking:
-                cut_short = True
-                break
-            r = find(s, a, chains=chains, contactable_only=contactable_only)
-            if not r.get("ok"):
-                errors.append(f"{s}/{a}: {r.get('error')}")
-                continue
-            collected += r["candidates"]
-            time.sleep(PAUSE)
+    stop_looking = started + budget - WRITE_RESERVE
+    widen_by = started + (budget - WRITE_RESERVE) * WIDEN_BEFORE
 
-    if not collected:
-        board.finish_task(task["id"], agent, {"found": 0}, status="done")
+    seen, collected, spare, errors, widened_to = set(), [], [], [], []
+    got = {"stored": [], "duplicates": [], "refused": [], "personal_data_held": []}
+    guessed = {"looked_for": 0, "sites_found": 0, "too_generic_to_guess": [],
+               "no_site_found": [], "not_reached_this_pass": 0}
+    enriched = {"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
+                "not_reached_this_pass": 0, "spend": 0.0}
+    n = {"rounds": 0, "examined": 0, "already": 0, "stored": 0}
+
+    def search(seg, a):
+        """One round's new businesses — or "refused" / "clock" if none came back."""
+        r = find(seg, a, chains=chains, contactable_only=contactable_only,
+                 deadline=stop_looking)
+        if not r.get("ok"):
+            errors.append(f"{seg}/{a}: {r.get('error')}")
+            return "clock" if r.get("out_of_time") else "refused"
+        time.sleep(PAUSE)
+        fresh = []
+        for c in r["candidates"]:
+            k = _pool_key(c)
+            if k in seen:
+                continue                     # met this pass already
+            seen.add(k)
+            # Asked BEFORE a website is looked up or read: a business already
+            # in the cabinet should cost nothing at all, not a site read that
+            # intake then throws away as a duplicate.
+            if board.lead_seen(c.get("email"), c.get("phone"), c.get("company"),
+                               c.get("website")):
+                n["already"] += 1
+                continue
+            fresh.append(c)
+        n["examined"] += len(fresh)
+        return fresh
+
+    def file(batch):
+        """Look up missing sites, read them, and STORE — this round, not at the end."""
+        if not batch:
+            return
+        collected.extend(batch)
+        if dry_run:
+            n["stored"] += len(batch)
+            return
+        if guess_sites:
+            _tally(guessed, find_site.fill_in(batch, deadline=stop_looking))
+        if read_sites:
+            _tally(enriched, enrich(batch, deadline=stop_looking))
+        res = ls.intake(batch, agent=agent, sector=SECTOR)
+        for k in got:
+            got[k].extend(res.get(k) or [])
+        n["stored"] = len(got["stored"])
+
+    def use_spares():
+        """What earlier rounds had over their share, before giving up or going on."""
+        room = target - n["stored"]
+        if room > 0 and spare and time.time() < stop_looking:
+            batch = spare[:room]
+            del spare[:room]
+            file(batch)
+
+    def hunt(rounds, widening=False):
+        barren = refusals = 0
+        for seg, a in rounds:
+            if n["stored"] >= target:
+                return "target"
+            if time.time() >= stop_looking:
+                return "clock"
+            n["rounds"] += 1
+            fresh = search(seg, a)
+            if fresh == "clock":
+                return "clock"
+            if fresh == "refused":
+                refusals += 1
+                if refusals >= REFUSALS_LIMIT:
+                    return "refused"
+                continue
+            refusals = 0
+            if not fresh:
+                barren += 1
+                thin = n["stored"] < target / 2
+                if barren >= (BARREN_LIMIT_THIN if thin else BARREN_LIMIT):
+                    return "barren"
+                continue
+            barren = 0
+            if widening and a not in widened_to:
+                widened_to.append(a)
+            fresh.sort(key=_reach_rank)
+            room = target - n["stored"]
+            take = fresh[:min(cap, room)] if cap else fresh[:room]
+            spare.extend(fresh[len(take):])
+            file(take)
+        return "target" if n["stored"] >= target else "rounds"
+
+    why = hunt(core)
+    if why in ("barren", "rounds"):
+        use_spares()
+        if n["stored"] >= target:
+            why = "target"
+        elif wider and time.time() < widen_by:
+            why = hunt(wider, widening=True)
+            if why in ("barren", "rounds"):
+                use_spares()
+                if n["stored"] >= target:
+                    why = "target"
+    planned = len(core) + (len(wider) if widened_to or why == "clock" else 0)
+    stop_line = why_it_stopped(why, n["stored"], target, area=area,
+                               rounds_run=n["rounds"],
+                               untried=max(0, planned - n["rounds"]),
+                               examined=n["examined"], already=n["already"],
+                               budget=budget, dry_run=dry_run)
+    if widened_to:
+        stop_line += (f" {', '.join(DEFAULT_AREAS[:-1])} and {DEFAULT_AREAS[-1]} "
+                      f"ran short, so it widened to {', '.join(widened_to)}.")
+
+    if not collected and not n["already"]:
+        board.finish_task(task["id"], agent, {"found": 0, "stopped_because": why},
+                          status="done")
         return {"ok": False, "agent": agent, "task": task["id"], "errors": errors,
-                "error": ("OpenStreetMap returned nothing for "
-                          + ", ".join(segs) + " in " + ", ".join(areas)
+                "target": target, "rounds": n["rounds"], "stopped_because": why,
+                "error": (f"OpenStreetMap returned nothing new in {n['rounds']} "
+                          f"search(es), starting with {core[0][0]} in {core[0][1]}"
                           + (". " + errors[0] if errors else
                              ". That is the data, not a fault — OSM is thinner "
                              "than Google in the UAE."))}
 
+    reach = reach_of(collected)
     if dry_run:
         board.finish_task(task["id"], agent, {"found": len(collected),
                                               "dry_run": True}, status="done")
         return {"ok": True, "agent": agent, "task": task["id"], "dry_run": True,
-                "candidates": collected[:40], "errors": errors,
-                "reach": reach_of(collected),
-                "head": f"{len(collected)} found, nothing stored (dry run)"}
+                "candidates": collected[:40], "errors": errors, "reach": reach,
+                "target": target, "rounds": n["rounds"], "stopped_because": why,
+                "message": stop_line,
+                "head": f"{len(collected)} found, nothing stored (dry run). {stop_line}"}
 
-    # Two steps, in this order, and the order matters. A signage run in Dubai
-    # came back 49 worth having and 7 with any way in — the other 42 had a
-    # name and an address and nothing else. Most of those businesses DO have a
-    # website; what is missing is the volunteer who would have typed it into
-    # the map. So: find the missing sites first, then read every site we have.
-    guessed = ({"looked_for": 0, "sites_found": 0, "too_generic_to_guess": [],
-                "no_site_found": [], "not_reached_this_pass": 0,
-                "head": "missing sites not looked for this pass"}
-               if not guess_sites else find_site.fill_in(collected,
-                                                          deadline=stop_looking))
-
-    # THE STEP THAT WAS MISSING. Without it every OSM lead was filed with an
-    # empty email column and the mail runner had nobody to write to.
-    enriched = ({"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
-                 "not_reached_this_pass": 0, "spend": 0.0,
-                 "head": "sites not read this pass"}
-                if not read_sites else enrich(collected, deadline=stop_looking))
-
-    # Same gate as every other collector: screened, deduped, never contacted.
-    res = ls.intake(collected, agent=agent, sector=SECTOR)
-    reach = reach_of(collected)
-    head = (f"{len(res['stored'])} new lead(s) from OpenStreetMap, "
-            f"{len(res['duplicates'])} already on file, "
-            f"{len(res['refused'])} refused — " + reach_line(reach))
-    board.finish_task(task["id"], agent, {"stored": len(res["stored"]),
+    guessed["head"] = (f"looked for {guessed['looked_for']} missing site(s), found "
+                       f"{guessed['sites_found']}" if guess_sites else
+                       "missing sites not looked for this pass")
+    enriched["head"] = (f"read {enriched['sites_read']} site(s), got "
+                        f"{enriched['emails_found']} email address(es)"
+                        + (f", {enriched['not_reached_this_pass']} left for the "
+                           f"next pass" if enriched["not_reached_this_pass"] else "")
+                        if read_sites else "sites not read this pass")
+    on_file = n["already"] + len(got["duplicates"])
+    head = (f"{len(got['stored'])} new lead(s) from OpenStreetMap, "
+            f"{on_file} already on file, {len(got['refused'])} refused — "
+            + reach_line(reach) + ". " + stop_line)
+    board.finish_task(task["id"], agent, {"stored": len(got["stored"]),
                                           "mailable": reach["mailable"],
+                                          "target": target,
+                                          "stopped_because": why,
                                           "head": head}, status="done")
     board.log_decision(
         "leads-osm",
-        reasoning=(f"Collected {len(collected)} POI(s) from OpenStreetMap across "
-                   + ", ".join(segs) + " in " + ", ".join(areas)
-                   + f" — no Places key needed. Found {guessed['sites_found']} "
-                   f"website(s) the map did not have, and read "
-                   f"{enriched['sites_read']} of them for a published email."),
+        reasoning=(f"Hunted in {n['rounds']} round(s) for {target} lead(s), most "
+                   f"valuable segment first"
+                   + (f", widening to {', '.join(widened_to)}" if widened_to else "")
+                   + f". {n['already']} business(es) were already on file and cost "
+                   f"nothing. Found {guessed['sites_found']} website(s) the map did "
+                   f"not have, and read {enriched['sites_read']} for a published "
+                   f"email. {stop_line}"),
         expectation=(f"{reach['mailable']} can be written to by the mail runner; "
                      f"{reach['message']} are a phone only and are the owner's "
                      f"to message by hand."),
         confidence=0.6,
-        evidence={"stored": [s["id"] for s in res["stored"]],
+        evidence={"stored": [s["id"] for s in got["stored"]],
+                  "target": target, "stopped_because": why,
                   "emails_found": enriched["emails_found"],
                   "sites_guessed": guessed["sites_found"]})
     return {"ok": True, "agent": agent, "task": task["id"], "head": head,
             "errors": errors, "reach": reach, "enriched": enriched,
-            "guessed_sites": guessed, **res}
+            "guessed_sites": guessed, "target": target,
+            "complete": n["stored"] >= target, "rounds": n["rounds"],
+            "examined": n["examined"], "already_on_file": n["already"],
+            "widened_to": widened_to, "stopped_because": why,
+            "message": stop_line, **got, "contacted": 0, "sector": SECTOR}
 
 
 # ---------------------------------------------------------------------------
@@ -994,7 +1255,11 @@ def main():
                          "gave no contact for at all")
     ap.add_argument("--limit", type=int, default=MAX_RESULTS,
                     help=f"how many POIs to ask OSM for (default {MAX_RESULTS})")
-    ap.add_argument("--per-segment", type=int, default=1)
+    ap.add_argument("--per-segment", type=int, default=1,
+                    help="no longer limits anything — see --target")
+    ap.add_argument("--target", type=int, default=None,
+                    help=f"how many new leads to hunt for (default: the job's "
+                         f"number, or {TARGET_DEFAULT})")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
@@ -1057,7 +1322,7 @@ def main():
     r = run(segment=None, area=a.area if a.area != "Dubai" else None,
             per_segment=a.per_segment, dry_run=a.dry_run,
             read_sites=a.read_sites, contactable_only=a.contactable,
-            guess_sites=a.guess_sites)
+            guess_sites=a.guess_sites, target=a.target)
     print(json.dumps(r, indent=2) if a.json else
           (r.get("head") or r.get("error") or "nothing to do"))
     return deskwork.exit_code(r)

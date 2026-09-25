@@ -500,11 +500,14 @@ def rank_emails(rows, host):
     half the small-business sites in the UAE carry a "site by <agency>" line in
     the footer with the agency's address beside it. Writing to that wastes the
     slot and tells the agency we read their client's site.
+
+    The order is leads_hunt's too: their own domain first, then who the address
+    reaches (leads_sources.address_tier — projects@ before info@ before sales@,
+    a named person last), and only then how it was found.
     """
     theirname = brand(host)
     public = ("gmail.", "hotmail.", "yahoo.", "outlook.", "live.", "icloud.")
-    roles = (ls.ROLE_INBOXES if ls else
-             ("info", "sales", "contact", "admin", "office", "hello"))
+    roles = ("info", "sales", "contact", "admin", "office", "hello")
 
     def theirs(a):
         dom = a.partition("@")[2]
@@ -512,19 +515,20 @@ def rank_emails(rows, host):
             return True
         return brand(dom) == theirname or any(p in dom for p in public)
 
+    def tier(a):
+        if ls:
+            return ls.address_tier(a)
+        local = a.partition("@")[0]      # the old two-way split, if ls is gone
+        return 1 if any(local == x or local.startswith(x) for x in roles) else 3
+
     def score(r):
         a = r["value"]
-        local, _, dom = a.partition("@")
-        s = HOW_RANK.get(r["how"], 9) * 2
-        if theirname and brand(dom) == theirname:
-            s -= 5                       # their own domain, whatever the TLD
-        if any(local == x or local.startswith(x) for x in roles):
-            s -= 3                       # a role inbox outlives the person
-        if any(p in dom for p in public):
-            s += 2                       # works, but weaker
-        if "." in local or "_" in local:
-            s += 1                       # looks like a named individual
-        return (s, len(a))
+        dom = a.partition("@")[2]
+        return (0 if theirname and brand(dom) == theirname else 1,
+                tier(a),
+                1 if any(p in dom for p in public) else 0,
+                HOW_RANK.get(r["how"], 9),
+                len(a))
     return sorted((r for r in rows if theirs(r["value"])), key=score)
 
 

@@ -176,7 +176,7 @@ def test_the_collector_feeds_the_same_gate_as_every_other():
         board.post_task("Leads", "Collect today's leads across the mapped segments",
                         "work the source map")
         real = O.find
-        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False: {
+        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False, deadline=None: {
             "ok": True, "segment": seg, "area": area, "mirror": "test",
             "found": 1, "unnamed_skipped": 0, "with_phone": 1, "with_website": 1,
             "candidates": [O.to_candidate(CAFE, seg, area)]}
@@ -692,7 +692,7 @@ def test_the_run_says_how_each_lead_can_be_reached():
                         "work the source map")
         real_find, real_pause = O.find, O.PAUSE
         O.PAUSE = 0
-        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False: {
+        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False, deadline=None: {
             "ok": True, "segment": seg, "area": area, "mirror": "test",
             "found": 1, "unnamed_skipped": 0, "with_phone": 0, "with_website": 1,
             "candidates": [{"company": "Femiclinic", "email": "",
@@ -864,7 +864,7 @@ def test_a_name_and_nothing_else_still_gets_a_website():
                         "work the source map")
         real_find, real_pause = O.find, O.PAUSE
         O.PAUSE = 0
-        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False: {
+        O.find = lambda seg, area, limit=0, chains=False, contactable_only=False, deadline=None: {
             "ok": True, "segment": seg, "area": area, "mirror": "test",
             "found": 1, "unnamed_skipped": 0, "with_phone": 0, "with_website": 0,
             "candidates": [{"company": "Daffodils Advertising LLC", "email": "",
@@ -967,8 +967,248 @@ def test_the_pass_stops_in_time_to_store_what_it_found():
           O.pass_budget() - O.WRITE_RESERVE > 0, True)
 
 
+# ---------------------------------------------------------------------------
+# THE HUNT — rounds until the number, from the leads repo he pointed at
+# ---------------------------------------------------------------------------
+
+def _fake_map(calls, per_round=10, only_areas=None, same_every_time=0,
+              refuse=False, explode_on=None):
+    """A stand-in for find(): distinct reachable businesses per round, unless
+    told to keep returning the same few, return nothing, or refuse."""
+    counter = {"k": 0}
+
+    def firm(k, seg, area):
+        return {"company": f"Firm {k} Trading", "email": "", "website": "",
+                "phone": f"+97150{k:07d}", "address": f"Shop {k}, {area}",
+                "area": area, "segment": seg, "source": f"openstreetmap:node/{k}"}
+
+    def f(seg, area, limit=0, chains=False, contactable_only=False, deadline=None):
+        calls.append((seg, area))
+        if explode_on and len(calls) == explode_on:
+            raise RuntimeError("the step was killed here")
+        if refuse:
+            return {"ok": False, "error": "every mirror refused", "tried": []}
+        if only_areas is not None and area not in only_areas:
+            cands = []
+        elif same_every_time:
+            cands = [firm(k, seg, area) for k in range(1, same_every_time + 1)]
+        else:
+            cands = []
+            for _ in range(per_round):
+                counter["k"] += 1
+                cands.append(firm(counter["k"], seg, area))
+        return {"ok": True, "segment": seg, "area": area, "mirror": "test",
+                "found": len(cands), "candidates": cands}
+    return f
+
+
+def _hunt(fake, segment=None, area=None, **kw):
+    real_find, real_pause = O.find, O.PAUSE
+    O.find, O.PAUSE = fake, 0
+    try:
+        return O._run(O.AGENT, segment, area, 1, dry_run=False,
+                      read_sites=kw.pop("read_sites", False),
+                      guess_sites=False, **kw)
+    finally:
+        O.find, O.PAUSE = real_find, real_pause
+
+
+def test_it_hunts_until_the_number_he_asked_for():
+    """
+    The leads repo's whole idea: search in rounds until the target is met, then
+    stop. This pass used to do one sweep and stop wherever that left it.
+    """
+    print("\nThe hunt works to the job's number, and stops there:")
+    with _Cabinet() as cab:
+        board.post_task("Leads", "Collect 12 leads across the mapped segments",
+                        "work the source map")
+        calls = []
+        r = _hunt(_fake_map(calls))
+        check("twelve stored", len(r["stored"]), 12)
+        check("because twelve were asked for", r["target"], 12)
+        check("it says the target was the reason it stopped",
+              r["stopped_because"], "target")
+        check("and did not keep searching after", len(calls), 3)
+        check("the headline says so", "Stored 12 of the 12 asked for." in r["head"],
+              True)
+        per_area = cab.sql("SELECT area, count(*) n FROM leads GROUP BY area")
+        check("no single search filled more than its share",
+              max(row["n"] for row in per_area) <= O.per_round_cap(12), True)
+        check("so the twelve came from more than one search", len(per_area) > 1,
+              True)
+
+    print("\n...a job with no number still has one:")
+    with _Cabinet():
+        board.post_task("Leads", "Collect today's leads across the mapped segments",
+                        "work the source map")
+        r = _hunt(_fake_map([]))
+        check(f"the default is {O.TARGET_DEFAULT}", r["target"], O.TARGET_DEFAULT)
+        check("and it reaches it", len(r["stored"]), O.TARGET_DEFAULT)
+
+    print("\n...and a job that pins both segment and place is not rationed:")
+    with _Cabinet():
+        board.post_task("Leads", "Collect 20 signage leads in Dubai", "")
+        calls = []
+        r = _hunt(_fake_map(calls, per_round=30))
+        check("one search, all twenty from it", (len(calls), len(r["stored"])),
+              (1, 20))
+
+
+def test_each_round_is_stored_as_it_finishes():
+    """
+    The repo gathers everything and returns it at the end. Here that got a pass
+    killed at the step's ceiling with nothing stored, so every round is filed
+    the moment it is done.
+    """
+    print("\nA pass killed mid-hunt keeps what the finished rounds found:")
+    with _Cabinet() as cab:
+        board.post_task("Leads", "Collect 12 leads across the mapped segments",
+                        "work the source map")
+        try:
+            _hunt(_fake_map([], explode_on=3))
+            died = False
+        except RuntimeError:
+            died = True
+        check("the third search died", died, True)
+        check("and the first two rounds are already in the cabinet",
+              cab.sql("SELECT count(*) n FROM leads")[0]["n"], 10)
+
+
+def test_a_business_already_on_file_costs_nothing():
+    """
+    It used to look up and read the website of every business on the map, and
+    only find out at the very end that half were already in the cabinet.
+    """
+    print("\nThe cabinet is asked before any site is read:")
+    with _Cabinet():
+        board.add_lead_if_new({"company": "Firm 1 Trading", "phone": "+971500000001",
+                               "area": "Dubai", "segment": "signage",
+                               "source": "earlier run"})
+        board.post_task("Leads", "Collect 5 signage leads in Dubai", "")
+        read = []
+        real_enrich = O.enrich
+
+        def fake_enrich(batch, limit=12, timeout=20, allow_paid=True, deadline=None):
+            read.extend(c["company"] for c in batch)
+            return {"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
+                    "not_reached_this_pass": 0, "spend": 0.0}
+        O.enrich = fake_enrich
+        try:
+            r = _hunt(_fake_map([]), read_sites=True)
+        finally:
+            O.enrich = real_enrich
+        check("the known one was counted", r["already_on_file"], 1)
+        check("and never sent to be read", "Firm 1 Trading" in read, False)
+        check("five new ones stored all the same", len(r["stored"]), 5)
+        check("and the headline counts it as on file",
+              "1 already on file" in r["head"], True)
+
+
+def test_barren_rounds_end_the_hunt_and_say_so():
+    """
+    "If several rounds in a row surface nothing new, this niche/area is
+    genuinely exhausted; stop rather than burning the whole budget" — and be
+    more stubborn while the haul is thin.
+    """
+    print("\nSearch after search returning the same three stops the hunt:")
+    with _Cabinet():
+        board.post_task("Leads", "Collect 20 leads across the mapped segments",
+                        "work the source map")
+        calls = []
+        r = _hunt(_fake_map(calls, same_every_time=3))
+        check("three stored", len(r["stored"]), 3)
+        check("it knows why it stopped", r["stopped_because"], "barren")
+        check("it pushed through the thin-haul limit, then the wider one, no more",
+              len(calls), 1 + 2 * O.BARREN_LIMIT_THIN)
+        check("which is far short of every search it has",
+              len(calls) < len(O.segments_covered()) * len(O.DEFAULT_AREAS), True)
+        check("and it says what ran out",
+              "ran out of new businesses" in r["message"], True)
+        check("the task is not left pretending",
+              r["complete"], False)
+
+
+def test_short_on_the_main_emirates_it_widens_but_not_past_a_named_place():
+    print("\nNothing left in Dubai, Sharjah or Abu Dhabi: it goes further afield:")
+    with _Cabinet() as cab:
+        board.post_task("Leads", "Collect 5 leads across the mapped segments",
+                        "work the source map")
+        calls = []
+        r = _hunt(_fake_map(calls, only_areas={"Ajman"}))
+        check("five stored", len(r["stored"]), 5)
+        check("from Ajman", r["widened_to"], ["Ajman"])
+        check("and the headline says it widened", "widened to Ajman" in r["head"],
+              True)
+        check("they passed the screen with Ajman as their area",
+              cab.sql("SELECT DISTINCT area FROM leads")[0]["area"], "Ajman")
+
+    print("\n...but when he named the place, it stays there and says who to name:")
+    with _Cabinet():
+        board.post_task("Leads", "Collect 20 leads in Dubai", "")
+        calls = []
+        r = _hunt(_fake_map(calls, same_every_time=3))
+        check("every search was in Dubai", {a for _, a in calls}, {"Dubai"})
+        check("nothing widened", r["widened_to"], [])
+        check("and it names the neighbours for him to choose",
+              "name Sharjah or Ajman" in r["message"], True)
+
+    print("\n...and a lead in Al Ain is a UAE lead:")
+    ok, why = ls.screen_lead({"company": "Oasis Trading", "phone": "+97137001122",
+                              "area": "Al Ain", "segment": "builder"})
+    check("not refused as outside the UAE", (ok, why if not ok else ""), (True, ""))
+
+
+def test_a_free_service_refusing_twice_stops_the_hunt():
+    """Every mirror refusing is reported, and never retried in a tight loop."""
+    print("\nTwo searches refused in a row, and it stops:")
+    with _Cabinet():
+        board.post_task("Leads", "Collect 20 leads across the mapped segments",
+                        "work the source map")
+        calls = []
+        r = _hunt(_fake_map(calls, refuse=True))
+        check("two searches, not seventy-five", len(calls), O.REFUSALS_LIMIT)
+        check("not a success", r["ok"], False)
+        check("with the reason", r["stopped_because"], "refused")
+        check("and the mirror's own words", "every mirror refused" in r["error"], True)
+
+    print("\nFour slow mirrors cannot run a search past the pass's clock:")
+    waits = []
+
+    def slow(url, query, timeout=0):
+        waits.append(timeout)
+        raise TimeoutError()
+    real_post, real_pause = O._post, O.PAUSE
+    O._post, O.PAUSE = slow, 0
+    try:
+        r = O.ask("q", deadline=time.time() + 30)
+        check("each mirror waits no longer than the clock allows",
+              all(w <= 30 for w in waits) and len(waits) == len(O.MIRRORS), True)
+        waits.clear()
+        r = O.ask("q", deadline=time.time() + 3)
+        check("with seconds left, no mirror is even started", waits, [])
+        check("and it says it was the clock, not the mirrors",
+              (r["ok"], r.get("out_of_time")), (False, True))
+    finally:
+        O._post, O.PAUSE = real_post, real_pause
+
+    print("\nThe sentence for each way it can stop:")
+    line = O.why_it_stopped("clock", 7, 20, untried=30, budget=300)
+    check("the clock", ("5 minutes" in line, "30 search(es) still untried" in line),
+          (True, True))
+    line = O.why_it_stopped("refused", 0, 20)
+    check("the free service", "--probe" in line, True)
+    line = O.why_it_stopped("rounds", 4, 20, rounds_run=3, examined=4)
+    check("the list of searches", "every search I have" in line, True)
+
+
 def main():
-    for t in (test_it_works_the_valuable_segments_first_and_only_reachable_businesses,
+    for t in (test_it_hunts_until_the_number_he_asked_for,
+              test_each_round_is_stored_as_it_finishes,
+              test_a_business_already_on_file_costs_nothing,
+              test_barren_rounds_end_the_hunt_and_say_so,
+              test_short_on_the_main_emirates_it_widens_but_not_past_a_named_place,
+              test_a_free_service_refusing_twice_stops_the_hunt,
+              test_it_works_the_valuable_segments_first_and_only_reachable_businesses,
               test_the_pass_stops_in_time_to_store_what_it_found,
               test_the_query_asks_for_what_is_actually_mapped,
               test_an_osm_point_becomes_a_lead,
