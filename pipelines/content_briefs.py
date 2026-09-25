@@ -424,7 +424,18 @@ def _brief(agent, max_briefs, draft_allowance, job=None):
             why = (f"Nothing new to brief — all {len(skipped)} page candidates from this "
                    "gap list are already in the content queue. Send fresh gaps and I'll "
                    "pick them up.")
-            if job and asked_about and not narrowed:
+            # THE EMPTY TABLE FIRST, because it is the cause and the others are
+            # symptoms. A full day run reported "no tracked phrase mentions
+            # queue, briefed, real, facts" — words out of the MD's instruction,
+            # blamed for a table that had nothing in it at all. That sends him
+            # looking at the wording of a task when the fault was upstream in
+            # SEO, which is where this now points.
+            if not rows:
+                why = ("Nothing to brief: SEO's keyword table is empty, so there "
+                       "is no search demand to build a page on. That is an SEO "
+                       "problem, not a Content one — see what 'SEO finds the "
+                       "gaps' said in today's run.")
+            elif job and asked_about and not narrowed:
                 why = (f"Nothing to brief on that subject: no tracked phrase mentions "
                        + ", ".join(asked_about[:4])
                        + ". SEO has to find the phrases before Content can build a page "
