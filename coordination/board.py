@@ -1042,9 +1042,13 @@ def expire_unclaimed(older_than_days=UNCLAIMED_DAYS) -> list:
     out = []
     with _conn() as c:
         _migrate(c)
+        # Never the amber and red ones. Those are waiting on HIM, not on a
+        # desk, and withdrawing his pending decisions after three days would
+        # make them vanish from "Waiting on you" without his ever saying no.
         rows = c.execute(
             "SELECT id, sector, title, created_at FROM tasks"
-            "  WHERE status='open' AND created_at < ?", (cut,)).fetchall()
+            "  WHERE status='open' AND created_at < ?"
+            "    AND COALESCE(risk,'green') NOT IN ('amber','red')", (cut,)).fetchall()
         for r in rows:
             days = (_now() - int(r["created_at"] or _now())) // 86400
             c.execute(
@@ -2245,6 +2249,76 @@ def _answerable_grace(sector, timeout) -> int:
 # is generous enough for any real page and small enough that a runaway caller
 # cannot fill his cabinet with one row.
 MAX_CHANGE_BYTES = 200_000
+
+
+# ---- site issues: one ticket per problem, however often it is seen ----------
+#
+# The owner's IT panel listed "The email address on the site is info@... and
+# that domain has no DNS record" TWELVE times, and "Home page took 3263ms"
+# beside "took 2983ms" beside "took 2170ms". The health check files what it
+# finds on every run and nothing asked whether the same problem was already on
+# the list, so one broken address became twelve tickets, the Fixer worked each
+# one, and his panel read like twelve emergencies.
+#
+# The same problem is the same ticket while it is still live. Numbers are
+# ignored when comparing ("took 3263ms" and "took 2983ms" are one slow page),
+# and the live ticket is refreshed with the latest wording, so it always shows
+# the newest measurement rather than the first.
+LIVE_ISSUE = ("open", "fixing", "in_review")
+
+
+def _issue_shape(kind, detail) -> str:
+    return (str(kind or "").strip().lower() + "|"
+            + re.sub(r"\d+(?:[.,]\d+)?", "#", str(detail or "").strip().lower())[:400])
+
+
+def file_site_issue(kind, severity, detail, url="", found_by="", con=None) -> tuple:
+    """(id, is_new): file one site issue unless the same one is already live."""
+    now = _now()
+    own = con is None
+    c = con or sqlite3.connect(DB, timeout=30)
+    try:
+        shape = _issue_shape(kind, detail)
+        for r in c.execute("SELECT id, kind, detail FROM site_issues WHERE lower(kind)=?"
+                           " AND status IN (%s)" % ",".join("?" * len(LIVE_ISSUE)),
+                           (str(kind or "").strip().lower(), *LIVE_ISSUE)):
+            if _issue_shape(r[1], r[2]) == shape:
+                c.execute("UPDATE site_issues SET detail=?, severity=? WHERE id=?",
+                          (detail, severity, r[0]))
+                if own:
+                    c.commit()
+                return r[0], False
+        cur = c.execute(
+            "INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
+            " VALUES(?,?,?,?, 'open', ?,?)",
+            (kind, severity, detail, url, found_by, now))
+        if own:
+            c.commit()
+        return cur.lastrowid, True
+    finally:
+        if own:
+            c.close()
+
+
+def merge_duplicate_issues() -> int:
+    """
+    Fold the copies already on his list into one ticket each — the oldest,
+    which carries the history. The rest are marked 'duplicate', not 'closed':
+    a duplicate was never fixed, and counting it as fixed would flatter the
+    Report's numbers. Returns how many were folded.
+    """
+    folded = 0
+    with _conn() as c:
+        seen = {}
+        for r in c.execute("SELECT id, kind, detail FROM site_issues WHERE status IN (%s)"
+                           " ORDER BY id" % ",".join("?" * len(LIVE_ISSUE)), LIVE_ISSUE):
+            shape = _issue_shape(r["kind"], r["detail"])
+            if shape in seen:
+                c.execute("UPDATE site_issues SET status='duplicate' WHERE id=?", (r["id"],))
+                folded += 1
+            else:
+                seen[shape] = r["id"]
+    return folded
 
 
 def queue_site_change(agent, kind, detail):

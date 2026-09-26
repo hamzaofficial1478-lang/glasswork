@@ -240,6 +240,55 @@ def test_nothing_broken_is_not_an_error():
           "repairs the agency itself" in r["error"], True)
 
 
+def test_the_md_is_asked_once_not_every_pass():
+    """
+    "the main sectors like MD,Security,IT should wait for answer if they are
+     asking from othe sector they should not blindly throw the same message
+     again and again"
+    """
+    print("\nA fault IT cannot fix goes to the MD once, then IT waits:")
+    db = _fresh_db()
+    _crash(db, "content-writer", "TypeError: NoneType is not subscriptable")
+    faults.scan()
+    for minutes in (23, 43, 50):
+        # The wording drifts between passes, the way "in 23 minutes" did, so a
+        # match on the subject alone would read each one as a new question.
+        with sqlite3.connect(db) as c:
+            c.execute("UPDATE faults SET what=? WHERE kind='crash'",
+                      (f"content-writer crashed {minutes} minutes ago: TypeError",))
+        heal.run()
+    asked = _q(db, "SELECT count(*) FROM requests WHERE from_sector='IT'"
+                   " AND to_sector='Director'")[0][0]
+    check("three passes, one question", asked, 1)
+
+
+def test_being_behind_is_not_a_repair_job():
+    """
+    "IT has not answered SEO" and "work on IT's board nobody has picked up" are
+    routed to IT because IT is behind. This pass took them as repairs, found
+    none, and asked the MD "IT cannot fix this on its own" every pass with the
+    minutes ticking up in the subject — 23, 43, 50 — so each looked new.
+    """
+    print("\nIT being behind is IT's work to do, not a fault to hand upstairs:")
+    db = _fresh_db()
+    now = int(time.time())
+    with sqlite3.connect(db) as c:
+        for i, kind in enumerate(("unanswered", "unclaimed", "sector")):
+            c.execute("INSERT INTO faults(key,kind,agent,sector,routed_to,severity,"
+                      "what,first_seen,last_seen,status)"
+                      " VALUES(?,?,'','IT','IT','degraded',?,?,?,'routed')",
+                      (f"k{i}", kind, f"IT has not answered SEO in {20 + i} minutes",
+                       now - 600, now))
+    con = heal._conn()
+    try:
+        check("none of them is taken as a repair", heal.open_faults(con), [])
+    finally:
+        con.close()
+    heal.run()
+    check("and the MD is not asked about them",
+          _q(db, "SELECT count(*) FROM requests WHERE to_sector='Director'")[0][0], 0)
+
+
 def main():
     real = board.DB
     _fresh_db()
@@ -253,6 +302,8 @@ def main():
         test_nothing_broken_is_not_an_error()
         test_a_claim_can_always_be_released_eventually()
         test_a_desk_finishes_what_it_is_holding_first()
+        test_the_md_is_asked_once_not_every_pass()
+        test_being_behind_is_not_a_repair_job()
     finally:
         board.DB = real
 

@@ -296,15 +296,19 @@ def file_issues(findings, url, agent):
     """
     if not findings:
         return []
-    now = int(time.time())
+    # One ticket per problem. The same broken address found on every run is
+    # the SAME ticket, refreshed — see board.file_site_issue. The id comes back
+    # either way, so Report can still ask whether this check's issues cleared.
+    try:
+        board.merge_duplicate_issues()      # the copies filed before this existed
+    except Exception:
+        pass
     ids = []
     with sqlite3.connect(board.DB) as c:
         for f in findings:
-            cur = c.execute(
-                "INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
-                " VALUES(?,?,?,?, 'open', ?,?)",
-                (f["kind"], f["severity"], f["detail"], url, agent, now))
-            ids.append(cur.lastrowid)
+            iid, _new = board.file_site_issue(f["kind"], f["severity"], f["detail"],
+                                              url, agent, con=c)
+            ids.append(iid)
     return ids
 
 

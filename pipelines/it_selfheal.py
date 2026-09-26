@@ -131,13 +131,26 @@ def open_faults(con, limit=MAX_PER_PASS) -> list:
         " ORDER BY CASE severity WHEN 'blocking' THEN 0 WHEN 'degraded' THEN 1"
         "                        ELSE 2 END, last_seen DESC")]
     mine = [r for r in rows
-            if (r.get("routed_to") or "") == SECTOR
-            or faults.FIXER_OF.get(r.get("kind") or "") == SECTOR
-            # A dead claim has no named fixer, and it is the one kind IT can
-            # reliably clear. Leaving it to "the sector that should pick it
-            # back up" is how a task sat held by a dead desk for a week.
-            or (r.get("kind") == "abandoned")]
+            if (r.get("kind") or "") not in NOT_REPAIRS
+            and ((r.get("routed_to") or "") == SECTOR
+                 or faults.FIXER_OF.get(r.get("kind") or "") == SECTOR
+                 # A dead claim has no named fixer, and it is the one kind IT
+                 # can reliably clear. Leaving it to "the sector that should
+                 # pick it back up" is how a task sat held by a dead desk for
+                 # a week.
+                 or (r.get("kind") == "abandoned"))]
     return mine[:limit] if limit else mine
+
+
+# NOT REPAIRS. "IT has not answered SEO" and "tasks on IT's board nobody has
+# picked up" are routed to IT because IT is the sector that is behind — not
+# because there is anything broken to mend. This pass took them as repair jobs,
+# found no repair, and asked the Director "IT cannot fix this on its own" —
+# every pass, with the minutes in the subject ticking up, so each ask looked
+# new: 23 minutes, 43, 50. The answer to being behind is doing the work, which
+# is what IT's own desks and inbox are for; the Overseer already counts the
+# silence and escalates it once.
+NOT_REPAIRS = ("unanswered", "unclaimed", "sector")
 
 
 def _looks_transient(text) -> bool:
@@ -309,6 +322,14 @@ def carry_out(plan, fault, agent=AGENT, dry_run=False) -> dict:
                     "said": f"put to you: {plan['setting']} needs setting"}
 
         if do == "ask_md":
+            # ONCE PER FAULT. The MD has been told, and is either dealing with
+            # it or has answered; asking again each pass is the noise, not the
+            # fix. The question carries the fault's id so it can be found.
+            asked = _already_asked(fault)
+            if asked:
+                return {"done": False,
+                        "said": f"already with the MD (request {asked}) — "
+                                "waiting for that, not asking again"}
             board.post_request(
                 SECTOR, "Director",
                 f"IT cannot fix this on its own: {str(fault.get('what') or '')[:70]}",
@@ -317,11 +338,25 @@ def carry_out(plan, fault, agent=AGENT, dry_run=False) -> dict:
                  + str(fault.get("detail") or "")
                  + "\n\nIT has not changed anything. Deciding whether this is "
                    "worth fixing, working around, or living with is a call above "
-                   "this desk."))
+                   "this desk."),
+                about=f"faults:{fault.get('id')}")
             return {"done": False, "said": "handed to the MD with the error"}
     except Exception as e:
         return {"done": False, "said": f"the repair itself failed: {e}"}
     return {"done": False, "said": f"no repair for {do}"}
+
+
+def _already_asked(fault) -> str:
+    """The id of the question IT already put to the MD about this fault, or ""."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            r = c.execute("SELECT id FROM requests WHERE from_sector=? AND"
+                          " to_sector='Director' AND about=? ORDER BY created_at"
+                          " DESC LIMIT 1",
+                          (SECTOR, f"faults:{fault.get('id')}")).fetchone()
+        return (r[0] if r else "") or ""
+    except Exception:
+        return ""
 
 
 def _lock_held(resource):

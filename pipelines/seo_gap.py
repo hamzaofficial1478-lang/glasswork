@@ -40,12 +40,15 @@ from providers import store
 # owns it, and how to put it. Falls back to the fixed text — and says so in the
 # request — when no brain is routed. See ask.py for why the evidence is attached
 # by code and never written by the model.
-def _ask_send(to, situation, facts, subject, body, from_sector="SEO"):
+def _ask_send(to, situation, facts, subject, body, from_sector="SEO", about=""):
+    # `about` names what this is (handoff:<kind>), so the receiving inbox can
+    # answer it however the model words the subject. See coordination/inbox.
     try:
         from coordination import ask as _ask
     except Exception:
-        return board.post_request(from_sector, to, subject, body)
-    return _ask.send(from_sector, to, situation, facts, subject, body).get("id")
+        return board.post_request(from_sector, to, subject, body, about=about)
+    return _ask.send(from_sector, to, situation, facts, subject, body,
+                     about=about).get("id")
 
 
 # the business's real service + area taxonomy (this is the grounding evidence)
@@ -589,7 +592,7 @@ def _gap(agent, max_seeds, cost_ceiling, job=None):
             "site targets yet. Content decides what gets written, so the list is "
             "theirs to judge — some of these will not be worth a page.",
             [str(t.get("phrase", t)) for t in top][:20],
-            "Keyword-gap list ready", body)
+            "Keyword-gap list ready", body, about="handoff:keyword_gaps")
         did = board.log_decision(
             "seo-gap",
             reasoning=(f"Pulled {len(fetched)} real suggestions from {source} across "

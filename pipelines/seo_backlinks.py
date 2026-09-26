@@ -343,14 +343,22 @@ def _work(agent) -> dict:
                     + "\n\nNothing is sent from here. Draft it, and Leads sends it "
                       "after Security has cleared the recipient.")
             result["asked_content"] = board.post_request(
-                "SEO", "Content", "Guest-post pieces worth writing", body)
+                "SEO", "Content", "Guest-post pieces worth writing", body,
+                about="handoff:guest_posts")
 
         free_now = [r for r in short if r["effort"] == "free"]
         if free_now:
+            # AMBER: this is the owner's to do. Claiming a business listing
+            # means signing in as the business — an account, a phone or
+            # postcard verification — which no desk can do for him. As green
+            # work it sat on SEO's board as "nobody has picked it up" for ever.
             board.try_post_task(
                 "SEO", f"Claim {len(free_now)} free listing(s) that need no pitch",
-                "\n".join(f"{r['name']} ({r['url']}) — {r['why']}" for r in free_now),
-                risk="green", created_by="SEO")
+                "These are yours to claim — each needs you to sign in as the "
+                "business, and some verify by phone or post. Free, and a "
+                "citation Google can cross-check helps the map pack:\n\n"
+                + "\n".join(f"{r['name']} ({r['url']}) — {r['why']}" for r in free_now),
+                risk="amber", created_by="SEO")
 
         did = board.log_decision(
             "seo-backlinks",

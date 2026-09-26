@@ -299,8 +299,13 @@ def detect(now=None) -> list:
         #     reported twelve times. One board that is not being worked is one
         #     fault, and how much is on it is part of how bad it is.
         stuck = {}
+        # Not the amber and red ones: those are waiting on the OWNER, in his
+        # "Waiting on you" list, and no desk is meant to claim them. Counting
+        # them made "claim these free listings" and "set up Search Console"
+        # read as a sector ignoring its board.
         for r in _rows(c, "SELECT id, sector, title, desk, created_at FROM tasks"
                           " WHERE status='open' AND created_at < ?"
+                          "   AND COALESCE(risk,'green') NOT IN ('amber','red')"
                           " ORDER BY created_at LIMIT 200", (now - UNCLAIMED_SECS,)):
             stuck.setdefault(r["sector"] or "", []).append(r)
         for sector, rows in stuck.items():
@@ -517,6 +522,21 @@ def _still_true(c, f, now):
             q = ("SELECT count(*) FROM requests WHERE status IN ('open','claimed')"
                  " AND id IN (%s)" % ",".join("?" * len(ids)))
             return bool(c.execute(q, ids).fetchone()[0])
+        if kind == "sector":
+            # THE ALARM THAT NEVER CLOSED. "Content has 5 faults open at once"
+            # was raised once a day and nothing ever resolved it, so his Content
+            # panel listed seven of them — 5, 5, 11, 11, 9, 7, 3 — one per day,
+            # each reading like a fresh emergency. It is true only while it is
+            # TODAY's alarm and the sector still has that many open.
+            key = f["key"] or ""
+            day = time.strftime("%Y-%m-%d", time.localtime(now))
+            if not key.endswith(":" + day):
+                return False
+            sector = (f["sector"] or "").strip().lower()
+            n = c.execute("SELECT count(*) FROM faults WHERE status!='resolved'"
+                          " AND kind!='sector' AND lower(sector)=?",
+                          (sector,)).fetchone()[0]
+            return n >= SECTOR_ALARM
         if kind == "lock" and ev.startswith("locks:"):
             res = ev.split(":", 1)[1]
             r = c.execute("SELECT expires_at FROM locks WHERE resource=?", (res,)).fetchone()

@@ -217,7 +217,7 @@ def compose(from_sector, to_sector, situation, facts,
 
 
 def send(from_sector, to_sector, situation, facts,
-         fallback_subject, fallback_body, force=False) -> dict:
+         fallback_subject, fallback_body, force=False, about="") -> dict:
     """
     Decide, then post. Returns what happened, including a decision NOT to ask.
 
@@ -248,7 +248,10 @@ def send(from_sector, to_sector, situation, facts,
     else:
         body += f"\n\n[{d['note']}]"
 
-    rid = board.post_request(from_sector, d["to"], d["subject"], body)
+    # `about` travels with it whatever the model makes of the subject: it is
+    # how the receiving inbox knows WHAT this is (see inbox.handoff_kind),
+    # and a subject worded by a model is not something to match words on.
+    rid = board.post_request(from_sector, d["to"], d["subject"], body, about=about)
     return {"posted": True, "id": rid, "to": d["to"], "subject": d["subject"],
             "reasoned": d["reasoned"], "why": d.get("why", ""),
             "note": d.get("note", ""),

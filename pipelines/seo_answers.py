@@ -74,12 +74,15 @@ except ImportError:  # pragma: no cover
 # owns it, and how to put it. Falls back to the fixed text — and says so in the
 # request — when no brain is routed. See ask.py for why the evidence is attached
 # by code and never written by the model.
-def _ask_send(to, situation, facts, subject, body, from_sector="SEO"):
+def _ask_send(to, situation, facts, subject, body, from_sector="SEO", about=""):
+    # `about` names what this is (handoff:<kind>), so the receiving inbox can
+    # answer it however the model words the subject. See coordination/inbox.
     try:
         from coordination import ask as _ask
     except Exception:
-        return board.post_request(from_sector, to, subject, body)
-    return _ask.send(from_sector, to, situation, facts, subject, body).get("id")
+        return board.post_request(from_sector, to, subject, body, about=about)
+    return _ask.send(from_sector, to, situation, facts, subject, body,
+                     about=about).get("id")
 
 
 AGENT = "seo-answers"
@@ -1058,7 +1061,8 @@ def _work(agent, url, max_pages) -> dict:
                 f"The answer audit found things on our own pages that stop us "
                 f"being picked as the answer, and {sector} owns the fixes.",
                 [ln.strip("- ") for ln in body.split("\n") if ln.strip().startswith("-")][:20],
-                f"AEO/GEO fixes for {sector}", head + body + tail)
+                f"AEO/GEO fixes for {sector}", head + body + tail,
+                about="handoff:aeo_fixes")
 
         if robots.get("blocked"):
             board.queue_site_change(

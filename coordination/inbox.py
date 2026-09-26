@@ -66,6 +66,7 @@ It does not invent work. A request is somebody asking, which is the same
 standard content_briefs already held itself to. Nothing here mints a task off
 its own bat.
 """
+import re
 import sqlite3
 import traceback
 
@@ -184,6 +185,13 @@ CHASES = (
     # faults, which already exist and are already routed. A row telling the
     # sector it has them adds nothing it can do.
     "faults open",
+    # "3 task(s) on the Content board have been open up to 1 hour and nobody
+    # has picked them up" — the Overseer's wording for work nobody claims. It
+    # was missing here, so the MD turned the escalation into "From the MD:
+    # Escalating: 3 task(s) on the Content board..." — a FOURTH unclaimable
+    # task on the board that was being complained about.
+    "nobody has picked them up",
+    "nobody has picked it up",
 )
 
 # NOT chases, and the distinction cost a test to find: a desk that has stopped
@@ -192,7 +200,8 @@ CHASES = (
 # it is stripped and the thing inside is judged on its own merits — otherwise
 # "Escalating: seo-strategist stopped responding" would be filed away as
 # paperwork and the dead desk would stay dead.
-_WRAPPERS = ("escalating:", "escalating", "from the md:", "you have not answered:")
+_WRAPPERS = ("escalating:", "escalating", "from the md:", "you have not answered:",
+             "it cannot fix this on its own:")
 
 # Who is allowed to be chasing. A sector genuinely asking another sector for
 # something is never a chase, whatever words it happens to use.
@@ -208,9 +217,13 @@ def is_a_chase(req) -> bool:
     Overseer escalated decides whether there is anything to do about it.
     """
     frm = (req.get("from_sector") or "").strip().lower()
-    if frm not in CHASERS:
-        return False
     subject = (req.get("subject") or "").strip().lower()
+    # IT forwarding a fault it cannot repair is a delivery mechanism like any
+    # other: judge what is inside. Older builds sent "IT has not answered SEO"
+    # this way, every pass, and those may still be sitting in the MD's post.
+    forwarded = frm == "it" and subject.startswith("it cannot fix this on its own:")
+    if frm not in CHASERS and not forwarded:
+        return False
     peeled = True
     while peeled:
         peeled = False
@@ -234,6 +247,126 @@ def _answer_a_chase(sector, req) -> str:
         f"{sector} has {waiting} job(s) open right now. Those are the work this "
         f"notice is about, and they are what {sector} will do next. The fault "
         f"behind this stays open and keeps counting until they are done.")
+
+
+# ---------------------------------------------------------------------------
+# HAND-OFFS: SEO TELLING A SECTOR SOMETHING IT HAS ALREADY PUT ON FILE
+# ---------------------------------------------------------------------------
+#
+# "Keyword-gap list ready", "Pages worth writing", "Guest-post pieces worth
+# writing", "AEO/GEO fixes", "Search Console is not answering". None of these
+# is a question. Each is SEO saying "this is on file now" — and each was filed
+# on the receiving board as a task no desk was built to claim. So the thread
+# stayed open, the Overseer counted it as "Content has not answered SEO in 69
+# minutes", IT asked the MD about it every pass, and the owner watched the same
+# complaint arrive again and again.
+#
+# A hand-off is answered on receipt with what actually happens to it next, and
+# closed. The kind comes from the request's `about` tag (handoff:<kind>), set
+# by the sender, because SEO's subjects are now worded by its own model and a
+# word match would miss the day it phrases one differently. Rows from before
+# the tag existed are recognised by their old template subjects.
+HANDOFF_SUBJECTS = (
+    ("keyword_gaps", r"keyword.?gap|keyword list"),
+    ("pages", r"pages? worth (writing|building)"),
+    ("guest_posts", r"guest.?post"),
+    ("aeo_fixes", r"\baeo\b|\bgeo fixes|answer.?(engine|audit)"),
+    ("gsc_down", r"search console"),
+)
+
+
+def handoff_kind(req) -> str:
+    about = (req.get("about") or "").strip().lower()
+    if about.startswith("handoff:"):
+        return about.split(":", 1)[1].strip()
+    if (req.get("from_sector") or "").strip().lower() != "seo":
+        return ""
+    subject = (req.get("subject") or "").lower()
+    for kind, pattern in HANDOFF_SUBJECTS:
+        if re.search(pattern, subject):
+            return kind
+    return ""
+
+
+def _content_queue_state(con):
+    try:
+        briefed = con.execute("SELECT count(*) FROM content_queue WHERE status='briefed'").fetchone()[0]
+        review = con.execute("SELECT count(*) FROM content_queue WHERE status='in_review'").fetchone()[0]
+        return briefed, review
+    except Exception:
+        return 0, 0
+
+
+def _aeo_ticket(line) -> tuple:
+    """One AEO/GEO line from SEO, as an IT ticket the Fixer turns into a plan."""
+    label, _, rest = line.partition(" — ")
+    fix = rest.split("page(s).", 1)[-1].strip() if "page(s)." in rest else rest
+    slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:40] or "check"
+    return slug, (f"[aeo:{slug}] {label.strip()} ({rest.split('.', 1)[0].strip()}). "
+                  "Why it matters: answer boxes and AI assistants pick pages that "
+                  "have this, and quote the business that does. "
+                  f"Do: {fix or 'see the answer audit'} "
+                  "Fixed when: the answer audit passes this check on every page.")
+
+
+def answer_handoff(sector, req, agent, con):
+    """The reply to a hand-off, having done what it asks for; None if it is not one."""
+    kind = handoff_kind(req)
+    body = req.get("_body") or ""
+    if kind in ("keyword_gaps", "pages") and sector == "Content":
+        briefed, review = _content_queue_state(con)
+        return (f"Received, and nothing is lost. The briefs desk reads SEO's whole "
+                f"keyword table each time it briefs, not one list at a time, so "
+                f"these phrases are in what it works from — the next hand-off SEO "
+                f"sends starts that pass. Right now {briefed} page(s) are briefed "
+                f"and waiting to be written, and {review} are written and waiting "
+                f"for the owner's approval. Closing the thread: there is no "
+                f"question in it left to answer.")
+    if kind == "guest_posts" and sector == "Content":
+        return ("Guest posts are published on other people's sites, and only the "
+                "owner can agree one with a publication. Content writes for our "
+                "own site, so there is nothing to write until a site has said yes. "
+                "The list stays on SEO's link list for when that happens.")
+    if kind == "aeo_fixes" and sector in ("Content", "IT"):
+        lines = [ln.strip()[2:].strip() for ln in body.splitlines()
+                 if ln.strip().startswith("- ")][:12]
+        new = old = 0
+        for line in lines:
+            _slug, text = _aeo_ticket(line)
+            _iid, is_new = board.file_site_issue("seo", "low", text, "",
+                                                 f"{sector} inbox", con=con)
+            new, old = new + bool(is_new), old + (not is_new)
+        con.commit()
+        what = ("edits to the wording of pages that are already live"
+                if sector == "Content" else "changes to the markup of live pages")
+        return (f"Taken. These are {what}, and every change to the live site goes "
+                f"through IT's fix list and the owner's approval — so each one is "
+                f"now a ticket there: {new} new"
+                + (f", {old} already on the list" if old else "")
+                + ". Nothing changes on the site until he says yes.")
+    if kind == "gsc_down" and sector == "IT":
+        title = "You need to set up Google Search Console"
+        try:
+            exists = con.execute("SELECT 1 FROM tasks WHERE title=? AND status IN"
+                                 " ('open','in_progress')", (title,)).fetchone()
+            if not exists:
+                board.try_post_task(
+                    "IT", title,
+                    "SEO's best free source is Search Console: the searches that "
+                    "already reach the site, and the ones it ranks 5th to 20th for. "
+                    "It needs a Google service account with access to the property, "
+                    "which only you can create. Setup → Integrations → Google "
+                    "Search Console: paste the property and the service-account "
+                    "key.\n\nSEO's own words:\n" + body[:800],
+                    risk="amber", created_by=f"{sector} inbox")
+        except Exception:
+            pass
+        return ("This needs the owner, not IT: Search Console access is a Google "
+                "property and a service-account key that only he can create. It is "
+                "on his list now (Setup → Integrations → Google Search Console). "
+                "There is nothing in the code to change, so this thread is closed; "
+                "SEO carries on with the free sources until it is set up.")
+    return None
 
 
 def _file_as_task(sector, req, agent):
@@ -340,6 +473,8 @@ def work_the_inbox(sector, agent, handler=None, limit=MOST_PER_PASS,
                 continue
 
             answer = handler(row, body, con) if handler else None
+            if answer is None:
+                answer = answer_handoff(sector, row, agent, con)
             if answer is None:
                 outcome, reply, task_id = _file_as_task(sector, row, agent)
             else:

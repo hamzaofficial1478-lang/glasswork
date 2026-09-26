@@ -348,6 +348,17 @@ def _brief(agent, max_briefs, draft_allowance, job=None):
         # one message and a far better one than a filter that quietly drops
         # every message somebody bothered to write well.
         waiting = board.open_requests_for("Content")
+        # Brief from a hand-off that is ABOUT pages, first. The inbox answers
+        # the others on receipt (inbox.answer_handoff): AEO/GEO fixes are edits
+        # to live pages and go to IT's list, guest posts wait on the owner. A
+        # briefs pass that claimed one of those could only reply with a brief
+        # nobody asked for. Tagged kinds decide, not words in the subject.
+        from coordination import inbox as _inbox
+        not_briefs = ("aeo_fixes", "guest_posts", "gsc_down")
+        first = ("keyword_gaps", "pages")
+        waiting = sorted((r for r in waiting
+                          if _inbox.handoff_kind(dict(r)) not in not_briefs),
+                         key=lambda r: 0 if _inbox.handoff_kind(dict(r)) in first else 1)
         claimed = None
         for r in waiting:
             if board.claim_request(r["id"], agent):

@@ -644,6 +644,62 @@ def test_a_run_is_only_reaped_after_somebody_is_told():
               bool(cab.sql("SELECT 1 FROM requests WHERE to_sector='SEO'")), True)
 
 
+def test_a_sector_alarm_closes_when_the_day_or_the_faults_are_over():
+    """
+    His Content panel listed seven "Content has N faults open at once" — 5, 5,
+    11, 11, 9, 7, 3 — one per day, none ever closed. Each read like a fresh
+    emergency. An alarm is about today, and only while the faults are there.
+    """
+    print("\nYesterday's sector alarm is closed, not left on the panel:")
+    with _Cabinet() as cab:
+        now = int(time.time())
+        yday = time.strftime("%Y-%m-%d", time.localtime(now - 86400))
+        cab.write("INSERT INTO faults(key,kind,agent,sector,routed_to,severity,what,"
+                  "detail,evidence,first_seen,last_seen,seen_count,status)"
+                  " VALUES(?,'sector','','Content','Director',?,?,'x',"
+                  "'faults:content',?,?,1,'escalated')",
+                  (f"alarm:content:{yday}", F.DEGRADED,
+                   "Content has 5 faults open at once", now - 86400, now - 86400))
+        F.scan()
+        check("resolved",
+              cab.sql("SELECT status FROM faults WHERE kind='sector'")[0]["status"],
+              "resolved")
+
+    print("\n...and today's closes once the faults behind it have:")
+    with _Cabinet() as cab:
+        for a in ("seo-strategist", "seo-answers", "seo-lead"):
+            _stall(cab, agent=a)
+        F.scan()
+        check("the alarm is raised",
+              len(cab.sql("SELECT 1 FROM faults WHERE kind='sector'"
+                          " AND status!='resolved'")), 1)
+        for a in ("seo-strategist", "seo-answers", "seo-lead"):
+            _recovered(cab, agent=a)
+        F.scan()
+        check("and closed when the desks are back",
+              cab.sql("SELECT status FROM faults WHERE kind='sector'")[0]["status"],
+              "resolved")
+
+
+def test_the_owners_decisions_are_not_work_nobody_picks_up():
+    """
+    "Claim 3 free listings" and "set up Search Console" are amber: they wait on
+    HIM, in "Waiting on you". Counting them as a board nobody works made SEO
+    and IT look idle, and expiring them after three days would make his
+    pending decisions vanish without his ever saying no.
+    """
+    print("\nAn amber task waiting on the owner is not an ignored board:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - (board.UNCLAIMED_DAYS + 1) * 86400
+        cab.write("INSERT INTO tasks(id,sector,title,status,risk,created_at)"
+                  " VALUES('a1','SEO','Claim 3 free listings','open','amber',?)", (old,))
+        check("no unclaimed fault",
+              [f for f in F.detect() if f["kind"] == "unclaimed"], [])
+        board.expire_unclaimed()
+        check("and it is still on his list after days",
+              cab.sql("SELECT status FROM tasks WHERE id='a1'")[0]["status"], "open")
+
+
 def test_nothing_broken_says_nothing():
     print("\nA healthy agency is quiet:")
     with _Cabinet() as cab:
@@ -672,6 +728,8 @@ def main():
               test_work_nobody_picks_up_is_a_fault_too,
               test_a_dead_run_stops_claiming_to_be_running,
               test_a_run_is_only_reaped_after_somebody_is_told,
+              test_a_sector_alarm_closes_when_the_day_or_the_faults_are_over,
+              test_the_owners_decisions_are_not_work_nobody_picks_up,
               test_nothing_broken_says_nothing):
         t()
     print()

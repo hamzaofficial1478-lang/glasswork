@@ -939,10 +939,10 @@ def ask_for_help(con, built, top) -> list:
     except Exception:
         _ask = None
 
-    def _send(to, situation, facts, subject, body):
+    def _send(to, situation, facts, subject, body, about=""):
         if _ask is None:
-            return board.post_request("SEO", to, subject, body)
-        r = _ask.send("SEO", to, situation, facts, subject, body)
+            return board.post_request("SEO", to, subject, body, about=about)
+        r = _ask.send("SEO", to, situation, facts, subject, body, about=about)
         return r.get("id")
 
     # 1. Search Console is IT's door — it is a property and a service account,
@@ -961,7 +961,8 @@ def ask_for_help(con, built, top) -> list:
             "The keyword pass ran without the one source that knows which searches "
             "already reach us. Until this works there is no striking-distance list "
             "— the queries we rank 5th to 20th for, which are the cheapest traffic "
-            "available. Everything else in the pass carried on and is on file."))
+            "available. Everything else in the pass carried on and is on file.",
+            about="handoff:gsc_down"))
 
     # 2. Things the SITE sells that the catalogue has never heard of. Content
     #    owns the service list; SEO must not quietly widen it on its own.
@@ -1115,7 +1116,8 @@ def _work(agent, deep, budget=None) -> dict:
                 "impressions, autocomplete breadth, rival pages, and the wording "
                 "your own customers used. None of these is a search-volume "
                 "estimate and none of them cost anything:\n\n"
-                + "\n".join(f"- {t['phrase']}\n    {t['evidence']}" for t in writeable))
+                + "\n".join(f"- {t['phrase']}\n    {t['evidence']}" for t in writeable),
+                about="handoff:pages")
 
         # Ask for what it cannot get itself, before logging the decision — so
         # the decision can honestly say the ranking ran short and who was asked.

@@ -478,6 +478,122 @@ def test_a_sector_cannot_dodge_by_using_chase_words():
         check("nothing noted away", out["noted"], 0)
 
 
+def test_the_overseers_nobody_picked_it_up_wording_is_a_chase():
+    """
+    The MD turned "Escalating: 3 task(s) on the Content board ... nobody has
+    picked them up" into a FOURTH unclaimable task on that same board.
+    """
+    print("\n'Nobody has picked them up' is a chase, however it arrives:")
+    with _Cabinet():
+        board.post_request("Overseer", "Director",
+                           "Escalating: 3 task(s) on the Content board have been open"
+                           " up to 1 hour and nobody has picked them up", "x")
+        board.post_request("IT", "Director",
+                           "IT cannot fix this on its own: IT has not answered SEO"
+                           " in 43 minutes", "x")
+        out = inbox.work_the_inbox("Director", "managing-director")
+        check("both noted", out["noted"], 2)
+        check("neither became a task", out["filed"], 0)
+
+
+def test_seo_handoffs_are_answered_and_closed_on_receipt():
+    """
+    "Keyword-gap list ready", "Pages worth writing", "Guest-post pieces" — SEO
+    saying "this is on file now". Each was filed as a task no desk could claim,
+    so the thread stayed open and got chased, again and again.
+    """
+    print("\nA hand-off from SEO is answered, closed, and makes no dead task:")
+    with _Cabinet():
+        tagged = board.post_request("SEO", "Content", "7 openings this week",
+                                    "- pergola dubai\n- glass partition sharjah",
+                                    about="handoff:keyword_gaps")
+        legacy = board.post_request("SEO", "Content", "Keyword-gap list ready", "- x")
+        guest = board.post_request("SEO", "Content", "Guest-post pieces worth writing",
+                                   "- a piece", about="handoff:guest_posts")
+        out = inbox.work_the_inbox("Content", "content-lead")
+        check("all three answered", out["answered"], 3)
+        check("no task filed", _open_tasks("Content"), [])
+        check("every thread closed",
+              [_status(r) for r in (tagged, legacy, guest)], ["closed"] * 3)
+        check("and the answer says where the work actually is",
+              "briefed" in _thread(tagged)[-1]["body"], True)
+
+    print("\n...but another sector using the same words is still asking for work:")
+    with _Cabinet():
+        board.post_request("IT", "Content", "Search Console wording for the FAQ", "x")
+        out = inbox.work_the_inbox("Content", "content-lead")
+        check("filed, not waved through", out["filed"], 1)
+
+
+def test_aeo_fixes_become_it_tickets_once():
+    print("\nAEO fixes go on IT's fix list, once each, however often SEO sends them:")
+    body = ("- FAQ markup — missing on 6 page(s). Add FAQPage schema.\n"
+            "- Direct answer — missing on 4 page(s). Open with a one-line answer.")
+    with _Cabinet():
+        first = board.post_request("SEO", "IT", "AEO/GEO fixes", body,
+                                   about="handoff:aeo_fixes")
+        inbox.work_the_inbox("IT", "it-watcher")
+        with board._conn() as c:
+            n = c.execute("SELECT count(*) FROM site_issues").fetchone()[0]
+        check("two tickets", n, 2)
+        check("the thread is closed", _status(first), "closed")
+        board.post_request("SEO", "IT", "AEO/GEO fixes",
+                           body.replace("6 page(s)", "7 page(s)"),
+                           about="handoff:aeo_fixes")
+        inbox.work_the_inbox("IT", "it-watcher")
+        with board._conn() as c:
+            n = c.execute("SELECT count(*) FROM site_issues").fetchone()[0]
+        check("sent again with a new count: still two", n, 2)
+        check("and no task on IT's board", _open_tasks("IT"), [])
+
+
+def test_search_console_down_is_one_job_for_the_owner():
+    print("\n'Search Console is not answering' is the owner's to set up, once:")
+    with _Cabinet():
+        for _ in range(2):
+            board.post_request("SEO", "IT", "Search Console is not answering",
+                               "no service account", about="handoff:gsc_down")
+            inbox.work_the_inbox("IT", "it-watcher")
+        with board._conn() as c:
+            rows = [dict(r) for r in c.execute(
+                "SELECT title, risk FROM tasks WHERE status='open'")]
+        check("one amber task for him, not two",
+              rows, [{"title": "You need to set up Google Search Console",
+                      "risk": "amber"}])
+
+
+def test_the_same_site_problem_is_one_ticket():
+    """
+    His IT panel had "info@... has no DNS record" twelve times, and "Home page
+    took 3263ms" beside 2983ms beside 2170ms.
+    """
+    print("\nOne problem, one ticket — numbers do not make it a new one:")
+    with _Cabinet():
+        a, new_a = board.file_site_issue("speed", "medium", "Home page took 3263ms")
+        b, new_b = board.file_site_issue("speed", "medium", "Home page took 2983ms")
+        check("the second is the first", (b, new_a, new_b), (a, True, False))
+        with board._conn() as c:
+            detail = c.execute("SELECT detail FROM site_issues WHERE id=?",
+                               (a,)).fetchone()[0]
+        check("showing the newest measurement", detail, "Home page took 2983ms")
+        other, is_new = board.file_site_issue("speed", "medium", "Contact page took 3100ms")
+        check("a different page is a different ticket", is_new, True)
+
+    print("\n...and the copies already on his list are folded into one:")
+    with _Cabinet():
+        with board._conn() as c:
+            for ms in (3263, 2983, 2170):
+                c.execute("INSERT INTO site_issues(kind,severity,detail,status,found_at)"
+                          " VALUES('speed','medium',?, 'open', 0)",
+                          (f"Home page took {ms}ms",))
+        check("two folded", board.merge_duplicate_issues(), 2)
+        with board._conn() as c:
+            left = [r[0] for r in c.execute(
+                "SELECT status FROM site_issues ORDER BY id")]
+        check("the oldest stays open, the rest are marked duplicate",
+              left, ["open", "duplicate", "duplicate"])
+
+
 def main():
     for fn in list(globals().values()):
         if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):
