@@ -1,0 +1,159 @@
+"""
+sitepace_tests.py — run: python -m coordination.sitepace_tests
+
+"i checked the website and it says site cannot be reached with
+ worlddealtechnicalservices.com unexpectedly closed the connection"
+
+His site was up; his own address had been shut out by his host's firewall,
+because the agency read the site from three desks at once. What has to hold:
+
+  every desk's requests to HIS site go one at a time, in turn
+  the first time the site shuts the door, the agency stops asking
+  other websites are not held up by any of it
+  he can see it, and tell the agency the door is open again
+
+A throwaway cabinet, and a fake website on this machine that behaves like a
+firewall. No real site is touched.
+"""
+import os
+import socket
+import sqlite3
+import tempfile
+import threading
+import time
+import urllib.request
+from pathlib import Path
+
+from . import board, sitepace
+
+_fail = []
+ROOT = Path(__file__).parents[1]
+
+
+def check(name, got, want):
+    if got == want:
+        print(f"  ok  {name}")
+    else:
+        print(f"FAIL  {name}\n        got:  {got!r}\n        want: {want!r}")
+        _fail.append(name)
+
+
+class _Cabinet:
+    def __enter__(self):
+        self.real = (board.DB, sitepace._host_cache, os.environ.get("SITEPACE_TEST"))
+        d = Path(tempfile.mkdtemp())
+        db = d / "agency.db"
+        con = sqlite3.connect(db)
+        con.executescript((ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8"))
+        con.commit()
+        con.close()
+        board.DB = str(db)
+        sitepace._host_cache = "127.0.0.1"
+        os.environ["SITEPACE_TEST"] = "1"
+        return self
+
+    def __exit__(self, *a):
+        board.DB, sitepace._host_cache, was = self.real
+        if was is None:
+            os.environ.pop("SITEPACE_TEST", None)
+        else:
+            os.environ["SITEPACE_TEST"] = was
+
+
+def _slamming_server():
+    """A 'website' that accepts and hangs up at once — what the firewall did."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    s.listen(5)
+    port = s.getsockname()[1]
+
+    def serve():
+        for _ in range(5):
+            try:
+                conn, _addr = s.accept()
+                conn.close()
+            except OSError:
+                return
+    threading.Thread(target=serve, daemon=True).start()
+    return s, port
+
+
+def test_one_request_at_a_time():
+    print("\nEvery desk's requests to his site wait their turn:")
+    with _Cabinet():
+        waits = []
+        sitepace.before("https://127.0.0.1/", sleep=waits.append)
+        sitepace.before("https://127.0.0.1/about", sleep=waits.append)
+        sitepace.before("https://127.0.0.1/contact", sleep=waits.append)
+        check("the first goes at once, the next two wait in turn",
+              len(waits), 2)
+        check("each about a second behind the one before",
+              all(0.5 <= w <= 2.5 for w in waits), True)
+        other = []
+        sitepace.before("https://someone-else.ae/", sleep=other.append)
+        check("another website is not held up", other, [])
+
+
+def test_the_first_closed_door_stops_every_desk():
+    print("\nThe first time his site shuts the door, the agency stops asking:")
+    with _Cabinet():
+        os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
+        srv, port = _slamming_server()
+        try:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5)
+                slammed = False
+            except Exception:
+                slammed = True
+            check("the fake firewall hung up", slammed, True)
+            rest = sitepace.resting()
+            check("the agency noticed and is leaving the site alone", bool(rest), True)
+            check("and says why", "closed the connection" in rest.get("why", ""), True)
+            try:
+                sitepace.before(f"http://127.0.0.1:{port}/about")
+                refused = ""
+            except sitepace.SiteResting as e:
+                refused = str(e)
+            check("the next desk is refused at once instead of retrying",
+                  "leaving it alone until" in refused, True)
+        finally:
+            srv.close()
+
+    print("\nOrdinary answers do not count as a closed door:")
+    with _Cabinet():
+        for status in (200, 301, 401, 404, 500):
+            sitepace.told_to_stop("https://127.0.0.1/x", status=status)
+        check("401, 404 and the rest leave it open", sitepace.resting(), {})
+        sitepace.told_to_stop("https://127.0.0.1/x", status=429)
+        check("429 — too many requests — closes it", bool(sitepace.resting()), True)
+
+
+def test_he_sees_it_and_can_open_it_again():
+    print("\nHe sees it in 'Waiting on you', and his yes lets the agency back in:")
+    with _Cabinet():
+        sitepace.told_to_stop("https://127.0.0.1/", error=ConnectionResetError(
+            "An existing connection was forcibly closed by the remote host"))
+        from . import state
+        items = [a for a in state.build().get("approvals") or []
+                 if a.get("kind") == "site_resting"]
+        check("it is on his list", len(items), 1)
+        check("with how to check it on his phone", "mobile data" in items[0]["why"], True)
+        r = board.decide_approval("site_resting", "site", "approved")
+        check("his yes is recorded", r["ok"], True)
+        check("and the agency reads the site again", sitepace.resting(), {})
+
+
+def main():
+    for t in (test_one_request_at_a_time,
+              test_the_first_closed_door_stops_every_desk,
+              test_he_sees_it_and_can_open_it_again):
+        t()
+    print()
+    if _fail:
+        print(f"{len(_fail)} FAILED: " + ", ".join(_fail))
+        raise SystemExit(1)
+    print("sitepace: all good — his site is read gently, and left alone when it says stop.")
+
+
+if __name__ == "__main__":
+    main()

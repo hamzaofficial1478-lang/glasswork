@@ -748,3 +748,12 @@ CREATE TABLE IF NOT EXISTS stop_requests (
 -- The two columns themselves are added by board._ADDED_COLUMNS, because ALTER
 -- TABLE cannot be written idempotently and this file is re-applied on every
 -- connection. They are declared there, not here.
+
+-- HIS WEBSITE, READ GENTLY. One queue for every desk that reads his own site,
+-- and a pause after the site shuts the door (coordination/sitepace.py).
+CREATE TABLE IF NOT EXISTS site_pace (
+  id            INTEGER PRIMARY KEY CHECK (id=1),
+  next_at       REAL DEFAULT 0,    -- the earliest the next request may go
+  resting_until REAL DEFAULT 0,    -- his site said stop: leave it alone till then
+  why           TEXT
+);

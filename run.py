@@ -401,6 +401,7 @@ def tests():
             "coordination.inbox_tests",
             "coordination.review_tests",
             "coordination.leftovers_tests",
+            "coordination.sitepace_tests",
             "coordination.daygate_tests",
             "coordination.honest_tests",
             "coordination.clock_tests",

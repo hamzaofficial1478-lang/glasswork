@@ -2567,6 +2567,15 @@ def decide_approval(kind, ref, decision):
                         "waits for your own yes."
                         if decision == "approved" and moved else
                         "Turned down. It will not be sent." if moved else "")}
+    if kind == "site_resting":
+        # "It opens on this computer again" — let the agency read it now.
+        if decision == "approved":
+            from . import sitepace
+            sitepace.clear()
+        return {"ok": True, "kind": kind, "ref": ref, "decision": decision,
+                "why": ("The agency reads your site again from now, one request at "
+                        "a time." if decision == "approved" else
+                        "Left alone until the pause runs out.")}
     if kind != "task":
         raise ValueError(f"nothing of kind '{kind}' queues for approval")
     with _conn() as c:

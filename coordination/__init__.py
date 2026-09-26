@@ -13,3 +13,12 @@ try:
     _console_setup()
 except Exception:                                            # pragma: no cover
     pass
+
+# Every request any desk makes to HIS website is paced and stops when the site
+# says stop — his host's firewall blocked his own address once, because the
+# agency read the site from three desks at once. See coordination/sitepace.py.
+try:
+    from .sitepace import install as _pace_install
+    _pace_install()
+except Exception:                                            # pragma: no cover
+    pass

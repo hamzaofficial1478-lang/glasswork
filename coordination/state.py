@@ -767,6 +767,27 @@ def build():
                               "why": t["detail"] or "Needs your nod."})
     except Exception:
         pass
+    # HIS SITE STOPPED ANSWERING THE AGENCY. Said here, because it is the one
+    # thing only he can fix (his host's firewall), and because the agency has
+    # stopped reading the site until he does or the pause runs out.
+    try:
+        from . import sitepace
+        rest = sitepace.resting()
+        if rest:
+            until = time.strftime("%H:%M", time.localtime(rest["until"]))
+            approvals.append({
+                "kind": "site_resting", "id": "site", "lvl": "red · IT",
+                "text": f"Your website stopped answering the agency ({rest['why']})",
+                "why": ("Your site is probably fine for everyone else: your host's "
+                        "firewall has most likely blocked this computer's internet "
+                        "address because the agency read the site quickly. The agency "
+                        f"is leaving it alone until {until}. To check: open the site on "
+                        "your phone using mobile data, not your Wi-Fi. If it opens "
+                        "there, ask Hostinger support to unblock your address, or wait. "
+                        "Press Approve once it opens on this computer again, and the "
+                        "agency reads it again straight away.")})
+    except Exception:
+        pass
     # WRITTEN PAGES AND DRAFTED MAIL ARE READ ON THE REVIEW PAGE, NOT HERE.
     #
     # "i asked for 1 post and publish to website i do not know if it writes or
