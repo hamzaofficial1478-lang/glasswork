@@ -322,24 +322,20 @@ def test_the_md_actually_opens_its_post():
         msgs = cab.sql("SELECT * FROM request_msgs WHERE request_id=? ORDER BY at", (rid,))
         check("it replied in the thread", len(msgs) >= 2, True)
         reply = msgs[-1]["body"]
-        check("saying where it came in the queue", "in the queue" in reply, True)
+        check("saying it is already with whoever fixes it",
+              "already sent this to whoever fixes it" in reply, True)
 
-        # The brain never touches the hands: it routes, it does not fix.
-        # Filtered to what the INBOX routed — the MD's ordinary planning posts
-        # tasks too, and counting those made this assert on the wrong thing.
+        # The brain never touches the hands: it routes, it does not fix — and
+        # an escalation is ALREADY routed. The Overseer sent the dead
+        # strategist to IT's Fixer and told SEO before it ever told the MD.
+        # This test used to require a "From the MD: Escalating: …" row on
+        # SEO's board as well, and that row is what his screenshot showed:
+        # "unassigned", on a board where no desk does "stopped responding",
+        # for ever. Filtered to what the INBOX routed — the MD's ordinary
+        # planning posts tasks too.
         tasks = cab.sql("SELECT sector, title FROM tasks"
                         " WHERE created_by='MD' AND title LIKE 'From the MD:%'")
-        # "Content has 3 faults open" is a TALLY — the three faults already
-        # exist and are already routed, so a row telling Content it has them is
-        # paperwork it cannot act on. It is answered on the thread instead. The
-        # crashed strategist is real work and still goes to a board. This is
-        # the split that stopped his sector boards filling with unassigned
-        # "From the MD:" rows nobody could claim.
-        check("the work went to the sector that can act",
-              sorted({t["sector"] for t in tasks}), ["SEO"])
-        check("and it is only the inbox items that were routed", len(tasks), 1)
-        check("and the reply names the task",
-              any(t["title"][:20] in reply or "as task" in reply for t in tasks), True)
+        check("no copy of an already-routed fault is posted to any board", tasks, [])
 
 
 def test_a_dry_run_reads_but_changes_nothing():

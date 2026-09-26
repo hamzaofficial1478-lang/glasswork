@@ -410,7 +410,7 @@ def run(agent=AGENT, dry_run=False, only_id=None, limit=MAX_PER_PASS) -> dict:
                 # about the writing.
                 takes=lambda j: j.wants("write", "draft", "publish", "page",
                                         "article", "case study", "rewrite",
-                                        "copy")) as job:
+                                        "copy", "post", "blog")) as job:
             out = _write(agent, dry_run, only_id, limit, job)
             deskwork.settle(job, out, made=len(out.get("pages") or []),
                             what="page drafted|pages drafted")

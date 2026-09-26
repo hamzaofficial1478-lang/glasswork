@@ -189,6 +189,13 @@ def critic_check(briefs, gap_count, already=()):
     return (len(reasons) == 0, reasons)
 
 
+def is_briefing_work(job) -> bool:
+    """A job for this pass: about briefs, or at least not asking for a post written."""
+    return (job.wants("brief", "keyword", "gap", "plan", "topics")
+            or not job.wants("write", "publish", "post", "blog", "article",
+                             "case study", "rewrite", "draft"))
+
+
 def run(agent="content-writer", max_briefs=6, draft_allowance=1):
     """
     Brief the next pages — from SEO's handoff, or from a job the MD posted.
@@ -205,7 +212,14 @@ def run(agent="content-writer", max_briefs=6, draft_allowance=1):
     desk walking past a job addressed to it.
     """
     with board.agent_run(agent) as run_row:
-        with deskwork.at_the_desk("Content", agent, run_row) as job:
+        # The briefs pass and the writing pass both run as content-writer. A
+        # job that asks for a post to be WRITTEN — "write 1 post and publish on
+        # website" — is the writing pass's, and this pass used to take it, make
+        # six briefs out of the words in it, and mark it done with no post
+        # written. It now hands such a job back for content_write, and takes
+        # only what is about briefing.
+        with deskwork.at_the_desk("Content", agent, run_row,
+                                  takes=is_briefing_work) as job:
             out = _brief(agent, max_briefs, draft_allowance, job)
             deskwork.settle(job, out, made=out.get("stored"),
                             what="page brief")

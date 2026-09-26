@@ -2562,8 +2562,8 @@ def decide_approval(kind, ref, decision):
         return {"ok": bool(moved), "kind": kind, "ref": ref, "decision": decision,
                 "error": "" if moved else "that draft has already been decided",
                 "why": ("Approved. It goes out through your email on the next "
-                        "Leads pass, inside the daily cap — or press Send on the "
-                        "Review page to send it now. Every other draft still "
+                        "Leads pass, inside the daily cap — or press Send in the "
+                        "Mail room to send it now. Every other draft still "
                         "waits for your own yes."
                         if decision == "approved" and moved else
                         "Turned down. It will not be sent." if moved else "")}

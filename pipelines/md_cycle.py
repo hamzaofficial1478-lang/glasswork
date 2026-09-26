@@ -303,6 +303,35 @@ def clear_inbox(facts, dry_run=False) -> dict:
             done.append({**line, "action": "noted, not filed as work"})
             continue
 
+        # THE OVERSEER HAS ALREADY SENT IT TO WHOEVER FIXES IT, and a sector
+        # saying it cannot fix something does not want the same thing back.
+        #
+        # His IT board: "From the MD: Escalating: 'Owner's order: check for
+        # dummy mail…'", "From the MD: IT cannot fix this on its own: seo-
+        # strategist crashed". The chase check above missed them — the
+        # Overseer's subject is cut at 80 characters, before the words it
+        # looks for — so each became a job no desk is built to do, sitting
+        # "unassigned" for ever. An escalation carries the fault it is about
+        # (about='faults:…'); that fault is already routed to its fixer, so a
+        # second job would be a copy. And posting "IT cannot fix this" to IT is
+        # a circle. Both are read and answered, and the MD plans around them.
+        about = str(item.get("about") or "")
+        from_overseer = about.startswith(("faults:", "sector:"))
+        circle = bool(target) and target.lower() == str(item.get("from") or "").lower()
+        if from_overseer or circle:
+            board.reply_request(
+                item["id"], "managing-director",
+                (f"Read. {target} raised this itself, so a job for {target} saying "
+                 f"{target} cannot fix it would go round in a circle. It stays on "
+                 "the fault list, where the owner sees it, until it is fixed or "
+                 "he decides to live with it."
+                 if circle else
+                 "Read. The Overseer has already sent this to whoever fixes it and "
+                 "keeps counting until it is done, so a second job for it would be "
+                 "a copy. The MD plans the next day around it."), close=True)
+            done.append({**line, "action": "noted — already routed, not a new job"})
+            continue
+
         if target:
             try:
                 task_id = board.post_task(
@@ -576,10 +605,17 @@ def plan(facts: dict) -> list:
             for n in covered:
                 folded[n] = (sector, text)
             continue
+        # Named for the desk that does it, so no desk's word list can leave
+        # his order with nobody allowed to pick it up (desks.for_owner_order).
+        try:
+            from coordination import desks as _desks
+            desk = _desks.for_owner_order(sector, text)
+        except Exception:
+            desk = None
         out.append({
             "sector": sector, "risk": "green", "urgency": 1,
             "title": f"Owner's order: {text[:60]}",
-            "detail": text,
+            "detail": text, "desk": desk,
             "evidence": f"the owner set this order for {sector} today"})
 
     crit = site.get("critical", 0)

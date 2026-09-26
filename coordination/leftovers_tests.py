@@ -338,6 +338,82 @@ def test_the_md_finishes_what_is_waiting_first():
           ["The owner's order"])
 
 
+def test_his_orders_reach_a_desk_and_go_first():
+    """
+    "i start from resume button and run the program now the program has
+     stopped but in the sectors reports many tasks are still unassigned why"
+    """
+    from . import desks, dispatch
+    print("\nHis order finds the desk that does it — 'publish' is no veto for him:")
+    check("'write 1 post and publish on website' goes to the Writer",
+          desks.for_owner_order("Content", "write 1 post and publish on website"),
+          "content-writer")
+    check("'check and fix the bugs in code' goes to the Fixer",
+          desks.for_owner_order("IT", "check and fix the bugs in code in Home page"),
+          "it-fixer")
+    check("and the Writer alone would still be refused it without the name",
+          desks.verdict("content-writer",
+                        {"title": "Owner's order: write 1 post and publish on website"})["allowed"],
+          False)
+
+    print("\n...and it goes before the agency's own work, even mid-run:")
+    with _Cabinet() as cab:
+        # Another IT desk is mid-job, so the sector counts as busy.
+        _task(cab, "md1", "IT", "Fix the pricing table", status="in_progress",
+              owner="it-fixer")
+        _task(cab, "his", "IT", "Owner's order: check for dummy mail on the contact page")
+        got = dispatch.next_task("IT", "it-watcher")
+        check("the watcher takes his order although IT already has a job going",
+              (got or {}).get("id"), "his")
+
+    print("\nThe briefs pass hands a 'write a post' order to the writing pass:")
+    from pipelines import content_briefs
+    class _J:
+        def __init__(self, text):
+            self.text = text.lower()
+        def wants(self, *w):
+            import re as _re
+            return any(_re.search(r"(?<![a-z0-9])" + _re.escape(x) + r"(?![a-z0-9])",
+                                  self.text) for x in w)
+    check("declines 'write 1 post and publish'",
+          content_briefs.is_briefing_work(_J("Owner's order: write 1 post and publish on website")),
+          False)
+    check("takes 'Keyword-gap list ready'",
+          content_briefs.is_briefing_work(_J("Keyword-gap list ready")), True)
+
+
+def test_reminders_are_not_turned_into_jobs():
+    from pipelines import md_cycle
+    print("\nThe MD answers the Overseer's escalations instead of making jobs of them:")
+    with _Cabinet() as cab:
+        rid = board.post_request(
+            "Overseer", "Director",
+            "Escalating: 2 task(s) on the SEO board have been open up to 3 hour(s) and nob",
+            "detail", about="faults:7")
+        item = {"id": rid, "from": "Overseer", "subject":
+                "Escalating: 2 task(s) on the SEO board have been open up to 3 hour(s) and nob",
+                "points": 50, "why": [], "waited": "1h", "copies": 1,
+                "about": "faults:7", "position": "first"}
+        md_cycle.clear_inbox({"inbox": {"next": [item], "waiting": []}})
+        check("no job posted", cab.sql("SELECT id FROM tasks"), [])
+        check("and the escalation is answered and closed",
+              cab.sql("SELECT status FROM requests WHERE id=?", (rid,))[0]["status"], "closed")
+
+    print("\n...and the ones already made are taken off; his orders get a desk:")
+    with _Cabinet() as cab:
+        _task(cab, "n1", "SEO", "From the MD: Escalating: 2 task(s) on the SEO board have",
+              about="faults:7")
+        _task(cab, "n2", "IT", "From the MD: IT cannot fix this on its own: seo-strategist crashed")
+        _task(cab, "o1", "Content", "Owner's order: write 1 post and publish on website")
+        _task(cab, "real", "IT", "From the MD: Check the contact form", about="site_issues:3")
+        leftovers.tidy()
+        st = {t["id"]: t for t in cab.sql("SELECT id, status, desk FROM tasks")}
+        check("the reminder-jobs are withdrawn", (st["n1"]["status"], st["n2"]["status"]),
+              ("withdrawn", "withdrawn"))
+        check("a real MD job stays", st["real"]["status"], "open")
+        check("his order is named for the Writer", st["o1"]["desk"], "content-writer")
+
+
 def main():
     for t in (test_nothing_left_says_so,
               test_the_survey_reads_and_changes_nothing,
@@ -348,7 +424,9 @@ def main():
               test_put_away_keeps_what_is_his,
               test_a_resume_runs_only_what_is_left,
               test_resume_start_end_to_end,
-              test_the_md_finishes_what_is_waiting_first):
+              test_the_md_finishes_what_is_waiting_first,
+              test_his_orders_reach_a_desk_and_go_first,
+              test_reminders_are_not_turned_into_jobs):
         t()
     print()
     if _fail:

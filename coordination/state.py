@@ -626,12 +626,34 @@ def build():
                 # actually waiting on him; ordinary work nobody has picked up yet
                 # is 'queued', which is a different thing and a different colour.
                 pending = (t["risk"] if "risk" in t.keys() else "") in ("amber", "red")
-                agents.append({
-                    "n": owner, "slot": slot, "t": t["title"],
-                    "s": "waiting" if pending else "queued",
-                    **({"why": "This one needs your yes or no before the desk can "
-                               "start. Approve or decline it and the desk moves "
-                               "on to whatever is next."} if pending else {})})
+                # NOT "UNASSIGNED" — WHY IT IS WAITING. "many tasks are still
+                # unassigned why" — the word said nothing. Three different
+                # things wear it: his decision, a job waiting its turn (one per
+                # sector per run), and a job no desk in the sector does at all.
+                if pending:
+                    who, why = "waiting on you", (
+                        "This one needs your yes or no before the desk can start. "
+                        "Approve or decline it and the desk moves on to whatever "
+                        "is next.")
+                else:
+                    try:
+                        from . import desks as _desks
+                        able = [d for d in _desks.sector_desks(match)
+                                if _desks.verdict(d, dict(t))["allowed"]]
+                    except Exception:
+                        able = ["?"]
+                    if able:
+                        who, why = "next in line", (
+                            f"Waiting its turn for {able[0]}. Each sector takes one "
+                            "job per run and finishes it before starting the next; "
+                            "your own orders go first.")
+                    else:
+                        who, why = "no desk can take this", (
+                            f"No desk in {name} does this kind of work, so nobody can "
+                            "pick it up. Resume, or Clear up only, takes jobs like "
+                            "this off the board.")
+                agents.append({"n": who, "slot": slot, "t": t["title"],
+                               "s": "waiting" if pending else "queued", "why": why})
                 continue
             # Claimed, but no run backing it. A claim with nothing behind it is a
             # held job nobody is doing — it blocks every other agent from taking
@@ -762,14 +784,24 @@ def build():
         if n_pages:
             approvals.append({
                 "kind": "review_pages", "id": "pages", "lvl": "amber · Content",
-                "link": "/review#pages", "count": n_pages,
+                "link": "/posts", "count": n_pages,
                 "text": f"{n_pages} page(s) written and waiting for your yes",
                 "why": "Read each one in full before it goes on your website."})
     except Exception:
         pass
     try:
-        for s in c.execute("SELECT id,agent,kind,detail FROM site_queue WHERE status='pending'"
-                           " AND kind!='new_page' ORDER BY queued_at DESC LIMIT 3"):
+        # Only changes the Releaser could carry out once he says yes. An empty
+        # note (see it_release.plan_of) is not a decision; putting it to him
+        # only produced a red "refused" line after he approved it.
+        try:
+            from pipelines import it_release as _rel
+            _can = lambda row: _rel.carryable(dict(row))[0]
+        except Exception:
+            _can = lambda row: True
+        shown = [s for s in c.execute(
+            "SELECT id,agent,kind,detail,status FROM site_queue WHERE status='pending'"
+            " AND kind!='new_page' ORDER BY queued_at DESC LIMIT 20") if _can(s)][:3]
+        for s in shown:
             approvals.append({"kind": "site_change", "id": s["id"],
                               "lvl": "amber · IT",
                               "text": _change_title(s["kind"], s["detail"]),
@@ -786,7 +818,7 @@ def build():
                             for m in mails[:3])
             approvals.append({
                 "kind": "review_mails", "id": "mails", "lvl": "amber · Leads",
-                "link": "/review#mails", "count": len(mails),
+                "link": "/mail", "count": len(mails),
                 "text": f"{len(mails)} outreach mail(s) written — choose who gets them",
                 "why": (f"To {who}" + (" and others" if len(mails) > 3 else "")
                         + ". Read each one, tick the ones you want and press Send. "

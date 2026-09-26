@@ -237,6 +237,48 @@ def _duplicate_tasks(tasks):
     return pairs
 
 
+def _notice_jobs(c):
+    """
+    Jobs the MD made out of the Overseer's reminders — "From the MD:
+    Escalating: …", "From the MD: IT cannot fix this on its own: …". No desk
+    is built to do a notice, so they sat "unassigned" for ever. The fault each
+    is about is already routed to its fixer (see md_cycle.clear_inbox).
+    """
+    return _rows(c, "SELECT id, sector, title FROM tasks WHERE status='open'"
+                    " AND COALESCE(risk,'green') NOT IN ('amber','red')"
+                    " AND title LIKE 'From the MD:%'"
+                    " AND (about LIKE 'faults:%' OR about LIKE 'sector:%'"
+                    "      OR title LIKE 'From the MD: Escalating%'"
+                    "      OR title LIKE 'From the MD: IT cannot fix this on its own%')")
+
+
+def _handoff_jobs(c):
+    """Open jobs an older build filed from a hand-off that is answered on receipt now."""
+    from . import inbox
+    out = []
+    for row in _rows(c, "SELECT t.id AS task_id, t.sector, r.* FROM tasks t"
+                        " JOIN requests r ON t.about = 'requests:' || r.id"
+                        " WHERE t.status='open'"):
+        kind = inbox.handoff_kind(row)
+        if kind and (row["sector"], kind) not in inbox.WORKED_FROM_BY_A_DESK:
+            out.append(row)
+    return out
+
+
+def _orders_without_desk(c):
+    """His orders posted before orders were named for a desk, still unrouted."""
+    from . import desks
+    out = []
+    for t in _rows(c, "SELECT id, sector, title, detail, created_by FROM tasks"
+                      " WHERE status='open' AND COALESCE(desk,'')=''"
+                      " AND COALESCE(risk,'green') NOT IN ('amber','red')"
+                      " AND (title LIKE 'Owner''s order:%' OR created_by='owner')"):
+        d = desks.for_owner_order(t["sector"], f"{t['title']} {t.get('detail') or ''}")
+        if d:
+            out.append({**t, "desk_for": d})
+    return out
+
+
 def survey() -> dict:
     """What is left over. Reads only — nothing changes."""
     c = _conn()
@@ -261,6 +303,9 @@ def survey() -> dict:
             except Exception:
                 pass
         day_running = _day_running(c)
+        notices = _notice_jobs(c)
+        unrouted = _orders_without_desk(c)
+        handoff_jobs = _handoff_jobs(c)
     finally:
         c.close()
 
@@ -279,7 +324,8 @@ def survey() -> dict:
                + kinds.get("orphan", 0) + kinds.get("dead_claim", 0)
                + sum(1 for t in tasks if t["dead_claim"]) + dead_runs
                + sum(1 for t in tasks if t["status"] == "open" and not t["his"]
-                     and (t.get("created_at") or 0) < stale_cut))
+                     and (t.get("created_at") or 0) < stale_cut)
+               + len(notices) + len(unrouted) + len(handoff_jobs))
     waiting = kinds.get("question", 0) + kinds.get("dead_claim", 0) + sum(
         1 for t in tasks if not t["his"] and (t["status"] == "open" or t["dead_claim"]))
     unfinished = len(run.get("unfinished") or [])
@@ -313,6 +359,8 @@ def survey() -> dict:
             "duplicates": len(dup_t),
             "stale": sum(1 for t in tasks if t["status"] == "open" and not t["his"]
                          and (t.get("created_at") or 0) < stale_cut),
+            "notices": len(notices), "orders_unrouted": len(unrouted),
+            "handoff_jobs": len(handoff_jobs),
             "yours": sum(1 for t in tasks if t["his"])},
         "faults_open": faults_open, "dead_runs": dead_runs,
         "by_room": by_room, "garbage": garbage, "waiting": waiting,
@@ -411,6 +459,60 @@ def tidy(dry_run=False) -> dict:
     note("duplicate_tasks", len(pairs), f"folded {len(pairs)} copy job(s) into the "
                                         "original")
 
+    # 4b. Notices turned into jobs come off the board, and his orders that no
+    #     desk could take are named for the desk that does the work.
+    c = _conn()
+    try:
+        notices = _notice_jobs(c)
+        for t in notices:
+            c.execute("UPDATE tasks SET status='withdrawn', result=?, finished_at=?"
+                      " WHERE id=? AND status='open'",
+                      ("A reminder from the Overseer that was turned into a job. No "
+                       "desk does reminders, so nobody could pick it up. The fault it "
+                       "is about is already with whoever fixes it, and stays counted "
+                       "until it is done.", _now(), t["id"]))
+        unrouted = _orders_without_desk(c)
+        for t in unrouted:
+            c.execute("UPDATE tasks SET desk=? WHERE id=? AND status='open'",
+                      (t["desk_for"], t["id"]))
+        c.commit()
+    finally:
+        c.close()
+    note("notices", len(notices), f"took {len(notices)} reminder(s) off the boards "
+                                  "that had been turned into jobs no desk could do")
+    note("orders_routed", len(unrouted), f"gave {len(unrouted)} of your order(s) to the "
+                                         "desk that does that work")
+
+    # 4c. Hand-offs an older build filed as jobs — "Guest-post pieces worth
+    #     writing", "AEO/GEO fixes for Content", "Search Console is not
+    #     answering". They are answered on receipt now (inbox.answer_handoff);
+    #     the old copies get the same answer, and the job comes off the board.
+    #     SEO's gap list stays: the briefs desk works from it.
+    from . import inbox
+    settled_jobs = 0
+    c = _conn()
+    try:
+        for row in _handoff_jobs(c):
+            row["_body"] = inbox._thread(c, row["id"])
+            try:
+                answer = inbox.answer_handoff(row["sector"], row, TIDY_AGENT, c)
+            except Exception:
+                answer = None
+            if answer is None:
+                continue
+            c.execute("UPDATE tasks SET status='withdrawn', result=?, finished_at=?"
+                      " WHERE id=? AND status='open'",
+                      ("Answered on receipt instead of being worked as a job: "
+                       + str(answer)[:400], _now(), row["task_id"]))
+            c.commit()
+            if row["status"] in ("open", "claimed"):
+                board.reply_request(row["id"], TIDY_AGENT, str(answer), close=True)
+            settled_jobs += 1
+    finally:
+        c.close()
+    note("handoff_jobs", settled_jobs, f"answered {settled_jobs} hand-off(s) that had "
+                                       "been filed as jobs, and took the jobs off")
+
     # 5. The same question twice: the copies are answered with where the
     #    original is, and closed. Append-only — nothing is edited or removed.
     c = _conn()
@@ -470,6 +572,31 @@ def tidy(dry_run=False) -> dict:
         gone = board.expire_unclaimed()
         note("stale", len(gone), f"withdrew {len(gone)} job(s) nobody had picked up "
                                  f"in {board.UNCLAIMED_DAYS}+ days")
+    except Exception:
+        pass
+
+    # 8b. Site changes waiting for his yes that carry nothing to carry out —
+    #     empty notes from an older build (it_release.plan_of explains). Asking
+    #     him to approve one only produces a red "refused" line later.
+    try:
+        from pipelines import it_release
+        c = _conn()
+        try:
+            empty = []
+            for r in _rows(c, "SELECT * FROM site_queue WHERE status='pending'"):
+                ok, why = it_release.carryable(r)
+                if not ok:
+                    empty.append((r["id"], why))
+            for rid, why in empty:
+                c.execute("UPDATE site_queue SET status='withdrawn', decided_at=?,"
+                          " note=? WHERE id=? AND status='pending'",
+                          (_now(), ("taken off your list without asking you: "
+                                    + why)[:500], rid))
+            c.commit()
+        finally:
+            c.close()
+        note("empty_changes", len(empty), f"took {len(empty)} empty site change(s) "
+                                          "off your list — nothing in them to put on")
     except Exception:
         pass
 

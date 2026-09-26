@@ -165,7 +165,8 @@ DESKS = {
         "sector": "Content",
         "job": "drafts and polishes against a brief, in the owner's voice",
         "does": ("write", "draft", "brief", "rewrite", "copy", "article",
-                 "page", "case study", "caption", "headline", "polish"),
+                 "page", "case study", "caption", "headline", "polish",
+                 "post", "blog"),
         "never": ("publish", "deploy", "release", "ship", "push"),
         "never_why": "the Writer never self-publishes — the Auditor and the "
                      "owner stand between a draft and the world",
@@ -468,6 +469,44 @@ def best_desk(task, sector=None):
         return None, (f"{cands[0][1]} and {cands[1][1]} fit it equally — "
                       "leaving it open to both")
     return cands[0][1], cands[0][2]
+
+
+OWNER_ORDER = "Owner's order:"
+
+
+def is_owner_order(task) -> bool:
+    """His own instruction, as the MD posts it, or a job he posted himself."""
+    t = task if isinstance(task, dict) else dict(task)
+    return ((t.get("title") or "").startswith(OWNER_ORDER)
+            or (t.get("created_by") or "").strip().lower() == "owner")
+
+
+def for_owner_order(sector, text):
+    """
+    The desk his order is for, by what the desk DOES — its `never` words are
+    not a veto here.
+
+    "Owner's order: write 1 post and publish on website" sat on the Content
+    board for a whole run with nobody allowed to touch it. Content has one
+    desk, the Writer, and the Writer may never take a job with "publish" in it
+    — a guard so the Writer never puts anything live itself. Right for the
+    agency's own jobs; wrong for his. The Writer writes the post, and the rest
+    of his sentence happens the way publishing always happens: the Auditor,
+    his yes in the Posts room, and the Releaser. Nothing the Writer does can
+    publish, so naming it here cannot break the red line the word list guards.
+
+    Returns the desk, or None when no desk in the sector does any of it.
+    """
+    words = str(text or "")
+    best = []
+    for d in sector_desks(sector):
+        hits = _hits(words, DESKS[d]["does"])
+        if hits:
+            best.append((len(hits), d))
+    if not best:
+        return None
+    best.sort(key=lambda x: (-x[0], x[1]))
+    return best[0][1]
 
 
 def as_text(sector=None):

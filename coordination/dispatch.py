@@ -441,6 +441,20 @@ def next_task(sector, agent, now=None, skip=()):
     # The pipelines still all RUN — a board task is direction, not permission,
     # and seo_gap still finds gaps on a pass where it claimed nothing. This
     # caps what the sector is ASKED to do, which is the thing that was piling up.
+    # HIS ORDERS GO FIRST, AND THE ONE-JOB-PER-RUN RULE IS NOT FOR THEM.
+    #
+    # "i start from resume button and run the program now the program has
+    #  stopped but in the sectors reports many tasks are still unassigned why"
+    #
+    # One job per sector per run is his rule, for the agency's own work — so a
+    # sector is never asked to do more than it can finish. It was also holding
+    # back his own orders: IT took one of the MD's jobs and his "check and fix
+    # the bugs" waited a whole run behind it. An order from him is not the
+    # agency loading itself up; it is the reason the agency exists.
+    own = _owners_order(sector, agent, skip)
+    if own is not None:
+        return own
+
     busy = _sector_is_busy(sector, skip=skip)
     if busy:
         return None
@@ -462,6 +476,32 @@ def next_task(sector, agent, now=None, skip=()):
                 got["points"] = t.get("points")
                 got["position"] = t.get("position")
             return got
+
+
+def _owners_order(sector, agent, skip=()):
+    """Claim the oldest open order of his that this desk may do, if any."""
+    skip = {str(x) for x in (skip or ())}
+    try:
+        with _conn() as c:
+            rows = [dict(r) for r in c.execute(
+                "SELECT * FROM tasks WHERE sector=? AND status='open'"
+                " AND COALESCE(risk,'green') NOT IN ('amber','red')"
+                " ORDER BY created_at", (sector,))]
+    except Exception:
+        return None
+    for t in rows:
+        if str(t["id"]) in skip or not desks.is_owner_order(t):
+            continue
+        v = desks.verdict(agent, t)
+        if not v["allowed"]:
+            continue
+        if board.claim_task(t["id"], agent):
+            got = board.get_task(t["id"])
+            if got is not None:
+                got = dict(got)
+                got["why_me"] = "your own order — it goes before the agency's work"
+            return got
+    return None
 
 
 def nothing_here(sector, agent) -> dict:

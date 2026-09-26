@@ -81,6 +81,16 @@ header>*{flex:none}
 .room.sec{border-color:rgba(229,86,91,.5)}.room.dir{border-color:var(--glass)}
 .plaque{position:absolute;top:-11px;left:14px;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:3px 10px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--etch);white-space:nowrap;z-index:3}
 .room.dir .plaque{border-color:var(--glass);color:var(--glass)}
+/* THE DOOR OUT OF A ROOM, on its bottom edge the way the plaque sits on the
+   top: the Leads room opens onto the Mail room, Content onto the Posts room.
+   "i did not see any section or room where the mails will be sent there is
+   just leads room" — so the door is on the room itself. */
+.door{position:absolute;bottom:-12px;right:14px;z-index:6;display:flex;gap:6px;align-items:center;
+  background:var(--panel2);border:1px solid var(--glass);border-radius:7px;padding:3px 10px;
+  font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--glass);text-decoration:none;white-space:nowrap}
+.door:hover{background:var(--glass-dim)}
+.door b{background:var(--amber);color:#1a1206;border-radius:999px;padding:0 6px;font-size:10px;letter-spacing:0}
 .room.sec .plaque{border-color:rgba(229,86,91,.5);color:var(--danger)}
 /* port lights where wires enter a room */
 .port{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--glass);box-shadow:0 0 8px var(--glass);opacity:.5;z-index:4}
@@ -481,7 +491,7 @@ header>*{flex:none}
     <button class="htab" onclick="openActivity()">Activity <span id="actBadge"></span></button>
     <button class="htab" onclick="openComms()">Sector traffic <span id="commBadge"></span></button>
     <button class="htab" onclick="openResults()">Results</button>
-    <a class="htab" href="/review" style="text-decoration:none">Review <span id="revBadge"></span></a>
+    <a class="htab" href="/mail" style="text-decoration:none">Mail &amp; posts <span id="revBadge"></span></a>
     <button class="htab" onclick="openChanges()">Website changes</button>
     <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
     <!-- Connections lived here and also in the full control room. Two doors to
@@ -698,6 +708,18 @@ const LAYOUT={Director:{x:24,y:22,w:320,h:150},Report:{x:372,y:22,w:230,h:150},S
 const $=s=>document.querySelector(s);
 const SVGNS="http://www.w3.org/2000/svg";
 
+// The rooms that open onto a room of their own, and how many things are
+// waiting in there for him (from the same approvals list the header counts).
+const DOORS = {Leads:['/mail','Mail room','review_mails'], Content:['/posts','Posts room','review_pages']};
+function doorOf(key){
+  const d = DOORS[key]; if(!d) return '';
+  const a = ((LIVE&&LIVE.approvals)||[]).find(x=>x.kind===d[2]);
+  const n = a ? (a.count||0) : 0;
+  return `<a class="door" href="${d[0]}" title="${key==='Leads'
+      ? 'Write mails to your collected leads, read them, and send the ones you approve'
+      : 'Read the pages Content wrote, and approve or turn them down'}">${d[1]}${n?` <b>${n}</b>`:''} &rarr;</a>`;
+}
+
 function renderFloor(){
   const st=SITES[CURRENT], floor=$('#floor');
   [...floor.querySelectorAll('.room,.plant')].forEach(n=>n.remove());
@@ -717,7 +739,7 @@ function renderFloor(){
     if(off) room.title = 'Switched off'+(rm.off_note?' — '+rm.off_note:'')
       +'. Turn it back on in the full control room.';
     room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
-    room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+`<div class="desks">`+
+    room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+doorOf(rm.key)+`<div class="desks">`+
       rm.agents.map((a,i)=>`<div class="emp ${oneOf(a.s,['idle','queued','waiting','working','done','blocked','off'])} ${rm.cls} ${powered&&!off?'pw':''} ${off?'off':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role" title="${escA(a.role)}">${esc(a.role)}</div></div>`).join('')
       +`</div>`;
     floor.appendChild(room);
@@ -1248,7 +1270,9 @@ function seatLive(rm, feed){
     desk.task_id = f.task_id || '';
     // show WHO actually did it — a desk labelled 'Writer' while content-writer
     // holds the task tells you nothing you didn't already know.
-    desk.n = (f.n && f.n !== 'unassigned') ? f.n : desk.staff;
+    // (and the three words the state uses for a job nobody holds are not a name)
+    desk.n = (f.n && !['unassigned','waiting on you','next in line','no desk can take this'].includes(f.n))
+      ? f.n : desk.staff;
   };
 
   const spare = [];
@@ -1557,6 +1581,8 @@ async function openLeads(scope){
     return;
   }
   $('#leadHead').textContent = `· ${j.head} · ${j.total} on file in total`;
+  const mailDoor = `<a class="pbtn" href="/mail" style="display:block;text-align:center;text-decoration:none;margin:0 0 14px">
+      Write and send mails to these leads &rarr;</a>`;
   $('#leadToday').style.borderColor = LEAD_SCOPE==='today' ? 'var(--glass)' : '';
   $('#leadAll').style.borderColor   = LEAD_SCOPE==='all'   ? 'var(--glass)' : '';
   if(!j.leads.length){
@@ -1565,7 +1591,7 @@ async function openLeads(scope){
       + `anyone already on file so nobody is contacted twice.</p>`;
     return;
   }
-  $('#leadBody').innerHTML = `<table class="ldtable"><thead><tr>`
+  $('#leadBody').innerHTML = mailDoor + `<table class="ldtable"><thead><tr>`
     + `<th>Company</th><th>Where</th><th>Stage</th><th>Contact</th>`
     + `<th>Reached</th><th>Found</th></tr></thead><tbody>`
     + j.leads.map(l=>`<tr>
@@ -2006,6 +2032,9 @@ function leftoversBlock(){
              [rq.orphans,'thread whose job had ended','threads whose job had ended'],
              [(rq.dead_claims||0)+(tk.dead_claims||0),'held by a desk that had stopped','held by a desk that had stopped'],
              [tk.stale,'job untouched for days','jobs untouched for days'],
+             [tk.notices,'reminder turned into a job no desk can do','reminders turned into jobs no desk can do'],
+             [tk.orders_unrouted,'of your orders with no desk yet','of your orders with no desk yet'],
+             [tk.handoff_jobs,'hand-off filed as a job','hand-offs filed as jobs'],
              [LEFT.dead_runs,'run left open by a closed program','runs left open by a closed program']]
             .filter(([n])=>n>0).map(([n,a,b])=>`${n} ${pl(n,a,b)}`).join(' · ');
   if(LEFT.garbage) rows.push(['✓', `${LEFT.garbage} can be cleared up without a model`, g]);
