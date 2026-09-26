@@ -212,6 +212,113 @@ def describe(before, after) -> list:
     return out
 
 
+def one_line(text, width=150) -> str:
+    """Markup squeezed to one readable line: tags kept, whitespace collapsed."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    return t if len(t) <= width else t[:width - 1] + "…"
+
+
+# How many removed/added lines the log keeps per change. Enough to see an email
+# address swapped or a tag repointed; not a copy of the file.
+DIFF_LINES = 6
+
+
+def what_changed(before, after) -> list:
+    """
+    What the agency's own write actually did to a page, line by line.
+
+    "i want to know what the program had changed". Each whole-page write used
+    to be logged as "rewrote includes/footer.php" and nothing more. The writer
+    always held the page as it was, so the difference is computed here: the
+    plain-language view first (describe — words, phone numbers, scripts), then
+    the exact lines that went and the lines that replaced them.
+    """
+    import difflib
+    out = []
+    try:
+        out += describe(shape_of(before or ""), shape_of(after or ""))
+    except Exception:
+        pass
+    old = [l.strip() for l in str(before or "").splitlines() if l.strip()]
+    new = [l.strip() for l in str(after or "").splitlines() if l.strip()]
+    gone, came = [], []
+    for line in difflib.unified_diff(old, new, lineterm="", n=0):
+        if line.startswith(("---", "+++", "@@")):
+            continue
+        if line.startswith("-"):
+            gone.append(line[1:])
+        elif line.startswith("+"):
+            came.append(line[1:])
+    for g in gone[:DIFF_LINES]:
+        out.append("removed: " + one_line(g))
+    for c in came[:DIFF_LINES]:
+        out.append("put in its place: " + one_line(c))
+    extra = max(0, len(gone) - DIFF_LINES) + max(0, len(came) - DIFF_LINES)
+    if extra:
+        out.append(f"and {extra} more changed line(s) — the server kept the old copy")
+    if not gone and not came and not out:
+        out.append("nothing visible changed — only spacing or line endings")
+    return out[:20]
+
+
+def because(row, c=None) -> list:
+    """
+    For one of the agency's changes, the approval it carried out: what he said
+    yes to and why, read from the approval queue. This is what explains the
+    changes made before the log recorded the lines themselves.
+    """
+    if (row.get("source") or "") != AGENCY or not row.get("ok"):
+        return []
+    at = int(row.get("at") or 0)
+    own = c is None
+    try:
+        c = c or sqlite3.connect(board.DB, timeout=30)
+        c.row_factory = sqlite3.Row
+        rows = [dict(r) for r in c.execute(
+            "SELECT * FROM site_queue WHERE status='applied'"
+            " AND applied_at BETWEEN ? AND ? ORDER BY abs(applied_at - ?) LIMIT 5",
+            (at - 900, at + 900, at))]
+    except Exception:
+        return []
+    finally:
+        if own and c is not None:
+            c.close()
+    try:
+        from pipelines import it_release
+    except Exception:
+        return []
+    page = row.get("page") or ""
+    for q in rows:
+        plan = it_release.plan_of(q)
+        do = plan.get("do")
+        touches = (do in ("replace", "call")
+                   or (plan.get("page") or "") == page
+                   or page in (plan.get("pages") or []))
+        if not touches:
+            continue
+        lines = []
+        if do == "replace":
+            lines.append(f"what you approved: change \u201c{one_line(plan['find'], 90)}\u201d "
+                         f"to \u201c{one_line(plan['to'], 90)}\u201d wherever it appears")
+        elif do == "call":
+            lines.append("what you approved: "
+                         + it_release.ALLOWED_CALLS.get(plan.get("call"), plan.get("call") or ""))
+        elif do == "head_block":
+            lines.append(f"what you approved: add the '{plan.get('block')}' block to "
+                         f"{plan.get('page')}")
+        elif do in ("page", "new_page"):
+            lines.append(f"what you approved: {'publish' if do == 'new_page' else 'rewrite'} "
+                         f"{plan.get('page')}")
+        why = one_line(plan.get("why") or "", 240)
+        if why:
+            lines.append("why: " + why)
+        when = q.get("decided_at")
+        if when:
+            lines.append("you approved it " + time.strftime("%d %b %H:%M", time.localtime(when)))
+        return lines
+    return []
+
+
 def _host(url):
     s = str(url or "")
     s = re.sub(r"^[a-z]+://", "", s).split("/")[0]
@@ -555,6 +662,8 @@ def recent(limit=30, page="", source="") -> dict:
             r["detail"] = [str(r.get("detail"))] if r.get("detail") else []
         r["by"] = ("the agency — " + (r["agent"] or "an agent")
                    if r["source"] == AGENCY else "somebody else")
+        # And, for the agency's own writes, the approval behind it.
+        r["because"] = because(r)
     return {"ok": True, "changes": rows, "total": total,
             "pages_watched": watched, "last_look": last,
             "head": _head(total, watched, last, rows)}
@@ -608,6 +717,24 @@ def _ago(secs):
     return f"{secs // 86400} days ago"
 
 
+def explain(limit=10) -> str:
+    """The agency's recent changes, each with what was changed and why."""
+    r = recent(limit=limit, source=AGENCY)
+    if not r.get("ok"):
+        return "Could not read the log: " + str(r.get("error"))
+    if not r["changes"]:
+        return "The agency has not changed anything on your website."
+    L = []
+    for ch in r["changes"]:
+        L.append(f"{ch['when']:>8}  {ch.get('page') or 'the site'} — "
+                 f"{ch.get('summary') or ch.get('action')}")
+        for line in (ch.get("because") or []) + (ch.get("detail") or []):
+            L.append(f"          · {line}")
+        if ch.get("undo_cmd"):
+            L.append(f"          undo: {ch['undo_cmd']}")
+    return "\n".join(L)
+
+
 def as_text(r) -> str:
     if not r.get("ok"):
         return "WEBSITE CHANGES — " + (r.get("error") or "could not read the log")
@@ -628,8 +755,13 @@ def main():
     ap.add_argument("--page", default="", help="just this page")
     ap.add_argument("--outside", action="store_true",
                     help="only changes the agency did not make")
+    ap.add_argument("--explain", action="store_true",
+                    help="the agency's changes, each with what was changed and why")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.explain:
+        print(explain(limit=0 if a.all else 10))
+        return 0
     r = recent(limit=0 if a.all else 30, page=a.page,
                source=OUTSIDE if a.outside else "")
     print(json.dumps(r, indent=2) if a.json else as_text(r))

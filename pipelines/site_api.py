@@ -357,7 +357,7 @@ def _may_write(agent) -> str:
 # looking for why nothing happened.
 
 def _log_write(action, page, agent, r, html=None, block_id="", summary="",
-               undo_cmd=""):
+               undo_cmd="", before=None, added=""):
     """Write one line of the change log, and refresh what we think the page is."""
     try:
         from coordination import changelog
@@ -369,12 +369,24 @@ def _log_write(action, page, agent, r, html=None, block_id="", summary="",
         # The nightly run putting back a block that is already there is not a
         # change, and logging it every night would bury the real ones.
         return r
+    detail = None
+    if ok:
+        try:
+            if before is not None and html is not None:
+                detail = changelog.what_changed(before, html)
+            elif added:
+                detail = ["added to the top of the page: " + changelog.one_line(added)]
+        except Exception:
+            detail = None
     changelog.record(
         action, page=page, agent=agent, block_id=block_id,
-        summary=summary or _plain(action, page, block_id, ok, r),
+        summary=((summary + (f" in {page}" if page and page not in summary else ""))
+                 if summary and ok else _plain(action, page, block_id, ok, r)),
+        bytes_before=(len(before) if before is not None else None),
         bytes_after=(len(html) if html is not None else r.get("bytes")),
         backup=r.get("backup") or "", undo_cmd=undo_cmd if ok else "",
-        ok=ok, error="" if ok else str(r.get("error") or "")[:300])
+        ok=ok, error="" if ok else str(r.get("error") or "")[:300],
+        detail=detail)
     if ok and html is not None:
         changelog.note_page(page, html=html)
     elif ok:
@@ -450,10 +462,12 @@ def put_head_block(page, block_id, html, agent=AGENT, s=None) -> dict:
              {"page": page, "id": block_id, "html": html}, s=s)
     return _log_write("head_block", page, agent, r, block_id=block_id,
                       undo_cmd=(f"python -m pipelines.site_api "
-                                f"--remove-block {block_id} --page {page}"))
+                                f"--remove-block {block_id} --page {page}"),
+                      added=html)
 
 
-def put_page(page, html, agent=AGENT, s=None, _action="page", _block="") -> dict:
+def put_page(page, html, agent=AGENT, s=None, _action="page", _block="",
+             before=None, summary="") -> dict:
     """
     Write a whole page.
 
@@ -461,6 +475,13 @@ def put_page(page, html, agent=AGENT, s=None, _action="page", _block="") -> dict
     rewriting the file — taking one block out, say — can have the change log
     read "took the viewport block back out of header.php" instead of the
     literally-true but useless "rewrote header.php".
+
+    `before` is the page as it was, and `summary` the change in his words.
+    "i want to know what the program had changed" — his Website changes panel
+    said "rewrote includes/footer.php" and nothing else, three times. With the
+    old page in hand the log records the lines that actually went and came
+    (changelog.what_changed); every caller here reads the page before it
+    writes, so it costs nothing to pass on.
     """
     why = not_ours(page)
     if why:
@@ -481,7 +502,8 @@ def put_page(page, html, agent=AGENT, s=None, _action="page", _block="") -> dict
                           block_id=_block)
     r = call("/pages", "POST", {"page": page, "html": html}, s=s)
     return _log_write(_action, page, agent, r, html=html, block_id=_block,
-                      undo_cmd=f"python -m pipelines.site_api --undo {page}")
+                      undo_cmd=f"python -m pipelines.site_api --undo {page}",
+                      before=before, summary=summary)
 
 
 def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
@@ -503,7 +525,7 @@ def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
     if not pat.search(src):
         return {"ok": True, "page": page, "action": "nothing there"}
     return put_page(page, pat.sub("", src), agent=agent, s=s,
-                    _action="remove_block", _block=block_id)
+                    _action="remove_block", _block=block_id, before=src)
 
 
 # The exact strings the generator leaves for him to fill in. Kept here so the
@@ -601,7 +623,8 @@ def fix_address(agent=AGENT, s=None) -> dict:
             left.append({"page": row["page"], "placeholders": still})
         if not did:
             continue
-        r = put_page(row["page"], html, agent=agent, s=s)
+        r = put_page(row["page"], html, agent=agent, s=s, before=got["html"],
+                     summary="put your saved address where the placeholder was")
         if r.get("ok"):
             changed.append({"page": row["page"], "fixed": did,
                             "backup": r.get("backup")})
@@ -696,7 +719,9 @@ def fix_canonical(agent=AGENT, s=None, dry_run=False) -> dict:
             out.append(line)
         if not hits:
             continue
-        r = put_page(page, "\n".join(out), agent=agent, s=s)
+        r = put_page(page, "\n".join(out), agent=agent, s=s,
+                     before=got.get("html") or "",
+                     summary=f"pointed the canonical tag at {want}")
         if r.get("ok"):
             changed.append({"page": page, "fixed": hits,
                             "backup": r.get("backup")})
@@ -820,7 +845,9 @@ def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:
         if find not in html:
             continue                      # changed under us since the plan
         r = put_page(h["page"], html.replace(find, replace), agent=agent, s=s,
-                     _action="replace")
+                     _action="replace", before=html,
+                     summary=(f"changed \u201c{find[:60]}\u201d to \u201c{replace[:60]}\u201d "
+                              f"({h['times']} time{'s' if h['times'] != 1 else ''})"))
         if r.get("ok"):
             changed.append({"page": h["page"], "times": h["times"],
                             "backup": r.get("backup")})

@@ -418,6 +418,44 @@ def test_a_blocked_write_carries_its_change_to_him():
           (row["status"], "without asking you" in (row["note"] or "")), ("withdrawn", True))
 
 
+def test_the_change_log_says_what_changed_and_why():
+    """
+    "i want to know what the program had changed" — his panel said "rewrote
+    includes/footer.php", "rewrote includes/header.php", "rewrote Home.html"
+    and nothing else.
+    """
+    print("\nEvery change says what went, what came, and which approval asked for it:")
+    _fresh_db()
+    footer = "<footer>\n<p>Mail us: info@worlddeal.ae</p>\n<p>Dubai</p>\n</footer>"
+    header = "<header>\n<a href='mailto:info@worlddeal.ae'>info@worlddeal.ae</a>\n</header>"
+    with _Stub(pages={"includes/footer.php": footer, "includes/header.php": header}) as site:
+        cid = _queue({"why": "the .ae address has no mail server, so enquiries bounce",
+                      "change": {"replace": "info@worlddeal.ae", "with": "info@worlddeal.com",
+                                 "pages": ["includes/footer.php", "includes/header.php"]}})
+        R.run()
+    log = [c for c in changelog.recent()["changes"] if c["source"] == "agency"]
+    foot = next(c for c in log if c["page"] == "includes/footer.php")
+    check("the summary says what, not 'rewrote'",
+          foot["summary"].startswith("changed \u201cinfo@worlddeal.ae\u201d to \u201cinfo@worlddeal.com\u201d"),
+          True)
+    check("the exact line that went", any("removed:" in d and "worlddeal.ae" in d
+                                          for d in foot["detail"]), True)
+    check("and what replaced it", any("put in its place:" in d and "worlddeal.com" in d
+                                      for d in foot["detail"]), True)
+    check("and the approval behind it, with his reason",
+          any("the .ae address has no mail server" in b for b in foot["because"]), True)
+
+    print("\n...and a change made before lines were recorded still says why:")
+    with sqlite3.connect(board.DB) as c:
+        c.execute("UPDATE site_changes SET detail=NULL, summary='rewrote includes/header.php'"
+                  " WHERE page='includes/header.php'")
+    head = next(c for c in changelog.recent()["changes"] if c["page"] == "includes/header.php")
+    check("the approval explains the old 'rewrote' line",
+          any(b.startswith("what you approved: change") for b in head["because"]), True)
+    check("and the command-line view shows it too",
+          "what you approved" in changelog.explain(), True)
+
+
 def test_a_change_the_page_will_not_confirm_goes_straight_back():
     """
     'The server said ok' and 'the change is on the page' are different claims.
@@ -547,6 +585,7 @@ def main():
         test_only_the_named_routines_may_be_run()
         test_the_happy_path_end_to_end()
         test_a_blocked_write_carries_its_change_to_him()
+        test_the_change_log_says_what_changed_and_why()
         test_a_change_the_page_will_not_confirm_goes_straight_back()
         test_advice_he_approved_is_not_pretended_at()
         test_a_site_it_cannot_reach_fails_loudly()

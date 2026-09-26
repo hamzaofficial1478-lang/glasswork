@@ -536,8 +536,11 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
 
         if plan["do"] == "page":
             # An existing page, rewritten whole. The server keeps the old copy
-            # and the change log carries the undo, the same as every write.
-            r = site_api.put_page(plan["page"], plan["html"], agent=agent)
+            # and the change log carries the undo, the same as every write —
+            # and the lines that changed, read off the page as it was.
+            was = site_api.read_page(plan["page"])
+            r = site_api.put_page(plan["page"], plan["html"], agent=agent,
+                                  before=(was.get("html") if was.get("ok") else None))
             if not r.get("ok"):
                 return _could_not(plan, str(r.get("error") or "the write failed"))
             if not confirm(plan["page"], _needle(plan["html"])):

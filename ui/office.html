@@ -1833,6 +1833,12 @@ function renderChanges(){
          snapshot it took, so these are things like "looks like new writing was
          published", "a phone number was added", "code was added — new script
          from tracker.unknown-host.ru". See coordination/changelog.describe. */
+      /* THE APPROVAL BEHIND IT. "i want to know what the program had
+         changed" — for the agency's own writes, what he said yes to and why,
+         read from the approval queue (coordination/changelog.because). */
+      + ((c.because && c.because.length) ? `<ul style="margin:7px 0 0;padding-left:16px;
+              font-size:12px;color:var(--glass);line-height:1.7">`
+          + c.because.map(l=>`<li>${esc(l)}</li>`).join('') + `</ul>` : '')
       + ((c.detail && c.detail.length) ? `<ul style="margin:7px 0 0;padding-left:16px;
               font-size:12px;color:var(--fg);line-height:1.7">`
           + c.detail.map(l=>`<li>${esc(l)}</li>`).join('') + `</ul>` : '')
