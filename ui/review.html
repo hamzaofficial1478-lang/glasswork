@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Review before it leaves</title>
+<title>Mail room</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -110,6 +110,23 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
 .bottombar .in{max-width:1080px;margin:0 auto;padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .bottombar .in p{margin:0;flex:1 1 200px;font-size:13px}
 
+/* ---- a collected lead ---- */
+.leads{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.lead{display:grid;grid-template-columns:28px minmax(0,1.4fr) minmax(0,1.2fr) minmax(0,1fr);gap:4px 12px;
+  align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.lead:last-child{border-bottom:0}
+.lead.picked{background:var(--glass-dim)}
+.lead input{width:17px;height:17px;accent-color:var(--glass);cursor:pointer;margin:0}
+.lead .who b{display:block;overflow-wrap:anywhere}
+.lead .who span{color:var(--muted);font-size:12px}
+.lead .st{font-size:12px;color:var(--muted)}
+.lead.off{opacity:.62}
+.more-leads{padding:10px 14px;font-size:12.5px;color:var(--muted)}
+@media (max-width:640px){
+  .lead{grid-template-columns:24px 1fr;}
+  .lead .addr,.lead .st{grid-column:2}
+}
+
 /* ---- a written page ---- */
 .page{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 12px}
 .page.held{border-color:rgba(234,165,67,.35)}
@@ -163,13 +180,13 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
   <div class="bar">
     <div>
       <div class="etch">Before it leaves the building</div>
-      <h1>Review</h1>
+      <h1 id="roomName">Review</h1>
     </div>
     <a class="back" href="/">&larr; Back to the office</a>
   </div>
   <div class="tabs" role="tablist">
-    <button class="tab on" id="tabMails" role="tab" onclick="show('mails')">Emails<span class="more">&nbsp;to send</span> <span class="count" id="nMails">–</span></button>
-    <button class="tab" id="tabPages" role="tab" onclick="show('pages')">Pages<span class="more">&nbsp;for your website</span> <span class="count" id="nPages">–</span></button>
+    <button class="tab on" id="tabMails" role="tab" onclick="show('mails')">Mail room<span class="more">&nbsp;· write and send</span> <span class="count" id="nMails">–</span></button>
+    <button class="tab" id="tabPages" role="tab" onclick="show('pages')">Posts<span class="more">&nbsp;· read and approve</span> <span class="count" id="nPages">–</span></button>
   </div>
 </header>
 
@@ -177,7 +194,13 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
   <section id="mails" class="on">
     <div class="strip" id="mailFacts"></div>
     <div id="mailNotice"></div>
-    <h2>Written and waiting for you <small id="mailHead"></small></h2>
+    <h2>1 · Your leads <small id="leadHead"></small></h2>
+    <p class="lede">Everyone the Hunter has collected. Tick the ones you want a mail written
+      for and press Write &mdash; the agency writes one mail per lead, in your voice, for you
+      to read below. Nothing is sent at this step.</p>
+    <div class="tools" id="leadTools"></div>
+    <div id="leadList"></div>
+    <h2>2 · Read, tick and send <small id="mailHead"></small></h2>
     <p class="lede">Every mail is written for one lead. Read them, tick the ones you want
       to go, and press Send &mdash; they leave from your own email straight away. Nothing
       you have not ticked is ever sent.</p>
@@ -225,15 +248,21 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const escA = s => esc(s).replace(/'/g, '&#39;');
 let DATA = null;
 const PICKED = new Set();     // mail ids he has ticked — survives every refresh
+const LEADPICK = new Set();   // lead ids he has ticked to have a mail written
+let LEAD_ALL = false;         // show every lead, not just the ones ready to write
+const LEAD_SHOWN = 40;
 const OPEN = new Set();       // pages whose preview he has opened
 let WORKING = false;          // a button press in flight: do not redraw under it
 
 function show(which){
+  $('#roomName').textContent = which === 'pages' ? 'Posts room' : 'Mail room';
+  document.title = which === 'pages' ? 'Posts room' : 'Mail room';
   for(const id of ['mails','pages']){
     $('#'+id).classList.toggle('on', id===which);
     $('#tab'+id[0].toUpperCase()+id.slice(1)).classList.toggle('on', id===which);
   }
-  if(location.hash !== '#'+which) history.replaceState(null,'','#'+which);
+  const path = which === 'pages' ? '/posts' : '/mail';
+  if(location.pathname !== path) history.replaceState(null, '', path);
   drawBar();
 }
 
@@ -293,11 +322,10 @@ function drawMails(m){
     or sent. Turn it back on in the office to use this page.</p></div>`);
   if(m.writing) notes.push(`<div class="notice"><span class="busy">Writing a mail for each lead…</span>
     <p>They appear below as each one is finished.</p></div>`);
-  else if(m.leads_without_mail > 0 && DATA.sectors.Leads) notes.push(`<div class="notice"><p><b>${m.leads_without_mail}</b>
-    lead${m.leads_without_mail===1?' has':'s have'} no mail written yet.</p>
-    <button class="btn glass" onclick="startJob('draft-mails', this)">Write the mails</button></div>`);
+
   $('#mailNotice').innerHTML = notes.join('');
 
+  drawLeads(m);
   $('#mailHead').textContent = m.waiting.length ? `${m.waiting.length} mail${m.waiting.length===1?'':'s'}` : '';
   $('#mailTools').style.display = m.waiting.length ? '' : 'none';
   $('#pickAll').checked = m.waiting.length>0 && m.waiting.every(x=>PICKED.has(x.id));
@@ -330,6 +358,79 @@ function drawMails(m){
       <td>${esc(x.subject)}</td><td>${x.status==='sent'?'<span class="pill ok">sent</span>':'<span class="pill">not sent</span>'}
       ${x.note&&x.status!=='sent'?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
     </table></div>` : `<div class="empty">Nothing decided yet.</div>`;
+}
+
+const LEAD_STATE = {
+  ready:    ['', 'no mail yet'],
+  drafted:  ['amber', 'mail written — read it below'],
+  approved: ['ok', 'approved, going out'],
+  sent:     ['ok', 'written to already'],
+  no:       ['', ''],
+};
+function drawLeads(m){
+  const all = m.leads || [];
+  const live = new Set(all.filter(l=>l.state==='ready').map(l=>l.id));
+  for(const id of [...LEADPICK]) if(!live.has(id)) LEADPICK.delete(id);
+  const ready = all.filter(l=>l.state==='ready');
+  const list = LEAD_ALL ? all : ready;
+  $('#leadHead').textContent = all.length
+    ? `${ready.length} ready to write · ${all.length} collected` : '';
+  const can = DATA.sectors.Leads && !m.writing;
+  $('#leadTools').innerHTML = all.length ? `
+    <label><input type="checkbox" ${ready.length && ready.every(l=>LEADPICK.has(l.id))?'checked':''}
+      ${ready.length?'':'disabled'} onchange="pickLeads(this.checked)"> Tick all ready</label>
+    <button class="btn quiet" onclick="LEAD_ALL=!LEAD_ALL;drawLeads(DATA.mails)">${LEAD_ALL?'Show only the ready ones':'Show every lead'}</button>
+    <span class="sp"></span>
+    <button class="btn glass" ${can && LEADPICK.size?'':'disabled'} onclick="writeFor([...LEADPICK], this)">
+      ${LEADPICK.size ? `Write ${LEADPICK.size} mail${LEADPICK.size===1?'':'s'}` : 'Tick leads to write for'}</button>` : '';
+  if(!all.length){
+    $('#leadList').innerHTML = `<div class="empty">No leads collected yet. The Hunter finds them when Leads runs;
+      each one appears here to be written to.</div>`;
+    return;
+  }
+  if(!list.length){
+    $('#leadList').innerHTML = `<div class="empty">Every lead has a mail written or has been written to already.
+      New ones appear here when the Hunter finds them.</div>`;
+    return;
+  }
+  const rows = list.slice(0, LEAD_SHOWN).map(l=>{
+    const [tone, word] = LEAD_STATE[l.state] || ['', ''];
+    const status = l.state==='no' ? esc(l.why || 'cannot be written to')
+                 : `<span class="pill ${tone}">${esc(word)}</span>`;
+    const pickable = l.state==='ready';
+    return `<div class="lead${LEADPICK.has(l.id)?' picked':''}${pickable?'':' off'}" data-lead="${l.id}">
+      ${pickable ? `<input type="checkbox" aria-label="Write to ${escA(l.company||l.email)}"
+          ${LEADPICK.has(l.id)?'checked':''} onchange="pickLead(${l.id}, this.checked)">` : '<span></span>'}
+      <div class="who"><b>${esc(l.company||'(no name)')}</b><span>${[l.area,(l.segment||'').replace(/_/g,' '),
+        'found '+ago(l.found_at)].filter(Boolean).map(esc).join(' · ')}</span></div>
+      <div class="addr">${esc(l.email||'no email address')}</div>
+      <div class="st">${status}</div>
+    </div>`;}).join('');
+  $('#leadList').innerHTML = `<div class="leads">${rows}${list.length>LEAD_SHOWN
+    ? `<div class="more-leads">and ${list.length-LEAD_SHOWN} more on file — write for these first and the next ones move up.</div>` : ''}</div>`;
+}
+function pickLead(id, on){
+  on ? LEADPICK.add(id) : LEADPICK.delete(id);
+  drawLeads(DATA.mails);
+}
+function pickLeads(on){
+  for(const l of (DATA.mails.leads||[])) if(l.state==='ready') on ? LEADPICK.add(l.id) : LEADPICK.delete(l.id);
+  drawLeads(DATA.mails);
+}
+async function writeFor(ids, btn){
+  if(!ids.length) return;
+  if(ids.length > 25){ toast('Up to 25 at a time — untick some, and write the rest next.', 'bad'); return; }
+  btn.disabled = true; btn.textContent = 'Starting…';
+  let j;
+  try{
+    const r = await fetch('/api/review/start/draft-mails', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  if(!j.ok){ toast(j.error || 'Could not start it.', 'bad'); btn.disabled = false; return; }
+  LEADPICK.clear();
+  toast(`Writing ${ids.length} mail${ids.length===1?'':'s'}. Each appears under step 2 when it is finished.`, 'good');
+  setTimeout(load, 2500);
 }
 
 function pick(id, on){
@@ -426,6 +527,10 @@ function drawPages(p){
     <button class="btn glass" onclick="startJob('write-page', this)">Write the next page now</button></div>`);
   if(DATA.other_site_changes) notes.push(`<div class="notice"><p>${DATA.other_site_changes} other change${DATA.other_site_changes===1?'':'s'} to your
     site ${DATA.other_site_changes===1?'is':'are'} waiting in the office under <a href="/">Waiting on you</a>.</p></div>`);
+  if((p.upcoming||[]).length) notes.push(`<div class="notice" style="display:block"><p style="margin:0 0 6px"><b>Next to be written</b></p>
+    ${p.upcoming.map(u=>`<div style="font-size:12.5px;color:var(--muted);padding:2px 0">${esc(u.title)}`
+      + (u.keyword?` — for “${esc(u.keyword)}”`:'')
+      + (u.held_for_seo?` <span class="pill">waiting on SEO</span>`:'') + `</div>`).join('')}</div>`);
   $('#pageNotice').innerHTML = notes.join('');
 
   $('#pageHead').textContent = p.waiting.length ? `${p.waiting.length} page${p.waiting.length===1?'':'s'}` : '';
@@ -510,7 +615,11 @@ function tick(){
   });
 }
 
-show(location.hash === '#pages' ? 'pages' : 'mails');
+// /mail and /posts are the two rooms; /review opens either from its hash.
+const ROOM = location.pathname.startsWith('/posts') ? 'pages'
+           : location.pathname.startsWith('/mail') ? 'mails'
+           : (location.hash === '#pages' ? 'pages' : 'mails');
+show(ROOM);
 tick();
 </script>
 </body>

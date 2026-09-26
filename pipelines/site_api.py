@@ -307,6 +307,26 @@ def backups(s=None) -> dict:
 # WRITE — the Releaser, or the owner's queue. Never a third option.
 # ---------------------------------------------------------------------------
 
+def _queue_for_him(agent, kind, page, detail):
+    """
+    Queue a blocked write for his yes, WITH the change in it.
+
+    THE FIVE RED "REFUSED" LINES. This used to queue {"page", "bytes"} — the
+    page's name and the size of what was going to be written, and not the
+    thing itself. He approved five of them, the Releaser opened each and found
+    nothing to carry out, and his change log filled with "this approval carries
+    no change and no instruction". The approval was real; the note it was
+    written on was empty. It now carries exactly what the desk wanted to write,
+    in the shape the Releaser reads (it_release.plan_of).
+
+    Too big for the queue is said out loud, never saved as an empty note.
+    """
+    try:
+        return board.queue_site_change(agent, kind, detail)
+    except ValueError as e:
+        return {"not_queued": str(e), "page": page}
+
+
 def _may_write(agent) -> str:
     if agent != AGENT:
         return (f"'{agent}' may not change the website. Only {AGENT} goes "
@@ -417,9 +437,12 @@ def put_head_block(page, block_id, html, agent=AGENT, s=None) -> dict:
                           {"ok": False, "error": why}, block_id=block_id)
     refused = _may_write(agent)
     if refused:
-        cid = board.queue_site_change(agent, "head_block",
-                                      {"page": page, "id": block_id,
-                                       "bytes": len(html)})
+        cid = _queue_for_him(agent, "head_block", page, {
+            "change": {"page": page, "block": block_id, "html": html},
+            "why": (f"{agent} wants to add the '{block_id}' block to the head of "
+                    f"{page}. Only the IT Releaser writes to your site, so it "
+                    "waits for your yes."),
+            "bytes": len(html)})
         return _log_write("head_block", page, agent,
                           {"ok": False, "queued": cid, "error": refused},
                           block_id=block_id)
@@ -445,8 +468,14 @@ def put_page(page, html, agent=AGENT, s=None, _action="page", _block="") -> dict
                           {"ok": False, "error": why}, block_id=_block)
     refused = _may_write(agent)
     if refused:
-        cid = board.queue_site_change(agent, "page",
-                                      {"page": page, "bytes": len(html)})
+        cid = _queue_for_him(agent, "page", page, {
+            "change": {"page": page, "html": html, "whole_page": True},
+            "why": (f"{agent} wants to rewrite {page}"
+                    + (f" ({_action.replace('_', ' ')})" if _action != "page" else "")
+                    + ". Only the IT Releaser writes to your site, so it waits for "
+                      "your yes. The old copy is kept on the server and can be put "
+                      "back."),
+            "bytes": len(html)})
         return _log_write(_action, page, agent,
                           {"ok": False, "queued": cid, "error": refused},
                           block_id=_block)
@@ -773,10 +802,12 @@ def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:
         return {**plan, "dry_run": True}
     refused = _may_write(agent)
     if refused:
-        cid = board.queue_site_change(agent, "replace_text",
-                                      {"find": find, "replace": replace,
-                                       "files": plan["files"],
-                                       "times": plan["times"]})
+        cid = _queue_for_him(agent, "replace_text", "site", {
+            "change": {"replace": find, "with": replace,
+                       "pages": plan["files"], "times": plan["times"]},
+            "why": (f"{agent} wants to change {find!r} to {replace!r} in "
+                    f"{len(plan['files'])} file(s). Only the IT Releaser writes "
+                    "to your site, so it waits for your yes.")})
         return {"ok": False, "queued": cid, "error": refused}
 
     changed, failed = [], []

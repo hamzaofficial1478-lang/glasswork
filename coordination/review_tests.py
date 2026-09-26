@@ -103,6 +103,45 @@ def test_every_mail_is_there_whole():
         check("the lead with no mail yet is counted", m["leads_without_mail"], 1)
 
 
+def test_the_mail_room_lists_every_lead_and_where_it_stands():
+    print("\nThe Mail room lists the collected leads, and where each stands:")
+    with _Cabinet() as cab:
+        ready = board.add_lead_if_new({"company": "Marina Fitout", "email": "hello@marinafit.ae"})
+        drafted = board.add_lead_if_new({"company": "Al Noor", "email": "info@alnoor.ae"})
+        board.queue_outreach(drafted, "Al Noor", "info@alnoor.ae", "S", "b")
+        sent = board.add_lead_if_new({"company": "Done Before", "email": "hi@done.ae"})
+        cab.sql("INSERT INTO outreach_log(lead_id,channel,direction,body,at)"
+                " VALUES(?,'email','sent','hi',?)", (sent, int(time.time())))
+        noaddr = board.add_lead_if_new({"company": "No Address", "phone": "+97143851122"})
+        st = {l["id"]: l for l in review.build()["mails"]["leads"]}
+        check("ready to write", st[ready]["state"], "ready")
+        check("a mail already written", st[drafted]["state"], "drafted")
+        check("written to already", st[sent]["state"], "sent")
+        check("no address: cannot, and says why",
+              (st[noaddr]["state"], st[noaddr]["why"]), ("no", "no address on file"))
+
+
+def test_write_only_for_the_ticked_leads():
+    print("\nWrite writes for the leads he ticked, and nobody else:")
+    from pipelines import leads_outreach as O
+    real = O.draft_for
+    O.draft_for = lambda lead, company, owner_voice="": {
+        "ok": True, "lead": lead, "service": "glass work", "service_key": "glass",
+        "draft": f"Subject: For {lead['company']}\n\nHello.", "subject": f"For {lead['company']}",
+        "body": "Hello.", "audit": {"pass": True, "words": 40, "warnings": [], "blocking": []}}
+    try:
+        with _Cabinet():
+            a = board.add_lead_if_new({"company": "Marina Fitout", "email": "hello@marinafit.ae"})
+            board.add_lead_if_new({"company": "Palm Villas", "email": "office@palmvillas.ae"})
+            r = review.draft_mails([a])
+            check("it ran", r.get("ok"), True)
+            q = board.pending_outreach()
+            check("one mail, for the ticked lead", [x["lead_id"] for x in q], [a])
+            check("and nothing was sent", [x["status"] for x in q], ["pending"])
+    finally:
+        O.draft_for = real
+
+
 def test_send_refuses_without_his_email():
     print("\nSend refuses, and approves nothing, while his email is not set up:")
     with _Cabinet():
@@ -185,6 +224,8 @@ def test_nothing_picked_is_not_an_action():
 
 def main():
     for t in (test_every_mail_is_there_whole,
+              test_the_mail_room_lists_every_lead_and_where_it_stands,
+              test_write_only_for_the_ticked_leads,
               test_send_refuses_without_his_email,
               test_a_written_page_is_there_with_the_page_itself,
               test_the_held_page_he_could_not_find_is_there,

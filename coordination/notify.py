@@ -157,7 +157,7 @@ def collect() -> list:
                                   "waiting on you"),
                         "body": (f"To {who}"
                                  + (" and others" if len(held) > 3 else "")
-                                 + ". Read them on the Review page, tick the "
+                                 + ". Read them in the Mail room, tick the "
                                    "ones you want and press Send. Nothing has "
                                    "been sent yet, and nothing goes without "
                                    "your tick.")})

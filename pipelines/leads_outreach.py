@@ -55,7 +55,7 @@ EVERY MAIL IS HIS CALL
 This used to hold the FIRST batch of three for him and treat approving any one
 of them as permission to send every later draft on its own. That is not what
 he asked for. Now every draft — one per eligible lead, up to BATCH a pass — is
-queued, he reads them on the Review page (/review), ticks the recipients he
+queued, he reads them in the Mail room (/mail), ticks the recipients he
 wants, and presses Send. Those go out through his own SMTP, inside the daily
 cap, straight away (send_now). Nothing leaves without his tick; the ones he
 does not want he discards, and they are never sent.
@@ -91,7 +91,7 @@ def _company():
                 "areas": uae.served()}
 
 
-def eligible(limit=BATCH):
+def eligible(limit=BATCH, only_ids=None, log=True):
     """
     Leads that may be written to, and why each rejected one may not.
 
@@ -118,6 +118,9 @@ def eligible(limit=BATCH):
         c.close()
 
     can, cannot = [], []
+    if only_ids:
+        want = {int(i) for i in only_ids}
+        rows = [r for r in rows if r["id"] in want]
     for r in rows:
         name = r.get("company") or r.get("name") or f"lead {r['id']}"
         if not (r.get("email") or "").strip():
@@ -141,8 +144,12 @@ def eligible(limit=BATCH):
         findings = security_screen.scan_lead(r)
         bad = [f for f in findings if f["severity"] in ("high", "critical")]
         if bad:
-            security_screen.log_events(findings, source=f"lead {r['id']}",
-                                       action="refused")
+            # Logged when it is a real refusal, not every time a screen that
+            # only shows the list asks (log=False) — the Mail room reads this
+            # on every refresh.
+            if log:
+                security_screen.log_events(findings, source=f"lead {r['id']}",
+                                           action="refused")
             cannot.append({"id": r["id"], "company": name,
                            "why": f"Security: {bad[0]['why']}"})
             continue
@@ -169,14 +176,15 @@ def draft_for(lead, company, owner_voice=""):
             "audit": v, "used": written.get("used")}
 
 
-def run(agent=AGENT, dry_run=False, limit=BATCH) -> dict:
+def run(agent=AGENT, dry_run=False, limit=BATCH, only_ids=None) -> dict:
+    """One pass. `only_ids`: write for just these leads — the Mail room's ticks."""
     with board.agent_run(agent) as run_row:
-        out = _run(agent, dry_run, limit)
+        out = _run(agent, dry_run, limit, only_ids)
         run_row.note(out.get("head") or out.get("error") or "nothing to do")
         return out
 
 
-def _run(agent, dry_run, limit) -> dict:
+def _run(agent, dry_run, limit, only_ids=None) -> dict:
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off — you turned this "
                                       "sector off, so nothing goes out."}
@@ -195,7 +203,7 @@ def _run(agent, dry_run, limit) -> dict:
         return dispatch.nothing_here(SECTOR, agent)
 
     company = _company()
-    can, cannot = eligible(limit)
+    can, cannot = eligible(limit, only_ids=only_ids)
     if not can:
         board.finish_task(task["id"], agent,
                           {"drafted": 0, "why": "nobody eligible"}, status="done")
@@ -310,7 +318,7 @@ def _send_approved(room, ids=None, failed=None):
                         "service": q["service"], "words": 0})
         else:
             # Left 'approved' so the next pass tries again, with the reason
-            # written where the Review page shows it.
+            # written where the Mail room shows it.
             _note_attempt(q["id"], r.get("error", "the send boundary refused it"))
             failed.append({"id": q["id"], "company": q["company"], "to": q["to_email"],
                            "why": r.get("error", "the send boundary refused it")})
@@ -329,7 +337,7 @@ def _note_attempt(qid, why):
 
 def send_now(ids) -> dict:
     """
-    The Review page's Send button: approve exactly these drafts and send them,
+    The Mail room's Send button: approve exactly these drafts and send them,
     now, through his SMTP, inside the daily cap. Returns {sent, failed}.
     """
     if not board.sector_enabled(SECTOR):
@@ -363,7 +371,7 @@ def _head(sent, queued, held, failed, drafted, dry_run):
                 f"{len(held)} would be held by the Auditor, nothing sent")
     if queued:
         return (f"{len(queued)} mail(s) written and waiting on you. Tick the "
-                "ones you want on the Review page and press Send."
+                "ones you want in the Mail room and press Send."
                 + (f" {len(sent)} you approved earlier were sent." if sent else ""))
     if sent:
         return (f"{len(sent)} mail(s) sent"
@@ -382,7 +390,7 @@ def as_text(r) -> str:
     L = [f"OUTREACH — {r['head']}"]
     if "cap" in r:
         L.append(f"  cap {r['sent_today']}/{r['cap']} today · every draft waits "
-                 "for your tick on the Review page")
+                 "for your tick in the Mail room")
     for s in r.get("sent") or []:
         L.append(f"  sent    {s['company'][:34]:36} {s['to'][:30]:32} {s['subject'][:40]}")
     for q in r.get("queued") or []:
@@ -408,7 +416,7 @@ def preview(to_email="", lead=None, company=None) -> dict:
     read.
 
     Two things this deliberately does NOT do. It does not count against the
-    daily cap or his Review page, because it goes to him and nobody else; and
+    daily cap or the Mail room, because it goes to him and nobody else; and
     it refuses any address that is not one he typed on the command line, so
     "preview" can never quietly become "send to a lead".
     """

@@ -309,6 +309,9 @@ app.get("/control", (_q, r) => r.sendFile(path.join(__dirname, "ui", "agency.htm
 app.get("/setup", (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
 app.get("/status", (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
 app.get("/review", (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
+// The two rooms, one page: /mail opens on the mail, /posts on the written pages.
+app.get("/mail", (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
+app.get("/posts", (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
 
 /* IS THE RUNNING PROGRAM OLDER THAN THE PAGE READING IT?
    The screens are files on disk, re-read on every refresh. This file is read
@@ -1176,8 +1179,12 @@ app.post("/api/review/start/:job", (req, res) => {
   if (!flag) return res.json({ ok: false, error: "unknown job" });
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
+  // The Mail room's ticks: which leads to write for. Numbers only.
+  const ids = (Array.isArray((req.body || {}).ids) ? req.body.ids : [])
+    .map((x) => parseInt(x, 10)).filter(Number.isFinite).slice(0, 25);
+  const extra = (req.params.job === "draft-mails" && ids.length) ? ["--ids", ids.join(",")] : [];
   try {
-    const child = spawn(py.cmd, [...py.prefix, "-m", "coordination.review", flag], {
+    const child = spawn(py.cmd, [...py.prefix, "-m", "coordination.review", flag, ...extra], {
       cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,
     });
     child.on("error", () => {});

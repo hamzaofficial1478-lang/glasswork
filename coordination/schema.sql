@@ -313,6 +313,8 @@ CREATE TABLE IF NOT EXISTS site_queue (
   kind       TEXT,                        -- upsert_page | release | rollback | form_test | ...
   detail     TEXT,
   status     TEXT DEFAULT 'pending',      -- pending | approved | rejected
+                                          -- | withdrawn (never put to him: an
+                                          --   empty note, nothing to carry out)
                                           -- | applied  (it is on the site now)
                                           -- | failed   (tried, and could not)
   queued_at  INTEGER,

@@ -182,6 +182,15 @@ def plan_of(row) -> dict:
                 "content_id": change.get("content_id"),
                 "issue_id": issue, "why": d.get("why") or "", "row": row}
 
+    # A WHOLE EXISTING PAGE, rewritten — queued by site_api when a desk other
+    # than the Releaser was stopped from writing it. Checked before the head
+    # block, which has the same two keys: reading a whole page as a block
+    # would paste an entire document into the <head>.
+    if isinstance(change, dict) and change.get("html") and change.get("page") \
+            and (change.get("whole_page") or str(row.get("kind") or "") == "page"):
+        return {"do": "page", "page": change["page"], "html": change["html"],
+                "issue_id": issue, "why": d.get("why") or "", "row": row}
+
     if isinstance(change, dict) and change.get("html") and change.get("page"):
         return {"do": "head_block", "page": change["page"],
                 "block": change.get("block") or "agency",
@@ -234,10 +243,37 @@ def plan_of(row) -> dict:
                 "why": (row.get("detail") or "")[:300],
                 "steps": []}
 
+    # AN EMPTY NOTE FROM AN OLDER BUILD. site_api used to queue a blocked
+    # write as its page name and size only, dropping the change itself (see
+    # site_api._queue_for_him). Say what it actually was.
+    if d.get("page") and ("bytes" in d or "id" in d) or d.get("find"):
+        return {"do": "refuse", "issue_id": issue, "row": row, "empty_note": True,
+                "why": (f"this was only a note that {row.get('agent') or 'a desk'} "
+                        f"had been stopped from writing to "
+                        f"{d.get('page') or 'your site'} — the change itself was "
+                        "never saved with it, so there was nothing to put on. "
+                        "Nothing was changed. Newer notes carry the change, and "
+                        "the desk will ask again if it still wants it.")}
+
     return {"do": "refuse", "issue_id": issue, "row": row,
             "why": ("this approval carries no change and no instruction — it "
                     "looks like a record of something that was refused rather "
                     "than a proposal. Nothing was done to your site.")}
+
+
+def carryable(row) -> tuple:
+    """
+    (True, "") if the Releaser could carry this out once he says yes, else
+    (False, why). Asked BEFORE a change is put to him, so he is never asked to
+    approve a note with nothing in it.
+    """
+    try:
+        plan = plan_of(dict(row))
+    except Exception as e:
+        return False, f"it could not be read: {e}"
+    if plan.get("do") == "refuse":
+        return False, plan.get("why") or ""
+    return True, ""
 
 
 # The only routines this desk may call, by name. A list rather than getattr on
@@ -378,7 +414,7 @@ def _work(agent, limit, dry_run, skip_tests):
 
     plans = [plan_of(r) for r in waiting]
     doable = [p for p in plans
-              if p["do"] in ("head_block", "call", "replace", "new_page")]
+              if p["do"] in ("head_block", "call", "replace", "new_page", "page")]
     noted = [p for p in plans if p["do"] == "noted"]
     refused = [p for p in plans if p["do"] == "refuse"]
 
@@ -495,6 +531,25 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             board.mark_site_change(
                 row["id"], "applied",
                 f"written to {plan['page']} and confirmed on the page"
+                + (" (tests were skipped at your request)" if skipped_tests else ""))
+            return True
+
+        if plan["do"] == "page":
+            # An existing page, rewritten whole. The server keeps the old copy
+            # and the change log carries the undo, the same as every write.
+            r = site_api.put_page(plan["page"], plan["html"], agent=agent)
+            if not r.get("ok"):
+                return _could_not(plan, str(r.get("error") or "the write failed"))
+            if not confirm(plan["page"], _needle(plan["html"])):
+                site_api.undo(page=plan["page"], agent=agent)
+                return _could_not(
+                    plan, "the website accepted the page and then did not serve "
+                          "it back, so it was put straight back. Nothing has been "
+                          "left half-done.")
+            _close_ticket(plan.get("issue_id"))
+            board.mark_site_change(
+                row["id"], "applied",
+                f"{plan['page']} rewritten and confirmed on the page"
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 

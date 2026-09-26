@@ -363,6 +363,61 @@ def test_the_happy_path_end_to_end():
     check("and writes nothing again", site.writes, [])
 
 
+def test_a_blocked_write_carries_its_change_to_him():
+    """
+    His change log: five red "REFUSED — this approval carries no change and no
+    instruction". A desk other than the Releaser tried to write, was stopped,
+    and the note put to him held only the page name and a size. He approved
+    empty notes.
+    """
+    print("\nA desk that is stopped from writing puts the change itself to him:")
+    _fresh_db()
+    with _Stub() as site:
+        r = site_api.put_head_block("includes/header.php", "viewport", VIEWPORT,
+                                    agent="seo-lead")
+        check("the desk did not write", site.writes, [])
+        cid = r.get("queued")
+        row = _sql("SELECT kind, detail FROM site_queue WHERE id=?", (cid,))[0]
+        check("the note carries the markup",
+              json.loads(row["detail"])["change"]["html"], VIEWPORT)
+        ok, _why = R.carryable(row)
+        check("and it is something the Releaser can carry out", ok, True)
+        board.decide_site_change(cid, "approved")
+        got = R.run()
+        check("his yes puts it on", got["applied"], 1)
+        check("written by the Releaser, not the desk",
+              site.writes, [("includes/header.php", "viewport", "it-releaser")])
+
+    print("\n...and a whole page the same way:")
+    _fresh_db()
+    with _Stub(pages={"Home.html": "<html><body>old</body></html>"}) as site:
+        new_html = "<html><body>" + "A new home page for the business. " * 4 + "</body></html>"
+        r = site_api.put_page("Home.html", new_html, agent="it-fixer")
+        cid = r.get("queued")
+        board.decide_site_change(cid, "approved")
+        got = R.run()
+        check("the rewrite is carried out", got["applied"], 1)
+        check("and the page is the new one", site.pages["Home.html"], new_html)
+
+    print("\nAn empty note from an older build is never put to him:")
+    _fresh_db()
+    old = board.queue_site_change("seo-lead", "head_block",
+                                  {"page": "includes/header.php", "id": "schema",
+                                   "bytes": 812})
+    ok, why = R.carryable(_sql("SELECT * FROM site_queue WHERE id=?", (old,))[0])
+    check("seen as nothing to carry out", ok, False)
+    check("and the reason says what it was", "only a note" in why, True)
+    from coordination import state
+    check("it is not on his list",
+          [a for a in state.build().get("approvals") or []
+           if a.get("kind") == "site_change" and a.get("id") == old], [])
+    from coordination import leftovers
+    leftovers.tidy()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (old,))[0]
+    check("the clear-up takes it off, saying why",
+          (row["status"], "without asking you" in (row["note"] or "")), ("withdrawn", True))
+
+
 def test_a_change_the_page_will_not_confirm_goes_straight_back():
     """
     'The server said ok' and 'the change is on the page' are different claims.
@@ -491,6 +546,7 @@ def main():
         test_a_red_suite_stops_everything()
         test_only_the_named_routines_may_be_run()
         test_the_happy_path_end_to_end()
+        test_a_blocked_write_carries_its_change_to_him()
         test_a_change_the_page_will_not_confirm_goes_straight_back()
         test_advice_he_approved_is_not_pretended_at()
         test_a_site_it_cannot_reach_fails_loudly()

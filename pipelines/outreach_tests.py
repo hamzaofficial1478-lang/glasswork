@@ -228,7 +228,7 @@ def test_every_mail_waits_for_his_tick():
             appr = [a for a in _approvals() if a["kind"] == "review_mails"]
             check("one line on his list", len(appr), 1)
             check("saying how many", appr[0]["count"], 2)
-            check("and linking to where he reads them", appr[0]["link"], "/review#mails")
+            check("and linking to the Mail room, where he reads them", appr[0]["link"], "/mail")
 
             print("  ...he ticks one and presses Send:")
             r = O.send_now([qa])

@@ -165,7 +165,58 @@ def _mails(c):
         pass
     return {"waiting": waiting, "approved": approved, "recent": recent,
             "leads_without_mail": unwritten, "writing": busy("leads-outreach", c),
-            **_mail_settings()}
+            "leads": _lead_list(c), **_mail_settings()}
+
+
+# How many leads the Mail room lists. Newest first; the rest are on file.
+LEAD_LIST = 200
+
+
+def _lead_list(c):
+    """
+    Every collected lead, newest first, with where it stands for mail:
+
+      ready      can be written to — tick it and press Write
+      drafted    a mail is written and waiting for his tick below
+      approved   he said yes; it goes on the next pass (cap or server)
+      sent       already written to — a business is approached once
+      no         cannot be written to, and why (no address, Security, stage)
+    """
+    leads = _rows(c, "SELECT id, company, name, email, area, segment, source,"
+                     " stage, found_at FROM leads ORDER BY found_at DESC, id DESC"
+                     " LIMIT ?", (LEAD_LIST,))
+    if not leads:
+        return []
+    state = {}
+    for q in _rows(c, "SELECT lead_id, status FROM outreach_queue"
+                      " WHERE status IN ('pending','approved','sent')"):
+        rank = {"pending": 1, "approved": 2, "sent": 3}
+        cur = state.get(q["lead_id"])
+        if not cur or rank[q["status"]] > rank[cur]:
+            state[q["lead_id"]] = q["status"]
+    for r in _rows(c, "SELECT DISTINCT lead_id FROM outreach_log WHERE direction='sent'"):
+        state[r["lead_id"]] = "sent"
+    why_not = {}
+    try:
+        from pipelines import leads_outreach
+        _can, cannot = leads_outreach.eligible(limit=LEAD_LIST * 2, log=False,
+                                               only_ids=[l["id"] for l in leads])
+        why_not = {x["id"]: x["why"] for x in cannot}
+    except Exception:
+        pass
+    out = []
+    for l in leads:
+        st = {"pending": "drafted", "approved": "approved", "sent": "sent"}.get(
+            state.get(l["id"]), "")
+        why = ""
+        if not st:
+            why = why_not.get(l["id"], "")
+            st = "no" if why else "ready"
+        out.append({"id": l["id"], "company": l.get("company") or l.get("name") or "",
+                    "email": l.get("email") or "", "area": l.get("area") or "",
+                    "segment": l.get("segment") or "", "source": l.get("source") or "",
+                    "found_at": l.get("found_at") or 0, "state": st, "why": why})
+    return out
 
 
 def _page_of(detail):
@@ -216,8 +267,16 @@ def _pages(c):
                              " AND (draft IS NULL OR draft='')").fetchone()[0]
     except sqlite3.Error:
         pass
+    upcoming = []
+    for r in _rows(c, "SELECT id, title, brief, status FROM content_queue"
+                      " WHERE (status='briefed' AND (draft IS NULL OR draft=''))"
+                      "    OR status LIKE 'blocked_on_%' ORDER BY id LIMIT 8"):
+        b = _json(r.get("brief"), {}) or {}
+        upcoming.append({"id": r["id"], "title": r.get("title") or "",
+                         "keyword": b.get("primary_keyword") or "",
+                         "held_for_seo": (r.get("status") or "").startswith("blocked_on_")})
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
-            "to_write": to_write,
+            "to_write": to_write, "upcoming": upcoming,
             "held_for_seo": sum(n for k, n in counts.items() if k.startswith("blocked_on_")),
             "published": counts.get("published", 0),
             "writing": busy("content-writer", c),
@@ -227,11 +286,15 @@ def _pages(c):
 def build() -> dict:
     c = _conn()
     try:
+        # Only changes he could actually decide — the same rule as "Waiting on
+        # you" (it_release.carryable), so the two screens agree on the number.
         other = 0
         try:
-            other = c.execute("SELECT count(*) FROM site_queue WHERE status='pending'"
-                              " AND kind!='new_page'").fetchone()[0]
-        except sqlite3.Error:
+            from pipelines import it_release
+            other = sum(1 for r in _rows(c, "SELECT * FROM site_queue WHERE"
+                                            " status='pending' AND kind!='new_page'")
+                        if it_release.carryable(r)[0])
+        except Exception:
             pass
         day_running = False
         try:
@@ -348,17 +411,28 @@ def act(do, ids) -> dict:
 # it. The server starts these in the background so the page stays usable
 # while Claude writes, and the page shows "writing…" from the busy flags.
 
-def draft_mails() -> dict:
+# The most he can have written in one press. One Claude call each; more than
+# this in one go is an afternoon of allowance for mail he will not read today.
+MOST_AT_ONCE = 25
+
+
+def draft_mails(ids=None) -> dict:
+    """Write a mail for each ticked lead (or every ready one), queued for his tick."""
     if not board.sector_enabled("Leads"):
         return {"ok": False, "error": "Leads is switched off."}
     if busy("leads-outreach"):
         return {"ok": False, "error": "The outreach desk is already writing."}
+    ids = _ids(ids)[:MOST_AT_ONCE]
     board.post_task(
-        "Leads", "Write outreach mails for the leads on file",
-        "The owner pressed 'Write the mails' on the Review page. Draft one mail "
-        "per eligible lead and queue each one for his tick. Send nothing that he "
-        "has not ticked.", created_by="owner", desk="leads-outreach")
+        "Leads", "Write outreach mails for the leads on file"
+                 + (f" ({len(ids)} picked by the owner)" if ids else ""),
+        "The owner pressed 'Write' in the Mail room. Draft one mail per lead"
+        + (" he ticked" if ids else " that can be written to")
+        + " and queue each one for his tick. Send nothing he has not ticked.",
+        created_by="owner", desk="leads-outreach")
     from pipelines import leads_outreach
+    if ids:
+        return leads_outreach.run(limit=len(ids), only_ids=ids)
     return leads_outreach.run()
 
 
@@ -385,6 +459,7 @@ def main():
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--act", action="store_true", help="read {do, ids} on stdin")
     ap.add_argument("--draft-mails", action="store_true")
+    ap.add_argument("--ids", default="", help="with --draft-mails: lead ids, comma-separated")
     ap.add_argument("--write-page", action="store_true")
     ap.add_argument("--publish-now", action="store_true")
     a = ap.parse_args()
@@ -393,7 +468,7 @@ def main():
             req = json.loads(sys.stdin.read() or "{}")
             out = act(str(req.get("do") or ""), req.get("ids") or [])
         elif a.draft_mails:
-            out = draft_mails()
+            out = draft_mails([i for i in a.ids.split(",") if i.strip()])
         elif a.write_page:
             out = write_page()
         elif a.publish_now:
