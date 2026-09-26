@@ -457,21 +457,102 @@ def _only_for(rid) -> list:
         return []
 
 
-def _open_run(note, forced, blocking, only=None):
+def _open_run(note, forced, blocking, only=None, skip=None, resume_of=None,
+              tidied=None):
+    """
+    Write the run and its steps down. `skip` is {seq: why} for steps a resume
+    does not run: they are settled here, with the reason, so the run panel shows
+    from the first second what will and will not happen.
+    """
     rid = uuid.uuid4().hex[:12]
+    skip = skip or {}
     board.ensure_schema()
+    now = _now()
     with sqlite3.connect(board.DB, timeout=30) as c:
         c.execute("INSERT INTO day_runs(id,started_at,status,started_by,note,forced,"
-                  "blocking,only_sectors,steps_total,steps_done,pid,host)"
-                  " VALUES(?,?,?,?,?,?,?,?,?,0,?,?)",
-                  (rid, _now(), "running", "owner", (note or "")[:2000],
+                  "blocking,only_sectors,steps_total,steps_done,pid,host,"
+                  "resume_of,tidied)"
+                  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (rid, now, "running", "owner", (note or "")[:2000],
                    1 if forced else 0, json.dumps(blocking or []),
-                   json.dumps(only) if only else None, len(STEPS),
-                   os.getpid(), board._this_host()))
+                   json.dumps(only) if only else None, len(STEPS), len(skip),
+                   os.getpid(), board._this_host(), resume_of,
+                   json.dumps(tidied) if tidied else None))
         for i, (label, mod, room, lane) in enumerate(STEPS):
-            c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane)"
-                      " VALUES(?,?,?,?, 'waiting', ?)", (rid, i, label, mod, lane))
+            if i in skip:
+                c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane,"
+                          "started_at,ended_at,code,summary)"
+                          " VALUES(?,?,?,?, 'skipped', ?,?,?,0,?)",
+                          (rid, i, label, mod, lane, now, now, skip[i]))
+            else:
+                c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane)"
+                          " VALUES(?,?,?,?, 'waiting', ?)", (rid, i, label, mod, lane))
     return rid
+
+
+def _preskipped(rid) -> set:
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            return {r[0] for r in c.execute(
+                "SELECT seq FROM day_steps WHERE run_id=? AND status='skipped'",
+                (rid,))}
+    except Exception:
+        return set()
+
+
+# ---------------------------------------------------------------------------
+# RESUME — START FROM WHERE IT LEFT OFF
+# ---------------------------------------------------------------------------
+#
+# "add a button that should say resume or start from where you left by
+#  clicking that button the program will start from where it was closed last
+#  time it will finish that unanswered and queued tasks first"
+#
+# A resume is an ordinary run with a plan: the clear-up first (every run has
+# that now — coordination/leftovers.tidy), then only
+#
+#   the steps the last run did not get to finish   if it was cut off
+#   the steps of any sector that still has work   a question in its inbox or a
+#     waiting                                       job on its board
+#   the cheap ones about the agency as a whole    phone answers, the Overseer
+#                                                   either side, Report
+#
+# Everything else finished last time and is not repeated — which is the model
+# calls saved. The MD does not plan the day again unless its own step never
+# ran or questions are waiting for it: the plan it made still stands, and a
+# second plan on top of an unfinished first is the double load he means.
+
+# Cheap, and about the agency as a whole: they run on every resume.
+ALWAYS_ON_RESUME = ("coordination.ntfy_replies", "coordination.faults",
+                    "pipelines.report_daily")
+
+# Steps that do their own fresh work rather than working a queue. A sector
+# with jobs waiting does not re-run these just because of the queue.
+NOT_FOR_A_QUEUE = ("pipelines.seo_audit", "pipelines.site_watch",
+                   "pipelines.site_search", "pipelines.md_cycle")
+
+
+def resume_plan(prev, rooms) -> dict:
+    """{seq: why} for each step a resume does NOT run."""
+    prev = prev or {}
+    unfinished = {u["label"] for u in prev.get("unfinished") or []}
+    rooms = {str(r).lower() for r in (rooms or [])}
+    when = prev.get("ended_at") or prev.get("started_at")
+    at = f" ({time.strftime('%H:%M', time.localtime(when))})" if when else ""
+    skip = {}
+    for i, (label, mod, room, _lane) in enumerate(STEPS):
+        if mod in ALWAYS_ON_RESUME or label in unfinished:
+            continue
+        if mod == "pipelines.md_cycle":
+            if "director" in rooms:
+                continue                  # questions are waiting for the MD
+            skip[i] = ("the MD's plan from the last run still stands, so it is not "
+                       "made again on top of work that is not finished")
+            continue
+        if room.lower() in rooms and mod not in NOT_FOR_A_QUEUE:
+            continue
+        skip[i] = f"done in the last run{at} and nothing is waiting for it — not repeated"
+    return skip
 
 
 def _step(rid, seq, **fields):
@@ -811,6 +892,8 @@ def _run_lanes(rid, stop=None):
     lock = threading.Lock()
     stopping = (lambda: bool(stop is not None and stop.is_set()))
 
+    pre = _preskipped(rid)
+
     def walk(name):
         try:
             for dep in LANE_AFTER.get(name, ()):
@@ -826,6 +909,8 @@ def _run_lanes(rid, stop=None):
                     if stopping() or time.time() >= until:
                         break
             for seq in plan[name]:
+                if seq in pre:
+                    continue              # a resume settled it at the start
                 if stopping():
                     _step(rid, seq, status="stopped", ended_at=_now(),
                           summary=(stop.note() if stop else "stopped")
@@ -892,13 +977,16 @@ def _ctrl_c_is_a_stop(stop):
 
 
 def start(orders=None, note="", force=False, quick=False, skip_check=False,
-          only=None) -> dict:
+          only=None, resume=False) -> dict:
     """
     Check, take the owner's instructions, then work. Returns when the day is done.
 
     `orders` is {sector: what the owner wants today}. It is written to the board
     BEFORE the MD plans, which is the whole point — an order that arrives after
     the plan is written is an order the MD never saw.
+
+    Every run clears up what the last one left first (leftovers.tidy — no
+    model). `resume` then runs only what was left: see RESUME above.
     """
     pre = {"ready": True, "blocking": [], "warnings": []} if skip_check \
         else preflight(quick=quick)
@@ -928,6 +1016,35 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
                               "python -m pipelines.day_run --unlock"),
                     "run_id": live}
 
+    # CLEAR UP FIRST. Dead claims back on the board, copies folded, chases and
+    # hand-offs answered, orphans closed — all without a model, and before any
+    # desk starts, so no desk spends a call on garbage. It never stops the day.
+    from coordination import leftovers
+    try:
+        tidied = leftovers.tidy()
+        tidied = {"head": tidied.get("head") or tidied.get("error") or "",
+                  "done": tidied.get("done") or [], "counts": tidied.get("counts") or {}}
+    except Exception as e:
+        tidied = {"head": f"the clear-up could not run: {e}", "done": [], "counts": {}}
+
+    skip, resume_of = None, None
+    if resume:
+        prev = leftovers.last_run()
+        rooms = leftovers.rooms_with_work()
+        if not only and prev.get("id"):
+            only = _only_for(prev["id"])    # the sectors he picked last time
+        skip = resume_plan(prev, rooms)
+        runnable = [i for i in range(len(STEPS)) if i not in skip
+                    and STEPS[i][1] not in ALWAYS_ON_RESUME]
+        if not runnable:
+            board.release_lock(LOCK, LOCK_HOLDER)
+            return {"ok": True, "ran": False, "nothing_to_resume": True,
+                    "tidied": tidied,
+                    "why": ("Nothing to pick up: the last run finished and no sector "
+                            "has work waiting. " + (tidied.get("head") or "")
+                            + " Press Run the day to start a new one.").strip()}
+        resume_of = prev.get("id")
+
     # The owner's words go on the board FIRST, so the MD plans around them
     # rather than over them. An order for a sector that does not exist is
     # reported back, never swallowed — he asked for something and is entitled
@@ -949,7 +1066,8 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
     board.clear_stop(LOCK)
 
     only = pick_sectors(only)
-    rid = _open_run(note, force and not pre["ready"], pre.get("blocking"), only)
+    rid = _open_run(note, force and not pre["ready"], pre.get("blocking"), only,
+                    skip=skip, resume_of=resume_of, tidied=tidied)
     stopped = False
     try:
         with _StopWatch() as watch:
@@ -996,6 +1114,12 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
 
     why = ("The day ran clean." if not failed
            else f"The day ran; {failed} of {len(STEPS)} steps failed.")
+    if resume_of:
+        why = ("Picked up where the last run left off — "
+               f"{len(STEPS) - len(skip or {})} step(s) ran, the rest had already "
+               "finished. " + why)
+    if tidied.get("done"):
+        why += " " + tidied["head"]
     if rejected:
         why += (" Your order for " + ", ".join(rejected)
                 + " went nowhere — " + list(rejected.values())[0])
@@ -1003,7 +1127,8 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
         why += f" {pushed['sent']} thing(s) sent to your phone."
     return {"ok": True, "ran": True, "run_id": rid, "orders": written,
             "rejected_orders": rejected, "failed_steps": failed,
-            "notified": pushed.get("sent", 0), "preflight": pre, "why": why}
+            "notified": pushed.get("sent", 0), "preflight": pre, "why": why,
+            "resumed_from": resume_of, "tidied": tidied}
 
 
 # ---------------------------------------------------------------------------
@@ -1117,6 +1242,10 @@ def status(run_id=None) -> dict:
         run["only_sectors"] = json.loads(run.get("only_sectors") or "[]")
     except Exception:
         run["only_sectors"] = []
+    try:
+        run["tidied"] = json.loads(run.get("tidied") or "null")
+    except Exception:
+        run["tidied"] = None
     # How much Claude this run used, per sector, from Claude's own report of
     # each call — so "running only Content saves tokens" is something he can
     # see rather than take on trust.
@@ -1353,9 +1482,12 @@ def main():
                          "(MD, IT, Security and Report always run), e.g. --only content")
     ap.add_argument("--order", nargs=2, action="append", metavar=("SECTOR", "TEXT"),
                     default=[], help="today's order for one sector (repeatable)")
+    ap.add_argument("--resume", action="store_true",
+                    help="start from where the last run left off: clear up, then "
+                         "run only what did not finish and what is waiting")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--stdin", action="store_true",
-                    help="read {orders, note, force, quick, only} as JSON on stdin")
+                    help="read {orders, note, force, quick, only, resume} as JSON on stdin")
     a = ap.parse_args()
 
     body = {}
@@ -1392,7 +1524,8 @@ def main():
               force=bool(body.get("force")) or a.force,
               quick=bool(body.get("quick")) or a.quick,
               skip_check=bool(body.get("skip_check")) or a.skip_check,
-              only=(body.get("only") or [s for s in a.only.split(",") if s.strip()]))
+              only=(body.get("only") or [s for s in a.only.split(",") if s.strip()]),
+              resume=bool(body.get("resume")) or a.resume)
     if a.json or a.stdin:
         print(json.dumps(r))
     else:

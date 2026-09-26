@@ -482,6 +482,10 @@ CREATE TABLE IF NOT EXISTS day_runs (
   blocking    TEXT,                -- json: what was wrong when he forced it
   only_sectors TEXT,               -- json: the sectors he picked for THIS run;
                                    -- empty means all of them
+  resume_of   TEXT,                -- the run this one picked up from, if it
+                                   -- was started with Resume
+  tidied      TEXT,                -- json: what the clear-up at the start put
+                                   -- right (coordination/leftovers.tidy)
   steps_total INTEGER DEFAULT 0,
   steps_done  INTEGER DEFAULT 0,
   pid         INTEGER,             -- the process running it; see locks.pid

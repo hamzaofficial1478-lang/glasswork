@@ -369,6 +369,67 @@ def answer_handoff(sector, req, agent, con):
     return None
 
 
+# Hand-offs a desk works FROM, rather than ones answered on receipt. The briefs
+# desk claims SEO's gap list to brief from it (pipelines/content_briefs), so
+# settling it in a tidy-up before that desk has run would leave it nothing to
+# claim. Duplicates of it are still folded — see leftovers.tidy.
+WORKED_FROM_BY_A_DESK = {("Content", "keyword_gaps"), ("Content", "pages")}
+
+
+def settle_paperwork(sector, agent="agency-tidy", limit=200) -> dict:
+    """
+    Answer only the post that needs no thinking, and leave the rest alone.
+
+    Chases are answered and closed. Hand-offs are answered on receipt the way
+    the sector would (answer_handoff). Post for a sector he has switched off is
+    declined, as the sector's own inbox would. Real questions are NOT touched:
+    those belong to the sector's own pass, where its handler may know the
+    answer — filing them from here would turn an answerable question into a
+    task. No model is called.
+    """
+    sector = to_sector(sector)
+    off = not board.sector_enabled(sector)
+    out = {"noted": 0, "answered": 0, "declined": 0}
+    con = sqlite3.connect(board.DB)
+    con.row_factory = sqlite3.Row
+    try:
+        for req in board.open_requests_for(sector, triaged=False)[:max(0, int(limit))]:
+            row = dict(req)
+            chase = is_a_chase(row)
+            kind = handoff_kind(row)
+            if kind and (sector, kind) in WORKED_FROM_BY_A_DESK:
+                kind = ""
+            if not (chase or kind or off):
+                continue
+            if not board.claim_request(req["id"], agent):
+                continue
+            row["_body"] = _thread(con, req["id"])
+            try:
+                if chase:
+                    board.reply_request(req["id"], agent,
+                                        _answer_a_chase(sector, row), close=True)
+                    out["noted"] += 1
+                    continue
+                answer = answer_handoff(sector, row, agent, con) if kind else None
+                if answer is not None:
+                    board.reply_request(req["id"], agent, str(answer), close=True)
+                    out["answered"] += 1
+                elif off:
+                    board.reply_request(
+                        req["id"], agent,
+                        f"{sector} is switched off, so this cannot be worked right "
+                        f"now. Nothing has been lost — ask again once the owner "
+                        f"turns the sector back on.", close=True)
+                    out["declined"] += 1
+                else:
+                    _unclaim(req["id"])
+            except Exception:
+                _unclaim(req["id"])
+    finally:
+        con.close()
+    return out
+
+
 def _file_as_task(sector, req, agent):
     """
     Turn a request into claimable work, and say what happened.

@@ -371,6 +371,11 @@ header>*{flex:none}
 .runbtn.busy{border-color:var(--glass);background:var(--glass-dim);color:var(--glass)}
 .runbtn .b{width:8px;height:8px;border-radius:50%;background:currentColor}
 .runbtn.busy .b{animation:pulse 1.1s infinite}
+/* Resume: amber, because it is about something left unfinished. It only
+   appears when there is something to pick up or clear. */
+.runbtn.resume{border-color:var(--amber);background:var(--amber-dim);color:var(--amber)}
+.runbtn.resume:hover{background:rgba(234,165,67,.24)}
+.left .chk small{max-width:60ch}
 /* A wider panel must also park further off-screen. Widening it alone left
    100px of an invisible panel sitting over the right of the header, swallowing
    clicks on the Run button and on whichever panel was actually open. */
@@ -483,6 +488,8 @@ header>*{flex:none}
          one screen is one door too many in a bar that was already wrapping. -->
   </div>
   <div class="spacer"></div>
+  <button class="runbtn resume" id="resumeBtn" onclick="openLeftovers()" style="display:none"
+          title="Pick up what the last run left: finish or clear the waiting work first"><span class="b"></span><span id="resumeLabel">Resume</span></button>
   <button class="runbtn" id="runBtn" onclick="openRun()"><span class="b"></span><span id="runLabel">Run the day</span></button>
   <span class="live"><span class="d"></span>Open</span>
   <span class="clock" id="clock">--:--</span>
@@ -1894,7 +1901,7 @@ const RUN = {view:'idle', check:null, busy:false, force:false, orders:{}, note:'
              skip:{},
              // Stop takes two presses and a few seconds; all three states are
              // visible or he presses it again while it is already stopping.
-             confirmStop:false, stopping:false, stopMsg:''};
+             confirmStop:false, stopping:false, stopMsg:'', leftMsg:''};
 const RUN_SECTORS = [
   ['IT','IT & Site Health'],['Content','Content & Social'],['SEO','SEO & Rankings'],
   ['Leads','Leads & Outreach'],['Report','Reports'],['Security','Security'],
@@ -1949,8 +1956,115 @@ function standingOrders(){
     + `<p style="font-size:11px;color:var(--faint);margin:8px 0 0">The MD plans around these.</p></div>`;
 }
 
+/* ---- LEFT OVER FROM LAST TIME ----------------------------------------------
+   "add a button that should say resume or start from where you left ... it will
+    finish that unanswered and queued tasks first as if we do not either delete
+    or finish those unanswered or queued tasks they can make garbage for us and
+    also the double load on models"
+
+   Three choices, in order of how much they do. Resume clears up and then runs
+   only what did not finish and the sectors that have work waiting. Clear up
+   only does the clear-up — no model, nothing new. Put the leftovers away lets
+   the rest go, keeping every reason and everything that is his.
+   coordination/leftovers.py and day_run.start(resume=True) do the work. ----- */
+let LEFT = null;
+async function pullLeftovers(){
+  try{ const r = await fetch('/api/leftovers'); LEFT = await r.json(); }
+  catch(e){ LEFT = null; }
+  renderResumeButton();
+  if(RUN.view==='idle' && $('#runPanel').classList.contains('open')) renderRun();
+}
+function leftWorth(){
+  const running = !!(LIVE&&LIVE.run&&LIVE.run.run&&LIVE.run.run.running);
+  return !!(LEFT && LEFT.ok && !running && !LEFT.day_running && (LEFT.resumable || LEFT.garbage>0));
+}
+function renderResumeButton(){
+  const btn = $('#resumeBtn'); if(!btn) return;
+  const show = leftWorth();
+  btn.style.display = show ? '' : 'none';
+  if(show) $('#resumeLabel').textContent = LEFT.resumable ? 'Resume' : 'Clear leftovers';
+}
+function openLeftovers(){
+  openPanel('runPanel');
+  RUN.confirmStop = false; RUN.view = 'idle';
+  renderRun();
+  pullLeftovers();
+}
+function leftoversBlock(){
+  if(!leftWorth()) return RUN.leftMsg
+    ? `<div class="pgroup"><p style="font-size:12.5px;color:var(--muted);line-height:1.6;margin:0">${esc(RUN.leftMsg)}</p></div>` : '';
+  const lr = LEFT.last_run||{}, un = lr.unfinished||[], rq = LEFT.requests||{}, tk = LEFT.tasks||{};
+  const pl = (n,a,b)=> n===1 ? a : (b||a+'s');
+  const rows = [];
+  if(un.length) rows.push(['■', `The last run stopped with ${un.length} of ${lr.total} steps not done`,
+    un.slice(0,5).map(u=>u.label).join(' · ') + (un.length>5 ? ` · and ${un.length-5} more` : '')]);
+  const rooms = Object.entries(LEFT.by_room||{}).map(([k,v])=>
+    `${k}: ${[v.questions?v.questions+' '+pl(v.questions,'question'):'', v.jobs?v.jobs+' '+pl(v.jobs,'job'):''].filter(Boolean).join(', ')}`).join(' · ');
+  const q = (rq.waiting||0)+(rq.dead_claims||0), j = (tk.open||0)+(tk.dead_claims||0);
+  if(q||j) rows.push(['▤', `${q} ${pl(q,'question')} and ${j} ${pl(j,'job')} still waiting`, rooms]);
+  const g = [[(rq.duplicates||0)+(tk.duplicates||0),'copy','copies'],[rq.chases,'chase'],[rq.handoffs,'hand-off'],
+             [rq.orphans,'thread whose job had ended','threads whose job had ended'],
+             [(rq.dead_claims||0)+(tk.dead_claims||0),'held by a desk that had stopped','held by a desk that had stopped'],
+             [tk.stale,'job untouched for days','jobs untouched for days'],
+             [LEFT.dead_runs,'run left open by a closed program','runs left open by a closed program']]
+            .filter(([n])=>n>0).map(([n,a,b])=>`${n} ${pl(n,a,b)}`).join(' · ');
+  if(LEFT.garbage) rows.push(['✓', `${LEFT.garbage} can be cleared up without a model`, g]);
+  if(tk.yours) rows.push(['!', `${tk.yours} ${pl(tk.yours,'decision')} waiting on you`, 'left alone — they are yours to make']);
+  const sub = 'border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px';
+  return `<div class="pgroup left"><div class="gh etch">Left over from last time</div>`
+    + rows.map(([m,t,d])=>`<div class="chk"><span class="m" style="color:var(--amber)">${m}</span><span>${esc(t)}`
+        + (d?`<small>${esc(d)}</small>`:'') + `</span></div>`).join('')
+    + (RUN.leftMsg ? `<p style="font-size:12px;color:var(--muted);line-height:1.6;margin:10px 0 0">${esc(RUN.leftMsg)}</p>` : '')
+    + (LEFT.resumable ? `<button class="pbtn" style="margin-top:12px" ${RUN.busy?'disabled':''} onclick="doResume()">
+        Resume where it left off</button>
+        <p style="font-size:11.5px;color:var(--faint);margin:6px 0 0;line-height:1.55">Clears up first, then runs only what did
+        not finish and the sectors with work waiting. What finished last time is not repeated, and the MD does not
+        plan new work on top.</p>` : '')
+    + `<button class="pbtn" style="${sub}" ${RUN.busy?'disabled':''} onclick="doTidy()">Clear up only — no model, nothing new</button>`
+    + `<button class="pbtn" style="${sub}" ${RUN.busy?'disabled':''} onclick="doPutAway()">Put the leftovers away</button>`
+    + `</div>`;
+}
+async function leftPost(url){
+  try{ const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); return await r.json(); }
+  catch(e){ return {ok:false, error:'Could not reach the office server.'}; }
+}
+async function doResume(){
+  RUN.busy = true; RUN.leftMsg = 'Checking the setup, then picking up where it left off…'; renderRun();
+  const j = await leftPost('/api/run/resume');
+  RUN.busy = false;
+  if(!j.ok || j.nothing){
+    RUN.leftMsg = j.why || j.error || 'It did not start.';
+    await pullLeftovers(); renderRun(); return;
+  }
+  RUN.leftMsg = ''; RUN.view = 'progress'; RUN.confirmStop = false; RUN.stopping = false; RUN.stopMsg = '';
+  renderRun(); renderResumeButton();
+  for(let i=0;i<8;i++){
+    await new Promise(r=>setTimeout(r,1000));
+    const s = await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+    renderResumeButton();
+    if(RUN.view==='progress') renderRun();
+  }
+}
+async function doTidy(){
+  RUN.busy = true; RUN.leftMsg = 'Clearing up…'; renderRun();
+  const j = await leftPost('/api/leftovers/tidy');
+  RUN.busy = false;
+  RUN.leftMsg = j.head || j.error || 'Done.';
+  await pullLeftovers(); renderRun();
+}
+async function doPutAway(){
+  if(!confirm('Put the leftovers away?\n\nEvery question still waiting is closed with a note, and every queued job '
+             + 'is withdrawn without being done. Nothing is deleted, and your own decisions and anything you posted '
+             + 'yourself are left alone.')) return;
+  RUN.busy = true; RUN.leftMsg = 'Putting the leftovers away…'; renderRun();
+  const j = await leftPost('/api/leftovers/put-away');
+  RUN.busy = false;
+  RUN.leftMsg = j.head || j.error || 'Done.';
+  await pullLeftovers(); renderRun();
+}
+
 function runIdle(){
-  return standingOrders()+`<div class="pgroup">
+  return leftoversBlock()+standingOrders()+`<div class="pgroup">
     <p style="font-size:12.5px;color:var(--muted);line-height:1.65;margin:0 0 14px">
       Pressing this checks the whole program first — the filing cabinet, every sector's
       brain and keys, whether each pipeline even loads, and every API and connector —
@@ -2163,6 +2277,10 @@ function runProgress(){
     ${(run.blocking||[]).length} known problem${(run.blocking||[]).length===1?'':'s'} — those sectors will do nothing.</div>`;
   if((run.only_sectors||[]).length) H+=`<p style="font-size:12px;color:var(--muted);margin:10px 0 0">
     This run only: <b>${esc(run.only_sectors.join(', '))}</b>. The rest sat it out and spent nothing.</p>`;
+  if(run.resume_of) H+=`<p style="font-size:12px;color:var(--amber);margin:10px 0 0">
+    Picked up where the last run left off — what had finished was not repeated.</p>`;
+  if(run.tidied && (run.tidied.done||[]).length) H+=`<p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6">
+    Cleared up first: ${esc(run.tidied.done.join('; '))}.</p>`;
   H+=stopControl(R);
   H+=`</div><div class="pgroup">`;
   (R.steps||[]).forEach(s=>{
@@ -2249,13 +2367,16 @@ async function boot(){
    claims, works and finishes inside one tick is never once seen 'working' —
    the bulbs go straight from dark to done and the office looks like nothing
    happened. Four seconds is the difference between a live floor and a report. */
-let POLL_MS = 15000, pollTimer = null;
+let POLL_MS = 15000, pollTimer = null, WAS_LIVE = false;
 function schedulePoll(){
   clearTimeout(pollTimer);
   pollTimer = setTimeout(async ()=>{
     const j = await pullLive();
     if(j){ LIVE=j; applyLive(j); renderFloor(); renderPerf(); }
     const live = !!(j && j.run && j.run.run && j.run.run.running);
+    if(WAS_LIVE && !live) pullLeftovers();   // a run just ended: what is left now?
+    WAS_LIVE = live;
+    renderResumeButton();
     POLL_MS = live ? 4000 : 15000;
     /* AND REDRAW THE RUN PANEL. It used to be left out, so the progress bar
        moved for the first six polls after he pressed Start — doStart's own
@@ -2273,6 +2394,7 @@ function schedulePoll(){
 }
 schedulePoll();
 renderSiteMenu();renderConns();boot();
+pullLeftovers(); setInterval(pullLeftovers, 60000);
 // The beams are real rows now, so they have to be fetched. Slower than the
 // animation: the traffic changes when a pipeline runs, not every two seconds.
 pullComms(); setInterval(pullComms, 30000);

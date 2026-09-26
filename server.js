@@ -1008,6 +1008,58 @@ app.post("/api/run/start", (req, res) => {
     why: "Running. Watch the office floor — the lamps come on as each sector picks up." });
 });
 
+// ---- WHAT THE LAST SESSION LEFT, AND PICKING UP FROM IT ----------------------
+// "add a button that should say resume or start from where you left ... it will
+//  finish that unanswered and queued tasks first". coordination/leftovers.py
+// reads and clears up; day_run.start(resume=True) runs only what is left.
+app.get("/api/leftovers", (_q, res) =>
+  res.json(pyModule("coordination.leftovers", ["--json"], 30000)));
+app.post("/api/leftovers/tidy", (_q, res) =>
+  res.json(pyModule("coordination.leftovers", ["--tidy", "--json"], 120000)));
+app.post("/api/leftovers/put-away", (_q, res) =>
+  res.json(pyModule("coordination.leftovers", ["--put-away", "--json"], 120000)));
+
+app.post("/api/run/resume", (_req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const st = pyModule("pipelines.day_run", ["--status", "--json"], 60000);
+  if (st && st.run && st.run.running) {
+    return res.json({ ok: false, busy: true,
+      why: "A day is already running — wait for it to finish." });
+  }
+  // Nothing to pick up is answered here, with the clear-up done, rather than
+  // by a background process whose "nothing to do" he would never see.
+  const left = pyModule("coordination.leftovers", ["--json"], 30000);
+  if (left && left.ok && !left.resumable) {
+    const t = pyModule("coordination.leftovers", ["--tidy", "--json"], 120000);
+    return res.json({ ok: true, started: false, nothing: true, tidied: t,
+      why: "Nothing to pick up — the last run finished and no sector has work waiting. "
+         + ((t && t.head) || "") });
+  }
+  // The quick check (config only, no model calls) here, so a refusal reaches
+  // him; the run itself then skips it rather than checking twice.
+  const pre = pyModule("pipelines.day_run", ["--check", "--quick", "--json"], 300000);
+  if (pre && pre.ok && !pre.ready) {
+    return res.json({ ok: false, refused: true, preflight: pre,
+      why: "Not resumed. " + (pre.blocking || []).slice(0, 3).join("; ")
+         + ". Fix these first — the Run panel's check shows the detail." });
+  }
+  const payload = JSON.stringify({ resume: true, quick: true, skip_check: true,
+                                   orders: {}, only: [] });
+  try {
+    const child = spawn(py.cmd, [...py.prefix, "-m", "pipelines.day_run", "--stdin", "--json"], {
+      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"],
+    });
+    child.on("error", () => {});
+    try { child.stdin.end(payload); } catch (_) {}
+    child.unref();
+  } catch (e) {
+    return res.json({ ok: false, error: "Could not start it: " + e.message });
+  }
+  res.json({ ok: true, started: true,
+    why: "Clearing up, then picking up where the last run left off." });
+});
+
 // ---- WHAT EACH SECTOR ACTUALLY PRODUCED -------------------------------------
 // "there is no any section that shows the results of the sectors."
 //

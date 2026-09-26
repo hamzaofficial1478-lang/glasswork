@@ -49,6 +49,13 @@ from coordination import board, briefing, proposals as _props, state as _state, 
 from coordination import targets as _targets
 
 MAX_TASKS_PER_CYCLE = 6      # a plan nobody can finish is not a plan
+
+# FINISH WHAT IS WAITING FIRST. "if we do not either delete or finish those
+# unanswered or queued tasks they can make garbage for us and also the double
+# load on models". A sector already carrying this many jobs gets no new work
+# from the MD's own rules until it has worked them down — the owner's orders
+# still go through. BOARD_FULL (8) is the hard stop; this is the manners.
+BACKLOG_FIRST = 3
 # How many of its own requests the MD answers in one pass. A queue of twenty-six
 # is not a reason to answer twenty-six: the rest stay queued, in order, and the
 # ageing in triage.py guarantees they rise rather than starve.
@@ -150,6 +157,12 @@ def sense() -> dict:
         facts["open_titles"] = {
             (r[0], (r[1] or "").strip().lower()) for r in con.execute(
                 "SELECT sector, title FROM tasks WHERE status IN ('open','in_progress')")}
+        # Work a desk can actually get on with — not his amber decisions,
+        # which wait on him and not on the sector.
+        facts["backlog"] = {
+            r[0]: r[1] for r in con.execute(
+                "SELECT sector, count(*) FROM tasks WHERE status IN ('open','in_progress')"
+                " AND COALESCE(risk,'green') NOT IN ('amber','red') GROUP BY sector")}
         facts["site"] = {
             r[0]: r[1] for r in con.execute(
                 "SELECT severity, count(*) FROM site_issues"
@@ -698,6 +711,12 @@ def critic_check(candidates: list, facts: dict) -> tuple:
             continue
         if key in open_titles:
             rejected.append({**c, "why": "already on the board, unclaimed or in progress"})
+            continue
+        waiting = (facts.get("backlog") or {}).get(c["sector"], 0)
+        if waiting >= BACKLOG_FIRST and int(c.get("urgency") or 5) > 1:
+            rejected.append({**c, "why": (f"{c['sector']} already has {waiting} job(s) "
+                                          "waiting — those are finished first, so "
+                                          "nothing new is stacked on top")})
             continue
         if c.get("title", "").strip().lower() in facts.get("objected_titles", set()):
             # a sector has already said this is not its work. Re-posting it

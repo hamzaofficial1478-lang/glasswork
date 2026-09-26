@@ -1051,8 +1051,12 @@ def expire_unclaimed(older_than_days=UNCLAIMED_DAYS) -> list:
             "    AND COALESCE(risk,'green') NOT IN ('amber','red')", (cut,)).fetchall()
         for r in rows:
             days = (_now() - int(r["created_at"] or _now())) // 86400
+            # finished_at, not ended_at: tasks has no ended_at column. This
+            # line named the wrong one from the day it was written, so every
+            # call raised, the Overseer's pass swallowed the error, and not one
+            # abandoned job was ever withdrawn — the board grew for ever.
             c.execute(
-                "UPDATE tasks SET status='withdrawn', result=?, ended_at=?"
+                "UPDATE tasks SET status='withdrawn', result=?, finished_at=?"
                 "  WHERE id=? AND status='open'",
                 (f"Nobody picked this up in {days} day(s), so it was taken off "
                  "the board. It was not done. If it still matters it will be "
@@ -1262,6 +1266,10 @@ _ADDED_COLUMNS = (
     # "sometimes i will only run content sector with MD and IT and Security".
     # The sectors picked for one run, without touching the permanent switches.
     ("day_runs",     "only_sectors", "TEXT"),
+    # "start from where you left" — the run this one picks up from, and what
+    # the clear-up at its start put right. See coordination/leftovers.py.
+    ("day_runs",     "resume_of",    "TEXT"),
+    ("day_runs",     "tidied",       "TEXT"),
     # What the Harvester read off the business's own website — the details Maps
     # does not hold. `whatsapp` is filled ONLY from a click-to-chat button the
     # business published itself; `evidence` records where every detail came

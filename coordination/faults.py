@@ -815,6 +815,35 @@ def _sector_alarm(c, now, counts):
     return raised
 
 
+def close_cleared(now=None) -> int:
+    """
+    Only the closing half of scan(): resolve the faults whose cause has gone,
+    and file, route and escalate nothing. The clear-up before a run
+    (coordination/leftovers.tidy) uses this — a tidy-up that posts a dozen new
+    reminders while answering the old ones is making the mess it is there to
+    clear. Returns how many were closed.
+    """
+    now = int(now or time.time())
+    keys = {f["key"] for f in detect(now)}
+    closed = 0
+    c = _conn()
+    try:
+        board._migrate(c)
+        for row in _rows(c, "SELECT * FROM faults WHERE status!='resolved'"):
+            if row["key"] in keys or _still_true(c, row, now):
+                continue
+            note = "cleared on its own — the condition is no longer true"
+            c.execute("UPDATE faults SET status='resolved', resolved_at=?,"
+                      " resolution=? WHERE id=?", (now, note, row["id"]))
+            c.commit()
+            _close_out(c, row, f"Closing this: {note}. " + row["what"], "resolved-itself")
+            closed += 1
+        c.commit()
+    finally:
+        c.close()
+    return closed
+
+
 def scan(now=None) -> dict:
     """
     One pass: find what is broken, file it, route it, escalate what deserves it,
