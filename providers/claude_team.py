@@ -702,6 +702,9 @@ def status() -> dict:
     t = team()
     return {
         "ready": ready, "why": why,
+        # Which Claude Code answers, so "which one is it using?" has an answer
+        # on the screen rather than a guess.
+        "cli": local_cli.cli_path() if ready else "",
         "ceiling": CEILING,
         "models": [{"id": m, "label": LABEL[m]} for m in LADDER],
         "team": [{"sector": s, "label": SECTOR_LABEL[s], "model": t[s],

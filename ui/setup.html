@@ -446,7 +446,8 @@ $('#saveWebsite').onclick=async()=>{
 let TEAM = null;
 function teamStateLine(t){
   if(!t || !t.ok) return '<span style="color:var(--danger)">✕ '+esc((t&&t.error)||'Could not read the team')+'</span>';
-  if(!t.ready) return '<span style="color:var(--danger)">✕ Claude Code is not ready on this machine.</span> '+esc((t.why||'').split('\n')[0]);
+  if(!t.ready) return '<span style="color:var(--danger)">✕ Claude Code is not ready on this machine.</span>'
+    +'<pre style="white-space:pre-wrap;font-size:11.5px;color:var(--muted);background:#0d1418;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px">'+esc(t.why||'')+'</pre>';
   const accs=(t.accounts||[]).map(a=>{
     const who=a.email?(' as '+esc(a.email)):'';
     return a.ok?('<span style="color:var(--ok)">✓ '+esc(a.label)+' signed in'+who+'</span>')
@@ -454,7 +455,8 @@ function teamStateLine(t){
   });
   if((t.accounts||[]).length<2) accs.push('<span class="dim">no backup account yet</span>');
   const struggling=(t.struggling||[]).map(h=>'<div style="color:var(--amber)">! '+esc(h.why)+' — tried again in '+h.back_in_minutes+' min</div>').join('');
-  return accs.join(' · ')+struggling;
+  const cli=t.cli?'<div class="dim" style="margin-top:4px;font-family:\'IBM Plex Mono\',monospace;font-size:10.5px">Claude Code: '+esc(t.cli)+'</div>':'';
+  return accs.join(' · ')+struggling+cli;
 }
 function renderTeam(){
   $('#teamState').innerHTML=teamStateLine(TEAM);

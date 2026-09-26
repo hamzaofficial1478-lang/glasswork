@@ -17,6 +17,7 @@ honest on a machine that has it and never spends the owner's allowance.
 import os
 import shutil
 import sys
+from pathlib import Path
 
 from . import local_cli
 
@@ -121,7 +122,7 @@ def test_one_shape_on_every_path():
     try:
         res = local_cli._chat_as(None, "sonnet", ASK)
         check("refused", res["ok"], False)
-        check("and names the fix", "npm install" in res["error"], True)
+        check("and names the fix", "install.ps1" in res["error"], True)
         check("the cause is readable", res["cause"], "claude code is not installed here")
     finally:
         local_cli.cli_path = real_path
@@ -208,8 +209,8 @@ def test_it_is_found_when_PATH_is_no_help():
         check("and absent is still absent", local_cli.cli_path(), "")
         ready, why = local_cli.available()
         check("it does not pretend to be ready", ready, False)
-        check("and points at the thing that has to come first",
-              "nodejs.org" in why, True)
+        check("and points at the official installer, which needs no npm",
+              "install.ps1" in why, True)
     finally:
         local_cli._setting = real_setting
         local_cli.shutil.which = real_which
@@ -256,15 +257,15 @@ def test_npm_is_asked_where_it_puts_things():
         local_cli.os.path.isfile = lambda p: False
         ready, why = local_cli.available()
         check("it is plain about it", "not installed on this machine" in why, True)
-        check("it names the one command", "npm install -g" in why, True)
+        check("it names the one command", "irm https://claude.ai/install.ps1 | iex" in why, True)
         check("and explains why the web app is not this",
               "WEBSITE OR THE DESKTOP APP" in why, True)
 
-        print("\nNo npm at all is a different problem and says so:")
+        print("\nNo npm at all is no longer a dead end — the installer needs none:")
         local_cli.shutil.which = lambda n: None
         local_cli._run_quietly = lambda argv, timeout=20: ""
         ready, why = local_cli.available()
-        check("Node comes first", "nodejs.org" in why, True)
+        check("it says so", "needs neither Node nor npm" in why, True)
     finally:
         local_cli.shutil.which = real_which
         local_cli._run_quietly = real_run
@@ -300,8 +301,9 @@ def test_a_half_finished_npm_install_is_named_and_the_fix_given():
         fh.write('echo "Error: claude native binary not installed." >&2\n'
                  'echo "Either postinstall did not run" >&2\nexit 1\n')
 
-    real = local_cli._npm_root
+    real, real_path = local_cli._npm_root, local_cli.cli_path
     local_cli._npm_root = lambda: root
+    local_cli.cli_path = lambda: ""          # and no working copy anywhere else
     try:
         half = local_cli.half_installed()
         check("half-installed is detected", bool(half), True)
@@ -311,18 +313,26 @@ def test_a_half_finished_npm_install_is_named_and_the_fix_given():
         check("the reason is the real one", "placeholder" in why, True)
         check("the command is quoted, for a user folder with a space in it",
               f'node "{half["installer"]}"' in why, True)
-        check("and the reinstall alternative is given too",
-              "--allow-scripts=@anthropic-ai/claude-code" in why, True)
+        check("and it says no other copy was found — so the fix is really needed",
+              "No other copy of Claude Code was found" in why, True)
         check("the Shelf screen's red line says which problem",
               local_cli._unavailable_cause(why),
               "claude code is half-installed — its setup step was blocked")
+        check("the official installer is offered as the other way",
+              "install.ps1" in why, True)
+
+        print("\n...but a working Claude Code somewhere else wins — the leftover is no veto:")
+        local_cli.cli_path = lambda: r"C:\Users\x\.local\bin\claude.exe"
+        ready, why = local_cli.available()
+        check("ready", (ready, why), (True, ""))
+        local_cli.cli_path = lambda: ""
 
         print("\nOnce the real binary is in place, it is no longer flagged:")
         with open(stub, "wb") as fh:
             fh.write(b"\0" * (local_cli.PLACEHOLDER_MAX + 1))
         check("the full-size binary passes", local_cli.half_installed(), {})
     finally:
-        local_cli._npm_root = real
+        local_cli._npm_root, local_cli.cli_path = real, real_path
 
     print("\nWindows' own wording is translated if it ever gets that far:")
     check("'not a valid application'",
@@ -331,6 +341,93 @@ def test_a_half_finished_npm_install_is_named_and_the_fix_given():
           "claude code is half-installed — its setup step was blocked")
 
 
+
+
+def test_the_placeholder_is_walked_past_and_what_works_is_remembered():
+    """
+    "when i open the setup after pulling the newer code ... Claude Code is
+     installed but its last setup step never ran" — on a machine where he had
+    signed in to a Claude Code that worked. The check looked at npm's leftover
+    first, found the 500-byte placeholder, and never looked any further; and
+    the official installer's folder was not on its list at all.
+    """
+    import tempfile
+    print("\nnpm's placeholder and the shim that runs it are both walked past:")
+    d = Path(tempfile.mkdtemp())
+    npm = d / "npm"
+    stub = npm / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+    stub.parent.mkdir(parents=True)
+    stub.write_text('echo "Error: claude native binary not installed." >&2\nexit 1\n',
+                    encoding="utf-8")
+    shim = npm / "claude.cmd"
+    shim.write_text('@"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*\n',
+                    encoding="utf-8")
+    real_exe = d / "local-bin" / "claude.exe"
+    real_exe.parent.mkdir()
+    real_exe.write_bytes(b"MZ" + b"\0" * (local_cli.PLACEHOLDER_MAX + 10))
+    check("the placeholder .exe is not the program", local_cli.is_placeholder(str(stub)), True)
+    check("nor is the npm shim that only runs it", local_cli.is_placeholder(str(shim)), True)
+    check("the real one is", local_cli.is_placeholder(str(real_exe)), False)
+
+    saved = (local_cli._setting, local_cli.shutil.which, local_cli._likely_homes,
+             local_cli._npm_installed, local_cli.remembered)
+    try:
+        local_cli._setting = lambda n: ""
+        local_cli.remembered = lambda: ""
+        local_cli.shutil.which = lambda n: str(shim) if n in ("claude", "claude.cmd") else None
+        local_cli._likely_homes = lambda: [str(real_exe), str(shim)]
+        local_cli._npm_installed = lambda: [str(shim)]
+        check("PATH finds the npm shim first, and the search goes on to the real one",
+              local_cli.cli_path(), str(real_exe))
+        local_cli._likely_homes = lambda: [str(shim)]
+        check("with only the leftover on the machine, nothing is found",
+              local_cli.cli_path(), "")
+
+        print("\nWhere it last worked is tried first, and re-checked every time:")
+        local_cli.remembered = lambda: str(real_exe)
+        check("the remembered path is used", local_cli.cli_path(), str(real_exe))
+        local_cli.remembered = lambda: str(d / "gone" / "claude.exe")
+        check("a remembered path that has gone is searched past, not trusted",
+              local_cli.cli_path(), "")
+    finally:
+        (local_cli._setting, local_cli.shutil.which, local_cli._likely_homes,
+         local_cli._npm_installed, local_cli.remembered) = saved
+
+    print("\nThe official installer's folder is on the Windows list:")
+    real_name = os.name
+    try:
+        os.name = "nt"
+        homes = local_cli._likely_homes()
+    finally:
+        os.name = real_name
+    check("~/.local/bin/claude.exe", any(h.replace("\\", "/").endswith(".local/bin/claude.exe")
+                                         for h in homes), True)
+    check("and it is looked at before npm's folder",
+          [i for i, h in enumerate(homes) if ".local" in h][0]
+          < [i for i, h in enumerate(homes) if "npm" in h][0], True)
+
+    print("\nRemembering writes a small file of our own — never while the suite runs:")
+    real_file = local_cli.REMEMBERED
+    local_cli.REMEMBERED = d / "claude_code.local.json"
+    was = os.environ.get("AGENCY_IGNORE_DOTENV")
+    try:
+        os.environ["AGENCY_IGNORE_DOTENV"] = "1"
+        local_cli.remember(str(real_exe))
+        check("the suite writes nothing", local_cli.REMEMBERED.exists(), False)
+        os.environ.pop("AGENCY_IGNORE_DOTENV")
+        real_setting = local_cli._setting
+        local_cli._setting = lambda n: ""
+        try:
+            local_cli.remember(str(real_exe))
+        finally:
+            local_cli._setting = real_setting
+        check("outside it, the path is kept", local_cli.remembered(), str(real_exe))
+    finally:
+        local_cli.REMEMBERED = real_file
+        if was is None:
+            os.environ.pop("AGENCY_IGNORE_DOTENV", None)
+        else:
+            os.environ["AGENCY_IGNORE_DOTENV"] = was
 
 
 def test_the_floor_and_the_team_s_own_clock():
@@ -552,6 +649,7 @@ def _stubbed():
               test_it_is_found_when_PATH_is_no_help,
               test_npm_is_asked_where_it_puts_things,
               test_a_half_finished_npm_install_is_named_and_the_fix_given,
+              test_the_placeholder_is_walked_past_and_what_works_is_remembered,
               test_the_floor_and_the_team_s_own_clock,
               test_never_above_opus_5,
               test_every_call_is_lean,

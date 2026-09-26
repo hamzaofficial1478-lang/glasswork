@@ -12,7 +12,14 @@ will remove all of them and will integrate the Claude". The function names and
 the shapes they return are kept exactly, because two dozen callers ask through
 them and none of them needed to know what answers.
 """
-from . import claude_team, local_cli
+
+
+def _team():
+    # Imported when first asked, not when the package loads: `python -m
+    # providers.local_cli` would otherwise find itself already imported and
+    # print a RuntimeWarning at the top of the owner's terminal.
+    from . import claude_team, local_cli
+    return claude_team, local_cli
 
 
 def resolve_task(task: str) -> dict:
@@ -20,6 +27,7 @@ def resolve_task(task: str) -> dict:
     Who would answer for this sector, in order — without asking anything.
     Never returns a secret; there are none to return.
     """
+    claude_team, local_cli = _team()
     s = claude_team.normalise(task)
     if s not in claude_team.DEFAULT_TEAM:
         return {"ok": False, "task": s, "candidates": [],
@@ -42,7 +50,7 @@ def resolve_task(task: str) -> dict:
 
 def call_task(task: str, messages, max_tokens: int = 512, timeout: int = 0) -> dict:
     """Ask this sector's Claude. See claude_team.call for the full story."""
-    return claude_team.call(task, messages, max_tokens, timeout)
+    return _team()[0].call(task, messages, max_tokens, timeout)
 
 
 def deliberate(task: str, messages, max_tokens: int = 512, verdict_of=None) -> dict:
@@ -58,4 +66,4 @@ def deliberate(task: str, messages, max_tokens: int = 512, verdict_of=None) -> d
     """
     from . import effort
     with effort.demanding(f"a judgement where being wrong costs money ({task})"):
-        return claude_team.deliberate(task, messages, max_tokens, verdict_of)
+        return _team()[0].deliberate(task, messages, max_tokens, verdict_of)

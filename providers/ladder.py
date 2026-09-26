@@ -10,13 +10,13 @@ With the Claude team that cannot happen the same way. Every sector's own call
 already steps down the models and over to the backup account
 (providers/claude_team.py), and a model is not a seat that one sector takes
 from another. So think() is one call, and spread() is several at once.
+
+The Claude team is imported when first asked for, not when the package loads —
+see routing._team for why.
 """
 from concurrent.futures import ThreadPoolExecutor
 
-from . import claude_team, local_cli
-
 OWN = "own"
-SECTORS = claude_team.SECTORS
 
 # How many of a sector's independent jobs run side by side. Each is its own
 # Claude Code process; three keeps a laptop responsive and a plan's allowance
@@ -24,14 +24,20 @@ SECTORS = claude_team.SECTORS
 WORKERS = 3
 
 
+def _team():
+    from . import claude_team, local_cli
+    return claude_team, local_cli
+
+
 def think(sector, messages, agent="", reason="", max_tokens=512, timeout=0,
           **_ignored) -> dict:
     """One answer, with {rung, climbed, why} so older callers read it as before."""
+    claude_team, _ = _team()
     r = claude_team.call(sector, messages, max_tokens, timeout, agent=agent)
+    name = claude_team.SECTOR_LABEL.get(claude_team.normalise(sector), sector)
     return {**r, "rung": OWN if r.get("ok") else None, "climbed": [],
-            "why": (r.get("stepped_down") or
-                    f"{claude_team.SECTOR_LABEL.get(claude_team.normalise(sector), sector)}"
-                    f" answered on its own model") if r.get("ok") else r.get("error", "")}
+            "why": (r.get("stepped_down") or f"{name} answered on its own model")
+                   if r.get("ok") else r.get("error", "")}
 
 
 def spread(sector, jobs, max_tokens=512, timeout=0, agent="", workers=None) -> dict:
@@ -40,6 +46,7 @@ def spread(sector, jobs, max_tokens=512, timeout=0, agent="", workers=None) -> d
     one article — done a few at a time. Returns
     {ok, results: {key: result}, done, failed, models_used, rung}.
     """
+    claude_team, _ = _team()
     jobs = list(jobs or [])
     if not jobs:
         return {"ok": True, "results": {}, "done": 0, "failed": 0,
@@ -59,22 +66,24 @@ def spread(sector, jobs, max_tokens=512, timeout=0, agent="", workers=None) -> d
 
 def who_could_answer(sector) -> dict:
     """Could this sector think at all right now? Read-only; spends nothing."""
+    claude_team, local_cli = _team()
     s = claude_team.normalise(sector)
     ready, why = local_cli.available()
     known = s in claude_team.DEFAULT_TEAM
     ok = ready and known
-    return {"ok": ok, "own": ok, "spare": 0,
-            "own_error": "" if ok else (why or f"'{sector}' is not on the Claude team"),
-            "why": "" if ok else (why or f"'{sector}' is not on the Claude team")}
+    why = "" if ok else (why or f"'{sector}' is not on the Claude team")
+    return {"ok": ok, "own": ok, "spare": 0, "own_error": why, "why": why}
 
 
 def state(sector=None) -> dict:
     """What readiness shows: nothing is borrowed any more; what is struggling is."""
+    claude_team, _ = _team()
     return {"on_the_directors_brain": [], "borrows_today": 0,
             "struggling": claude_team.health()}
 
 
 def as_text() -> str:
+    claude_team, _ = _team()
     rows = claude_team.health()
     if not rows:
         return "Every Claude model on the team is being tried at the top."

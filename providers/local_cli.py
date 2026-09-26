@@ -76,6 +76,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 # The base_url that marks a credential as "run it here, do not call anything".
 MARKER = "local://claude-code"
@@ -197,6 +198,12 @@ def _likely_homes():
         appdata = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
         local = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
         out += [
+            # The official installer (irm https://claude.ai/install.ps1 | iex)
+            # puts it here. It was missing from this list, so a machine where
+            # that install worked and an old npm attempt had failed was told
+            # it was "half-installed" — the npm leftover was all it could see.
+            os.path.join(home, ".local", "bin", "claude.exe"),
+            os.path.join(local, "Microsoft", "WinGet", "Links", "claude.exe"),
             os.path.join(appdata, "npm", "claude.cmd"),
             os.path.join(appdata, "npm", "claude.exe"),
             os.path.join(local, "Programs", "claude", "claude.exe"),
@@ -261,20 +268,33 @@ def toolchain() -> dict:
             "npm_bin": npm_bin() if npm else ""}
 
 
+PLACEHOLDER = "placeholder"
+
+
 def find_candidates() -> list:
-    """Every place the CLI was looked for, and whether it was there — for --check."""
+    """
+    Every place the CLI was looked for, and what was there — for --check.
+    True: a working install. False: nothing. PLACEHOLDER: npm's stand-in.
+    """
+    def state(path):
+        if not path or not os.path.isfile(path):
+            return False
+        return PLACEHOLDER if is_placeholder(path) else True
     rows = []
     named = _setting(CLI_ENV)
     if named:
-        rows.append((f"{CLI_ENV}={named}", os.path.isfile(named)
-                     or bool(shutil.which(named))))
+        rows.append((f"{CLI_ENV}={named}", state(named if os.path.isfile(named)
+                                                 else shutil.which(named))))
+    last = remembered()
+    if last:
+        rows.append((f"last worked: {last}", state(last)))
     for name in ("claude", "claude.cmd", "claude.exe"):
         found = shutil.which(name)
-        rows.append((f"PATH: {name}", bool(found)))
+        rows.append((f"PATH: {name}" + (f" -> {found}" if found else ""), state(found)))
     for p in _likely_homes():
-        rows.append((p, os.path.isfile(p)))
+        rows.append((p, state(p)))
     for p in _npm_installed():
-        rows.append((p + "   (npm's own global folder)", os.path.isfile(p)))
+        rows.append((p + "   (npm's own global folder)", state(p)))
     return rows
 
 
@@ -287,13 +307,86 @@ def _npm_installed() -> list:
     return [os.path.join(binroot, n) for n in names]
 
 
+# WHERE IT WAS LAST FOUND WORKING. "when i have integrated the claude it should
+# keep that safe". Once a call succeeds, the command that answered is written
+# down, and looked at first next time — re-checked on disk every time, so a
+# path that stops existing is simply searched past, never trusted blindly.
+REMEMBERED = Path(__file__).resolve().parents[1] / "config" / "claude_code.local.json"
+
+
+def _suite_isolated() -> bool:
+    """The test suite must neither read nor write what his machine remembered."""
+    return str(os.environ.get("AGENCY_IGNORE_DOTENV", "")).strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def remembered() -> str:
+    if _suite_isolated():
+        return ""
+    try:
+        return (json.loads(REMEMBERED.read_text(encoding="utf-8")).get("cli") or "").strip()
+    except Exception:
+        return ""
+
+
+def remember(path: str):
+    """Write down the command that just answered, if it is not already."""
+    if not path or _suite_isolated() or path == remembered() or _setting(CLI_ENV):
+        return
+    try:
+        REMEMBERED.parent.mkdir(parents=True, exist_ok=True)
+        REMEMBERED.write_text(json.dumps({"cli": path, "at": int(time.time())},
+                                         indent=2), encoding="utf-8")
+    except Exception:
+        pass                    # remembering is a convenience, never a failure
+
+
+def _placeholder_file(path: str) -> bool:
+    """npm's 500-byte text stand-in for the program, judged by size and content."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return False            # cannot tell — let the call itself say what is wrong
+    if size > PLACEHOLDER_MAX:
+        return False
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(400).decode("utf-8", "replace").lower()
+    except OSError:
+        head = ""
+    return "not installed" in head or head.startswith("echo") or size < 4096
+
+
+def is_placeholder(path: str) -> bool:
+    """
+    Is this "claude" not really the program?
+
+    Two shapes. The .exe npm left behind when its setup step was blocked, and
+    npm's .cmd shim, which is real enough itself but only ever runs that
+    placeholder. Neither may stand in the way of a working Claude Code
+    installed some other way.
+    """
+    if not path:
+        return True
+    low = path.lower()
+    if low.endswith((".cmd", ".bat")):
+        target = os.path.join(os.path.dirname(path), "node_modules", "@anthropic-ai",
+                              "claude-code", "bin", "claude.exe")
+        if os.path.isfile(target):
+            return _placeholder_file(target)
+        return False
+    return _placeholder_file(path)
+
+
 def cli_path() -> str:
     """
-    Where the CLI is, or '' if this machine really has not got it.
+    Where a WORKING CLI is, or '' if this machine really has not got one.
 
-    Four places, in order: what he set, PATH, the usual install locations, and
-    nothing. The third is the one that rescues the office server, whose PATH is
-    whatever Node was started with.
+    In order: what he set, where it last worked, PATH, the usual install
+    locations, and npm's own folder. The npm placeholder is walked past
+    wherever it turns up — it is the one "claude" on the disk that can never
+    answer, and treating it as THE install is what told a machine with a
+    working Claude Code that it had none.
     """
     named = _setting(CLI_ENV)
     if named:
@@ -305,18 +398,21 @@ def cli_path() -> str:
         # He named something that is not there. Say so rather than quietly
         # searching elsewhere and running a different binary than he asked for.
         return ""
+    last = remembered()
+    if last and os.path.isfile(last) and not is_placeholder(last):
+        return last
     for name in ("claude", "claude.cmd", "claude.exe"):
         found = shutil.which(name)
-        if found:
+        if found and not is_placeholder(found):
             return found
     for p in _likely_homes():
-        if os.path.isfile(p):
+        if os.path.isfile(p) and not is_placeholder(p):
             return p
     # Last, because it costs a subprocess: ask npm where it actually puts
     # things. Covers a custom prefix or a version manager, which no list of
     # guessed paths can.
     for p in _npm_installed():
-        if os.path.isfile(p):
+        if os.path.isfile(p) and not is_placeholder(p):
             return p
     return ""
 
@@ -395,12 +491,7 @@ def half_installed() -> dict:
             continue
         if size > PLACEHOLDER_MAX:
             return {}                          # the real thing is in place
-        try:
-            with open(binary, "rb") as fh:
-                head = fh.read(400).decode("utf-8", "replace").lower()
-        except OSError:
-            head = ""
-        if "not installed" in head or head.startswith("echo") or size < 4096:
+        if _placeholder_file(binary):
             return {"installer": installer if os.path.isfile(installer) else "",
                     "binary": binary, "size": size}
     return {}
@@ -424,54 +515,59 @@ def available() -> tuple:
     if switched_off():
         return False, (f"Claude is switched off for this run ({OFF_ENV}) — the "
                        "test suite never spends the owner's Claude allowance.")
+    named = _setting(CLI_ENV)
+    path = cli_path()
+    if named and not path:
+        return False, (f"{CLI_ENV} is set to '{named}' and there is nothing "
+                       "there. Correct it, or clear it and let the agency find "
+                       "Claude Code itself.")
+    if named and is_placeholder(path):
+        return False, (f"{CLI_ENV} points at npm's placeholder, not the program: "
+                       f"{path}. Point it at the Claude Code that works — in "
+                       "PowerShell, `where.exe claude` lists every copy.")
+    if path:
+        # A working Claude Code was found. Whatever state an old npm attempt
+        # left behind somewhere else is not this machine's problem any more.
+        return True, ""
     half = half_installed()
     if half:
         return False, (
             "Claude Code is installed but its last setup step never ran, so "
             "the 'claude.exe' on disk is a 500-byte placeholder, not the "
             "program. npm blocked the step because install scripts are not "
-            "allowed by default any more.\n\n"
+            "allowed by default any more. No other copy of Claude Code was "
+            "found on this machine.\n\n"
             "Run this once, then check again:\n\n"
             f"    {repair_command(half)}\n\n"
-            "Or reinstall with the step allowed:\n\n"
-            "    npm install -g @anthropic-ai/claude-code "
-            "--allow-scripts=@anthropic-ai/claude-code")
-    named = _setting(CLI_ENV)
-    if named and not cli_path():
-        return False, (f"{CLI_ENV} is set to '{named}' and there is nothing "
-                       "there. Correct it, or clear it and let the agency find "
-                       "Claude Code itself.")
-    if not cli_path():
-        kit = toolchain()
-        if not kit["npm"]:
-            return False, (
-                "Claude Code is not on this machine, and neither is npm, so it "
-                "cannot be installed the usual way.\n"
-                "Install Node.js from nodejs.org (it brings npm with it), then "
-                "run:  npm install -g @anthropic-ai/claude-code")
-        return False, (
-            "Claude Code is not installed on this machine.\n"
-            "It was looked for on PATH, in the usual install folders, and in "
-            f"npm's own global folder ({kit['npm_bin'] or 'unknown'}). Nothing "
-            "there.\n\n"
-            "IF YOU USE CLAUDE THROUGH THE WEBSITE OR THE DESKTOP APP, THAT IS "
-            "WHY. Those are not this. This needs the command-line tool on this "
-            "machine, and installing it does not change how you use the others:"
-            "\n\n"
-            "    npm install -g @anthropic-ai/claude-code\n"
-            "    claude            (once, to sign in — then close it)\n"
-            f"    python -m providers.local_cli --check\n\n"
-            f"Node {kit['node_version'] or '?'} and npm are already here, so "
-            "the install is a couple of minutes and needs nothing else.\n"
-            "If it IS installed and you know where, put that path into .env as "
-            f"{CLI_ENV}=<path> and restart the server.")
-    return True, ""
+            "Or install it with the official installer instead:\n\n"
+            "    irm https://claude.ai/install.ps1 | iex\n\n"
+            "Either way, run  claude  once afterwards and sign in. If Claude "
+            "Code already works in your PowerShell, `where.exe claude` shows "
+            f"where it is — put that path in .env as {CLI_ENV}=<path>.")
+    kit = toolchain()
+    return False, (
+        "Claude Code is not installed on this machine.\n"
+        "It was looked for on PATH, in the usual install folders"
+        + (f", and in npm's own global folder ({kit['npm_bin']})" if kit["npm_bin"] else "")
+        + ". Nothing there.\n\n"
+        "IF YOU USE CLAUDE THROUGH THE WEBSITE OR THE DESKTOP APP, THAT IS "
+        "WHY. Those are not this. This needs the command-line tool on this "
+        "machine, and installing it does not change how you use the others.\n\n"
+        "In PowerShell:\n\n"
+        "    irm https://claude.ai/install.ps1 | iex\n"
+        "    claude            (once, to sign in — then close it)\n"
+        "    python -m providers.local_cli --check\n\n"
+        "The official installer needs neither Node nor npm. If it IS installed "
+        "and you know where, put that path into .env as "
+        f"{CLI_ENV}=<path> and restart the server.")
 
 
 def _unavailable_cause(why: str) -> str:
     """The one-line cause shown in red, matched to the reason."""
     if OFF_ENV in why:
         return "claude is switched off for this run"
+    if "points at npm's placeholder" in why:
+        return "CLAUDE_CLI points at the npm placeholder"
     if "placeholder" in why:
         return "claude code is half-installed — its setup step was blocked"
     if "is set to" in why:
@@ -628,7 +724,8 @@ def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT
                        cause="empty prompt")
 
     trimmed = _trim_ok
-    cmd = _launcher(cli_path()) + [
+    path = cli_path()
+    cmd = _launcher(path) + [
         "-p", "--output-format", "json",
         "--model", _model_flag(model_name)] + LEAN + (TRIM if trimmed else [])
     fallback = [_model_flag(m) for m in (fallback or ()) if m]
@@ -710,6 +807,7 @@ def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT
                        cause="empty answer", waited=[took],
                        body=proc.stdout or "")
 
+    remember(path)              # it answered: this is where Claude Code lives
     return _answer(True, cmd, status=200, text=answer, waited=[took],
                    body=answer,
                    extra={"local": {
@@ -781,6 +879,16 @@ def check(model=SIMPLE_MODEL, timeout=120) -> dict:
             "ran": (res.get("local") or {}).get("ran") or []}
 
 
+def _print_candidates():
+    mark = {True: "FOUND", False: "  -  ", PLACEHOLDER: "STUB "}
+    print("\nLooked in:")
+    for where, found in find_candidates():
+        print(f"   {mark[found]}  {where}")
+    if any(f == PLACEHOLDER for _w, f in find_candidates()):
+        print("\n   STUB = npm's 500-byte placeholder, left by an install whose last")
+        print("   step was blocked. It is walked past; it is not the program.")
+
+
 def main(argv=None):
     import argparse
 
@@ -804,16 +912,17 @@ def main(argv=None):
         print(f"npm     : {kit['npm'] or '(not found)'}")
         if kit["npm_bin"]:
             print(f"npm puts global tools in: {kit['npm_bin']}")
-        print("\nLooked in:")
-        for where, found in find_candidates():
-            print(f"   {'FOUND' if found else '  -  '}  {where}")
+        _print_candidates()
         print("\n  --  " + why)
         return 1
     print("Model   : " + a.model)
     res = check(a.model)
     if res["ok"]:
         print(f"\n  ok  it answered: {res['output'][:60]!r}")
-        print("      Which sector uses which model: python -m providers.claude_team")
+        print("      This is the Claude Code the agency will use, and it is now")
+        print(f"      remembered in {REMEMBERED.name}, so it stays found.")
+        _print_candidates()
+        print("\n      Which sector uses which model: python -m providers.claude_team")
         return 0
     print("\n  --  " + (res.get("cause") or "it did not answer"))
     if res.get("error"):
