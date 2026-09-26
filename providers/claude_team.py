@@ -72,6 +72,9 @@ from . import local_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "claude_team.local.json"
+# His real file, remembered so the suite can tell it apart from a temp file a
+# test has pointed CONFIG at. See _saved.
+_REAL_CONFIG = CONFIG
 
 # ---------------------------------------------------------------------------
 # THE MODELS, STRONGEST FIRST — AND NOTHING ABOVE OPUS 5
@@ -209,6 +212,13 @@ def below(model) -> list:
 
 
 def _saved() -> dict:
+    # THE SUITE PLANS AGAINST THE DEFAULTS, NOT HIS CHOICES. He moved a sector
+    # to Opus 4.7 on the Setup page, the release gate ran the tests, and a test
+    # expecting the default team saw his — so the suite went red on the one
+    # machine where it decides whether his approved changes go live. Same
+    # switch the rest of the suite uses (see providers/store._load).
+    if CONFIG == _REAL_CONFIG and local_cli._suite_isolated():
+        return {}
     try:
         return json.loads(CONFIG.read_text(encoding="utf-8")).get("team") or {}
     except Exception:

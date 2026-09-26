@@ -378,6 +378,15 @@ def tests():
     # plan the agency needs for real work. Tests of the Claude team stub the
     # call itself. See providers/local_cli.available.
     os.environ["CLAUDE_TEAM_OFF"] = "1"
+    # And never through his proxy. Several suites stand up a tiny server on
+    # 127.0.0.1 and talk to it. On Windows, Python takes the SYSTEM proxy from
+    # the registry for every address — a VPN or an antivirus web shield sets
+    # one — and a request to 127.0.0.1 sent through it never arrives, so a
+    # suite green everywhere else goes red on his laptop for no reason in the
+    # code. NO_PROXY makes Python ignore the registry proxy for the run.
+    local = "127.0.0.1,localhost,::1"
+    os.environ["NO_PROXY"] = ",".join(x for x in (os.environ.get("NO_PROXY"), local) if x)
+    os.environ["no_proxy"] = os.environ["NO_PROXY"]
     mods = ["coordination.cabinet_tests", "coordination.floor_tests",
             "coordination.targets_tests", "coordination.hook_tests",
             "coordination.faults_tests", "coordination.comms_tests",

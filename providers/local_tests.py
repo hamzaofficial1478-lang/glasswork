@@ -118,14 +118,19 @@ def test_one_shape_on_every_path():
 
     print("\nA missing CLI is a sentence, not a stack trace:")
     real_path, real_off = local_cli.cli_path, os.environ.pop(local_cli.OFF_ENV, None)
+    real_half = local_cli.half_installed
     local_cli.cli_path = lambda: ""
+    # Not installed at all — whatever an old npm attempt left on THIS machine.
+    # His laptop had npm's placeholder on it, which made this read
+    # "half-installed" and turned the suite red for a state of his disk.
+    local_cli.half_installed = lambda: {}
     try:
         res = local_cli._chat_as(None, "sonnet", ASK)
         check("refused", res["ok"], False)
         check("and names the fix", "install.ps1" in res["error"], True)
         check("the cause is readable", res["cause"], "claude code is not installed here")
     finally:
-        local_cli.cli_path = real_path
+        local_cli.cli_path, local_cli.half_installed = real_path, real_half
         if real_off is not None:
             os.environ[local_cli.OFF_ENV] = real_off
 
@@ -246,7 +251,12 @@ def test_npm_is_asked_where_it_puts_things():
     try:
         local_cli.shutil.which = lambda n: "/usr/bin/npm" if n == "npm" else None
         local_cli._run_quietly = lambda argv, timeout=20: "/custom/prefix"
-        found = "/custom/prefix/bin/claude"
+        # npm puts commands in <prefix> on Windows and <prefix>/bin elsewhere;
+        # this suite runs on his Windows laptop as well as on Linux, so the
+        # expected path is the one npm's own layout gives on this machine.
+        found = local_cli._npm_installed()[0]
+        check("npm's folder is asked for, not guessed",
+              found.replace("\\", "/").startswith("/custom/prefix"), True)
         local_cli.os.path.isfile = lambda p: p == found
         check("it is found where npm actually put it", local_cli.cli_path(), found)
         check("and the folder is named in the search list",
