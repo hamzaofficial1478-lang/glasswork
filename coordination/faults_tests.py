@@ -700,6 +700,27 @@ def test_the_owners_decisions_are_not_work_nobody_picks_up():
               cab.sql("SELECT status FROM tasks WHERE id='a1'")[0]["status"], "open")
 
 
+def test_a_scored_decision_is_filed_under_the_desk_that_made_it():
+    """
+    "what heppens to the MD all the sudden it failed why?" — the floor read
+    "scored the MD's call: failed" for SEO's keyword-gap lists.
+    """
+    print("\nReport scoring SEO's call is not the MD failing:")
+    from . import activity
+    with _Cabinet() as cab:
+        now = int(time.time())
+        cab.write("INSERT INTO decisions(id,cycle,reasoning,confidence,outcome,"
+                  "created_at,scored_at,outcome_note)"
+                  " VALUES('d1','seo-gap','7 in-scope gaps',0.7,'failed',?,?,?)",
+                  (now - 600, now, "none of the 7 gap phrases was briefed within 5 days"))
+        ev = [e for e in activity.feed()["events"] if e["who"] == "report-reporter"]
+        check("one scoring line", len(ev), 1)
+        check("it names SEO's list, not the MD", ev[0]["what"],
+              "scored SEO's keyword-gap list: failed")
+        check("it sits in SEO's room", ev[0]["room"], "SEO")
+        check("and says why", ev[0]["detail"].startswith("why: none of the 7"), True)
+
+
 def test_nothing_broken_says_nothing():
     print("\nA healthy agency is quiet:")
     with _Cabinet() as cab:
@@ -730,6 +751,7 @@ def main():
               test_a_run_is_only_reaped_after_somebody_is_told,
               test_a_sector_alarm_closes_when_the_day_or_the_faults_are_over,
               test_the_owners_decisions_are_not_work_nobody_picks_up,
+              test_a_scored_decision_is_filed_under_the_desk_that_made_it,
               test_nothing_broken_says_nothing):
         t()
     print()

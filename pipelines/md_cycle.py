@@ -793,7 +793,8 @@ def _cycle(agent, dry_run):
 
     hit = facts.get("hit_rate")
     scoreline = ("no scored decisions yet — no track record to reason from"
-                 if hit is None else f"recent hit-rate {hit:.0%}")
+                 if hit is None else
+                 f"agency-wide hit-rate {hit:.0%} (every desk's calls, not only the MD's)")
 
     if not kept:
         stuck = [r for r in rejected if r.get("owner_blocked")]

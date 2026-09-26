@@ -17,6 +17,7 @@ never move the score.
 Everything runs against a throwaway cabinet; no real Telegram message is
 ever sent (send_message is monkeypatched to prove nothing goes out).
 """
+import json
 import sqlite3
 import sys
 import tempfile
@@ -144,6 +145,30 @@ def _scoring_tests():
     report.score_pending_decisions(con)
     check("nothing briefed past the grace window -> failed", _outcome(con, did), "failed")
     con.execute("DELETE FROM decisions"); con.commit()
+
+    print("seo-gap is judged by the PAGE its phrases belong to, as the briefs desk is:")
+    def _page(url, at):
+        con.execute("INSERT INTO content_queue(title,type,brief,status,created_at)"
+                    " VALUES(?,?,?,?,?)",
+                    (url, "service_page", json.dumps({"url": url}), "briefed", at))
+        con.commit()
+    ev = {"phrases": ["shower screen repair dubai marina"]}
+    did = _mk_decision("seo-gap", _now() - 1000, con, ev)
+    _page("/shower-glass-dubai-marina", _now())
+    report.score_pending_decisions(con)
+    check("its page briefed after the list, without the exact words -> worked",
+          _outcome(con, did), "worked")
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM content_queue"); con.commit()
+
+    _page("/shower-glass-dubai-marina", _now() - report.GRACE["seo-gap"] - 500)
+    did = _mk_decision("seo-gap", _now() - report.GRACE["seo-gap"] - 10, con, ev)
+    scored, waiting = report.score_pending_decisions(con)
+    check("its page was already briefed before the list -> not a failure",
+          _outcome(con, did), None)
+    check("and it says why",
+          "already briefed" in next(w["why"] for w in waiting if w["decision_id"] == did),
+          True)
+    con.execute("DELETE FROM decisions"); con.execute("DELETE FROM content_queue"); con.commit()
 
     print("content-briefs follows the pages it actually created:")
     b1 = _brief(con, "Page one", "briefed", _now())

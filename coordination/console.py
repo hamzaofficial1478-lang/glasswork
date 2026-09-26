@@ -82,3 +82,30 @@ def read(path, default=""):
     except UnicodeDecodeError:
         # Somebody's editor saved a file as cp1252. Do not lose the run over it.
         return Path(path).read_text(encoding="utf-8", errors="replace")
+
+
+# ---------------------------------------------------------------------------
+# A CHILD THAT KEEPS TO ITSELF, ON WINDOWS
+# ---------------------------------------------------------------------------
+#
+# "seo-strategist crashed: FAILED: KeyboardInterrupt" — twice, on a sector that
+# was otherwise healthy. Nothing in the code raises KeyboardInterrupt. Windows
+# does: Ctrl+C in a console window is delivered to EVERY program attached to
+# that console, not just the one in front. A step started from the window he
+# ran the program in shared that window, so a Ctrl+C there — pressed to stop a
+# run that looked stuck, or to copy an error off the screen — landed in
+# whichever desk happened to be mid-call to Claude, and the floor read it as a
+# crash. A console program started by the office (which has no window) got a
+# fresh black window of its own for every step instead, one more thing to be
+# closed or pressed in by mistake.
+#
+# So a background child is started in its own process group (Ctrl+C in any
+# window does not reach it) and with no window (nothing pops up). Stopping it
+# is the parent's job, which is how the Stop button already works: day_run
+# ends the step and writes it down as stopped, not crashed. 0 off Windows.
+def background_flags() -> int:
+    if os.name != "nt":
+        return 0
+    import subprocess
+    return (getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))

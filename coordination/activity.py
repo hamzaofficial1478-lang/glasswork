@@ -61,6 +61,30 @@ ROOM = {"md": "Director", "director": "Director", "managing": "Director",
         "report": "Report", "reporter": "Report",
         "security": "Security", "owner": "Director"}
 
+# Whose call a logged decision is, from the cycle that logged it. Anything not
+# listed is named after its own cycle, never quietly credited to the MD.
+DECISION_OWNER = {
+    "md-cycle": ("the MD's day plan", "managing-director", "Director"),
+    "seo-gap": ("SEO's keyword-gap list", "seo-strategist", "SEO"),
+    "competitor-watch": ("SEO's rival watch", "seo-strategist", "SEO"),
+    "content-briefs": ("Content's page briefs", "content-writer", "Content"),
+    "it-health": ("IT's health check", "it-watcher", "IT"),
+    "site-services": ("IT's services check", "it-watcher", "IT"),
+    "leads-hunt": ("the Leads hunt", "leads-hunter", "Leads"),
+    "leads-sources": ("Leads' source map", "leads-hunter", "Leads"),
+    "security-screen": ("Security's screening", "security", "Security"),
+}
+
+
+def decision_owner(cycle) -> tuple:
+    """(whose call, the desk, the room) for a decision's cycle."""
+    cycle = (cycle or "").strip()
+    if cycle in DECISION_OWNER:
+        return DECISION_OWNER[cycle]
+    room = _room_of(cycle) or "Report"
+    return f"{cycle or 'an unnamed'} call", cycle or "report-reporter", room
+
+
 WINDOW = 24 * 3600      # how far back the floor looks by default
 PER_SOURCE = 40         # cap per source so one chatty table cannot drown the rest
 
@@ -120,6 +144,9 @@ def since(ts=None, limit=60) -> list:
         elif r["status"] == "error":
             ev.append(_ev(r["ended_at"] or r["started_at"], ERRORED, r["agent"],
                           line, "the run raised and stopped", level="bad"))
+        elif r["status"] == "stopped":
+            ev.append(_ev(r["ended_at"] or r["started_at"], GOT, r["agent"],
+                          "stopped part-way", r["note"] or "", level="normal"))
         elif r["status"] == "stalled":
             # Reaped by the Overseer. Past tense, and anchored to when it was
             # declared dead rather than to now — see the note below.
@@ -266,20 +293,30 @@ def since(ts=None, limit=60) -> list:
         ev.append(_ev(o["updated_at"], GOT, o["sector"],
                       "the owner's order for today", o["orders"] or "", level="amber"))
 
-    # ---- the MD's own calls ---------------------------------------------
-    for d in _rows(c, "SELECT cycle,reasoning,confidence,outcome,created_at,scored_at"
+    # ---- every desk's logged calls, and how Report scored them -----------
+    #
+    # "what heppens to the MD all the sudden it failed why?" — it had not. This
+    # read "scored the MD's call: failed" for EVERY decision in the table, and
+    # most of them are not the MD's: SEO's keyword-gap lists, IT's health
+    # checks, the Leads hunt. Each is filed under the desk that made it, and the
+    # line names whose call it was and why Report scored it the way it did.
+    for d in _rows(c, "SELECT cycle,reasoning,confidence,outcome,outcome_note,"
+                      "created_at,scored_at"
                       " FROM decisions WHERE COALESCE(scored_at,created_at)>=?"
                       " ORDER BY COALESCE(scored_at,created_at) DESC LIMIT ?",
                    (ts, PER_SOURCE)):
+        whose, who, room = decision_owner(d["cycle"])
         if (d["created_at"] or 0) >= ts:
-            ev.append(_ev(d["created_at"], PUSHED, "md",
-                          f"logged a call ({d['cycle']})", (d["reasoning"] or "")[:180],
-                          room="Director"))
+            ev.append(_ev(d["created_at"], PUSHED, who,
+                          f"logged a call: {whose}", (d["reasoning"] or "")[:180],
+                          room=room))
         if (d["scored_at"] or 0) >= ts and d["outcome"]:
+            why = d["outcome_note"] or ""
             ev.append(_ev(d["scored_at"], DELIVERED if d["outcome"] == "worked" else ERRORED,
                           "report-reporter",
-                          f"scored the MD's call: {d['outcome']}",
-                          (d["reasoning"] or "")[:180], room="Report",
+                          f"scored {whose}: {d['outcome']}",
+                          (f"why: {why} — " if why else "") + (d["reasoning"] or ""),
+                          room=room,
                           level="good" if d["outcome"] == "worked" else "amber"))
 
     c.close()

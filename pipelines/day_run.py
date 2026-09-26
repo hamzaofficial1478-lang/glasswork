@@ -60,7 +60,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from coordination import board, proposals, readiness   # noqa: E402
+from coordination import board, console, proposals, readiness   # noqa: E402
 
 PY = sys.executable or "python3"
 LOCK = "day_run"
@@ -613,6 +613,12 @@ class _StopWatch:
     def is_set(self):
         return self.event.is_set()
 
+    def interrupt(self, why):
+        """Ctrl+C in the window the run was started from: a Stop, not a crash."""
+        if not self.event.is_set():
+            self.by, self.why = "owner", why
+            self.event.set()
+
     def note(self):
         who = "you" if (self.by or "owner") == "owner" else self.by
         return f"stopped by {who}" + (f" — {self.why}" if self.why else "")
@@ -708,8 +714,10 @@ def _run_child(mod, stop=None):
         return 1, str(e), False
     try:
         try:
+            # Its own process group, and no window: see console.background_flags.
             p = subprocess.Popen([PY, "-m", mod], cwd=str(ROOT),
-                                 stdout=sink, stderr=subprocess.STDOUT)
+                                 stdout=sink, stderr=subprocess.STDOUT,
+                                 creationflags=console.background_flags())
         except Exception as e:                           # pragma: no cover
             return 1, str(e), False
 
@@ -845,9 +853,42 @@ def _run_lanes(rid, stop=None):
                                 daemon=True) for n in plan]
     for t in threads:
         t.start()
-    for t in threads:
-        t.join()
+    restore = _ctrl_c_is_a_stop(stop)
+    try:
+        for t in threads:
+            while t.is_alive():
+                t.join(timeout=0.5)
+    finally:
+        restore()
     return len(failed), stopping()
+
+
+def _ctrl_c_is_a_stop(stop):
+    """
+    While the lanes run, Ctrl+C in the terminal presses Stop: each lane ends
+    its running step and writes the rest down as stopped, and the day reads
+    'stopped'. Before, the KeyboardInterrupt tore the run down with its steps
+    still going and marked the day 'failed' — and on Windows it also landed in
+    every step sharing the window, which the floor read as crashes.
+
+    A handler rather than catching KeyboardInterrupt round join(): an
+    interrupted join() can leave the thread reporting itself finished while it
+    is still running, and the run would return with a step left 'running'.
+    Only the main thread may set one; anywhere else this does nothing.
+    Returns the function that puts the old handler back.
+    """
+    import signal
+    if stop is None or threading.current_thread() is not threading.main_thread():
+        return lambda: None
+
+    def on_ctrl_c(_signum, _frame):
+        stop.interrupt("Ctrl+C in the window the run was started from")
+
+    try:
+        old = signal.signal(signal.SIGINT, on_ctrl_c)
+    except (ValueError, OSError):
+        return lambda: None
+    return lambda: signal.signal(signal.SIGINT, old)
 
 
 def start(orders=None, note="", force=False, quick=False, skip_check=False,

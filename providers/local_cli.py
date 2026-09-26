@@ -223,6 +223,14 @@ def _likely_homes():
     return out
 
 
+def _background_flags() -> int:
+    try:
+        from coordination import console
+        return console.background_flags()
+    except Exception:                                        # pragma: no cover
+        return 0
+
+
 def _run_quietly(argv, timeout=20) -> str:
     """One short command's stdout, or '' — never raises, never blocks for long."""
     try:
@@ -754,10 +762,14 @@ def _chat_as(cred, model_name, messages, max_tokens=512, timeout=DEFAULT_TIMEOUT
     allowed = max(1, int(timeout or 0)) if exact else max(FLOOR_TIMEOUT,
                                                            int(timeout or 0))
     try:
+        # Its own process group and no window (console.background_flags): a
+        # Ctrl+C meant for somebody else must not land mid-answer, and a
+        # console flashing up for every call is not something to click on.
         proc = subprocess.run(
             cmd, input=prompt, capture_output=True, text=True,
             timeout=allowed, cwd=workdir, env=child_env(config_dir),
-            encoding="utf-8", errors="replace")
+            encoding="utf-8", errors="replace",
+            creationflags=_background_flags())
     except subprocess.TimeoutExpired:
         return _answer(False, cmd, status=408,
                        error=f"the local model did not answer within {allowed}s",

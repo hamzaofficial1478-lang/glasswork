@@ -262,6 +262,17 @@ def test_the_md_is_asked_once_not_every_pass():
     check("three passes, one question", asked, 1)
 
 
+def test_ctrl_c_is_not_a_bug_for_the_md():
+    print("\nAn old 'crashed: KeyboardInterrupt' is cleared, not sent upstairs as a bug:")
+    db = _fresh_db()
+    _crash(db, "seo-strategist", "looking for page-two wins — FAILED: KeyboardInterrupt: ")
+    faults.scan()
+    r = heal.run()
+    check("repaired by clearing it", r["repaired"], 1)
+    check("and the MD is not asked",
+          _q(db, "SELECT count(*) FROM requests WHERE to_sector='Director'")[0][0], 0)
+
+
 def test_being_behind_is_not_a_repair_job():
     """
     "IT has not answered SEO" and "work on IT's board nobody has picked up" are
@@ -303,6 +314,7 @@ def main():
         test_a_claim_can_always_be_released_eventually()
         test_a_desk_finishes_what_it_is_holding_first()
         test_the_md_is_asked_once_not_every_pass()
+        test_ctrl_c_is_not_a_bug_for_the_md()
         test_being_behind_is_not_a_repair_job()
     finally:
         board.DB = real

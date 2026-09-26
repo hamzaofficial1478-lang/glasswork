@@ -1565,6 +1565,16 @@ def agent_run(agent, task_id=None, note=None):
         run = _Run(None)
     try:
         yield run
+    except KeyboardInterrupt:
+        # Not a fault in the desk. Windows hands Ctrl+C to every program in
+        # the window it was pressed in (see console.background_flags), so this
+        # is somebody stopping a run, or copying text off the screen — and the
+        # floor calling it "crashed" sent IT off to ask the MD about a bug that
+        # does not exist.
+        _end_run(run.id, "stopped", note=(
+            "stopped part-way: Ctrl+C reached it from the window it was started "
+            "in. Nothing is wrong with the code; it runs again next time."))
+        raise
     except BaseException as e:
         # Record WHAT WENT WRONG, not just that something did. The note at the
         # point of the crash says what the agent was attempting; on its own that
@@ -1576,13 +1586,19 @@ def agent_run(agent, task_id=None, note=None):
     _end_run(run.id, "ok")
 
 
-def _end_run(run_id, status, error=None):
+def _end_run(run_id, status, error=None, note=None):
     if run_id is None:
         return
     try:
         with _conn() as c:
             _migrate(c)
-            if error:
+            if note:
+                c.execute(
+                    "UPDATE agent_runs SET status=?, ended_at=?,"
+                    " note = CASE WHEN note IS NULL OR note='' THEN ?"
+                    "             ELSE note || ' — ' || ? END"
+                    " WHERE id=?", (status, _now(), note, note, run_id))
+            elif error:
                 # keep what it was doing, then say how it broke
                 c.execute(
                     "UPDATE agent_runs SET status=?, ended_at=?,"

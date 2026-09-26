@@ -22,7 +22,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from coordination import activity, board, readiness
+from coordination import activity, board, faults, readiness
 from providers import store
 
 _fail = []
@@ -999,6 +999,71 @@ def _stop_button_tests(day_run):
     # This is the part the Overseer reads. 'failed' would put a stopped day in
     # its sights as something to investigate; 'stopped' is a fact about him.
     check("and it is not recorded as a failure", st["run"]["status"] != "failed", True)
+
+    print("\nCtrl+C in the window is a Stop, not a crash:")
+    # "seo-strategist crashed: FAILED: KeyboardInterrupt" — Windows hands
+    # Ctrl+C to every program in the window, and a bare join() let it tear the
+    # day down with its steps still going.
+    import _thread
+    day_run.STEPS = [("A long step", "pipelines._never", "SEO", "seo")]
+    day_run.LANE_AFTER = {"seo": ()}
+    kids.clear()
+    day_run.subprocess = types.SimpleNamespace(
+        Popen=slow_popen, STDOUT=subprocess.STDOUT,
+        TimeoutExpired=subprocess.TimeoutExpired)
+    board.clear_stop(day_run.LOCK)
+    try:
+        rid = day_run._open_run("ctrl-c test", False, [])
+        threading.Timer(1.0, _thread.interrupt_main).start()
+        t0 = time.time()
+        with day_run._StopWatch(every=0.2) as watch:
+            failed, stopped = day_run._run_lanes(rid, watch)
+        took = time.time() - t0
+    finally:
+        day_run.subprocess = real_sub
+        for p in kids:
+            try:
+                p.kill()
+                p.wait(timeout=5)
+            except Exception:
+                pass
+        day_run.STEPS, day_run.LANE_AFTER = real_steps, real_after
+        board.clear_stop(day_run.LOCK)
+    check("the run comes back as stopped", (failed, stopped), (0, True))
+    check("without sitting out the step", took < 10, True)
+    st = day_run.status(rid)
+    check("the step says it was cut off, not that it failed",
+          [s["status"] for s in st["steps"]], ["stopped"])
+    check("and why", "Ctrl+C" in (st["steps"][0]["summary"] or ""), True)
+    day_run._close_run(rid, "stopped")
+
+    print("\n...and a desk that Ctrl+C does reach is stopped, not crashed:")
+    try:
+        with board.agent_run("seo-strategist", note="looking for page-two wins"):
+            raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        pass
+    run = _rows("SELECT status, note FROM agent_runs WHERE agent='seo-strategist'"
+                " ORDER BY id DESC LIMIT 1")[0]
+    check("written down as stopped", run[0], "stopped")
+    check("with what it was doing and a plain reason",
+          run[1].startswith("looking for page-two wins — stopped part-way: Ctrl+C"),
+          True)
+    check("and no crash is filed against it",
+          [f for f in faults.detect() if f["kind"] == "crash"
+           and f.get("agent") == "seo-strategist"], [])
+
+    print("\nOn Windows a step gets its own process group and no window:")
+    from coordination import console
+    real_name = os.name
+    try:
+        os.name = "nt"
+        flags = console.background_flags()
+    finally:
+        os.name = real_name
+    check("new process group (Ctrl+C elsewhere does not reach it)", bool(flags & 0x200), True)
+    check("no window popping up", bool(flags & 0x08000000), True)
+    check("and nothing changes elsewhere", console.background_flags() if os.name != "nt" else 0, 0)
 
     print("\nStop when nothing is running clears up instead of erroring:")
     board.acquire_lock(day_run.LOCK, day_run.LOCK_HOLDER, wait=False, ttl=600)

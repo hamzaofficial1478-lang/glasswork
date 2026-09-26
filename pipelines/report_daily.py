@@ -91,23 +91,68 @@ def _in(col, ids):
     return f"{col} IN ({','.join('?' * len(ids))})"
 
 
+def _page_for(phrase, area=""):
+    """The service page a phrase would be briefed into — the briefs desk's own rule."""
+    from pipelines import content_briefs as cb
+    svc = cb._service_of(phrase or "")
+    if not svc:
+        return None
+    ar = cb._area_of(phrase, area or "")
+    return "/" + cb._slug(f"{svc} {ar}" if ar else svc)
+
+
 def _score_seo_gap(con, created_at, ev):
     """
     Did Content brief a page from THESE phrases? A brief written about something
     else is not evidence that this gap list was any good.
+
+    A phrase counts as briefed when it is written into a brief, OR when the
+    page it belongs to (service + area, the briefs desk's own clustering) was
+    briefed after the list. The desk briefs one page per service and area and
+    keeps ten phrases per brief, so matching the exact words alone scored
+    'failed' on lists whose page had in fact been written.
+
+    And a list whose every phrase falls under a page ALREADY briefed before it
+    was sent is not scored at all: it added supporting phrases to existing
+    pages, there was no new page to write, and calling that a failure blamed
+    SEO — and, on the old floor wording, the MD — for Content not repeating
+    itself.
     """
     phrases = [p for p in (ev.get("phrases") or []) if p]
     if not phrases:
         return None, "no phrases recorded on this decision — cannot tell what it claimed"
-    rows = con.execute("SELECT brief, title FROM content_queue WHERE created_at>?",
-                       (created_at,)).fetchall()
+    areas = {}
+    ids = _ids(ev, "keyword_ids")
+    if ids:
+        areas = {r[0]: r[1] or "" for r in con.execute(
+            f"SELECT phrase, area FROM keywords WHERE {_in('id', ids)}", ids)}
+    before, after, texts_after = set(), set(), []
+    for brief, title, at in con.execute(
+            "SELECT brief, title, created_at FROM content_queue"):
+        try:
+            url = (json.loads(brief) or {}).get("url", "")
+        except Exception:
+            url = ""
+        if (at or 0) > created_at:
+            after.add(url)
+            texts_after.append(((brief or "") + " " + (title or "")).lower())
+        else:
+            before.add(url)
+    page = {p: _page_for(p, areas.get(p, "")) for p in phrases}
     hits = {p for p in phrases
-            for r in rows if p.lower() in ((r[0] or "") + " " + (r[1] or "")).lower()}
+            if any(p.lower() in t for t in texts_after) or (page[p] and page[p] in after)}
     if hits:
         return "worked", (f"{len(hits)} of {len(phrases)} gap phrase(s) were briefed, "
                           f"e.g. {sorted(hits)[0]!r}")
+    in_scope = [p for p in phrases if page[p]]
+    if in_scope and all(page[p] in before for p in in_scope):
+        return None, (f"all {len(in_scope)} in-scope phrase(s) belong to pages already "
+                      "briefed before this list — it added supporting phrases, not new "
+                      "pages, so there was nothing new to write and nothing to score")
     if _expired("seo-gap", created_at):
-        return "failed", f"none of the {len(phrases)} gap phrases was briefed within 5 days"
+        needing = [p for p in in_scope if page[p] not in before] or phrases
+        return "failed", (f"{len(needing)} of the {len(phrases)} gap phrase(s) needed a "
+                          "new page and none was briefed within 5 days")
     return None, "still within the 5-day grace window"
 
 

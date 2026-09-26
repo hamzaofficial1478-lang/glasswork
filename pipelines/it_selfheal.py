@@ -86,6 +86,9 @@ PASSING = (
     r"connection (?:reset|refused|aborted|error)", r"\bECONNRESET\b",
     r"\bremote end closed\b", r"\btemporary failure in name resolution\b",
     r"\bread timed out\b", r"\bssl\b.*\beof\b",
+    # Ctrl+C reaching a step from the window it shared. Somebody stopped it;
+    # nothing in the code is broken. See coordination/console.background_flags.
+    r"\bKeyboardInterrupt\b",
 )
 
 # A crash whose message names something only HE can put right. The capture
