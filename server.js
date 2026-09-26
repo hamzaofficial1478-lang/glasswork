@@ -308,6 +308,7 @@ app.get("/", (_q, r) => r.sendFile(path.join(__dirname, "ui", "office.html")));
 app.get("/control", (_q, r) => r.sendFile(path.join(__dirname, "ui", "agency.html")));
 app.get("/setup", (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
 app.get("/status", (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
+app.get("/review", (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
 
 /* IS THE RUNNING PROGRAM OLDER THAN THE PAGE READING IT?
    The screens are files on disk, re-read on every refresh. This file is read
@@ -1082,6 +1083,57 @@ app.post("/api/approve", (req, res) => {
   if (!out) return res.json({ ok: false, error: "approve error: " + String(r.stderr || "no output") });
   try { return res.json(JSON.parse(out)); }
   catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+});
+
+// ---- THE REVIEW PAGE: written pages and drafted mail, read before they leave --
+// "made a section where i can see if it write the post to publish and mail to
+//  sent i will approve both of them". coordination/review.py does the reading
+// and the deciding; these only carry it.
+app.get("/api/review", (_q, res) =>
+  res.json(pyModule("coordination.review", ["--json"], 30000)));
+
+const REVIEW_ACTS = ["send", "discard", "publish", "reject_page", "rewrite", "discard_page"];
+app.post("/api/review/act", (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const b = req.body || {};
+  const act = String(b.do || "");
+  if (!REVIEW_ACTS.includes(act)) return res.json({ ok: false, error: "unknown action" });
+  const ids = (Array.isArray(b.ids) ? b.ids : [])
+    .map((x) => parseInt(x, 10)).filter(Number.isFinite).slice(0, 200);
+  // Sending goes through his mail server one message at a time, so it gets
+  // longer than a database write — but not unbounded.
+  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.review", "--act"], {
+    cwd: __dirname, input: JSON.stringify({ do: act, ids }),
+    timeout: act === "send" ? 300000 : 60000, maxBuffer: 4 * 1024 * 1024,
+  });
+  if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
+  const out = String(r.stdout || "");
+  if (!out) return res.json({ ok: false, error: "review error: " + String(r.stderr || "no output") });
+  try { return res.json(JSON.parse(out)); }
+  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+});
+
+// Writing a mail per lead, writing a page, and the Releaser's test run all take
+// minutes, so they are started in the background the way the day run is, and
+// the page watches the busy flags in /api/review.
+const REVIEW_JOBS = { "draft-mails": "--draft-mails", "write-page": "--write-page",
+                      "publish-now": "--publish-now" };
+app.post("/api/review/start/:job", (req, res) => {
+  const flag = REVIEW_JOBS[req.params.job];
+  if (!flag) return res.json({ ok: false, error: "unknown job" });
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  try {
+    const child = spawn(py.cmd, [...py.prefix, "-m", "coordination.review", flag], {
+      cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,
+    });
+    child.on("error", () => {});
+    child.unref();
+  } catch (e) {
+    return res.json({ ok: false, error: "Could not start it: " + e.message });
+  }
+  res.json({ ok: true, started: req.params.job });
 });
 
 // ---- put a stuck job back on the board --------------------------------------

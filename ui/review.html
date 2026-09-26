@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review before it leaves</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!--
+  THE REVIEW PAGE. What the agency has written, read in full before any of it
+  leaves the building: every drafted mail, ticked by him before it is sent, and
+  every written page, read before it goes on his website — including the pages
+  the checks held back, which used to be on no screen at all.
+
+  The office's own look (same tokens, same two faces), because this is a room
+  of the same building, not a different product. Dark only, like the office.
+  Everything is read from /api/review and decided through /api/review/act;
+  coordination/review.py is where the rules live.
+-->
+<style>
+:root{
+  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
+  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
+  --text:#e7eff3; --muted:#7d919c; --faint:#54666f;
+  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.14);
+  --amber:#eaa543; --amber-dim:rgba(234,165,67,.13);
+  --danger:#e5565b; --danger-dim:rgba(229,86,91,.13); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:120px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Space Grotesk',system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;font-size:14px;line-height:1.55}
+button,input{font-family:inherit}
+a{color:var(--glass)}
+.etch{font-family:'IBM Plex Mono',ui-monospace,monospace;text-transform:uppercase;letter-spacing:.18em;
+  color:var(--etch);font-size:10px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
+
+header{position:sticky;top:0;z-index:20;background:rgba(12,18,22,.92);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line)}
+.bar{max-width:1080px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.bar h1{font-size:17px;margin:0;font-weight:600;letter-spacing:-.01em}
+.bar .back{margin-left:auto;font-size:13px;color:var(--muted);text-decoration:none;
+  border:1px solid var(--line2);border-radius:9px;padding:6px 11px}
+.bar .back:hover{color:var(--text)}
+.tabs{max-width:1080px;margin:0 auto;padding:0 16px;display:flex;gap:4px}
+.tab{padding:9px 14px 10px;border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);
+  cursor:pointer;font-size:14px;font-weight:500;display:flex;gap:8px;align-items:center;white-space:nowrap}
+.tab.on{color:var(--text);border-bottom-color:var(--glass)}
+.count{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:1px 7px;border-radius:999px;
+  background:var(--panel2);color:var(--muted)}
+.tab.on .count.hot,.count.hot{background:var(--amber);color:#1a1206;font-weight:600}
+
+main{max-width:1080px;margin:0 auto;padding:22px 16px 120px}
+section{display:none}
+section.on{display:block}
+h2{font-size:15px;font-weight:600;margin:30px 0 4px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+h2:first-child{margin-top:0}
+h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
+.lede{color:var(--muted);margin:0 0 14px;max-width:68ch;font-size:13px}
+
+.strip{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px}
+.fact{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 13px;min-width:0}
+.fact .v{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.fact .l{font-size:11.5px;color:var(--muted)}
+.fact.warn{border-color:rgba(234,165,67,.5);background:var(--amber-dim)}
+.fact.warn .v{color:var(--amber)}
+
+.notice{border:1px solid var(--line2);background:var(--panel);border-radius:12px;padding:12px 14px;margin:0 0 16px;
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}
+.notice.amber{border-color:rgba(234,165,67,.5);background:var(--amber-dim)}
+.notice p{margin:0;flex:1 1 280px;min-width:0}
+
+.btn{padding:8px 14px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);color:var(--text);
+  cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--etch)}
+.btn.go{border-color:rgba(92,192,136,.55);color:var(--ok);background:var(--ok-dim)}
+.btn.go:hover{background:rgba(92,192,136,.2)}
+.btn.glass{border-color:var(--glass);color:var(--glass);background:var(--glass-dim)}
+.btn.stop:hover{border-color:var(--danger);color:var(--danger);background:var(--danger-dim)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.quiet{background:transparent}
+
+.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.tools .sp{flex:1}
+.tools label{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);cursor:pointer}
+
+/* ---- a drafted mail ---- */
+.mails{display:grid;gap:12px}
+.mail{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px 14px 14px;
+  display:grid;grid-template-columns:28px 1fr;gap:4px 10px;transition:border-color .12s}
+.mail.picked{border-color:var(--glass);box-shadow:0 0 0 1px var(--glass) inset}
+.mail input[type=checkbox]{width:18px;height:18px;margin:3px 0 0;accent-color:var(--glass);cursor:pointer}
+.mhead{display:flex;gap:6px 12px;flex-wrap:wrap;align-items:baseline;min-width:0}
+.mhead b{font-size:15px}
+.addr{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--glass);overflow-wrap:anywhere}
+.meta{grid-column:2;color:var(--muted);font-size:12px}
+.subj{grid-column:2;margin-top:8px;font-weight:600}
+.subj span{color:var(--muted);font-weight:400}
+.body{grid-column:2;white-space:pre-wrap;margin:6px 0 0;font-size:13.5px;line-height:1.65;color:#d5e1e6;
+  max-width:70ch;overflow-wrap:anywhere}
+.notes{grid-column:2;margin-top:8px;font-size:12px;color:var(--amber)}
+
+.bottombar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(19,29,35,.97);
+  border-top:1px solid var(--line2);transform:translateY(110%);visibility:hidden;
+  transition:transform .18s,visibility .18s}
+.bottombar.on{transform:none;visibility:visible}
+.bottombar .in{max-width:1080px;margin:0 auto;padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.bottombar .in p{margin:0;flex:1 1 200px;font-size:13px}
+
+/* ---- a written page ---- */
+.page{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 12px}
+.page.held{border-color:rgba(234,165,67,.35)}
+.page h3{margin:0;font-size:15.5px;font-weight:600;text-wrap:balance}
+.page .meta{margin-top:3px}
+.page .why{font-size:13px;color:#cbd8de;margin:8px 0 0;max-width:72ch}
+.reasons{margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--amber)}
+.reasons li{margin:2px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+.row .msg{font-size:12.5px;color:var(--muted)}
+.frame{margin-top:12px;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:#fff}
+.frame iframe{display:block;width:100%;height:70vh;border:0;background:#fff}
+.pill{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
+.pill.ok{border-color:rgba(92,192,136,.5);color:var(--ok)}
+.pill.bad{border-color:rgba(229,86,91,.5);color:var(--danger)}
+.pill.amber{border-color:rgba(234,165,67,.5);color:var(--amber)}
+
+.log{width:100%;border-collapse:collapse;font-size:12.5px}
+.logwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.log th{text-align:left;font-weight:500;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line);
+  font-size:11.5px;white-space:nowrap}
+.log td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.log tr:last-child td{border-bottom:0}
+.log td.n{white-space:nowrap;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+
+.empty{color:var(--muted);font-size:13px;padding:14px 0}
+.busy{display:inline-flex;gap:8px;align-items:center;color:var(--glass);font-size:13px}
+.busy::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--glass);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.busy::before{animation:none}.bottombar{transition:none}}
+
+.toast{position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:40;max-width:min(560px,calc(100% - 32px));
+  background:var(--raise);border:1px solid var(--line2);border-radius:10px;padding:10px 14px;font-size:13px;
+  box-shadow:0 14px 40px rgba(0,0,0,.45);display:none}
+.toast.on{display:block}
+.toast.good{border-color:rgba(92,192,136,.6)}
+.toast.bad{border-color:rgba(229,86,91,.6)}
+
+@media (max-width:640px){
+  .tab .more{display:none}
+  .tab{padding:9px 10px 10px}
+  .mail{grid-template-columns:24px 1fr;padding:12px}
+  .frame iframe{height:60vh}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div>
+      <div class="etch">Before it leaves the building</div>
+      <h1>Review</h1>
+    </div>
+    <a class="back" href="/">&larr; Back to the office</a>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab on" id="tabMails" role="tab" onclick="show('mails')">Emails<span class="more">&nbsp;to send</span> <span class="count" id="nMails">–</span></button>
+    <button class="tab" id="tabPages" role="tab" onclick="show('pages')">Pages<span class="more">&nbsp;for your website</span> <span class="count" id="nPages">–</span></button>
+  </div>
+</header>
+
+<main>
+  <section id="mails" class="on">
+    <div class="strip" id="mailFacts"></div>
+    <div id="mailNotice"></div>
+    <h2>Written and waiting for you <small id="mailHead"></small></h2>
+    <p class="lede">Every mail is written for one lead. Read them, tick the ones you want
+      to go, and press Send &mdash; they leave from your own email straight away. Nothing
+      you have not ticked is ever sent.</p>
+    <div class="tools" id="mailTools">
+      <label><input type="checkbox" id="pickAll" onchange="pickAll(this.checked)"> Tick all</label>
+      <span class="sp"></span>
+    </div>
+    <div class="mails" id="mailList"></div>
+    <div id="mailApproved"></div>
+    <h2>Already decided <small>the last twenty</small></h2>
+    <div id="mailRecent"></div>
+  </section>
+
+  <section id="pages">
+    <div class="strip" id="pageFacts"></div>
+    <div id="pageNotice"></div>
+    <h2>Ready for your yes <small id="pageHead"></small></h2>
+    <p class="lede">Written, and passed the writer's and the Auditor's checks. Read the page
+      as it would appear. Approving it hands it to IT, which runs the tests and then puts it
+      on your website &mdash; nothing goes live before that.</p>
+    <div id="pageList"></div>
+    <div id="pageApproved"></div>
+    <h2>Held back by the checks <small id="heldHead"></small></h2>
+    <p class="lede">These were written but did not pass, so they cannot go on the site as they
+      are. Send one back to be written again, or drop it.</p>
+    <div id="heldList"></div>
+    <h2>Already decided</h2>
+    <div id="pageRecent"></div>
+  </section>
+</main>
+
+<div class="bottombar" id="sendBar">
+  <div class="in">
+    <p id="sendText">Nothing ticked</p>
+    <button class="btn stop" id="discardBtn" onclick="discardPicked()">Discard ticked</button>
+    <button class="btn go" id="sendBtn" onclick="sendPicked()">Send ticked now</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const escA = s => esc(s).replace(/'/g, '&#39;');
+let DATA = null;
+const PICKED = new Set();     // mail ids he has ticked — survives every refresh
+const OPEN = new Set();       // pages whose preview he has opened
+let WORKING = false;          // a button press in flight: do not redraw under it
+
+function show(which){
+  for(const id of ['mails','pages']){
+    $('#'+id).classList.toggle('on', id===which);
+    $('#tab'+id[0].toUpperCase()+id.slice(1)).classList.toggle('on', id===which);
+  }
+  if(location.hash !== '#'+which) history.replaceState(null,'','#'+which);
+  drawBar();
+}
+
+function ago(t){
+  if(!t) return '';
+  const s = Math.max(0, Math.floor(Date.now()/1000) - t);
+  if(s < 60) return 'just now';
+  if(s < 3600) return Math.floor(s/60) + 'm ago';
+  if(s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function toast(text, kind){
+  const t = $('#toast');
+  t.textContent = text; t.className = 'toast on ' + (kind||'');
+  clearTimeout(toast._t); toast._t = setTimeout(()=>{ t.className='toast'; }, 9000);
+}
+
+async function load(){
+  if(WORKING) return;
+  try{
+    const r = await fetch('/api/review');
+    const j = await r.json();
+    if(!j.ok){ toast(j.error || 'Could not read what is waiting.', 'bad'); return; }
+    DATA = j;
+  }catch(e){ toast('Could not reach the office server — is it still running?', 'bad'); return; }
+  draw();
+}
+
+function draw(){
+  const m = DATA.mails, p = DATA.pages;
+  // Drop ticks on mail that is no longer waiting.
+  const live = new Set(m.waiting.map(x=>x.id));
+  for(const id of [...PICKED]) if(!live.has(id)) PICKED.delete(id);
+
+  const nm = m.waiting.length, np = p.waiting.length + p.held.length;
+  $('#nMails').textContent = nm; $('#nMails').classList.toggle('hot', nm>0);
+  $('#nPages').textContent = np; $('#nPages').classList.toggle('hot', p.waiting.length>0);
+  drawMails(m); drawPages(p); drawBar();
+}
+
+// ---------------------------------------------------------------- mail ----
+function drawMails(m){
+  const left = Math.max(0, (m.cap||0) - (m.sent_today||0));
+  $('#mailFacts').innerHTML = [
+    `<div class="fact"><div class="v">${m.waiting.length}</div><div class="l">written, waiting for you</div></div>`,
+    `<div class="fact${left===0?' warn':''}"><div class="v">${m.sent_today||0} / ${m.cap||0}</div><div class="l">sent today, of your daily limit</div></div>`,
+    m.ready ? `<div class="fact"><div class="v mono" style="font-size:13px">${esc(m.from)}</div><div class="l">sends from</div></div>`
+            : `<div class="fact warn"><div class="v">Not set up</div><div class="l">your email</div></div>`,
+  ].join('');
+
+  const notes = [];
+  if(!m.ready) notes.push(`<div class="notice amber"><p>Your email is not set up, so nothing can be sent yet.
+    Add it on <a href="/setup">Setup &rarr; Integrations &rarr; Email (SMTP)</a>; you can still read and tick
+    the mails here.</p></div>`);
+  if(!DATA.sectors.Leads) notes.push(`<div class="notice amber"><p>Leads is switched off, so no mail is written
+    or sent. Turn it back on in the office to use this page.</p></div>`);
+  if(m.writing) notes.push(`<div class="notice"><span class="busy">Writing a mail for each lead…</span>
+    <p>They appear below as each one is finished.</p></div>`);
+  else if(m.leads_without_mail > 0 && DATA.sectors.Leads) notes.push(`<div class="notice"><p><b>${m.leads_without_mail}</b>
+    lead${m.leads_without_mail===1?' has':'s have'} no mail written yet.</p>
+    <button class="btn glass" onclick="startJob('draft-mails', this)">Write the mails</button></div>`);
+  $('#mailNotice').innerHTML = notes.join('');
+
+  $('#mailHead').textContent = m.waiting.length ? `${m.waiting.length} mail${m.waiting.length===1?'':'s'}` : '';
+  $('#mailTools').style.display = m.waiting.length ? '' : 'none';
+  $('#pickAll').checked = m.waiting.length>0 && m.waiting.every(x=>PICKED.has(x.id));
+
+  $('#mailList').innerHTML = m.waiting.length ? m.waiting.map(x=>{
+    const lead = x.lead || {};
+    const bits = [x.service, lead.area, (lead.segment||'').replace(/_/g,' '),
+                  lead.source ? 'found via '+lead.source : '', 'written '+ago(x.queued_at)]
+                 .filter(Boolean).map(esc).join(' &middot; ');
+    const warn = (x.warnings||[]).length ? `<div class="notes">The Auditor passed it, and noted: ${(x.warnings||[]).map(esc).join('; ')}</div>` : '';
+    return `<article class="mail${PICKED.has(x.id)?' picked':''}" data-id="${x.id}">
+      <input type="checkbox" aria-label="Send to ${escA(x.company||x.to)}" ${PICKED.has(x.id)?'checked':''}
+             onchange="pick(${x.id}, this.checked)">
+      <div class="mhead"><b>${esc(x.company||'(no company name)')}</b><span class="addr">${esc(x.to)}</span></div>
+      <div class="meta">${bits}</div>
+      <div class="subj"><span>Subject:</span> ${esc(x.subject)}</div>
+      <div class="body">${esc(x.body)}</div>
+      ${warn}
+    </article>`;}).join('')
+    : `<div class="empty">No mail is waiting for you.${m.leads_without_mail>0?'':' When the Hunter finds new leads, a mail for each one appears here.'}</div>`;
+
+  $('#mailApproved').innerHTML = m.approved.length ? `<h2>Approved, not sent yet <small>they go on the next Leads pass</small></h2>
+    <div class="logwrap"><table class="log"><tr><th>To</th><th>Subject</th><th>Why it has not gone</th></tr>
+    ${m.approved.map(x=>`<tr><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td><td>${esc(x.subject)}</td>
+      <td>${esc(x.note||'waiting for the next pass')}</td></tr>`).join('')}</table></div>` : '';
+
+  $('#mailRecent').innerHTML = m.recent.length ? `<div class="logwrap"><table class="log">
+    <tr><th>When</th><th>To</th><th>Subject</th><th>What happened</th></tr>
+    ${m.recent.map(x=>`<tr><td class="n">${esc(ago(x.at))}</td><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td>
+      <td>${esc(x.subject)}</td><td>${x.status==='sent'?'<span class="pill ok">sent</span>':'<span class="pill">not sent</span>'}
+      ${x.note&&x.status!=='sent'?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
+    </table></div>` : `<div class="empty">Nothing decided yet.</div>`;
+}
+
+function pick(id, on){
+  on ? PICKED.add(id) : PICKED.delete(id);
+  const el = document.querySelector(`.mail[data-id="${id}"]`);
+  if(el) el.classList.toggle('picked', on);
+  const all = (DATA?.mails.waiting||[]);
+  $('#pickAll').checked = all.length>0 && all.every(x=>PICKED.has(x.id));
+  drawBar();
+}
+function pickAll(on){
+  for(const x of (DATA?.mails.waiting||[])) on ? PICKED.add(x.id) : PICKED.delete(x.id);
+  drawMails(DATA.mails); drawBar();
+}
+
+function drawBar(){
+  const n = PICKED.size, onMails = $('#mails').classList.contains('on');
+  $('#sendBar').classList.toggle('on', n>0 && onMails);
+  $('#sendText').textContent = n ? `${n} ticked` + (DATA?.mails.ready ? ` — they go from ${DATA.mails.from}` : ' — your email is not set up yet') : 'Nothing ticked';
+  $('#sendBtn').textContent = n ? `Send ${n} now` : 'Send ticked now';
+  $('#sendBtn').disabled = !n || !DATA?.mails.ready || !DATA?.sectors.Leads;
+  $('#discardBtn').textContent = n ? `Discard ${n}` : 'Discard ticked';
+}
+
+async function act(what, ids){
+  WORKING = true;
+  let j;
+  try{
+    const r = await fetch('/api/review/act', {method:'POST', headers:{'Content-Type':'application/json'},
+                                               body: JSON.stringify({do: what, ids})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  WORKING = false;
+  return j;
+}
+
+async function sendPicked(){
+  const ids = [...PICKED];
+  if(!ids.length) return;
+  const to = (DATA.mails.waiting||[]).filter(x=>PICKED.has(x.id)).map(x=>x.company||x.to);
+  if(!confirm(`Send ${ids.length} mail${ids.length===1?'':'s'} from ${DATA.mails.from} now?\n\n` + to.join('\n'))) return;
+  $('#sendBtn').disabled = true; $('#sendBtn').textContent = 'Sending…';
+  const j = await act('send', ids);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  for(const s of (j.sent||[])) PICKED.delete(s.id);
+  await load();
+}
+
+async function discardPicked(){
+  const ids = [...PICKED];
+  if(!ids.length) return;
+  if(!confirm(`Discard ${ids.length} draft${ids.length===1?'':'s'}? They will never be sent.`)) return;
+  const j = await act('discard', ids);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) ids.forEach(i=>PICKED.delete(i));
+  await load();
+}
+
+// --------------------------------------------------------------- pages ----
+function preview(html){
+  // PHP includes cannot run here; show the page's own body without them.
+  return String(html||'').replace(/<\?php[\s\S]*?\?>/g, '');
+}
+
+function frameFor(kind, id, html){
+  const key = kind+':'+id;
+  if(!OPEN.has(key)) return '';
+  if(!html) return `<div class="empty">There is no finished page to show for this one.</div>`;
+  // sandbox with nothing allowed: no scripts, no forms, no navigation. The page
+  // was written by a model and is shown as a picture of itself.
+  return `<div class="frame"><iframe sandbox title="Preview of the page" srcdoc="${escA(preview(html))}"></iframe></div>`;
+}
+
+function toggle(kind, id){
+  const key = kind+':'+id;
+  OPEN.has(key) ? OPEN.delete(key) : OPEN.add(key);
+  drawPages(DATA.pages);
+}
+
+function drawPages(p){
+  $('#pageFacts').innerHTML = [
+    `<div class="fact${p.waiting.length?' warn':''}"><div class="v">${p.waiting.length}</div><div class="l">ready for your yes</div></div>`,
+    `<div class="fact"><div class="v">${p.held.length}</div><div class="l">held back by the checks</div></div>`,
+    `<div class="fact"><div class="v">${p.to_write}</div><div class="l">briefed, waiting to be written</div></div>`,
+    p.held_for_seo ? `<div class="fact"><div class="v">${p.held_for_seo}</div><div class="l">waiting on SEO to clear</div></div>` : '',
+    `<div class="fact"><div class="v">${p.published}</div><div class="l">on your website</div></div>`,
+  ].join('');
+
+  const notes = [];
+  if(p.writing) notes.push(`<div class="notice"><span class="busy">Content is writing a page…</span>
+    <p>It appears here when it is finished, usually within a few minutes.</p></div>`);
+  else if(p.to_write > 0 && DATA.sectors.Content) notes.push(`<div class="notice"><p><b>${p.to_write}</b> page${p.to_write===1?' is':'s are'}
+    briefed and waiting to be written. Content writes one per run, or now if you ask.</p>
+    <button class="btn glass" onclick="startJob('write-page', this)">Write the next page now</button></div>`);
+  if(DATA.other_site_changes) notes.push(`<div class="notice"><p>${DATA.other_site_changes} other change${DATA.other_site_changes===1?'':'s'} to your
+    site ${DATA.other_site_changes===1?'is':'are'} waiting in the office under <a href="/">Waiting on you</a>.</p></div>`);
+  $('#pageNotice').innerHTML = notes.join('');
+
+  $('#pageHead').textContent = p.waiting.length ? `${p.waiting.length} page${p.waiting.length===1?'':'s'}` : '';
+  $('#pageList').innerHTML = p.waiting.length ? p.waiting.map(x=>`
+    <article class="page" data-id="${x.id}">
+      <h3>${esc(x.title)}</h3>
+      <div class="meta">${[x.file ? 'will be /'+x.file : '', x.keyword ? 'for “'+x.keyword+'”' : '', 'written '+ago(x.queued_at)].filter(Boolean).map(esc).join(' &middot; ')}</div>
+      ${x.why?`<p class="why">${esc(x.why)}</p>`:''}
+      ${(x.warnings||[]).length?`<ul class="reasons">${x.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:''}
+      <div class="row">
+        <button class="btn quiet" onclick="toggle('w', ${x.id})">${OPEN.has('w:'+x.id)?'Hide the page':'Read the page'}</button>
+        <span style="flex:1"></span>
+        <button class="btn stop" onclick="decidePage('reject_page', ${x.id}, this)">Turn down</button>
+        <button class="btn go" onclick="decidePage('publish', ${x.id}, this)">Approve for the website</button>
+      </div>
+      ${frameFor('w', x.id, x.html)}
+    </article>`).join('')
+    : `<div class="empty">No written page is waiting for you.</div>`;
+
+  $('#pageApproved').innerHTML = p.approved.length ? `<h2>Approved, waiting to go live</h2>
+    <div class="notice"><p>${p.approved.map(x=>'<b>'+esc(x.title)+'</b>').join(', ')} —
+    IT runs the tests, then puts ${p.approved.length===1?'it':'them'} on your website.</p>
+    ${p.publishing ? '<span class="busy">IT is running the tests and publishing…</span>'
+                   : `<button class="btn glass" onclick="startJob('publish-now', this)">Put it live now</button>`}</div>` : '';
+
+  $('#heldHead').textContent = p.held.length ? `${p.held.length} page${p.held.length===1?'':'s'}` : '';
+  $('#heldList').innerHTML = p.held.length ? p.held.map(x=>`
+    <article class="page held" data-id="${x.id}">
+      <h3>${esc(x.title||'(untitled)')}</h3>
+      <div class="meta">${[x.keyword ? 'for “'+x.keyword+'”' : ''].filter(Boolean).map(esc).join('')}</div>
+      ${(x.why||[]).length?`<ul class="reasons">${x.why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:''}
+      <div class="row">
+        <button class="btn quiet" onclick="toggle('h', ${x.id})">${OPEN.has('h:'+x.id)?'Hide the page':'Read what was written'}</button>
+        <span style="flex:1"></span>
+        <button class="btn stop" onclick="decidePage('discard_page', ${x.id}, this)">Drop it</button>
+        <button class="btn glass" onclick="decidePage('rewrite', ${x.id}, this)">Write it again</button>
+      </div>
+      ${frameFor('h', x.id, x.html)}
+    </article>`).join('')
+    : `<div class="empty">Nothing is held back.</div>`;
+
+  const label = s => ({applied:'<span class="pill ok">on the site</span>', failed:'<span class="pill bad">could not publish</span>',
+                       rejected:'<span class="pill">turned down</span>'}[s] || `<span class="pill">${esc(s)}</span>`);
+  $('#pageRecent').innerHTML = p.recent.length ? `<div class="logwrap"><table class="log">
+    <tr><th>Page</th><th>What happened</th></tr>
+    ${p.recent.map(x=>`<tr><td>${esc(x.title)}${x.file?'<br><span class="addr">/'+esc(x.file)+'</span>':''}</td>
+      <td>${label(x.status)}${x.note?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
+    </table></div>` : `<div class="empty">Nothing decided yet.</div>`;
+}
+
+async function decidePage(what, id, btn){
+  const words = {publish:'Approve this page for your website? IT runs the tests before it goes live.',
+                 reject_page:'Turn this page down? It will not be published.',
+                 rewrite:'Send this page back to be written again?',
+                 discard_page:'Drop this held page?'}[what];
+  if(!confirm(words)) return;
+  btn.disabled = true;
+  const j = await act(what, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  await load();
+}
+
+async function startJob(job, btn){
+  btn.disabled = true; btn.textContent = 'Starting…';
+  let j;
+  try{
+    const r = await fetch('/api/review/start/'+job, {method:'POST'});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  if(!j.ok){ toast(j.error || 'Could not start it.', 'bad'); btn.disabled = false; return; }
+  toast({'draft-mails':'Writing a mail for each lead. They appear here as they are finished.',
+         'write-page':'Content is writing the next page.',
+         'publish-now':'IT is running the tests; approved pages go live when they pass.'}[job], 'good');
+  setTimeout(load, 2500);
+}
+
+// Faster while a desk is working, so "writing…" turns into mail on its own.
+function tick(){
+  load().finally(()=>{
+    const busy = DATA && (DATA.mails.writing || DATA.pages.writing || DATA.pages.publishing);
+    setTimeout(tick, busy ? 6000 : 30000);
+  });
+}
+
+show(location.hash === '#pages' ? 'pages' : 'mails');
+tick();
+</script>
+</body>
+</html>

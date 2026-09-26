@@ -157,9 +157,10 @@ def collect() -> list:
                                   "waiting on you"),
                         "body": (f"To {who}"
                                  + (" and others" if len(held) > 3 else "")
-                                 + ". Read one in the office and approve it, and "
-                                   "outreach starts running on its own inside the "
-                                   "daily cap. Nothing has been sent yet.")})
+                                 + ". Read them on the Review page, tick the "
+                                   "ones you want and press Send. Nothing has "
+                                   "been sent yet, and nothing goes without "
+                                   "your tick.")})
         for r in _rows(c, "SELECT id, title, sector FROM tasks"
                           " WHERE status IN ('open','in_progress')"
                           " AND risk IN ('amber','red') LIMIT 5"):

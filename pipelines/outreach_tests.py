@@ -7,8 +7,8 @@ what is protected here is the gates, not the plumbing:
   the Auditor    nothing leaves with a placeholder, a price, an invented claim
                  or no way to make it stop — the handbook rule that was written
                  down and never built
-  the arming     the agency does not start cold-mailing on its own say-so. The
-                 first batch waits; approving one arms it for good
+  his tick       every draft waits for him, and only the ones he ticks and
+                 sends go out — through the same cap and domain checks
   the approval   an amber task cannot be claimed at all until he says yes
   the dedup      a business is approached once, across every channel
 
@@ -199,36 +199,80 @@ def test_an_amber_task_cannot_be_claimed_until_he_says_yes():
 # ARMING — one confirmation, then autonomous
 # ---------------------------------------------------------------------------
 
-def test_the_first_batch_waits_and_approving_arms_it():
-    print("\nThe agency does not start writing to strangers on its own say-so:")
-    with _Cabinet():
-        check("not armed to begin with", board.outreach_armed(), False)
-        qid = board.queue_outreach(1, "Al Noor Cafeteria", "info@alnoor.ae",
-                                   "Shopfront glass in Al Quoz", "body here",
-                                   service="glass shopfronts")
-        check("the draft is held, not sent", len(board.pending_outreach()), 1)
-        check("still not armed", board.outreach_armed(), False)
+def test_every_mail_waits_for_his_tick():
+    """
+    "it will write mail according to the leads and will show me the mail it
+     writes then will use the email i integrated to send the mails to the
+     selected mails i will select"
+    """
+    print("\nEvery draft waits for him, and only what he ticks goes:")
+    sent_to = []
+    real = (O.mail._smtp_send, O.mail.daily_cap, O.mail.sent_today, O.mail.log_outreach)
+    O.mail._smtp_send = lambda lead, draft: (sent_to.append(lead["email"]) or {"ok": True})
+    O.mail.daily_cap = lambda: 20
+    O.mail.sent_today = lambda con=None: len(sent_to)
+    O.mail.log_outreach = lambda *a, **k: None
+    try:
+        with _Cabinet():
+            a_id = board.add_lead_if_new({"company": "Al Noor Cafeteria",
+                                          "email": "info@alnoor.ae"})
+            b_id = board.add_lead_if_new({"company": "Marina Fitout",
+                                          "email": "hello@marinafit.ae"})
+            qa = board.queue_outreach(a_id, "Al Noor Cafeteria", "info@alnoor.ae",
+                                      "Shopfront glass in Al Quoz", "body here")
+            qb = board.queue_outreach(b_id, "Marina Fitout", "hello@marinafit.ae",
+                                      "Partitions for fit-outs", "another body")
+            check("both are held, not sent", len(board.pending_outreach()), 2)
 
-        print("  ...and he sees the whole mail, not a summary of it:")
-        appr = [a for a in _approvals() if a["kind"] == "outreach"]
-        check("it is on his list", len(appr), 1)
-        check("with the address", "info@alnoor.ae" in appr[0]["why"], True)
-        check("and the body", "body here" in appr[0]["why"], True)
-        check("and what approving it also does",
-              "running on its own" in appr[0]["why"], True)
+            print("  ...the office points him at the Review page, with the count:")
+            appr = [a for a in _approvals() if a["kind"] == "review_mails"]
+            check("one line on his list", len(appr), 1)
+            check("saying how many", appr[0]["count"], 2)
+            check("and linking to where he reads them", appr[0]["link"], "/review#mails")
 
-        print("  ...and approving one arms outreach for good:")
-        r = board.decide_approval("outreach", qid, "approved")
-        check("recorded", r["ok"], True)
-        check("armed", board.outreach_armed(), True)
-        check("and it is no longer waiting on him", board.pending_outreach(), [])
+            print("  ...he ticks one and presses Send:")
+            r = O.send_now([qa])
+            check("that one went", [x["to"] for x in r["sent"]], ["info@alnoor.ae"])
+            check("through the send boundary, and nothing else did",
+                  sent_to, ["info@alnoor.ae"])
+            check("the other still waits for him",
+                  [q["id"] for q in board.pending_outreach()], [qb])
 
-    print("\nTurning one down does not arm anything:")
+            print("  ...and a later pass does not send the unticked one on its own:")
+            O._send_approved(10)
+            check("still only the one he ticked", sent_to, ["info@alnoor.ae"])
+    finally:
+        (O.mail._smtp_send, O.mail.daily_cap, O.mail.sent_today,
+         O.mail.log_outreach) = real
+
+    print("\nTurning one down means it is never sent:")
     with _Cabinet():
         qid = board.queue_outreach(1, "Somebody", "a@b.ae", "S", "b")
         board.decide_approval("outreach", qid, "rejected")
-        check("still not armed", board.outreach_armed(), False)
         check("and it will not be sent", board.pending_outreach(), [])
+
+    print("\nThe cap still holds when he ticks more than it allows:")
+    sent_to = []
+    real = (O.mail._smtp_send, O.mail.daily_cap, O.mail.sent_today, O.mail.log_outreach)
+    O.mail._smtp_send = lambda lead, draft: (sent_to.append(lead["email"]) or {"ok": True})
+    O.mail.daily_cap = lambda: 1
+    O.mail.sent_today = lambda con=None: len(sent_to)
+    O.mail.log_outreach = lambda *a, **k: None
+    try:
+        with _Cabinet():
+            ids = [board.queue_outreach(board.add_lead_if_new(
+                       {"company": f"Firm {i}", "email": f"info@firm{i}.ae"}),
+                       f"Firm {i}", f"info@firm{i}.ae", "S", "b") for i in range(3)]
+            r = O.send_now(ids)
+            check("one sent", len(r["sent"]), 1)
+            check("the rest are told why", all("cap" in f["why"] for f in r["failed"]), True)
+            with board._conn() as c:
+                left = c.execute("SELECT count(*) FROM outreach_queue"
+                                 " WHERE status='approved'").fetchone()[0]
+            check("and stay approved for the next pass", left, 2)
+    finally:
+        (O.mail._smtp_send, O.mail.daily_cap, O.mail.sent_today,
+         O.mail.log_outreach) = real
 
     print("\nThe same draft twice is one decision, not two:")
     with _Cabinet():
@@ -311,7 +355,7 @@ def main():
               test_the_auditor_fails_closed,
               test_warnings_do_not_block,
               test_an_amber_task_cannot_be_claimed_until_he_says_yes,
-              test_the_first_batch_waits_and_approving_arms_it,
+              test_every_mail_waits_for_his_tick,
               test_a_business_is_approached_once,
               test_it_will_not_run_on_a_stopped_sector_or_an_empty_board):
         t()

@@ -39,25 +39,28 @@ THE GATES, IN THE ORDER THEY RUN, AND WHY EACH ONE IS HERE
   5. the Auditor          coordination/auditor.py. The handbook's rule that
                           nothing leaves without passing QA, finally built. A
                           held draft is reported, never quietly dropped.
-  6. the owner's arming   the FIRST batch is queued for him to read. Approving
-                          one arms outreach and later batches send on their
-                          own. See below.
+  6. the owner's tick     every draft is queued for him to read. Only the
+                          ones he ticks and sends go out. See below.
   7. cap and domain       inside mail._smtp_send, where they already were, and
                           deliberately not duplicated here — a limit enforced
                           by whoever happens to call is a limit the next caller
                           skips.
 
-ONE CONFIRMATION, THEN AUTONOMOUS
+EVERY MAIL IS HIS CALL
 
-The owner asked for automatic sending and that is what this is. But an agency
-that starts cold-mailing real UAE businesses without him having read a single
-example of what it writes is not what he asked for either; it is what he would
-discover afterwards. So the first batch is held, pushed to his phone, and
-approving any one of them arms the system permanently — after that this runner
-sends without asking, inside the cap.
+"it will write mail according to the leads and will show me the mail it
+ writes then will use the email i integrated to send the mails to the
+ selected mails i will select"
 
-He can see it either way: `--queue` lists what is held, and the office shows
-each draft under 'Awaiting you' with Approve and Not now.
+This used to hold the FIRST batch of three for him and treat approving any one
+of them as permission to send every later draft on its own. That is not what
+he asked for. Now every draft — one per eligible lead, up to BATCH a pass — is
+queued, he reads them on the Review page (/review), ticks the recipients he
+wants, and presses Send. Those go out through his own SMTP, inside the daily
+cap, straight away (send_now). Nothing leaves without his tick; the ones he
+does not want he discards, and they are never sent.
+
+`--queue` lists what is held.
 """
 import argparse
 import json
@@ -70,14 +73,10 @@ from . import mail, security_screen, services
 AGENT = "leads-outreach"
 SECTOR = "Leads"
 
-# How many to draft in one pass, before the daily cap is even consulted.
-# Drafting costs a model call each, and a pass that drafts forty and then
-# discovers it may send three has spent thirty-seven calls to learn nothing.
-BATCH = 6
-
-# What the first held batch looks like. Enough for him to judge the writing,
-# few enough to read on a phone.
-FIRST_BATCH = 3
+# How many to draft in one pass. One model call each; he asked the Hunter for
+# ten leads and wants a mail written for every one of them, so a pass covers
+# that without drafting forty he will never get through.
+BATCH = 10
 
 
 def _company():
@@ -170,15 +169,6 @@ def draft_for(lead, company, owner_voice=""):
             "audit": v, "used": written.get("used")}
 
 
-def _send_one(d):
-    """Hand one drafted mail to the send boundary, and log what happened."""
-    lead = d["lead"]
-    r = mail._smtp_send(lead, d["draft"])
-    if r.get("ok"):
-        return True, "sent"
-    return False, r.get("error", "the send boundary refused it")
-
-
 def run(agent=AGENT, dry_run=False, limit=BATCH) -> dict:
     with board.agent_run(agent) as run_row:
         out = _run(agent, dry_run, limit)
@@ -191,8 +181,17 @@ def _run(agent, dry_run, limit) -> dict:
         return {"ok": False, "error": "Leads is switched off — you turned this "
                                       "sector off, so nothing goes out."}
 
+    # Mail he has already ticked and not yet seen go (the cap was full, or the
+    # SMTP server was down when he pressed Send) goes first, task or no task:
+    # his yes is the instruction.
+    room = max(0, mail.daily_cap() - mail.sent_today())
+    sent = [] if dry_run else _send_approved(room)
+
     task = board.next_open_task(SECTOR, agent)
     if not task:
+        if sent:
+            return {"ok": True, "agent": agent, "sent": sent, "queued": [],
+                    "head": f"{len(sent)} mail(s) you approved were sent"}
         return dispatch.nothing_here(SECTOR, agent)
 
     company = _company()
@@ -201,16 +200,14 @@ def _run(agent, dry_run, limit) -> dict:
         board.finish_task(task["id"], agent,
                           {"drafted": 0, "why": "nobody eligible"}, status="done")
         return {"ok": False, "agent": agent, "task": task["id"],
-                "eligible": 0, "not_eligible": cannot[:20],
+                "eligible": 0, "not_eligible": cannot[:20], "sent": sent,
                 "error": ("Nobody is eligible to be written to. "
                           + (cannot[0]["why"] if cannot else
                              "there are no leads on file yet"))}
 
-    armed = board.outreach_armed()
-    room = max(0, mail.daily_cap() - mail.sent_today())
-    drafted, held, sent, failed, queued = [], [], [], [], []
+    drafted, held, failed, queued = [], [], [], []
 
-    for lead in can[: (limit if armed else FIRST_BATCH)]:
+    for lead in can[:limit]:
         d = draft_for(lead, company)
         if not d.get("ok"):
             failed.append({"company": lead.get("company"), "why": d["error"]})
@@ -226,33 +223,14 @@ def _run(agent, dry_run, limit) -> dict:
         if dry_run:
             continue
 
-        if not armed:
-            # FIRST BATCH. He reads it before the agency writes to anybody.
-            qid = board.queue_outreach(
-                lead["id"], lead.get("company"), lead.get("email"),
-                d["subject"], d["body"], service=d["service"],
-                audit=d["audit"], by=agent)
-            queued.append({**line, "queue_id": qid})
-            continue
+        # Every draft waits for him. See EVERY MAIL IS HIS CALL above.
+        qid = board.queue_outreach(
+            lead["id"], lead.get("company"), lead.get("email"),
+            d["subject"], d["body"], service=d["service"],
+            audit=d["audit"], by=agent)
+        queued.append({**line, "queue_id": qid})
 
-        if len(sent) >= room:
-            held.append({**line, "why": ["today's cap is used up"]})
-            continue
-        ok, why = _send_one(d)
-        if ok:
-            mail.log_outreach(lead["id"], d["draft"], channel="email")
-            _mark_contacted(lead["id"])
-            sent.append(line)
-        else:
-            failed.append({**line, "why": why})
-
-    # Anything the owner already approved goes out on this pass too. Without
-    # this, approving the first batch would arm outreach but the mails he
-    # actually read and said yes to would never be the ones sent.
-    if not dry_run:
-        sent += _send_approved(room - len(sent))
-
-    head = _head(sent, queued, held, failed, drafted, armed, dry_run)
+    head = _head(sent, queued, held, failed, drafted, dry_run)
     board.finish_task(task["id"], agent,
                       {"sent": len(sent), "queued": len(queued),
                        "held": len(held), "head": head}, status="done")
@@ -264,15 +242,14 @@ def _run(agent, dry_run, limit) -> dict:
     did = board.log_decision(
         "leads-outreach",
         reasoning=(f"{len(can)} lead(s) eligible; drafted {len(drafted)}, "
-                   f"Auditor held {len(held)}, "
-                   + (f"sent {len(sent)}" if armed else
-                      f"queued {len(queued)} for the owner — outreach is not armed yet")),
+                   f"Auditor held {len(held)}, queued {len(queued)} for the owner "
+                   f"to tick; sent {len(sent)} he had already approved"),
         expectation=("Replies arrive within a week, or the segment is wrong and "
                      "the next pass targets a different one."),
         confidence=0.6,
         evidence={"lead_ids": [l["lead_id"] for l in drafted]})
 
-    return {"ok": True, "agent": agent, "task": task["id"], "armed": armed,
+    return {"ok": True, "agent": agent, "task": task["id"],
             "eligible": len(can), "not_eligible": cannot[:20],
             "drafted": drafted, "sent": sent, "queued": queued,
             "held": held, "failed": failed,
@@ -280,37 +257,94 @@ def _run(agent, dry_run, limit) -> dict:
             "decision_id": did, "head": head}
 
 
-def _send_approved(room):
-    """Mail the owner has said yes to. Runs whether or not anything new drafted."""
+def _send_approved(room, ids=None, failed=None):
+    """
+    Mail the owner has said yes to, oldest first, up to `room`. With `ids`,
+    only those. Anything that could not go is added to `failed`, if given.
+
+    Security looks again at the moment of sending: a lead cleared when the
+    draft was written may have been flagged since. A send that fails because
+    the cap is full or the mail server did not answer stays 'approved' and
+    goes on the next pass — his yes is not thrown away over a busy server.
+    """
     out = []
-    if room <= 0:
-        return out
+    failed = failed if failed is not None else []
     import sqlite3
     c = sqlite3.connect(board.DB, timeout=30)
     c.row_factory = sqlite3.Row
     try:
         board._migrate(c)
-        rows = [dict(r) for r in c.execute(
-            "SELECT * FROM outreach_queue WHERE status='approved'"
-            " ORDER BY queued_at LIMIT ?", (int(room),))]
+        q = "SELECT * FROM outreach_queue WHERE status='approved'"
+        args = []
+        if ids:
+            q += " AND id IN (%s)" % ",".join("?" * len(ids))
+            args = [int(i) for i in ids]
+        rows = [dict(r) for r in c.execute(q + " ORDER BY queued_at", args)]
     finally:
         c.close()
     for q in rows:
+        if len(out) >= room:
+            failed.append({"id": q["id"], "company": q["company"], "to": q["to_email"],
+                           "why": "today's cap is used up — it goes on the next pass"})
+            continue
         lead = board.get_lead(q["lead_id"]) if hasattr(board, "get_lead") else None
         lead = lead or {"id": q["lead_id"], "email": q["to_email"],
                         "company": q["company"]}
+        bad = [f for f in security_screen.scan_lead(lead)
+               if f["severity"] in ("high", "critical")]
+        if bad:
+            security_screen.log_events(bad, source=f"lead {q['lead_id']}",
+                                       action="refused")
+            board.mark_outreach_sent(q["id"], False, f"Security: {bad[0]['why']}"[:200])
+            failed.append({"id": q["id"], "company": q["company"], "to": q["to_email"],
+                           "why": f"Security stopped it: {bad[0]['why']}"})
+            continue
         draft = f"Subject: {q['subject']}\n\n{q['body']}"
         r = mail._smtp_send(lead, draft)
         if r.get("ok"):
             mail.log_outreach(q["lead_id"], draft, channel="email")
             _mark_contacted(q["lead_id"])
             board.mark_outreach_sent(q["id"], True, "approved by the owner")
-            out.append({"lead_id": q["lead_id"], "company": q["company"],
+            out.append({"id": q["id"], "lead_id": q["lead_id"], "company": q["company"],
                         "to": q["to_email"], "subject": q["subject"],
                         "service": q["service"], "words": 0})
         else:
-            board.mark_outreach_sent(q["id"], False, r.get("error", "")[:200])
+            # Left 'approved' so the next pass tries again, with the reason
+            # written where the Review page shows it.
+            _note_attempt(q["id"], r.get("error", "the send boundary refused it"))
+            failed.append({"id": q["id"], "company": q["company"], "to": q["to_email"],
+                           "why": r.get("error", "the send boundary refused it")})
     return out
+
+
+def _note_attempt(qid, why):
+    import sqlite3
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE outreach_queue SET note=? WHERE id=?",
+                      (f"not sent yet: {why}"[:300], qid))
+    except Exception:
+        pass
+
+
+def send_now(ids) -> dict:
+    """
+    The Review page's Send button: approve exactly these drafts and send them,
+    now, through his SMTP, inside the daily cap. Returns {sent, failed}.
+    """
+    if not board.sector_enabled(SECTOR):
+        return {"ok": False, "sent": [], "failed": [],
+                "error": "Leads is switched off — turn it back on to send mail."}
+    ids = [int(i) for i in (ids or [])]
+    if not ids:
+        return {"ok": False, "sent": [], "failed": [], "error": "nothing was ticked"}
+    for i in ids:
+        board.decide_outreach(i, "approved", note="owner ticked it and pressed Send")
+    failed = []
+    room = max(0, mail.daily_cap() - mail.sent_today())
+    sent = _send_approved(room, ids=ids, failed=failed)
+    return {"ok": bool(sent) or not failed, "sent": sent, "failed": failed,
+            "cap": mail.daily_cap(), "sent_today": mail.sent_today()}
 
 
 def _mark_contacted(lead_id):
@@ -323,13 +357,14 @@ def _mark_contacted(lead_id):
         pass
 
 
-def _head(sent, queued, held, failed, drafted, armed, dry_run):
+def _head(sent, queued, held, failed, drafted, dry_run):
     if dry_run:
         return (f"dry run — drafted {len(drafted)}, "
                 f"{len(held)} would be held by the Auditor, nothing sent")
     if queued:
-        return (f"{len(queued)} mail(s) written and waiting on you. Approve one "
-                "and outreach runs on its own from then on.")
+        return (f"{len(queued)} mail(s) written and waiting on you. Tick the "
+                "ones you want on the Review page and press Send."
+                + (f" {len(sent)} you approved earlier were sent." if sent else ""))
     if sent:
         return (f"{len(sent)} mail(s) sent"
                 + (f", {len(held)} held by the Auditor" if held else "")
@@ -344,18 +379,19 @@ def _head(sent, queued, held, failed, drafted, armed, dry_run):
 def as_text(r) -> str:
     if not r.get("ok"):
         return "OUTREACH — " + str(r.get("error"))
-    L = [f"OUTREACH — {r['head']}",
-         f"  cap {r['sent_today']}/{r['cap']} today · "
-         + ("armed" if r["armed"] else "NOT ARMED — the first batch waits on you")]
-    for s in r["sent"]:
+    L = [f"OUTREACH — {r['head']}"]
+    if "cap" in r:
+        L.append(f"  cap {r['sent_today']}/{r['cap']} today · every draft waits "
+                 "for your tick on the Review page")
+    for s in r.get("sent") or []:
         L.append(f"  sent    {s['company'][:34]:36} {s['to'][:30]:32} {s['subject'][:40]}")
-    for q in r["queued"]:
+    for q in r.get("queued") or []:
         L.append(f"  waiting {q['company'][:34]:36} {q['to'][:30]:32} {q['subject'][:40]}")
-    for h in r["held"]:
+    for h in r.get("held") or []:
         L.append(f"  HELD    {h['company'][:34]:36} {'; '.join(h['why'])[:70]}")
-    for f in r["failed"]:
+    for f in r.get("failed") or []:
         L.append(f"  failed  {str(f.get('company'))[:34]:36} {str(f.get('why'))[:70]}")
-    if r["not_eligible"]:
+    if r.get("not_eligible"):
         L.append(f"  -- {len(r['not_eligible'])} not eligible --")
         for x in r["not_eligible"][:6]:
             L.append(f"     {x['company'][:34]:36} {x['why']}")
@@ -372,7 +408,7 @@ def preview(to_email="", lead=None, company=None) -> dict:
     read.
 
     Two things this deliberately does NOT do. It does not count against the
-    daily cap or the arming gate, because it goes to him and nobody else; and
+    daily cap or his Review page, because it goes to him and nobody else; and
     it refuses any address that is not one he typed on the command line, so
     "preview" can never quietly become "send to a lead".
     """
@@ -396,7 +432,7 @@ def preview(to_email="", lead=None, company=None) -> dict:
     if not to_email:
         return out
     # Sent as a plain mail, NOT through the outreach boundary: no cap, no
-    # arming, no outreach_log row. This is not outreach — it is him reading
+    # queue, no outreach_log row. This is not outreach — it is him reading
     # his own agency's work.
     r = mail.send_plain(to_email, "[PREVIEW] " + d["subject"],
                         _preview_wrapper(d, lead))

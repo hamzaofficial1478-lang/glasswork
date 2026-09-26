@@ -745,9 +745,31 @@ def build():
                               "why": t["detail"] or "Needs your nod."})
     except Exception:
         pass
+    # WRITTEN PAGES AND DRAFTED MAIL ARE READ ON THE REVIEW PAGE, NOT HERE.
+    #
+    # "i asked for 1 post and publish to website i do not know if it writes or
+    #  not made a section where i can see if it write the post to publish and
+    #  mail to sent i will approve both of them"
+    #
+    # This list showed three site changes and five mails, each as a paragraph
+    # of text: a page was a filename and a sentence, never the page itself, and
+    # pages held back by the checks were not on it at all. Each is now ONE
+    # line here with the count, and a link to /review, where every page can be
+    # read in full and every mail read and ticked.
+    try:
+        n_pages = c.execute("SELECT count(*) FROM site_queue WHERE status='pending'"
+                            " AND kind='new_page'").fetchone()[0]
+        if n_pages:
+            approvals.append({
+                "kind": "review_pages", "id": "pages", "lvl": "amber · Content",
+                "link": "/review#pages", "count": n_pages,
+                "text": f"{n_pages} page(s) written and waiting for your yes",
+                "why": "Read each one in full before it goes on your website."})
+    except Exception:
+        pass
     try:
         for s in c.execute("SELECT id,agent,kind,detail FROM site_queue WHERE status='pending'"
-                           " ORDER BY queued_at DESC LIMIT 3"):
+                           " AND kind!='new_page' ORDER BY queued_at DESC LIMIT 3"):
             approvals.append({"kind": "site_change", "id": s["id"],
                               "lvl": "amber · IT",
                               "text": _change_title(s["kind"], s["detail"]),
@@ -755,20 +777,20 @@ def build():
                                      + " — queued by " + (s["agent"] or "IT")})
     except Exception:
         pass
-    # Drafted mail, held until he has read one. The whole draft goes in `why`,
-    # not a summary of it — the point of this queue is that he sees exactly
-    # what the agency would put in front of a real business, and a decision
-    # made on a one-line description is not the decision he was asked for.
     try:
-        for m in c.execute("SELECT id,company,to_email,subject,body FROM outreach_queue"
-                           " WHERE status='pending' ORDER BY queued_at LIMIT 5"):
+        mails = [dict(m) for m in c.execute(
+            "SELECT company, to_email FROM outreach_queue WHERE status='pending'"
+            " ORDER BY queued_at")]
+        if mails:
+            who = ", ".join((m["company"] or m["to_email"] or "a lead")[:30]
+                            for m in mails[:3])
             approvals.append({
-                "kind": "outreach", "id": m["id"], "lvl": "amber · Leads",
-                "text": f"Send this to {m['company'] or m['to_email']}?",
-                "why": (f"To: {m['to_email']}\nSubject: {m['subject']}\n\n"
-                        + (m["body"] or "")[:1200]
-                        + "\n\nApproving this also starts outreach running on "
-                          "its own, inside the daily cap.")})
+                "kind": "review_mails", "id": "mails", "lvl": "amber · Leads",
+                "link": "/review#mails", "count": len(mails),
+                "text": f"{len(mails)} outreach mail(s) written — choose who gets them",
+                "why": (f"To {who}" + (" and others" if len(mails) > 3 else "")
+                        + ". Read each one, tick the ones you want and press Send. "
+                          "Nothing has been sent.")})
     except Exception:
         pass
 

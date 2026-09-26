@@ -288,6 +288,8 @@ header>*{flex:none}
 .appr button.yes:hover{background:rgba(91,191,134,.12)}
 .appr button.no:hover{background:rgba(229,86,91,.12);border-color:var(--danger);color:var(--danger)}
 .appr button:disabled{opacity:.45;cursor:default}
+.appr a.yes{padding:8px 16px;border-radius:8px;border:1px solid rgba(91,191,134,.5);color:var(--ok);font-size:12.5px;font-weight:600}
+.appr a.yes:hover{background:rgba(91,191,134,.12)}
 .ldtable{width:100%;border-collapse:collapse;font-size:12.5px}
 .ldtable th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
@@ -474,6 +476,7 @@ header>*{flex:none}
     <button class="htab" onclick="openActivity()">Activity <span id="actBadge"></span></button>
     <button class="htab" onclick="openComms()">Sector traffic <span id="commBadge"></span></button>
     <button class="htab" onclick="openResults()">Results</button>
+    <a class="htab" href="/review" style="text-decoration:none">Review <span id="revBadge"></span></a>
     <button class="htab" onclick="openChanges()">Website changes</button>
     <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
     <!-- Connections lived here and also in the full control room. Two doors to
@@ -1442,6 +1445,12 @@ const DECIDED = new Map();
 function renderApprovals(){
   const items = (LIVE && LIVE.approvals) || [];
   const done = [...DECIDED.values()];
+  const rb = $('#revBadge');
+  if(rb){
+    const n = items.filter(a=>a.link).reduce((t,a)=>t+(a.count||1),0);
+    rb.innerHTML = n ? `<span style="background:var(--amber);color:#1a1206;border-radius:999px;
+        padding:1px 6px;font-size:10.5px;font-weight:700">${n}</span>` : '';
+  }
   $('#apprHead').textContent = items.length
     ? `· ${items.length} decision${items.length===1?'':'s'} for you`
     : (done.length ? `· all clear — ${done.length} decided just now`
@@ -1467,6 +1476,17 @@ function renderApprovals(){
   // different item by the time the next button is pressed.
   $('#apprBody').innerHTML = items.map(a=>{
     const k = `${a.kind}:${a.id}`;
+    // Written pages and drafted mail are read in full on the Review page, so
+    // their line here is a door to it rather than a yes/no on a summary.
+    if(a.link) return `
+    <div class="appr" data-key="${escA(k)}">
+      <div class="lvl">${esc(a.lvl||'amber')}</div>
+      <h4>${esc(a.text||'(no description)')}</h4>
+      ${a.why?`<div class="why">${esc(a.why)}</div>`:''}
+      <div class="row">
+        <a class="yes" href="${escA(a.link)}" style="text-decoration:none;display:inline-block">Read and decide &rarr;</a>
+      </div>
+    </div>`;
     return `
     <div class="appr" data-key="${escA(k)}">
       <div class="lvl">${esc(a.lvl||'amber')}</div>

@@ -2495,7 +2495,12 @@ def decide_outreach(qid, decision, note=""):
 
 def outreach_armed() -> bool:
     """
-    Has the owner ever approved a batch? Once he has, outreach runs on its own.
+    Has the owner ever approved a mail?
+
+    This used to switch outreach to sending on its own after his first yes. It
+    no longer does — every draft waits for his tick (pipelines/leads_outreach,
+    EVERY MAIL IS HIS CALL) — and this is kept only as a fact the screens can
+    report.
 
     Read from the record rather than a config flag on purpose: the thing that
     arms it is him actually approving mail, which is a row, not a setting
@@ -2548,9 +2553,10 @@ def decide_approval(kind, ref, decision):
         moved = decide_outreach(int(ref), decision, note=f"owner {decision} {when}")
         return {"ok": bool(moved), "kind": kind, "ref": ref, "decision": decision,
                 "error": "" if moved else "that draft has already been decided",
-                "why": ("Approved. This one goes out on the next Leads pass, and "
-                        "outreach is now armed — later drafts that pass Security "
-                        "and the Auditor send without asking again."
+                "why": ("Approved. It goes out through your email on the next "
+                        "Leads pass, inside the daily cap — or press Send on the "
+                        "Review page to send it now. Every other draft still "
+                        "waits for your own yes."
                         if decision == "approved" and moved else
                         "Turned down. It will not be sent." if moved else "")}
     if kind != "task":

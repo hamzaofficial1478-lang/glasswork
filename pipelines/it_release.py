@@ -61,7 +61,7 @@ import sys
 import time
 from pathlib import Path
 
-from coordination import board, changelog, deskwork
+from coordination import board, changelog, console, deskwork
 from . import site_api
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -266,9 +266,13 @@ def tests_pass(timeout=TEST_TIMEOUT) -> dict:
     """
     t0 = time.time()
     try:
+        # No window of its own (console.background_flags): started from the
+        # Review page's "Put it live now", this runs with no console, and on
+        # Windows the suite would otherwise open one on his screen.
         p = subprocess.run([PY, "run.py", "--tests", "--no-update"],
                            cwd=str(ROOT), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
+                           encoding="utf-8", errors="replace", timeout=timeout,
+                           creationflags=console.background_flags())
     except subprocess.TimeoutExpired:
         return {"ok": False, "took_s": int(time.time() - t0),
                 "why": f"the test suite did not finish inside {timeout}s"}
