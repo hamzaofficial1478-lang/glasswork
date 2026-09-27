@@ -91,9 +91,35 @@ SECTOR = "Content"
 # the draft_allowance note in content_briefs.
 MAX_PER_PASS = 1
 
-# Room for a real service page and no more. A model given eight thousand tokens
-# writes eight thousand tokens.
-WRITE_TOKENS = 2200
+# Room for the piece and no more. A model given eight thousand tokens writes
+# eight thousand tokens — but a 1,200-word article in HTML, inside JSON, needs
+# far more than the 2,200 this used to allow, and the pages came back at 160
+# words partly because there was no room to write more.
+WRITE_TOKENS = 4000
+TOKENS = {"blog": 6500, "service_page": 4000}
+
+# How long each kind is, and the least it may be before it is sent back to be
+# made fuller. "the program is writing like 150 to 160 words of too generic
+# posts" — the brief said "450-700 — short. Anything longer is padding", and a
+# model told to be short and to state nothing it was not given writes 160.
+LENGTH = {"blog": "1,000 to 1,400 words", "service_page": "600 to 900 words"}
+FEWEST = {"blog": 850, "service_page": 450}
+
+# What gives writing away as machine-made, and what no tradesman says. Found in
+# a draft, it goes back once with the phrases named. Not a trick to fool a
+# detector — these are the phrases that make a reader stop trusting a page.
+AI_TELLS = (
+    "delve", "in today's", "fast-paced", "whether you're", "whether you are",
+    "look no further", "elevate", "seamless", "unlock", "robust", "comprehensive",
+    "navigate the", "landscape", "testament to", "in conclusion", "to sum up",
+    "it's important to note", "it is important to note", "it's worth noting",
+    "game-changer", "game changer", "cutting-edge", "state-of-the-art", "nestled",
+    "boasts", "in the realm of", "a myriad of", "plethora", "furthermore",
+    "moreover", "embark", "tailored to your needs", "transform your space",
+    "look and feel", "second to none", "one-stop", "top-notch", "unparalleled",
+    "when it comes to", "rest assured", "we pride ourselves", "dive into",
+    "ever-evolving", "in this article", "this guide will",
+)
 
 BRAIN = "content"
 
@@ -105,47 +131,75 @@ PHOTO_SLOT = "<!-- agency:photos — put 3 to 6 of your own finished-job photos 
 
 
 SYSTEM = """\
-You are the Content writer for a glass and aluminium business in the UAE. The \
-owner has ten years in the trade and does the work himself. You are writing one \
-page for his own website.
+You write for the website of a glass and aluminium business in the UAE — glass \
+work, aluminium work, glass and wooden doors, pergolas, fabrication and \
+installation. The owner has __YEARS__ years in the trade and does the work \
+himself. What you write goes on his own site, under his name, and customers \
+read it before they ring him.
 
-HOW HE SOUNDS
-British English. Plain. Short sentences. The way a tradesman who is good at his \
-job talks to a customer who wants a price and a date. No marketing language, no \
-"nestled in the heart of", no "in today's fast-paced world", no exclamation \
-marks, no rhetorical questions as headings.
+WRITE LIKE THE MAN WHO DOES THE WORK
+British English. Write as the business, "we", the way a good tradesman talks a \
+customer through a job over the phone: plain, specific, a little opinionated, \
+never salesy. Vary the length of your sentences; some short, some longer when \
+you are explaining how something is done. Open with the situation the reader \
+is in, not a definition. One idea to a paragraph. Contractions are fine. No \
+exclamation marks. No rhetorical questions as headings. Do not finish with a \
+summary of what you already said.
 
-WHAT WINS THESE JOBS
-Speed of reply, a real survey date, and finished work the customer can look at. \
-Not adjectives. Lead with what the job actually involves and how fast he can be \
-there.
+USE WHAT THE TRADE KNOWS — THAT IS WHAT MAKES IT READ AS REAL
+You may and should use accurate, general trade knowledge: types of glass \
+(toughened/tempered, laminated, double-glazed units, low-E, tinted, frosted, \
+back-painted), usual thicknesses and where each is used, aluminium profiles \
+and finishes (powder coating, anodising, thermal break), fittings and systems \
+(patch fittings, spigots, channel systems, frameless and framed), how a job \
+runs (site visit and measuring, fabrication, fitting, silicone and finishing, \
+snagging), what the UAE heat, sand, humidity and AC do to glass, seals and \
+frames, what to check before choosing a contractor, what goes wrong with \
+cheap work, and how to look after it afterwards. Explain the trade-offs a \
+customer is actually weighing. That detail is what a generic page lacks.
 
-WHAT YOU MUST NOT DO — every one of these is checked after you, and a page that \
-breaks one is thrown away:
-  - Do not invent a fact. No years in business, no number of projects, no client \
-    names, no certifications, no awards, no percentages. You have been given \
-    everything you are going to be given.
-  - Do not name a price, a rate, a discount or an offer. That is the owner's \
-    call and it is a hard rule.
-  - Do not write any code. No <script>, no <style>, no <form>, no <iframe>, no \
-    onclick. Markup for text only.
-  - Do not add an image. Photographs are his own and they are added afterwards.
-  - Do not leave a placeholder of any kind.
+WHAT YOU MUST NOT CLAIM ABOUT THE BUSINESS — checked after you, and a page \
+that breaks one is thrown away:
+  - No number of projects or clients, no client or building names, no \
+    certificates, awards, ratings or percentages, no guarantees or warranty \
+    terms. Years in the trade: only __YEARS__, if you mention it at all.
+  - No price, rate, discount or offer. That is the owner's call.
+  - No code: no <script>, <style>, <form>, <iframe> or event attributes.
+  - No placeholder of any kind.
 
-WHAT THE PAGE MUST HAVE
-  - One <h1> saying what the page is.
-  - Two to five <h2> sections. One of them answers how quickly he can come and \
-    measure.
-  - The enquiry route in the body, high up: the phone number and the WhatsApp \
-    link you are given, as real links.
+PICTURES
+You are given numbered pictures. Put the marker <!--image 1-->, <!--image 2--> \
+and so on, on its own line, where each picture helps — after the paragraph it \
+illustrates. Do not write <img> yourself. If no pictures are listed, use none.
+
+WHAT IT MUST HAVE
+  - One <h1> saying what it is.
+  - Subheadings a reader can scan (<h2>, and <h3> under them where natural).
+  - The enquiry route high up and again at the end: the phone number and the \
+    WhatsApp link you are given, as real links.
   - The area named, if you were given one.
+  - Where it genuinely helps, a small <table> comparing options, or a <ul> \
+    checklist — the kind of thing a customer screenshots.
 
 Reply with JSON and nothing else:
 {"title": "<the browser title, under 60 characters>",
  "meta": "<the search-result description, under 155 characters>",
- "h1": "<the page heading>",
- "html": "<the page body: h1, p, h2, ul, a and strong only>",
+ "h1": "<the heading>",
+ "html": "<the body: h1, h2, h3, p, ul, ol, li, table, thead, tbody, tr, th, \
+td, strong, em, a, blockquote, and the image markers>",
  "note": "<one line on what you led with and why>"}"""
+
+KIND_NOTES = {
+    "blog": ("THIS IS A BLOG ARTICLE, not a sales page. Pick a title a customer "
+             "would actually search or click — a question they have, a choice "
+             "they are making, a mistake to avoid — built around the phrase "
+             "below. Teach them something they did not know. Include a short "
+             "section of three to five real questions customers ask, each as an "
+             "<h3> with a straight answer. End with how to get the job looked at."),
+    "service_page": ("THIS IS A SERVICE PAGE. Lead with what the job involves "
+                     "and how quickly he can come and measure. Then the options "
+                     "and trade-offs, how the work is done, and what to expect."),
+}
 
 
 def _now():
@@ -222,8 +276,15 @@ def next_brief(con, limit=MAX_PER_PASS, only_id=None) -> list:
 # THE PAGE
 # ---------------------------------------------------------------------------
 
-def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
-    """The Content brain writes the body. Returns {ok, page|error, brain}."""
+def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
+                    fix=None, previous=None) -> dict:
+    """
+    The Content brain writes the body. Returns {ok, page|error, brain}.
+
+    `fix` and `previous`: a second pass on a draft that came back too short,
+    or with the phrases that give machine writing away, or missing something
+    the Critic needs — told exactly what, with its own draft in front of it.
+    """
     # "No brain means no page" is true of Content in a way it is not of the
     # sectors whose brains only word things — the page IS the model's output.
     # Content's own Claude call already steps down the models and over to the
@@ -233,7 +294,8 @@ def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
     except Exception as e:                                    # pragma: no cover
         return {"ok": False, "error": f"the provider shelf did not load ({e})"}
 
-    lines = [f"THE PAGE: {brief.get('title') or ''}",
+    lines = [KIND_NOTES.get(kind, KIND_NOTES["service_page"]), "",
+             f"THE SUBJECT: {brief.get('title') or ''}",
              f"WHAT IT IS FOR: {brief.get('angle') or ''}",
              f"THE PHRASE IT IS BRIEFED FOR: {brief.get('primary_keyword') or ''}"]
     sec = brief.get("secondary_keywords") or []
@@ -245,14 +307,28 @@ def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
     else:
         lines.append("THE AREA: the whole UAE — "
                      + ", ".join(facts.get("areas") or []))
-    lines.append(f"HOW LONG: {brief.get('word_count') or '450-700 words'}")
+    lines.append(f"HOW LONG: {LENGTH.get(kind, LENGTH['service_page'])} — full, "
+                 "specific and useful; never padded")
     for m in (brief.get("must_include") or []):
+        # The photographs are handled below, from real files; the old brief
+        # line about them would only make the writer leave a gap.
+        if "photo" in str(m).lower():
+            continue
         lines.append("MUST COVER: " + str(m))
     for d in (brief.get("do_not") or []):
+        if "stock photograph" in str(d).lower():
+            continue
         lines.append("DO NOT: " + str(d))
 
     lines.append("")
-    lines.append("THE ONLY FACTS YOU HAVE ABOUT THE BUSINESS:")
+    lines.append("PICTURES YOU CAN PLACE:" if images else "PICTURES: none this time.")
+    for i, img in enumerate(images or [], 1):
+        lines.append(f"  <!--image {i}--> — "
+                     + ("his own photograph: " if img.get("own") else "an illustrative photo: ")
+                     + (img.get("alt") or "a photograph"))
+
+    lines.append("")
+    lines.append("THE ONLY FACTS YOU HAVE ABOUT THE BUSINESS ITSELF:")
     if facts.get("name"):
         lines.append(f"  it is called {facts['name']}")
     if facts.get("phone"):
@@ -263,15 +339,26 @@ def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
         lines.append(f"  its WhatsApp link is {wa} — link it as <a href=\"{wa}\">")
     if facts.get("email"):
         lines.append(f"  its email is {facts['email']}")
+    lines.append(f"  the owner has {_years()} years in the trade")
     lines.append("  it works across: " + ", ".join(facts.get("areas") or []))
     lines.append("")
-    lines.append("There are no other facts. Anything you would like to say that "
-                 "is not on this list, leave out.")
+    lines.append("Nothing else about the business itself may be stated. General "
+                 "trade knowledge — materials, methods, the climate, what to ask a "
+                 "contractor — you should use freely and accurately.")
 
-    r = think(BRAIN, [{"role": "system", "content": SYSTEM},
+    if fix and previous:
+        lines += ["", "YOU WROTE THIS ALREADY, AND IT CAME BACK FOR THESE REASONS:"]
+        lines += [f"  - {x}" for x in fix]
+        lines += ["Rewrite it so every reason is dealt with. Keep what was good. "
+                  "Same JSON shape.", "", "YOUR DRAFT:",
+                  json.dumps({k: previous.get(k) for k in ("title", "meta", "h1", "html")})]
+
+    r = think(BRAIN, [{"role": "system", "content": SYSTEM.replace("__YEARS__", str(_years()))},
                       {"role": "user", "content": "\n".join(lines)}],
-              agent=AGENT, max_tokens=tokens,
-              reason=f"writing the page: {brief.get('title') or 'untitled'}")
+              agent=AGENT, max_tokens=tokens or TOKENS.get(kind, WRITE_TOKENS),
+              timeout=540,
+              reason=(("revising" if fix else "writing") + f" the {kind.replace('_', ' ')}: "
+                      + (brief.get("title") or "untitled")))
     if not r.get("ok"):
         return {"ok": False,
                 "error": f"Content's brain did not answer ({r.get('error') or 'no reason given'})"}
@@ -282,6 +369,38 @@ def _ask_the_writer(brief, facts, tokens=WRITE_TOKENS) -> dict:
                          "was not trusted to be a page"}
     return {"ok": True, "page": page, "brain": r.get("used"),
             "rung": r.get("rung"), "borrowed": r.get("why") if r.get("rung") != "own" else ""}
+
+
+def _years() -> int:
+    try:
+        return auditor.verified_years()
+    except Exception:
+        return 10
+
+
+def words_in(page) -> int:
+    text = re.sub(r"<[^>]+>", " ", str((page or {}).get("html") or ""))
+    return len(re.findall(r"\b[\w'’-]+\b", text))
+
+
+def voice_problems(page, kind="service_page") -> list:
+    """Why a draft reads thin or machine-made, in words the writer can act on."""
+    out = []
+    n = words_in(page)
+    least = FEWEST.get(kind, FEWEST["service_page"])
+    if n < least:
+        out.append(f"it is {n} words; this should be {LENGTH.get(kind)}. Add real "
+                   "substance — how the job is done, the options and their "
+                   "trade-offs, what goes wrong, what to ask — not padding")
+    text = re.sub(r"<[^>]+>", " ", str((page or {}).get("html") or "")).lower()
+    tells = [t for t in AI_TELLS if t in text]
+    if tells:
+        out.append("these phrases make it read as machine-written; say it plainly "
+                   "instead: " + ", ".join(f"'{t}'" for t in tells[:10]))
+    if text.count("—") > max(6, n // 120):
+        out.append("too many dashes — use full stops and commas the way a person "
+                   "writing quickly would")
+    return out
 
 
 def _parse(out):
@@ -304,7 +423,28 @@ def _parse(out):
     return d
 
 
-def _shell(page, brief, facts, include=""):
+def _place_images(body, images):
+    """Put each picture where the writer marked it; any unplaced go after a heading."""
+    from . import post_images
+    body = str(body or "")
+    used = set()
+    for i, img in enumerate(images or [], 1):
+        pat = re.compile(r"<!--\s*image\s*%d\s*-->" % i, re.I)
+        if pat.search(body):
+            body = pat.sub(post_images.figure(img), body, count=1)
+            used.add(i)
+    body = re.sub(r"<!--\s*image\s*\d+\s*-->", "", body, flags=re.I)
+    left = [img for i, img in enumerate(images or [], 1) if i not in used]
+    if left:
+        parts = re.split(r"(?=<h2\b)", body, flags=re.I)
+        for n, img in enumerate(left):
+            at = min(len(parts) - 1, 2 + n * 2) if len(parts) > 1 else 0
+            parts[at] = parts[at] + "\n" + post_images.figure(img)
+        body = "".join(parts)
+    return body
+
+
+def _shell(page, brief, facts, include="", images=()):
     """
     The body, wrapped so it comes out looking like his website.
 
@@ -316,8 +456,10 @@ def _shell(page, brief, facts, include=""):
     """
     title = str(page.get("title") or brief.get("title") or "").strip()[:70]
     meta = str(page.get("meta") or "").strip()[:160]
-    body = str(page.get("html") or "").strip()
-    if PHOTO_SLOT not in body:
+    body = _place_images(str(page.get("html") or "").strip(), images)
+    # The marker for his own photographs stays only when none of his own are
+    # in the piece — then it is still unfinished without them.
+    if PHOTO_SLOT not in body and not any(i.get("own") for i in images or ()):
         body = body + "\n\n" + PHOTO_SLOT
     if include:
         foot = include.replace("header", "footer").replace("head", "foot") \
@@ -483,21 +625,48 @@ def _write(agent, dry_run, only_id, limit, job=None):
                                      f"is still queued and is first up next run.")})
                 continue
             brief = row["brief"]
-            got = _ask_the_writer(brief, facts)
+            # A BLOG POST when that is what he asked for. "i ask for blog
+            # posts" — his order reaches this desk as the job, and the brief
+            # underneath it is the subject.
+            kind = ("blog" if (row.get("type") == "blog" or (job and job.wants(
+                "blog", "post", "posts", "article", "articles"))) else "service_page")
+            try:
+                from . import post_images
+                images = post_images.for_post(brief, facts.get("site") or "")
+            except Exception:
+                images = []
+            got = _ask_the_writer(brief, facts, kind=kind, images=images)
             if not got.get("ok"):
                 held.append({"id": row["id"], "title": row["title"],
                              "why": got.get("error")})
                 continue
 
             page = got["page"]
+            # ONE SECOND GO, TOLD WHY: too short, phrases that read as
+            # machine-written, or something the Critic needs. Kept only if it
+            # is better than the first.
+            first = voice_problems(page, kind) + critic_check(page, brief, facts)[1]
+            if first:
+                again = _ask_the_writer(brief, facts, kind=kind, images=images,
+                                        fix=first, previous=page)
+                if again.get("ok"):
+                    second = (voice_problems(again["page"], kind)
+                              + critic_check(again["page"], brief, facts)[1])
+                    if len(second) < len(first) or (
+                            len(second) == len(first)
+                            and words_in(again["page"]) > words_in(page)):
+                        page, got = again["page"], again
             ok, reasons = critic_check(page, brief, facts)
+            short = [v for v in voice_problems(page, kind) if v.startswith("it is ")]
+            if short and kind == "blog":
+                ok, reasons = False, reasons + short
             if not ok:
                 held.append({"id": row["id"], "title": row["title"],
                              "why": "the Critic rejected it: " + "; ".join(reasons)})
                 _store(con, row["id"], page, "in_review", reasons, dry_run)
                 continue
 
-            html, how = _shell(page, brief, facts, include)
+            html, how = _shell(page, brief, facts, include, images=images)
             host = re.sub(r"^https?://(www\.)?", "", facts.get("site") or "").split("/")[0]
             verdict = auditor.check_page(html, brief, site_host=host)
             if not verdict["pass"]:
@@ -507,7 +676,12 @@ def _write(agent, dry_run, only_id, limit, job=None):
                        html=html)
                 continue
 
-            path = _slug_path(brief, row["type"])
+            path = _slug_path(brief, kind)
+            if kind == "blog":
+                # Its own address, flat beside his pages so the header include
+                # path still works, named from the article's own title.
+                path = "blog-" + (re.sub(r"[^a-z0-9]+", "-", str(page.get("title") or path)
+                                         .lower()).strip("-")[:60] or path)
             page_file = path.lstrip("/") + (".php" if how == "php-include" else ".html")
             queued = None
             if not dry_run:
@@ -534,7 +708,11 @@ def _write(agent, dry_run, only_id, limit, job=None):
                               "not finished until they are in."),
                     "auditor": verdict["warnings"],
                 })
+            if not dry_run and kind != (row.get("type") or ""):
+                con.execute("UPDATE content_queue SET type=? WHERE id=?", (kind, row["id"]))
+                con.commit()
             pages.append({"id": row["id"], "title": page.get("title") or row["title"],
+                          "kind": kind, "images": len(images or []),
                           "page": page_file, "how": how, "words": verdict["words"],
                           "queued": queued, "warnings": verdict["warnings"],
                           "brain": got.get("brain")})

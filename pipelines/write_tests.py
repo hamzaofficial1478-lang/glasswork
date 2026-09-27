@@ -119,6 +119,8 @@ def _write(body=GOOD_BODY, include="", **kw):
                                       "spare": 0, "why": ""}), \
          mock.patch.object(providers, "think", _brain(body)), \
          mock.patch.object(CW, "_include_of_his_site", lambda: include), \
+         mock.patch("pipelines.post_images.for_post",
+                    kw.pop("images", None) or (lambda brief, site, **_: [])), \
          mock.patch.dict("os.environ", {
              "BUSINESS_NAME": "World Deal Technical Services",
              "BUSINESS_PHONE": "+971 4 123 4567",
@@ -425,6 +427,90 @@ def test_no_deadline_means_the_old_behaviour():
         CW._deadline = real
 
 
+def test_a_post_is_full_specific_and_has_pictures():
+    """
+    "i ask for blog posts but the program is writing like 150 to 160 words of
+     too generic posts with out any images any graphics why? ... i want the
+     posts to be written as real human written"
+    """
+    print("\nA thin or machine-sounding draft is sent back, told why:")
+    thin = {"html": "<h1>Glass</h1><p>" + "Word " * 150 + "</p>"}
+    probs = CW.voice_problems(thin, "blog")
+    check("150 words is too short for an article", any(p.startswith("it is 1") for p in probs), True)
+    robot = {"html": "<p>In today's fast-paced world, look no further. Let us delve in.</p>"
+                     + "<p>" + FILLER * 60 + "</p>"}
+    tells = " ".join(CW.voice_problems(robot, "service_page"))
+    check("the phrases that read as machine-written are named",
+          all(t in tells for t in ("in today's", "look no further", "delve")), True)
+
+    print("\n...and the second, fuller draft is the one kept:")
+    db = _fresh_db()
+    _queue_a_brief(db)
+    long_body = GOOD_BODY + "<h2>What to ask before you buy</h2><p>" + FILLER * 40 + "</p>"
+    calls = []
+
+    def two_drafts(task, messages, max_tokens=512, timeout=0, **kw):
+        calls.append(messages[-1]["content"])
+        body = GOOD_BODY if len(calls) == 1 else long_body
+        return {"ok": True, "used": "stand-in", "rung": "own", "output": json.dumps({
+            "title": "Choosing an aluminium pergola in Sharjah", "meta": "m",
+            "h1": "Choosing an aluminium pergola", "html": body, "note": "n"})}
+
+    class _Job:
+        text = "owner's order: write 1 post and publish on website"
+        def wants(self, *w):
+            return any(x in self.text for x in w)
+
+    import providers
+    pics = [{"src": "/assets/img/pages/pergola.jpg", "alt": "Pergola we fitted", "own": True},
+            {"src": "https://images.pexels.com/photos/1/x.jpeg", "own": False,
+             "alt": "Illustrative photo: pergola", "credit": "Illustrative photo — Pexels"}]
+    with mock.patch.object(providers.ladder, "who_could_answer",
+                           lambda s: {"ok": True, "own": True, "own_error": "", "spare": 0, "why": ""}), \
+         mock.patch.object(providers, "think", two_drafts), \
+         mock.patch.object(CW, "_include_of_his_site", lambda: ""), \
+         mock.patch("pipelines.post_images.for_post", lambda brief, site, **_: pics), \
+         mock.patch.dict("os.environ", {"BUSINESS_PHONE": "+971 4 123 4567",
+                                        "BUSINESS_WHATSAPP": "+971 50 987 6543",
+                                        "SITE_URL": "https://www.example.ae"}, clear=False):
+        out = CW._write("content-writer", False, None, 1, _Job())
+    check("his 'post' order is written as an article", out["pages"][0]["kind"], "blog")
+    check("it went back once, with the reason", len(calls), 2)
+    check("the revision was told it was too short", "it is " in calls[1] and "words" in calls[1], True)
+    with sqlite3.connect(db) as c:
+        row = c.execute("SELECT detail FROM site_queue").fetchone()
+        typ = c.execute("SELECT type FROM content_queue").fetchone()[0]
+    html = json.loads(row[0])["change"]["html"]
+    check("the fuller second draft is the one queued", "What to ask before you buy" in html, True)
+    check("under its own blog address", json.loads(row[0])["change"]["page"].startswith("blog-"), True)
+    check("and recorded as an article", typ, "blog")
+    check("his own photograph is in it", '/assets/img/pages/pergola.jpg' in html, True)
+    check("the stock one is labelled as an illustration",
+          "Illustrative photo — Pexels" in html, True)
+    check("no 'photos go here' gap when his own are in",
+          CW.PHOTO_SLOT in html, False)
+
+    print("\nThe Auditor lets a labelled stock photo through, never an unlabelled one:")
+    labelled = GOOD_BODY + ('<figure><img src="https://images.pexels.com/p/1.jpeg" alt="a">'
+                            '<figcaption>Illustrative photo — Pexels</figcaption></figure>')
+    check("labelled: fine", any("photograph" in b for b in
+                                auditor.check_page(labelled, BRIEF, site_host="example.ae")["blocking"]),
+          False)
+    bare = GOOD_BODY + '<img src="https://images.pexels.com/p/1.jpeg" alt="our work">'
+    check("unlabelled: refused", any("not labelled" in b for b in
+                                     auditor.check_page(bare, BRIEF, site_host="example.ae")["blocking"]),
+          True)
+
+    print("\nHis own photographs are found by what they show:")
+    from pipelines import post_images
+    home = ('<a href="/services.php">Services</a>'
+            '<img src="/assets/img/logo.png" alt="logo">'
+            '<img src="/assets/img/pages/pergola-villa.jpg" alt="Aluminium pergola">')
+    got = post_images.own_photos("https://www.example.ae", post_images._words("aluminium pergola"),
+                                 fetch=lambda u, timeout=15: home)
+    check("the pergola, not the logo", [g["src"] for g in got], ["/assets/img/pages/pergola-villa.jpg"])
+
+
 def main():
     real = board.DB
     _fresh_db()
@@ -442,6 +528,7 @@ def main():
         test_a_new_page_never_overwrites_one_he_has()
         test_the_queue_refuses_a_payload_it_would_have_to_cut()
         test_it_only_writes_briefs_that_are_ready()
+        test_a_post_is_full_specific_and_has_pictures()
     finally:
         board.DB = real
 
