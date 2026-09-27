@@ -733,7 +733,16 @@ def _work(agent, limit, only, dry_run):
         # claiming it is what clears the Overseer's 'nobody is picking this up'
         # fault, and leaving that standing while actually doing the work would
         # be the dashboard lying in the opposite direction.
-        task = board.next_open_task(SECTOR, agent)
+        # NOT THE AGENCY'S OWN FAULTS. "Fix: seo-strategist crashed: …" is a
+        # job for IT's self-repair desk (pipelines/it_selfheal), which knows a
+        # dropped connection is a passing thing and clears it. This desk fixes
+        # the WEBSITE; it ran first in the lane, took the crash ticket, found
+        # no website recipe for it, and set off "1 ticket I have no fix for"
+        # and a round of escalations about one dropped connection.
+        agency_jobs = [r[0] for r in con.execute(
+            "SELECT id FROM tasks WHERE sector=? AND status='open'"
+            " AND about LIKE 'faults:%'", (SECTOR,))]
+        task = board.next_open_task(SECTOR, agent, skip=agency_jobs)
 
         # WHAT HE ACTUALLY ASKED FOR.
         #

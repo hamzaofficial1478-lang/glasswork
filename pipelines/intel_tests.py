@@ -726,11 +726,60 @@ def test_a_403_from_search_console_says_which_of_the_two_causes_it_is():
         I._service_account_email = real_email
 
 
+def test_a_dropped_google_connection_does_not_crash_the_desk():
+    """
+    "seo-strategist crashed: FAILED: TransportError: ('Connection aborted.',
+     RemoteDisconnected)" — the Search Console login was the one step not
+    guarded, and one dropped connection took the whole SEO desk down.
+    """
+    print("\nGoogle dropping the login connection is a reason, not a crash:")
+    _stub_google()
+    sa = sys.modules["google.oauth2.service_account"]
+    tries = []
+
+    class TransportError(Exception):
+        pass
+
+    class _Dropped:
+        token = ""
+        def refresh(self, req):
+            tries.append(1)
+            raise TransportError("('Connection aborted.', RemoteDisconnected("
+                                 "'Remote end closed connection without response'))")
+
+    from providers import integrations
+    root = Path(__file__).parents[1]
+    sa_path = root / seo_intel.GSC_SA
+    made = not sa_path.exists()
+    if made:
+        sa_path.parent.mkdir(parents=True, exist_ok=True)
+        sa_path.write_text("{}", encoding="utf-8")
+    real = (sa.Credentials, integrations.read_env, seo_intel.time.sleep)
+    sa.Credentials = type("C", (), {
+        "from_service_account_file": staticmethod(lambda p, scopes=None: _Dropped())})
+    integrations.read_env = lambda: {"GSC_PROPERTY": "sc-domain:example.ae"}
+    waits = []
+    seo_intel.time.sleep = waits.append
+    try:
+        rows, why = seo_intel.gsc_queries()
+    except Exception as e:
+        rows, why = None, f"RAISED {type(e).__name__}: {e}"
+    finally:
+        sa.Credentials, integrations.read_env, seo_intel.time.sleep = real
+        if made:
+            sa_path.unlink()
+    check("it did not raise", rows, [])
+    check("it tried three times, waiting longer each time", (len(tries), waits), (3, [2, 5]))
+    check("and says plainly it was a dropped connection, not his setup",
+          "connection was closed" in why and "not a problem with your setup" in why, True)
+
+
 def main():
     test_it_works_with_no_paid_api()
     test_nothing_is_hardcoded()
     test_it_asks_instead_of_shrugging()
     test_search_console_talks_to_the_right_endpoint()
+    test_a_dropped_google_connection_does_not_crash_the_desk()
     test_a_403_from_search_console_says_which_of_the_two_causes_it_is()
     test_no_wins_says_which_link_is_missing()
     test_it_never_claims_to_know_volume()

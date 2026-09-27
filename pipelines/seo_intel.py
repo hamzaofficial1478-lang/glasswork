@@ -365,6 +365,33 @@ def _which_403(creds, host, prop, get=None) -> str:
             + ", ".join(repr(s) for s in seen[:6]) + "." + tip)
 
 
+def _dropped(e) -> bool:
+    """A connection that fell over on the way, rather than Google saying no."""
+    t = f"{type(e).__name__}: {e}".lower()
+    return any(w in t for w in ("connection aborted", "remotedisconnected",
+                                "connection reset", "timed out", "timeout",
+                                "temporarily unavailable", "name resolution",
+                                "max retries", "connectionerror", "eof occurred"))
+
+
+def _login_failed(e) -> str:
+    """Why the Search Console login did not happen, in words he can act on."""
+    raw = f"{type(e).__name__}: {e}"
+    if _dropped(e):
+        return ("Google did not answer the Search Console login — the connection "
+                f"was closed before a reply ({raw[:120]}). It was tried three times. "
+                "This is nearly always a short drop on this computer's internet or "
+                "at Google, not a problem with your setup; it is tried again on the "
+                "next run, and the free keyword sources carried on without it.")
+    if "invalid_grant" in raw.lower():
+        return ("Google refused the service-account key (invalid_grant). Either the "
+                "key was deleted in Google Cloud, or this computer's clock is wrong "
+                "by more than a few minutes. Check the clock first; if it is right, "
+                "create a new key and upload it on /setup → Integrations.")
+    return (f"The Search Console login failed ({raw[:160]}). The free keyword "
+            "sources carried on without it.")
+
+
 def gsc_queries(days=90, limit=500):
     """
     Real queries that brought impressions to this site, with position.
@@ -384,9 +411,36 @@ def gsc_queries(days=90, limit=500):
     from providers import integrations
     prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
 
-    creds = service_account.Credentials.from_service_account_file(
-        str(root / GSC_SA), scopes=[GSC_SCOPE])
-    creds.refresh(google.auth.transport.requests.Request())
+    # THE LOGIN WAS THE ONE STEP NOT GUARDED, and it took the whole desk down:
+    # "seo-strategist crashed: FAILED: TransportError: ('Connection aborted.',
+    # RemoteDisconnected)". Google's token server — or the line to it — dropped
+    # the connection while this fetched a login, the exception escaped, and
+    # the pass died with every other source unread, then set off a fault, an
+    # IT ticket and a string of escalations about one dropped connection. The
+    # promise above is "returns [] and a reason rather than raising"; this is
+    # that promise kept for the login too. A dropped connection is tried again
+    # twice, a little later each time; a refusal is not, because asking again
+    # does not change Google's mind.
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            str(root / GSC_SA), scopes=[GSC_SCOPE])
+    except Exception as e:
+        return [], (f"the Search Console key file could not be read ({e}). Upload "
+                    "the service-account JSON again on /setup → Integrations.")
+    err = None
+    for wait in (0, 2, 5):
+        if wait:
+            time.sleep(wait)
+        try:
+            creds.refresh(google.auth.transport.requests.Request())
+            err = None
+            break
+        except Exception as e:
+            err = e
+            if not _dropped(e):
+                break
+    if err is not None:
+        return [], _login_failed(err)
 
     end = time.strftime("%Y-%m-%d", time.localtime())
     start = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))

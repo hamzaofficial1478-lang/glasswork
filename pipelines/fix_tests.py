@@ -347,6 +347,23 @@ def test_worst_first():
           order, [crit, low])
 
 
+def test_an_agent_crash_is_left_for_self_repair():
+    """
+    The website fixer took "Fix: seo-strategist crashed: …", had no website
+    recipe for it, and set off "1 ticket I have no fix for" and a round of
+    escalations. Agency faults are IT's self-repair desk's (it_selfheal).
+    """
+    print("\nAn agent's crash is not a website ticket:")
+    _fresh_db()
+    tid = board.post_task("IT", "Fix: seo-strategist crashed: FAILED: TransportError",
+                          "the desk crashed", created_by="Overseer",
+                          about="faults:1", desk="it-fixer")
+    it_fix.run(dry_run=True)
+    with sqlite3.connect(board.DB) as c:
+        st = c.execute("SELECT status, owner FROM tasks WHERE id=?", (tid,)).fetchone()
+    check("the website fixer leaves it on the board for self-repair", st, ("open", None))
+
+
 def main():
     real = board.DB
     _fresh_db()
@@ -362,6 +379,7 @@ def main():
         test_two_fixers_do_not_patch_the_same_page()
         test_an_empty_bench_says_what_to_run()
         test_worst_first()
+        test_an_agent_crash_is_left_for_self_repair()
     finally:
         board.DB = real
 
