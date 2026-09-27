@@ -2453,6 +2453,35 @@ def mark_site_change(change_id, status, note=""):
     return {"id": change_id, "status": status, "note": note}
 
 
+def note_site_change(change_id, note=""):
+    """An approved change that has not gone yet, and why — its approval kept."""
+    with _conn() as c:
+        _migrate(c)
+        c.execute("UPDATE site_queue SET note=? WHERE id=? AND status='approved'",
+                  ((note or "")[:500], change_id))
+
+
+def reopen_site_changes(pattern_words, days=7):
+    """
+    Put back to 'approved' the changes marked failed only because his site did
+    not answer — his yes was never about the site being reachable. Returns ids.
+    """
+    since = _now() - days * 86400
+    out = []
+    with _conn() as c:
+        _migrate(c)
+        for r in c.execute("SELECT id, note FROM site_queue WHERE status='failed'"
+                           " AND COALESCE(applied_at, decided_at, queued_at, 0)>=?",
+                           (since,)).fetchall():
+            note = (r["note"] or "").lower()
+            if any(w in note for w in pattern_words):
+                c.execute("UPDATE site_queue SET status='approved', applied_at=NULL,"
+                          " note=? WHERE id=?",
+                          ("waiting — put back after your website did not answer", r["id"]))
+                out.append(r["id"])
+    return out
+
+
 # ---------------------------------------------------------------------------
 # OUTREACH — drafted mail waiting on the owner
 # ---------------------------------------------------------------------------

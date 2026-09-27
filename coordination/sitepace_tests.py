@@ -143,8 +143,37 @@ def test_he_sees_it_and_can_open_it_again():
         check("and the agency reads the site again", sitepace.resting(), {})
 
 
+def test_one_drop_is_a_short_pause_and_repeats_grow():
+    """
+    "approved a blog and passed it to publish to wesbite but this issue happenes"
+    — one closed connection stopped every desk for thirty minutes, and his blog
+    was refused inside the pause.
+    """
+    print("\nOne dropped connection is a short pause; only repeats grow it:")
+    import time as _t
+    with _Cabinet():
+        rests = []
+        for n in range(3):
+            sitepace.told_to_stop("https://127.0.0.1/blog-x.html",
+                                  error=ConnectionResetError("forcibly closed"))
+            rests.append(round((sitepace.resting()["until"] - _t.time()) / 60))
+        check("two minutes, then ten, then thirty", rests, [2, 10, 30])
+        why = sitepace.resting()["why"]
+        check("it says which page and what came back",
+              "/blog-x.html" in why and "ConnectionResetError" in why, True)
+        sitepace.clear()
+        sitepace.told_to_stop("https://127.0.0.1/", error=ConnectionResetError("reset"))
+        check("his 'the site is fine' starts the count again",
+              round((sitepace.resting()["until"] - _t.time()) / 60), 2)
+    with _Cabinet():
+        sitepace.told_to_stop("https://127.0.0.1/", status=429)
+        check("'too many requests' in words is fifteen minutes at once",
+              round((sitepace.resting()["until"] - _t.time()) / 60), 15)
+
+
 def main():
     for t in (test_one_request_at_a_time,
+              test_one_drop_is_a_short_pause_and_repeats_grow,
               test_the_first_closed_door_stops_every_desk,
               test_he_sees_it_and_can_open_it_again):
         t()

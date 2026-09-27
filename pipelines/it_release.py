@@ -113,6 +113,117 @@ def _now():
     return int(time.time())
 
 
+# ---------------------------------------------------------------------------
+# HIS SITE DID NOT ANSWER — THE CHANGE WAITS, IT IS NOT REFUSED
+# ---------------------------------------------------------------------------
+#
+# "approved a blog and passed it to publish to wesbite but this issue happenes
+#  ... why the changes are still not happening?"
+#
+# The agency had paused contact with his site after one closed connection, the
+# Releaser tried his blog inside the pause, and _could_not marked it failed —
+# which took it off every list that retries anything. His approval was about
+# the page, not about his site answering at that minute. Now a site that is
+# resting, down or unreachable leaves the change approved with a note saying
+# so, and a small waiter tries again as soon as the site answers.
+
+# The words a failure carries when his site simply did not answer. Not "could
+# not reach your website: <a setting is missing>" — that one is his to fix on
+# Setup, fails loudly, and must not bounce back into the queue every pass.
+UNREACHABLE_WORDS = ("could not reach your site:", "siteresting",
+                     "stopped answering this computer")
+
+
+def _unreachable(r) -> bool:
+    return bool(r.get("unreachable")) if isinstance(r, dict) else False
+
+
+def _wait_for_site(plan, why):
+    """Keep his approval; say the change waits for his site, and when it goes."""
+    from coordination import sitepace
+    rest = sitepace.resting()
+    when = (" It goes by itself at " + time.strftime("%H:%M", time.localtime(rest["until"]))
+            + ", when the pause ends." if rest else
+            " It is tried again by itself in a few minutes.")
+    board.note_site_change(plan["row"]["id"],
+                           "waiting for your website to answer — " + str(why)[:300] + when)
+    return False
+
+
+RETRY_LOCK = "release_retry"
+RETRY_MOST = 12            # goes a chain of waiters makes before leaving it to the day run
+FIRST_WAIT = 120           # a line that has just dropped: give it two minutes
+LONGEST_WAIT = 3 * 3600
+_ATTEMPT = 0               # which go this is, when a waiter started the run
+
+
+def _spawn_retry(attempt):
+    """A waiter, as its own process, so it outlives the run that started it."""
+    import os
+    import subprocess
+    kw = {"cwd": str(Path(__file__).parents[1]), "stdin": subprocess.DEVNULL,
+          "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if os.name == "nt":
+        from coordination import console
+        kw["creationflags"] = console.background_flags()
+    else:
+        kw["start_new_session"] = True
+    subprocess.Popen([sys.executable, "-m", "pipelines.it_release",
+                      "--when-site-answers", "--attempt", str(attempt)], **kw)
+
+
+def _schedule_retry() -> bool:
+    """One waiter at a time, that runs the Releaser again when his site answers."""
+    import os
+    if _ATTEMPT >= RETRY_MOST:
+        return False
+    if os.environ.get("AGENCY_IGNORE_DOTENV") == "1" and \
+            os.environ.get("RELEASE_RETRY_TEST") != "1":
+        return False                      # the test suite never starts processes
+    with board._conn() as c:
+        r = c.execute("SELECT expires_at, pid FROM locks WHERE resource=?",
+                      (RETRY_LOCK,)).fetchone()
+    if r and (r["expires_at"] or 0) > _now():
+        try:
+            if not r["pid"] or board.process_alive(r["pid"]):
+                return False              # one is already waiting
+        except Exception:
+            return False
+    try:
+        _spawn_retry(_ATTEMPT + 1)
+        return True
+    except Exception:
+        return False
+
+
+def when_site_answers(attempt=1, sleep=None) -> dict:
+    """
+    The waiter: sit out the pause (at least a couple of minutes), then run the
+    Releaser once. If his site is still not answering, that run starts the next
+    waiter — up to RETRY_MOST goes, after which the day run carries on.
+    """
+    global _ATTEMPT
+    from coordination import sitepace
+    sleep = sleep or time.sleep
+    if not board.acquire_lock(RETRY_LOCK, AGENT + "-waiter", wait=False,
+                              ttl=LONGEST_WAIT + 600):
+        return {"ok": True, "already": True}
+    try:
+        started = time.time()
+        sleep(FIRST_WAIT)
+        while time.time() - started < LONGEST_WAIT:
+            rest = sitepace.resting()
+            if not rest:
+                break
+            sleep(min(300, max(10, rest["until"] - time.time() + 10)))
+    finally:
+        board.release_lock(RETRY_LOCK, AGENT + "-waiter")
+    if not board.approved_site_changes(limit=1):
+        return {"ok": True, "nothing": True}
+    _ATTEMPT = attempt
+    return run()
+
+
 def _could_not(plan, why):
     """
     Mark one approved change as failed, and put it where he will see it.
@@ -354,13 +465,35 @@ def confirm(page, needle, s=None) -> bool:
     'The server returned ok' and 'the change is on the page' are different
     claims. Only the second one is worth telling him, and it costs one GET.
     """
+    return bool(_read_back(page, needle, s=s))
+
+
+def _read_back(page, needle, s=None):
+    """True: it is on the page. False: it is not. None: the site did not
+    answer, so nobody can say — which must not be read as "it is not there"
+    and undo a write that worked."""
     try:
         got = site_api.read_page(page, s=s)
     except Exception:
-        return False
+        return None
+    if _unreachable(got):
+        return None
     if not got.get("ok"):
         return False
     return (needle or "") in (got.get("html") or "")
+
+
+UNCHECKED = (" — written, but your website stopped answering before it could be "
+             "read back, so open the page to check it")
+
+
+def _fail_or_wait(plan, r, fallback):
+    """A write that did not happen: waiting if the site was not there, failed
+    if the site said no."""
+    if _unreachable(r):
+        plan["_waiting"] = True
+        return _wait_for_site(plan, r.get("error") or "")
+    return _could_not(plan, str(r.get("error") or fallback))
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +516,13 @@ def run(agent=AGENT, limit=MAX_PER_PASS, dry_run=False, skip_tests=False) -> dic
 def _work(agent, limit, dry_run, skip_tests):
     try:
         board.release_dead_request_claims()
+    except Exception:
+        pass
+
+    # Changes marked failed only because his site did not answer go back in
+    # the queue — including the blog refused in the pause that asked for this.
+    try:
+        board.reopen_site_changes(UNREACHABLE_WORDS)
     except Exception:
         pass
 
@@ -427,6 +567,21 @@ def _work(agent, limit, dry_run, skip_tests):
                 "agency cannot reach your website. " + why_not_ready,
                 "blocked": len(doable)}
 
+    # PAUSED: nothing is tried (and no test suite run) while the agency is
+    # leaving his site alone. The changes wait and go when the pause ends.
+    from coordination import sitepace
+    rest = sitepace.resting()
+    if doable and rest and not dry_run:
+        for p in doable:
+            _wait_for_site(p, rest.get("why") and ("the agency paused contact with "
+                                                    "your site: " + rest["why"]) or "")
+        _schedule_retry()
+        at = time.strftime("%H:%M", time.localtime(rest["until"]))
+        return {"ok": False, "idle": True, "agent": agent, "waiting": len(doable),
+                "error": (f"{len(doable)} approved change(s) wait for your website: the "
+                          f"agency paused contact with it ({rest.get('why')}). They go "
+                          f"by themselves at {at}.")}
+
     # THE TESTS, ONCE, BEFORE THE FIRST WRITE. Not per change: the code has not
     # moved between them, and running a fifteen-minute suite ten times would
     # turn a batch into an afternoon.
@@ -440,7 +595,7 @@ def _work(agent, limit, dry_run, skip_tests):
             return {"ok": False, "agent": agent, "tests": tests,
                     "error": tests["why"], "blocked": len(doable)}
 
-    applied, failed = [], []
+    applied, failed, waited = [], [], []
     if doable and not dry_run:
         # One holder for the batch. A second Releaser — a cron overlapping a
         # button press — waits rather than interleaving writes with this one.
@@ -450,9 +605,16 @@ def _work(agent, limit, dry_run, skip_tests):
                              "finish rather than writing over it."}
         try:
             for p in doable:
-                (applied if _carry_out(agent, p, skip_tests) else failed).append(p)
+                if _carry_out(agent, p, skip_tests):
+                    applied.append(p)
+                elif p.get("_waiting"):
+                    waited.append(p)
+                else:
+                    failed.append(p)
         finally:
             board.release_lock(LOCK, agent)
+        if waited:
+            _schedule_retry()
 
     if not dry_run:
         for p in noted:
@@ -467,7 +629,7 @@ def _work(agent, limit, dry_run, skip_tests):
         "ok": True, "agent": agent, "dry_run": bool(dry_run),
         "tests": tests,
         "approved_read": len(waiting),
-        "applied": len(applied), "failed": len(failed),
+        "applied": len(applied), "failed": len(failed), "waiting": len(waited),
         "noted": len(noted), "refused": len(refused),
         "changes": [{"queue_id": p["row"]["id"], "do": p["do"],
                      "page": p.get("page") or ", ".join(p.get("pages") or []),
@@ -489,6 +651,8 @@ def _work(agent, limit, dry_run, skip_tests):
     result["summary"] = (
         f"{len(applied)} change(s) now on your website"
         + (f", {len(failed)} could not be written" if failed else "")
+        + (f", {len(waited)} waiting for your website to answer — tried again by "
+           "themselves" if waited else "")
         + (f", {len(noted)} were for you to do" if noted else "")
         + (f", {len(refused)} refused" if refused else "")
         + (" (dry run — nothing written)" if dry_run else "")
@@ -515,7 +679,10 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             r = site_api.put_head_block(plan["page"], plan["block"],
                                         plan["html"], agent=agent)
             wrote = bool(r.get("ok"))
-            landed = wrote and confirm(plan["page"], plan["html"])
+            if not wrote:
+                return _fail_or_wait(plan, r, "the write failed")
+            seen = _read_back(plan["page"], plan["html"])
+            landed = seen is not False
             if wrote and not landed:
                 # IT SAID YES AND THE PAGE DISAGREES. Undo at once rather than
                 # leaving something half-written that nobody knows the shape of.
@@ -525,12 +692,11 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
                     "the website accepted the change and then did not show it, "
                     "so it was put straight back. Nothing has been left "
                     "half-done. This is worth a look by hand.")
-            if not wrote:
-                return _could_not(plan, str(r.get("error") or "the write failed"))
             _close_ticket(plan.get("issue_id"))
             board.mark_site_change(
                 row["id"], "applied",
-                f"written to {plan['page']} and confirmed on the page"
+                (f"written to {plan['page']} and confirmed on the page" if seen
+                 else f"{plan['page']}" + UNCHECKED)
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 
@@ -539,11 +705,14 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             # and the change log carries the undo, the same as every write —
             # and the lines that changed, read off the page as it was.
             was = site_api.read_page(plan["page"])
+            if _unreachable(was):
+                return _fail_or_wait(plan, was, "")
             r = site_api.put_page(plan["page"], plan["html"], agent=agent,
                                   before=(was.get("html") if was.get("ok") else None))
             if not r.get("ok"):
-                return _could_not(plan, str(r.get("error") or "the write failed"))
-            if not confirm(plan["page"], _needle(plan["html"])):
+                return _fail_or_wait(plan, r, "the write failed")
+            seen = _read_back(plan["page"], _needle(plan["html"]))
+            if seen is False:
                 site_api.undo(page=plan["page"], agent=agent)
                 return _could_not(
                     plan, "the website accepted the page and then did not serve "
@@ -552,7 +721,8 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             _close_ticket(plan.get("issue_id"))
             board.mark_site_change(
                 row["id"], "applied",
-                f"{plan['page']} rewritten and confirmed on the page"
+                (f"{plan['page']} rewritten and confirmed on the page" if seen
+                 else plan["page"] + UNCHECKED)
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 
@@ -561,6 +731,8 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             # the checks run in the other order: make sure we are not about to
             # write over something first, then write, then read it back.
             already = site_api.read_page(plan["page"])
+            if _unreachable(already):
+                return _fail_or_wait(plan, already, "")
             if already.get("ok") and (already.get("html") or "").strip():
                 return _could_not(
                     plan, f"{plan['page']} already exists on your website. A new "
@@ -569,12 +741,13 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             r = site_api.put_page(plan["page"], plan["html"], agent=agent,
                                   _action="new_page")
             if not r.get("ok"):
-                return _could_not(plan, str(r.get("error") or "the write failed"))
+                return _fail_or_wait(plan, r, "the write failed")
             # Confirm on something specific to THIS page rather than on the
             # whole body: a needle out of the middle of it, so a server that
             # wrote an empty file or a cached copy of something else fails the
             # check instead of passing it.
-            if not confirm(plan["page"], _needle(plan["html"])):
+            seen = _read_back(plan["page"], _needle(plan["html"]))
+            if seen is False:
                 site_api.undo(page=plan["page"], agent=agent)
                 return _could_not(
                     plan,
@@ -584,20 +757,20 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             _close_ticket(plan.get("issue_id"))
             board.mark_site_change(
                 row["id"], "applied",
-                f"{plan['page']} is now on your website"
+                (f"{plan['page']} is now on your website" if seen
+                 else plan["page"] + UNCHECKED)
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 
         if plan["do"] == "replace":
             r = site_api.replace_text(plan["find"], plan["to"], agent=agent)
             if not r.get("ok"):
-                return _could_not(plan, str(r.get("error")
-                                            or "the replacement did not finish"))
+                return _fail_or_wait(plan, r, "the replacement did not finish")
             # Read one page back and check the old text has really gone. The
             # same rule as a block: the server saying yes is not the page
             # agreeing.
             page = (r.get("changed") or [{}])[0].get("page", "")
-            if page and confirm(page, plan["find"]):
+            if page and _read_back(page, plan["find"]) is True:
                 return _could_not(
                     plan, f"'{plan['find']}' is still on {page} after the "
                           "change was written. Nothing further was touched; "
@@ -613,8 +786,7 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
         fn = getattr(site_api, plan["call"])
         r = fn(agent=agent)
         if not r.get("ok"):
-            return _could_not(plan, str(r.get("error") or "the routine reported "
-                                        "it could not finish"))
+            return _fail_or_wait(plan, r, "the routine reported it could not finish")
         _close_ticket(plan.get("issue_id"))
         board.mark_site_change(
             row["id"], "applied",
@@ -622,6 +794,11 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             + (" (tests were skipped at your request)" if skipped_tests else ""))
         return True
     except Exception as e:                                   # pragma: no cover
+        text = f"{type(e).__name__}: {e}".lower()
+        if isinstance(e, (ConnectionError, TimeoutError, OSError)) or \
+                any(w in text for w in UNREACHABLE_WORDS):
+            plan["_waiting"] = True
+            return _wait_for_site(plan, f"{type(e).__name__}: {e}")
         return _could_not(plan, f"it errored: {e}")
     finally:
         board.release_lock(resource, agent)
@@ -691,8 +868,15 @@ def main():
                     help="go without running the suite first — recorded against "
                          "every change in the batch")
     ap.add_argument("--limit", type=int, default=MAX_PER_PASS)
+    ap.add_argument("--when-site-answers", action="store_true",
+                    help="wait until the agency's pause on your site is over, then go")
+    ap.add_argument("--attempt", type=int, default=1)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.when_site_answers:
+        r = when_site_answers(a.attempt)
+        print(json.dumps(r, indent=2, default=str))
+        return 0
     r = run(limit=a.limit, dry_run=bool(a.dry_run or a.list),
             skip_tests=bool(a.skip_tests))
     print(json.dumps(r, indent=2) if a.json else _as_text(r))

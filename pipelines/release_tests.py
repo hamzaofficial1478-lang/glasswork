@@ -575,6 +575,132 @@ def test_the_dry_run_writes_nothing():
           "approved")
 
 
+# ---------------------------------------------------------------------------
+# HIS SITE NOT ANSWERING IS A WAIT, NOT A REFUSAL
+# ---------------------------------------------------------------------------
+#
+# "approved a blog and passed it to publish to wesbite but this issue happenes
+#  ... why the changes are still not happening?"
+
+DROPPED = {"ok": False, "unreachable": True,
+           "error": "could not reach your site: ConnectionResetError: forcibly closed"}
+HIS_ERROR = ("could not reach your site: SiteResting: your website stopped answering "
+             "this computer (it closed the connection at 14:24) — the agency is "
+             "leaving it alone until 14:54 so a firewall block is not made worse. "
+             "Nothing is wrong with the code.")
+BLOG = "blog-glass-railing-uae-cost-fixing-types-fitting-guide.html"
+BLOG_HTML = ("<h1>Glass railing in the UAE</h1><p>" + "A real sentence about fixing "
+             "glass balustrades on site, measured and fitted by our own team. " * 4 + "</p>")
+
+
+def _blog():
+    return board.queue_site_change("content-writer", "new_page", {
+        "change": {"page": BLOG, "html": BLOG_HTML}, "title": "Glass railing guide",
+        "why": "a new page"})
+
+
+class _Down(_Stub):
+    """His site not answering: every call, or only the reads after a write."""
+    def __init__(self, after_write=False, **kw):
+        super().__init__(**kw)
+        self.after_write, self.wrote = after_write, False
+
+    def _call(self, path, method="GET", body=None, timeout=25, s=None):
+        if self.after_write and not self.wrote:
+            r = super()._call(path, method, body, timeout, s)
+            self.wrote = self.wrote or method == "POST"
+            return r
+        return dict(DROPPED)
+
+
+def test_his_site_not_answering_keeps_his_approval():
+    from coordination import sitepace
+    print("\nThe agency has paused contact with his site: the change waits:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    c = sitepace._db()
+    c.execute("INSERT INTO site_pace(id,next_at,resting_until,why) VALUES(1,0,?,?)",
+              (time.time() + 600, "it closed the connection at 14:24"))
+    c.close()
+    ran_tests = []
+    with _Stub() as site:
+        R.tests_pass = lambda timeout=None: ran_tests.append(1) or {"ok": True, "took_s": 1}
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("his approval is kept", row["status"], "approved")
+    check("with a note saying it waits and when it goes",
+          "waiting for your website" in row["note"] and "goes by itself" in row["note"], True)
+    check("nothing is tried on the site, and no test suite run in the pause",
+          (site.writes, ran_tests), ([], []))
+    check("and it is not logged as refused",
+          [x for x in changelog.recent()["changes"] if not x.get("ok")], [])
+    check("the run says it waits, and is not painted red", (r.get("idle"), r.get("waiting")), (True, 1))
+
+    print("\n...a connection that drops during the publish waits too:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    with _Down() as site:
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("still approved, not failed", row["status"], "approved")
+    check("and the summary says it waits", "waiting for your website" in r["summary"], True)
+    check("no 'tried and could not' line in the change log",
+          [x for x in changelog.recent()["changes"] if not x.get("ok")], [])
+
+    print("\n...and the blog refused the way his was comes back and goes live:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    board.mark_site_change(cid, "failed", HIS_ERROR)
+    with _Stub(pages={}) as site:
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("put back in the queue and published", (row["status"], r["applied"]), ("applied", 1))
+    check("it is on his site", BLOG_HTML in site.pages.get(BLOG, ""), True)
+
+    print("\n...but a missing setting still fails loudly, and stays failed:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    board.mark_site_change(cid, "failed", "could not reach your website: there is no Admin API token")
+    with _Stub(pages={}):
+        R.run()
+    check("not put back", _sql("SELECT status FROM site_queue WHERE id=?", (cid,))[0]["status"],
+          "failed")
+
+
+def test_a_write_that_cannot_be_read_back_is_not_undone():
+    print("\nWritten, then the site stops answering before it can be read back:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    with _Down(after_write=True, pages={}) as site:
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("the write stands — nothing is undone", (site.undos, BLOG in site.pages), ([], True))
+    check("recorded as done, with a note to check it",
+          (row["status"], "open the page to check it" in row["note"]), ("applied", True))
+
+
+def test_the_waiter_goes_when_the_pause_is_over():
+    from coordination import sitepace
+    print("\nThe waiter sits out the pause, then publishes:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    c = sitepace._db()
+    c.execute("INSERT INTO site_pace(id,next_at,resting_until,why) VALUES(1,0,?,?)",
+              (time.time() + 300, "it closed the connection"))
+    c.close()
+    slept = []
+
+    def sleep(sec):
+        slept.append(round(sec))
+        sitepace.clear()                         # the pause ends while it waits
+    with _Stub(pages={}) as site:
+        r = R.when_site_answers(sleep=sleep)
+    check("it waited first", bool(slept), True)
+    check("then published the blog", (r.get("applied"), BLOG in site.pages), (1, True))
+    check("and only one waiter can wait at a time",
+          board.acquire_lock(R.RETRY_LOCK, "test", wait=False), True)
+
+
 def main():
     real = board.DB
     _fresh_db()
@@ -591,6 +717,9 @@ def main():
         test_a_site_it_cannot_reach_fails_loudly()
         test_two_releases_do_not_overlap()
         test_the_dry_run_writes_nothing()
+        test_his_site_not_answering_keeps_his_approval()
+        test_a_write_that_cannot_be_read_back_is_not_undone()
+        test_the_waiter_goes_when_the_pause_is_over()
     finally:
         board.DB = real
 

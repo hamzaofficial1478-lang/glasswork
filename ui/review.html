@@ -945,11 +945,18 @@ function drawPages(p){
     </article>`).join('')
     : `<div class="empty">No written page is waiting for you.</div>`;
 
+  // An approved page that could not go yet says why, and when it goes by itself.
+  const rest = p.site_resting || {};
+  const waitingNote = x => /waiting/.test(x.note||'') ? `<div style="font-size:12.5px;color:var(--amber);margin-top:4px">${esc(x.note)}</div>` : '';
   $('#pageApproved').innerHTML = p.approved.length ? `<h2>Approved, waiting to go live</h2>
-    <div class="notice"><p>${p.approved.map(x=>'<b>'+esc(x.title)+'</b>').join(', ')} —
-    IT runs the tests, then puts ${p.approved.length===1?'it':'them'} on your website.</p>
+    <div class="notice" style="display:block">
+    ${p.approved.map(x=>`<p style="margin:0 0 8px"><b>${esc(x.title)}</b>${waitingNote(x)}</p>`).join('')}
+    <p style="margin:0 0 10px;color:var(--muted)">${rest.until
+      ? `The agency paused contact with your website (${esc(rest.why||'it stopped answering')}) and tries again by itself at
+         ${new Date(rest.until*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}. If your site opens fine on your phone, press the button to try now.`
+      : `IT runs the tests, then puts ${p.approved.length===1?'it':'them'} on your website.`}</p>
     ${p.publishing ? '<span class="busy">IT is running the tests and publishing…</span>'
-                   : `<button class="btn glass" onclick="startJob('publish-now', this)">Put it live now</button>`}</div>` : '';
+                   : `<button class="btn glass" onclick="startJob('publish-now', this)">${rest.until ? 'My site opens fine — try now' : 'Put it live now'}</button>`}</div>` : '';
 
   $('#heldHead').textContent = p.held.length ? `${p.held.length} page${p.held.length===1?'':'s'}` : '';
   $('#heldList').innerHTML = p.held.length ? p.held.map(x=>`

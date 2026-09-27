@@ -318,9 +318,19 @@ def _pages(c):
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
             "to_write": to_write, "upcoming": upcoming,
             "held_for_seo": sum(n for k, n in counts.items() if k.startswith("blocked_on_")),
+            "site_resting": _site_resting(),
             "published": counts.get("published", 0),
             "writing": busy("content-writer", c),
             "publishing": busy("it-releaser", c)}
+
+
+def _site_resting() -> dict:
+    """{until, why} while the agency has paused contact with his site, else {}."""
+    try:
+        from coordination import sitepace
+        return sitepace.resting()
+    except Exception:
+        return {}
 
 
 def build() -> dict:
@@ -560,6 +570,14 @@ def publish_now() -> dict:
         return {"ok": False, "error": "The IT Releaser is already working."}
     if not board.approved_site_changes(limit=1):
         return {"ok": False, "error": "Nothing is approved and waiting to go live."}
+    # His press is "try now": if the agency paused contact with his site after a
+    # dropped connection, he is the one who can see the site opens fine.
+    try:
+        from coordination import sitepace
+        if sitepace.resting():
+            sitepace.clear()
+    except Exception:
+        pass
     from pipelines import it_release
     return it_release.run()
 

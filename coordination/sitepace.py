@@ -39,7 +39,19 @@ import time
 import urllib.parse
 
 GAP = 1.0                  # seconds between any two requests to his site
-PAUSE = 30 * 60            # how long his site is left alone after it says stop
+PAUSE = 30 * 60            # the longest rest: his site keeps closing the door
+# HOW LONG TO LEAVE IT, BY HOW OFTEN IT HAS HAPPENED.
+#
+# "approved a blog and passed it to publish to wesbite but this issue happenes"
+# — one closed connection at 14:24 stopped every desk for thirty minutes, and
+# the blog he had just approved was refused inside that half hour. His line
+# drops now and then on its own; a single drop is far more often that than a
+# firewall. So the first one rests the agency for two minutes, a second within
+# the hour for ten, and only a third for the full thirty. An explicit 429 ("too
+# many requests") is the site saying it in words, and gets fifteen at once.
+REST_STEPS = (2 * 60, 10 * 60, PAUSE)
+STRIKE_MEMORY = 60 * 60    # a clean hour and earlier drops are forgotten
+THROTTLED = 15 * 60
 BLOCK_STATUSES = {429, 503}
 # What a firewall shutting the door looks like from this side.
 BLOCK_WORDS = ("connection aborted", "remotedisconnected", "connectionreset",
@@ -92,6 +104,11 @@ def _db():
     c = sqlite3.connect(board.DB, timeout=30, isolation_level=None)
     c.execute("CREATE TABLE IF NOT EXISTS site_pace (id INTEGER PRIMARY KEY CHECK (id=1),"
               " next_at REAL DEFAULT 0, resting_until REAL DEFAULT 0, why TEXT)")
+    for col in ("strikes INTEGER DEFAULT 0", "last_strike REAL DEFAULT 0"):
+        try:
+            c.execute("ALTER TABLE site_pace ADD COLUMN " + col)
+        except sqlite3.OperationalError:
+            pass
     return c
 
 
@@ -151,15 +168,35 @@ def told_to_stop(url, status=None, error=None) -> bool:
     blocked = (status in BLOCK_STATUSES) or any(w in text for w in BLOCK_WORDS)
     if not blocked:
         return False
+    # Which request, and what exactly came back — so "it closed the
+    # connection" can be told apart later from a blip on his line.
+    try:
+        path = urllib.parse.urlsplit(str(url)).path or "/"
+    except Exception:
+        path = ""
     why = (f"it answered {status}" if status in BLOCK_STATUSES
            else "it closed the connection")
     why += time.strftime(" at %H:%M")
+    if path:
+        why += f" on {path[:60]}"
+    if error is not None:
+        why += f" ({type(error).__name__})"
+    now = time.time()
     try:
         c = _db()
         try:
-            c.execute("INSERT INTO site_pace(id, next_at, resting_until, why) VALUES(1,0,?,?)"
+            r = c.execute("SELECT strikes, last_strike FROM site_pace WHERE id=1").fetchone()
+            strikes, last = (r or (0, 0))
+            strikes = (strikes or 0) + 1 if (now - (last or 0)) < STRIKE_MEMORY else 1
+            rest = REST_STEPS[min(strikes, len(REST_STEPS)) - 1]
+            if status == 429:
+                rest = max(rest, THROTTLED)
+            c.execute("INSERT INTO site_pace(id, next_at, resting_until, why, strikes,"
+                      " last_strike) VALUES(1,0,?,?,?,?)"
                       " ON CONFLICT(id) DO UPDATE SET resting_until=excluded.resting_until,"
-                      " why=excluded.why", (time.time() + PAUSE, why))
+                      " why=excluded.why, strikes=excluded.strikes,"
+                      " last_strike=excluded.last_strike",
+                      (now + rest, why, strikes, now))
         finally:
             c.close()
     except Exception:
@@ -172,7 +209,7 @@ def clear():
     try:
         c = _db()
         try:
-            c.execute("UPDATE site_pace SET resting_until=0, why='' WHERE id=1")
+            c.execute("UPDATE site_pace SET resting_until=0, why='', strikes=0 WHERE id=1")
         finally:
             c.close()
     except Exception:

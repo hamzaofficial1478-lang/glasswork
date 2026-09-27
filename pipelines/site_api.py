@@ -189,8 +189,15 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
                             "on the server.")
         return out
     except Exception as e:
-        return {"ok": False, "error": f"could not reach your site: "
-                                      f"{type(e).__name__}: {e}"}
+        # NOT AN ANSWER — THE SITE WAS NOT THERE TO GIVE ONE. Marked, so the
+        # Releaser keeps his approval and tries again, instead of calling a
+        # dropped line or a resting pause a failed change and throwing his yes
+        # away (pipelines/it_release, _wait_for_site).
+        from coordination import sitepace
+        resting = isinstance(e, sitepace.SiteResting)
+        return {"ok": False, "unreachable": True, "resting": resting,
+                "error": (str(e) if resting else
+                          f"could not reach your site: {type(e).__name__}: {e}")}
     try:
         out = json.loads(raw)
     except Exception:
@@ -365,6 +372,11 @@ def _log_write(action, page, agent, r, html=None, block_id="", summary="",
         return r
     ok = bool(r.get("ok"))
     unchanged = (r.get("action") == "unchanged" or r.get("changed") is False)
+    if not ok and r.get("unreachable"):
+        # Nothing reached the site, so nothing was tried on it. The change is
+        # still waiting, and the Posts room says so — a "tried and could not"
+        # line here read as the change having been refused.
+        return r
     if ok and unchanged:
         # The nightly run putting back a block that is already there is not a
         # change, and logging it every night would bury the real ones.
