@@ -224,9 +224,30 @@ CREATE TABLE IF NOT EXISTS outreach_queue (
   queued_at  INTEGER,
   decided_at INTEGER,
   sent_at    INTEGER,
-  note       TEXT
+  note       TEXT,
+  campaign_id INTEGER,               -- the campaign this mail is (pipelines/campaign)
+  html       TEXT                    -- the designed version that goes with the text
 );
 CREATE INDEX IF NOT EXISTS idx_outq_status ON outreach_queue(status);
+
+-- ---- ONE MAIL FOR EVERY LEAD -------------------------------------------------
+-- "we can use 1 mail for all leads no need to write different mails for each
+--  lead" — and it is the company writing, with his offer and his services.
+-- One row per campaign; he approves it once, then ticks who gets it.
+CREATE TABLE IF NOT EXISTS campaigns (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  status      TEXT DEFAULT 'draft',   -- draft | approved | retired
+  copy        TEXT,                   -- JSON: subject, headline, intro, why_us, cta ...
+  tiles       TEXT,                   -- JSON: his services, with his photographs
+  offer       TEXT,                   -- his own words, exactly as he typed them
+  offer_until TEXT,
+  audit       TEXT,                   -- JSON: what the Auditor said
+  written_by  TEXT,                   -- standard | agency | owner
+  warnings    TEXT,                   -- JSON list
+  created_at  INTEGER,
+  updated_at  INTEGER,
+  approved_at INTEGER
+);
 
 CREATE TABLE IF NOT EXISTS site_issues (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

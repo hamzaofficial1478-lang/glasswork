@@ -336,7 +336,7 @@ def since(ts=None, limit=60) -> list:
 # A line about mail he can read, or a post he can read, is a line he will
 # click. It now carries the room the thing is waiting in — only when the line
 # is about the thing itself, not about sectors talking or a call being scored.
-_MAIL_WORDS = re.compile(r"\b(e?mails?|drafts?|auditor held|sent to)\b", re.I)
+_MAIL_WORDS = re.compile(r"\b(e?mails?|drafts?|auditor held|sent to|campaign)\b", re.I)
 _POST_WORDS = re.compile(r"\b(wrote|written|drafted|drafts?|held|published|rewr\w+|"
                          r"in_review|awaiting_review|blocked_on_\w+|posts?|blogs?)\b"
                          r"|^finished: write", re.I)

@@ -714,13 +714,14 @@ const SVGNS="http://www.w3.org/2000/svg";
 
 // The rooms that open onto a room of their own, and how many things are
 // waiting in there for him (from the same approvals list the header counts).
-const DOORS = {Leads:['/mail','Mail room','review_mails'], Content:['/posts','Posts room','review_pages']};
+const DOORS = {Leads:['/mail','Mail room',['review_mails','review_campaign']],
+               Content:['/posts','Posts room',['review_pages']]};
 function doorOf(key){
   const d = DOORS[key]; if(!d) return '';
-  const a = ((LIVE&&LIVE.approvals)||[]).find(x=>x.kind===d[2]);
-  const n = a ? (a.count||0) : 0;
+  const n = ((LIVE&&LIVE.approvals)||[]).filter(x=>d[2].includes(x.kind))
+              .reduce((t,x)=>t+(x.count||0),0);
   return `<a class="door" href="${d[0]}" title="${key==='Leads'
-      ? 'Write mails to your collected leads, read them, and send the ones you approve'
+      ? 'Your campaign mail: read it, approve it, and send it to the leads you tick'
       : 'Read the pages Content wrote, and approve or turn them down'}">${d[1]}${n?` <b>${n}</b>`:''} &rarr;</a>`;
 }
 

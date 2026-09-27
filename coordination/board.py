@@ -1270,6 +1270,10 @@ _ADDED_COLUMNS = (
     # the clear-up at its start put right. See coordination/leftovers.py.
     ("day_runs",     "resume_of",    "TEXT"),
     ("day_runs",     "tidied",       "TEXT"),
+    # One campaign mail for every lead (pipelines/campaign.py): which campaign
+    # a queued mail is, and the designed version that goes with the text.
+    ("outreach_queue", "campaign_id", "INTEGER"),
+    ("outreach_queue", "html",        "TEXT"),
     # What the Harvester read off the business's own website — the details Maps
     # does not hold. `whatsapp` is filled ONLY from a click-to-chat button the
     # business published itself; `evidence` records where every detail came
@@ -2551,6 +2555,14 @@ def mark_outreach_sent(qid, ok=True, note=""):
         c.execute("UPDATE outreach_queue SET status=?, sent_at=?, note=?"
                   " WHERE id=?",
                   ("sent" if ok else "rejected", _now(), note[:300], qid))
+
+
+def mark_outreach_stale(qid, note=""):
+    """Approved once, but what it would send is no longer what he approved."""
+    with _conn() as c:
+        _migrate(c)
+        c.execute("UPDATE outreach_queue SET status='stale', decided_at=?, note=?"
+                  " WHERE id=? AND status='approved'", (_now(), note[:300], qid))
 
 
 def decide_approval(kind, ref, decision):

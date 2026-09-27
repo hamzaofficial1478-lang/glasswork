@@ -846,6 +846,21 @@ def build():
                           "Nothing has been sent.")})
     except Exception:
         pass
+    # The campaign — one mail for every lead — waiting for his yes.
+    try:
+        camp = c.execute("SELECT id, copy, offer FROM campaigns WHERE status='draft'"
+                         " ORDER BY id DESC LIMIT 1").fetchone()
+        if camp:
+            subject = (json.loads(camp["copy"] or "{}").get("subject") or "").strip()
+            approvals.append({
+                "kind": "review_campaign", "id": camp["id"], "lvl": "amber · Leads",
+                "link": "/mail", "count": 1,
+                "text": "Your campaign mail is ready — read it and approve it",
+                "why": (f"“{subject}”" if subject else "One mail from the company")
+                       + (f", with your offer: {camp['offer']}" if camp["offer"] else "")
+                       + ". Nothing goes out until you approve it and tick who gets it."})
+    except Exception:
+        pass
 
     # ---- security feed ----
     sevmap = {"critical": "hi", "high": "hi", "hi": "hi",

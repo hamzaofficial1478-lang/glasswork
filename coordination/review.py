@@ -174,9 +174,21 @@ def _mails(c):
         ).fetchone()[0]
     except sqlite3.Error:
         pass
+    # THE CAMPAIGN — one mail from the company for every lead he ticks
+    # (pipelines/campaign.py). Shown to him for a real lead, so the greeting he
+    # reads is the one they will get.
+    campaign, recipients = {"exists": False}, []
+    try:
+        from pipelines import campaign as _campaign
+        recipients = _campaign.recipients()
+        first = next((r for r in recipients if r["state"] == "ready"), None)
+        campaign = _campaign.view({"company": first["company"]} if first else None)
+    except Exception as e:
+        campaign = {"exists": False, "error": f"{type(e).__name__}: {e}"}
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
             "leads_without_mail": unwritten, "writing": busy("leads-outreach", c),
-            "leads": _lead_list(c), **_mail_settings()}
+            "leads": _lead_list(c), "campaign": campaign, "recipients": recipients,
+            **_mail_settings()}
 
 
 # How many leads the Mail room lists. Newest first; the rest are on file.
@@ -338,8 +350,54 @@ def _ids(ids):
     return out
 
 
-def act(do, ids) -> dict:
+CAMPAIGN_ACTS = ("campaign_create", "campaign_save", "campaign_approve",
+                 "campaign_retire", "campaign_send", "campaign_test", "discard_old")
+
+
+def _campaign_act(do, ids, data) -> dict:
+    from pipelines import campaign
+    data = data if isinstance(data, dict) else {}
+    if do == "campaign_create":
+        r = campaign.create(str(data.get("offer") or ""), str(data.get("offer_until") or ""),
+                            str(data.get("focus") or ""))
+        return {**r, "head": "Your campaign is built. Read it, change anything you "
+                             "like, then approve it."}
+    if do == "campaign_save":
+        return campaign.save(data)
+    if do == "campaign_approve":
+        return campaign.approve()
+    if do == "campaign_retire":
+        return campaign.retire()
+    if do == "campaign_test":
+        return campaign.send_test(str(data.get("to") or ""))
+    if do == "campaign_send":
+        s = _mail_settings()
+        if not s["ready"]:
+            return {"ok": False, "error": (
+                "Your email is not set up yet, so nothing was sent. Add it on Setup → "
+                "Integrations → Email (SMTP), then press Send again.")}
+        return campaign.send(ids)
+    if do == "discard_old":
+        # Every one-off draft still waiting, or just the ones named.
+        with board._conn() as c:
+            board._migrate(c)
+            q = ("SELECT id FROM outreach_queue WHERE status IN ('pending','held')"
+                 + (" AND id IN (%s)" % ",".join("?" * len(ids)) if ids else ""))
+            found = [r["id"] for r in c.execute(q, ids)]
+            if found:
+                c.execute("UPDATE outreach_queue SET status='rejected', decided_at=?,"
+                          " note='owner put the one-off drafts away for the campaign'"
+                          " WHERE id IN (%s)" % ",".join("?" * len(found)),
+                          (board._now(), *found))
+        return {"ok": True, "head": f"Put away {len(found)} one-off draft(s). "
+                                    "They will not be sent."}
+    return {"ok": False, "error": f"not something this page does: {do!r}"}
+
+
+def act(do, ids, data=None) -> dict:
     ids = _ids(ids)
+    if do in CAMPAIGN_ACTS:
+        return _campaign_act(do, ids, data)
     if not ids:
         return {"ok": False, "error": "nothing was picked"}
     when = time.strftime("%Y-%m-%d %H:%M")
@@ -445,8 +503,18 @@ def draft_mails(ids=None) -> dict:
         created_by="owner", desk="leads-outreach")
     from pipelines import leads_outreach
     if ids:
-        return leads_outreach.run(limit=len(ids), only_ids=ids)
-    return leads_outreach.run()
+        return leads_outreach.run(limit=len(ids), only_ids=ids, per_lead=True)
+    return leads_outreach.run(per_lead=True)
+
+
+def campaign_rewrite(focus=None) -> dict:
+    """The agency writes fresh wording for the campaign. Started in the background."""
+    if not board.sector_enabled("Leads"):
+        return {"ok": False, "error": "Leads is switched off."}
+    if busy("leads-outreach"):
+        return {"ok": False, "error": "The outreach desk is already working."}
+    from pipelines import campaign
+    return campaign.rewrite(focus=focus)
 
 
 def write_page() -> dict:
@@ -475,11 +543,15 @@ def main():
     ap.add_argument("--ids", default="", help="with --draft-mails: lead ids, comma-separated")
     ap.add_argument("--write-page", action="store_true")
     ap.add_argument("--publish-now", action="store_true")
+    ap.add_argument("--campaign-rewrite", action="store_true")
+    ap.add_argument("--focus", default=None, help="with --campaign-rewrite: what to lead with")
     a = ap.parse_args()
     try:
         if a.act:
             req = json.loads(sys.stdin.read() or "{}")
-            out = act(str(req.get("do") or ""), req.get("ids") or [])
+            out = act(str(req.get("do") or ""), req.get("ids") or [], req.get("data"))
+        elif a.campaign_rewrite:
+            out = campaign_rewrite(a.focus)
         elif a.draft_mails:
             out = draft_mails([i for i in a.ids.split(",") if i.strip()])
         elif a.write_page:

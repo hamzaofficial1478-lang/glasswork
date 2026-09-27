@@ -120,6 +120,25 @@ OPT_OUT = (
     r"\bno reply needed\b",
 )
 
+# Formatting the writer meant for a chat window, not an inbox. "**Subject:**
+# Glass & aluminium…" and a line of "---" went into real drafts and read as
+# exactly what they were: a model's output pasted into an email.
+MARKUP = (
+    (r"\*\*", "'**'"),
+    (r"(?m)^\s*-{3,}\s*$", "a line of '---'"),
+    (r"(?m)^\s*#{1,6}\s+\S", "a '#' heading"),
+    (r"(?im)^\s*[*_]*subject\s*[*_]*\s*:", "a second 'Subject:' line in the body"),
+)
+
+# A personal inbox in a mail that goes out from the company. The writer signed
+# drafts with the address it knew for the person running it — his own Gmail —
+# instead of the business's.
+PERSONAL_INBOX = r"[\w.+-]+@(?:gmail|googlemail|hotmail|yahoo|outlook|live|icloud|aol)\.[a-z.]{2,}"
+
+# Speaking as one person. The campaign is from the company ("we"); a draft
+# that says "I work in glass…" and is signed by a man's name is not.
+FIRST_PERSON = r"(?<![\w'’])(?:I|I'm|I’m|I'll|I’ll|I've|I’ve|I'd|I’d)(?![\w'’])|\b(?i:my|me)\b"
+
 MAX_WORDS = 220          # a stranger's first mail; longer is not read
 MIN_WORDS = 25           # shorter than this is not a message, it is a ping
 MAX_SUBJECT = 78         # anything longer is cut off in every mail client
@@ -135,9 +154,14 @@ def _hits(text, patterns):
 
 
 def split_subject(draft):
-    """(subject, body) from a draft written as 'Subject: …' then the body."""
+    """(subject, body) from a draft written as 'Subject: …' then the body.
+
+    Forgiving about the markdown a writer wraps it in — '**Subject:** …' is
+    the same subject line, not a subject that starts with two asterisks.
+    """
     text = (draft or "").strip()
-    m = re.match(r"^\s*subject\s*:\s*(.+?)\s*\n(.*)$", text, re.I | re.S)
+    m = re.match(r"^\s*[*_#]*\s*subject\s*[*_]*\s*:\s*[*_]*\s*(.+?)\s*[*_]*\s*\n(.*)$",
+                 text, re.I | re.S)
     if m:
         return m.group(1).strip(), m.group(2).strip()
     lines = [l for l in text.splitlines()]
@@ -146,13 +170,33 @@ def split_subject(draft):
     return "", text
 
 
-def check_outreach(draft, lead=None, company=None, service_label="") -> dict:
+def _without(text, phrases):
+    """The text with each of these phrases taken out (case and spacing aside)."""
+    flat = re.sub(r"\s+", " ", text or "")
+    for p in phrases or ():
+        p = re.sub(r"\s+", " ", str(p or "")).strip()
+        if len(p) >= 3:
+            flat = re.sub(re.escape(p), " ", flat, flags=re.I)
+    return flat
+
+
+def check_outreach(draft, lead=None, company=None, service_label="",
+                   owner_offer=(), voice="") -> dict:
     """
     Is this mail fit to leave the building?
 
     Returns {pass, blocking[], warnings[], subject, words, why}. `blocking` is
     what stops it; `warnings` are worth knowing and do not. Every entry says
     what was found, so a refusal can be argued with rather than just obeyed.
+
+    `owner_offer`: wording the owner wrote and approved himself — his offer and
+    its closing date. Those exact words may name a price or a concession; the
+    handbook's line is that no agent offers one without him, and this is him.
+    Anything of the kind ANYWHERE ELSE in the mail is still refused, so the
+    writer cannot slip a second offer in beside his.
+
+    `voice="company"`: the mail is from the business, not one man. "I" and a
+    personal signature are refused.
     """
     lead = lead or {}
     try:
@@ -160,13 +204,31 @@ def check_outreach(draft, lead=None, company=None, service_label="") -> dict:
         text = f"{subject}\n{body}"
         words = len(re.findall(r"\b[\w'’-]+\b", body))
         blocking, warnings = [], []
+        not_his = _without(text, owner_offer)
 
         # --- the things that must never go out --------------------------------
         for h in _hits(text, PLACEHOLDER):
             blocking.append(f"an unfilled placeholder is still in it: {h!r}")
-        for h in _hits(text, CONCESSION):
+        for h in _hits(not_his, CONCESSION):
             blocking.append(f"it names a price or a concession ({h!r}) — that is "
                             "the owner's call, not an agent's")
+        for pat, what in MARKUP:
+            if re.search(pat, text if "subject" not in what else body):
+                blocking.append(f"formatting meant for a chat window is in it ({what})")
+        inbox = re.search(PERSONAL_INBOX, text, re.I)
+        if inbox:
+            blocking.append(f"a personal email address is in it ({inbox.group(0)}) — "
+                            "mail goes out from the company's address")
+        if voice == "company":
+            who = (lead.get("company") or "").strip()
+            # Links and addresses are not words: wa.me/971… is WhatsApp's own
+            # address, not the mail talking about "me".
+            prose = re.sub(r"(?:https?://|www\.|wa\.me/)\S+|\S+@\S+", " ",
+                           _without(not_his, [who]))
+            me = re.search(FIRST_PERSON, prose)
+            if me:
+                blocking.append(f"it speaks as one person ({me.group(0)!r}) — this "
+                                "mail is from the company, so it says 'we'")
         for h in _unbacked(text):
             blocking.append(f"it claims something nobody can stand behind: {h!r}")
         if not subject:

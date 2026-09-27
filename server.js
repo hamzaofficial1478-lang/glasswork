@@ -1263,7 +1263,24 @@ app.post("/api/approve", async (req, res) => {
 app.get("/api/review", async (_q, res) =>
   res.json(await pyModule("coordination.review", ["--json"], 30000)));
 
-const REVIEW_ACTS = ["send", "discard", "publish", "reject_page", "rewrite", "discard_page"];
+const REVIEW_ACTS = ["send", "discard", "publish", "reject_page", "rewrite", "discard_page",
+  "campaign_create", "campaign_save", "campaign_approve", "campaign_retire",
+  "campaign_send", "campaign_test", "discard_old"];
+// The campaign's fields, as he typed them: short strings only, nothing nested.
+const CAMPAIGN_KEYS = ["offer", "offer_until", "focus", "to", "subject", "preheader",
+  "headline", "intro", "why_us", "cta", "phone", "whatsapp"];
+function campaignData(d) {
+  const out = {};
+  if (!d || typeof d !== "object") return out;
+  for (const k of CAMPAIGN_KEYS) {
+    if (typeof d[k] === "string") out[k] = d[k].slice(0, 1200);
+  }
+  return out;
+}
+// How long each may take: building reads his website for photographs, and
+// sending goes through his mail server one message at a time.
+const REVIEW_TIMEOUT = { send: 300000, campaign_send: 300000, campaign_create: 180000,
+                         campaign_test: 90000 };
 app.post("/api/review/act", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
@@ -1275,8 +1292,8 @@ app.post("/api/review/act", async (req, res) => {
   // Sending goes through his mail server one message at a time, so it gets
   // longer than a database write — but not unbounded.
   const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.review", "--act"], {
-    cwd: __dirname, input: JSON.stringify({ do: act, ids }),
-    timeout: act === "send" ? 300000 : 60000, maxBuffer: 4 * 1024 * 1024,
+    cwd: __dirname, input: JSON.stringify({ do: act, ids, data: campaignData(b.data) }),
+    timeout: REVIEW_TIMEOUT[act] || 60000, maxBuffer: 8 * 1024 * 1024,
   });
   if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
   const out = String(r.stdout || "");
@@ -1289,7 +1306,7 @@ app.post("/api/review/act", async (req, res) => {
 // minutes, so they are started in the background the way the day run is, and
 // the page watches the busy flags in /api/review.
 const REVIEW_JOBS = { "draft-mails": "--draft-mails", "write-page": "--write-page",
-                      "publish-now": "--publish-now" };
+                      "publish-now": "--publish-now", "campaign-rewrite": "--campaign-rewrite" };
 app.post("/api/review/start/:job", async (req, res) => {
   const flag = REVIEW_JOBS[req.params.job];
   if (!flag) return res.json({ ok: false, error: "unknown job" });
@@ -1298,7 +1315,11 @@ app.post("/api/review/start/:job", async (req, res) => {
   // The Mail room's ticks: which leads to write for. Numbers only.
   const ids = (Array.isArray((req.body || {}).ids) ? req.body.ids : [])
     .map((x) => parseInt(x, 10)).filter(Number.isFinite).slice(0, 25);
-  const extra = (req.params.job === "draft-mails" && ids.length) ? ["--ids", ids.join(",")] : [];
+  let extra = (req.params.job === "draft-mails" && ids.length) ? ["--ids", ids.join(",")] : [];
+  // What he wants the campaign to lead with. One argument, never a shell.
+  const focus = (req.body || {}).focus;
+  if (req.params.job === "campaign-rewrite" && typeof focus === "string" && focus.trim())
+    extra = ["--focus", focus.trim().slice(0, 200)];
   try {
     const child = spawn(py.cmd, [...py.prefix, "-m", "coordination.review", flag, ...extra], {
       cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,

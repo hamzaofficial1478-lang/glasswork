@@ -664,10 +664,17 @@ def send_plain(to: str, subject: str, body: str, html: str = "") -> dict:
     return {"ok": True, "to": to, "from": sender}
 
 
-def _smtp_send(lead: dict, draft: str) -> dict:
+def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
+               headers=None) -> dict:
     """
     Deliver via SMTP using the credentials saved on /setup (env: SMTP_*). Kept as
     the single send boundary: no other code emails directly.
+
+    `html` rides along as an alternative to the text, as in send_plain — the
+    campaign is a designed mail, and it used to leave as bare text because this
+    boundary could not carry anything else. `from_name` is who the inbox shows
+    it is from (the company, not an address). `headers` adds lines such as
+    List-Unsubscribe.
 
     Three things happen here and nowhere else, because this is the only place
     that can be sure of them:
@@ -712,10 +719,19 @@ def _smtp_send(lead: dict, draft: str) -> dict:
 
     subject, body = _split_subject(draft)
     msg = EmailMessage()
-    msg["From"] = sender
+    if from_name:
+        from email.utils import formataddr
+        msg["From"] = formataddr((from_name, sender))
+    else:
+        msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject or "Glass & aluminium work"
+    for k, v in (headers or {}).items():
+        if k and v and k.lower() not in ("from", "to", "subject"):
+            msg[k] = v
     msg.set_content(body or draft)
+    if html:
+        msg.add_alternative(html, subtype="html")
 
     try:
         port = int((setting("SMTP_PORT") or "587").strip() or 587)

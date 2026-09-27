@@ -166,6 +166,41 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
 .toast.good{border-color:rgba(92,192,136,.6)}
 .toast.bad{border-color:rgba(229,86,91,.6)}
 
+/* ---- the campaign ---- */
+.camp{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:16px;align-items:start}
+.camp .frame{margin-top:0}
+.camp .frame iframe{height:820px}
+.camp-top{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:baseline;margin:0 0 8px;font-size:13px;color:var(--muted)}
+.camp-top b{color:var(--text);font-weight:600}
+.side{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:14px;min-width:0}
+.side h3{margin:0;font-size:14px;font-weight:600}
+.side .hint{font-size:12px;color:var(--muted);margin:3px 0 0}
+.field{display:grid;gap:5px}
+.field label{font-size:12px;color:var(--etch)}
+.field input,.field textarea{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:8px;
+  color:var(--text);padding:8px 10px;font-family:inherit;font-size:13px;line-height:1.45}
+.field textarea{resize:vertical;min-height:64px}
+.field input:focus,.field textarea:focus{border-color:var(--glass);outline:none}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.side details summary{cursor:pointer;font-size:13px;color:var(--glass)}
+.side details[open] summary{margin-bottom:10px}
+.side details .field+.field{margin-top:10px}
+.state{border-radius:10px;padding:10px 12px;font-size:13px;border:1px solid var(--line2)}
+.state.draft{border-color:rgba(234,165,67,.5);background:var(--amber-dim)}
+.state.approved{border-color:rgba(92,192,136,.5);background:var(--ok-dim)}
+.state b{display:block;font-size:13.5px}
+.checks{margin:6px 0 0;padding-left:18px;font-size:12.5px}
+.checks li{margin:2px 0}
+.checks .stop{color:var(--danger)}
+.checks .note{color:var(--amber)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow .btn{flex:1 1 auto}
+.build{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:14px;max-width:640px}
+details.old{margin-top:34px;border-top:1px solid var(--line);padding-top:16px}
+details.old>summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--muted)}
+details.old[open]>summary{color:var(--text)}
+@media (max-width:900px){.camp{grid-template-columns:1fr}.camp .frame iframe{height:70vh}}
+
 @media (max-width:640px){
   .tab .more{display:none}
   .tab{padding:9px 10px 10px}
@@ -194,25 +229,33 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
   <section id="mails" class="on">
     <div class="strip" id="mailFacts"></div>
     <div id="mailNotice"></div>
-    <h2>1 · Your leads <small id="leadHead"></small></h2>
-    <p class="lede">Everyone the Hunter has collected. Tick the ones you want a mail written
-      for and press Write &mdash; the agency writes one mail per lead, in your voice, for you
-      to read below. Nothing is sent at this step.</p>
-    <div class="tools" id="leadTools"></div>
-    <div id="leadList"></div>
-    <h2>2 · Read, tick and send <small id="mailHead"></small></h2>
-    <p class="lede">Every mail is written for one lead. Read them, tick the ones you want
-      to go, and press Send &mdash; they leave from your own email straight away. Nothing
-      you have not ticked is ever sent.</p>
-    <div class="tools" id="mailTools">
-      <label><input type="checkbox" id="pickAll" onchange="pickAll(this.checked)"> Tick all</label>
-      <span class="sp"></span>
-    </div>
-    <div class="mails" id="mailList"></div>
-    <div id="mailHeld"></div>
-    <div id="mailApproved"></div>
-    <h2>Already decided <small>the last twenty</small></h2>
+    <h2>1 · Your campaign <small id="campHead"></small></h2>
+    <p class="lede">One mail from the company, sent to every lead you tick &mdash; your offer, your
+      services, your photographs. What you see is exactly what they receive, with their own name
+      in the greeting. Read it, change anything you like, and approve it once.</p>
+    <div id="campaign"></div>
+    <h2>2 · Who gets it <small id="recHead"></small></h2>
+    <p class="lede">Every lead the Hunter has collected. Tick the ones to send to and press Send.
+      A business already written to is never written to again, and Security looks at each one
+      again as it goes.</p>
+    <div class="tools" id="recTools"></div>
+    <div id="recList"></div>
+    <h2>Already sent <small>the last twenty</small></h2>
     <div id="mailRecent"></div>
+    <details class="old" id="oldWrap">
+      <summary id="oldHead">One-off drafts from before the campaign</summary>
+      <p class="lede" style="margin-top:12px">Mails the agency wrote one lead at a time, before the
+        campaign. The campaign replaces them &mdash; sending it to a lead puts that lead's draft away.
+        You can still send or discard these yourself.</p>
+      <div class="tools" id="mailTools">
+        <label><input type="checkbox" id="pickAll" onchange="pickAll(this.checked)"> Tick all</label>
+        <span class="sp"></span>
+        <button class="btn stop" onclick="discardOld()">Put them all away</button>
+      </div>
+      <div class="mails" id="mailList"></div>
+      <div id="mailHeld"></div>
+      <div id="mailApproved"></div>
+    </details>
   </section>
 
   <section id="pages">
@@ -248,10 +291,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const escA = s => esc(s).replace(/'/g, '&#39;');
 let DATA = null;
-const PICKED = new Set();     // mail ids he has ticked — survives every refresh
-const LEADPICK = new Set();   // lead ids he has ticked to have a mail written
-let LEAD_ALL = false;         // show every lead, not just the ones ready to write
-const LEAD_SHOWN = 40;
+const PICKED = new Set();     // one-off draft ids he has ticked — survives every refresh
 const OPEN = new Set();       // pages whose preview he has opened
 let WORKING = false;          // a button press in flight: do not redraw under it
 
@@ -318,8 +358,11 @@ function draw(){
 // ---------------------------------------------------------------- mail ----
 function drawMails(m){
   const left = Math.max(0, (m.cap||0) - (m.sent_today||0));
+  const c = m.campaign || {};
   $('#mailFacts').innerHTML = [
-    `<div class="fact"><div class="v">${m.waiting.length}</div><div class="l">written, waiting for you</div></div>`,
+    !c.exists ? `<div class="fact warn"><div class="v">None yet</div><div class="l">your campaign</div></div>`
+      : c.status === 'approved' ? `<div class="fact"><div class="v" style="color:var(--ok)">Approved</div><div class="l">your campaign</div></div>`
+      : `<div class="fact warn"><div class="v">Draft</div><div class="l">your campaign — waiting for your yes</div></div>`,
     `<div class="fact${left===0?' warn':''}"><div class="v">${m.sent_today||0} / ${m.cap||0}</div><div class="l">sent today, of your daily limit</div></div>`,
     m.ready ? `<div class="fact"><div class="v mono" style="font-size:13px">${esc(m.from)}</div><div class="l">sends from</div></div>`
             : `<div class="fact warn"><div class="v">Not set up</div><div class="l">your email</div></div>`,
@@ -327,24 +370,27 @@ function drawMails(m){
 
   const notes = [];
   if(!m.ready) notes.push(`<div class="notice amber"><p>Your email is not set up, so nothing can be sent yet.
-    Add it on <a href="/setup">Setup &rarr; Integrations &rarr; Email (SMTP)</a>; you can still read and tick
-    the mails here.</p></div>`);
-  if(!DATA.sectors.Leads) notes.push(`<div class="notice amber"><p>Leads is switched off, so no mail is written
-    or sent. Turn it back on in the office to use this page.</p></div>`);
-  if(m.writing) notes.push(`<div class="notice"><span class="busy">Writing a mail for each lead…</span>
-    <p>They appear below as each one is finished.</p></div>`);
-
+    Add it on <a href="/setup">Setup &rarr; Integrations &rarr; Email (SMTP)</a>; you can still build and
+    approve the campaign here.</p></div>`);
+  if(!DATA.sectors.Leads) notes.push(`<div class="notice amber"><p>Leads is switched off, so nothing is
+    sent. Turn it back on in the office to use this page.</p></div>`);
+  if(m.writing) notes.push(`<div class="notice"><span class="busy">The agency is working on your mail…</span>
+    <p>This page updates on its own when it is done.</p></div>`);
   $('#mailNotice').innerHTML = notes.join('');
 
-  drawLeads(m);
-  $('#mailHead').textContent = m.waiting.length ? `${m.waiting.length} mail${m.waiting.length===1?'':'s'}` : '';
+  drawCampaign(m);
+  drawRecipients(m);
+
+  // ---- the one-off drafts from before the campaign, folded away ----
+  const held = m.held || [];
+  const nOld = m.waiting.length + held.length;
+  $('#oldWrap').style.display = nOld || m.approved.length ? '' : 'none';
+  $('#oldHead').textContent = `One-off drafts from before the campaign (${nOld})`;
   $('#mailTools').style.display = m.waiting.length ? '' : 'none';
   $('#pickAll').checked = m.waiting.length>0 && m.waiting.every(x=>PICKED.has(x.id));
-
-  $('#mailList').innerHTML = m.waiting.length ? m.waiting.map(x=>{
+  $('#mailList').innerHTML = m.waiting.map(x=>{
     const lead = x.lead || {};
-    const bits = [x.service, lead.area, (lead.segment||'').replace(/_/g,' '),
-                  lead.source ? 'found via '+lead.source : '', 'written '+ago(x.queued_at)]
+    const bits = [x.service, lead.area, (lead.segment||'').replace(/_/g,' '), 'written '+ago(x.queued_at)]
                  .filter(Boolean).map(esc).join(' &middot; ');
     const warn = (x.warnings||[]).length ? `<div class="notes">The Auditor passed it, and noted: ${(x.warnings||[]).map(esc).join('; ')}</div>` : '';
     return `<article class="mail${PICKED.has(x.id)?' picked':''}" data-id="${x.id}">
@@ -355,17 +401,8 @@ function drawMails(m){
       <div class="subj"><span>Subject:</span> ${esc(x.subject)}</div>
       <div class="body">${esc(x.body)}</div>
       ${warn}
-    </article>`;}).join('')
-    : `<div class="empty">No mail is waiting for you.${m.leads_without_mail>0?'':' When the Hunter finds new leads, a mail for each one appears here.'}</div>`;
-
-  // WRITTEN, BUT STOPPED BY THE AUDITOR. "if the job finished then why i did
-  // not see any mail written?" — because held drafts used to be dropped. They
-  // are shown here with the reason, and can be written again; they can never
-  // be sent as they are.
-  const held = m.held || [];
-  $('#mailHeld').innerHTML = held.length ? `<h2>Stopped by the Auditor <small>${held.length} — written, but not fit to send as they are</small></h2>
-    <p class="lede">The agency wrote these, then its own checker refused them for the reason in red. They
-      cannot be sent. Press Write it again and the agency rewrites it with the reason in mind.</p>
+    </article>`;}).join('');
+  $('#mailHeld').innerHTML = held.length ? `<h2>Stopped by the Auditor <small>${held.length}</small></h2>
     <div class="mails">${held.map(x=>`<article class="mail" style="border-color:rgba(229,86,91,.45)">
       <span></span>
       <div class="mhead"><b>${esc(x.company||'(no company name)')}</b><span class="addr">${esc(x.to)}</span></div>
@@ -373,10 +410,7 @@ function drawMails(m){
       <div class="notes" style="color:var(--danger)">${(x.why||[]).map(esc).join('<br>')}</div>
       <div class="subj"><span>Subject:</span> ${esc(x.subject)}</div>
       <div class="body">${esc(x.body)}</div>
-      <div class="row" style="grid-column:2"><button class="btn glass" ${DATA.sectors.Leads&&!m.writing?'':'disabled'}
-        onclick="writeFor([${Number(x.lead_id)||0}], this)">Write it again</button></div>
     </article>`).join('')}</div>` : '';
-
   $('#mailApproved').innerHTML = m.approved.length ? `<h2>Approved, not sent yet <small>they go on the next Leads pass</small></h2>
     <div class="logwrap"><table class="log"><tr><th>To</th><th>Subject</th><th>Why it has not gone</th></tr>
     ${m.approved.map(x=>`<tr><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td><td>${esc(x.subject)}</td>
@@ -387,81 +421,271 @@ function drawMails(m){
     ${m.recent.map(x=>`<tr><td class="n">${esc(ago(x.at))}</td><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td>
       <td>${esc(x.subject)}</td><td>${x.status==='sent'?'<span class="pill ok">sent</span>':'<span class="pill">not sent</span>'}
       ${x.note&&x.status!=='sent'?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
-    </table></div>` : `<div class="empty">Nothing decided yet.</div>`;
+    </table></div>` : `<div class="empty">Nothing sent yet.</div>`;
 }
 
-const LEAD_STATE = {
-  ready:    ['', 'no mail yet'],
-  drafted:  ['amber', 'mail written — read it below'],
-  held:     ['bad', 'the Auditor stopped it — tick to write again'],
-  approved: ['ok', 'approved, going out'],
-  sent:     ['ok', 'written to already'],
-  no:       ['', ''],
-};
-function drawLeads(m){
-  const all = m.leads || [];
-  const live = new Set(all.filter(l=>l.state==='ready'||l.state==='held').map(l=>l.id));
-  for(const id of [...LEADPICK]) if(!live.has(id)) LEADPICK.delete(id);
-  const ready = all.filter(l=>l.state==='ready'||l.state==='held');
-  const list = LEAD_ALL ? all : ready;
-  $('#leadHead').textContent = all.length
-    ? `${ready.length} ready to write · ${all.length} collected` : '';
-  const can = DATA.sectors.Leads && !m.writing;
-  $('#leadTools').innerHTML = all.length ? `
-    <label><input type="checkbox" ${ready.length && ready.every(l=>LEADPICK.has(l.id))?'checked':''}
-      ${ready.length?'':'disabled'} onchange="pickLeads(this.checked)"> Tick all ready</label>
-    <button class="btn quiet" onclick="LEAD_ALL=!LEAD_ALL;drawLeads(DATA.mails)">${LEAD_ALL?'Show only the ready ones':'Show every lead'}</button>
-    <span class="sp"></span>
-    <button class="btn glass" ${can && LEADPICK.size?'':'disabled'} onclick="writeFor([...LEADPICK], this)">
-      ${LEADPICK.size ? `Write ${LEADPICK.size} mail${LEADPICK.size===1?'':'s'}` : 'Tick leads to write for'}</button>` : '';
-  if(!all.length){
-    $('#leadList').innerHTML = `<div class="empty">No leads collected yet. The Hunter finds them when Leads runs;
-      each one appears here to be written to.</div>`;
+// ---- the campaign: preview on the left, his controls on the right ----
+// The editor is only redrawn when the campaign itself changes — a refresh
+// every thirty seconds must never wipe what he is halfway through typing.
+let CAMP_SIG = '';
+let CAMP_DIRTY = false;
+function campSig(c){ return c.exists ? [c.id, c.updated_at, c.status, c.approved_at].join('|') : 'none'; }
+
+function drawCampaign(m, force){
+  const c = m.campaign || {};
+  const sig = campSig(c) + '|' + (m.writing?1:0);
+  $('#campHead').textContent = c.exists ? (c.status === 'approved' ? 'approved' : 'draft — waiting for your yes') : '';
+  if(!force && sig === CAMP_SIG && $('#campaign').innerHTML) return;
+  if(!force && CAMP_DIRTY && $('#campaign').contains(document.activeElement)) return;
+  CAMP_SIG = sig; CAMP_DIRTY = false;
+
+  if(c.error && !c.exists){
+    $('#campaign').innerHTML = `<div class="notice amber"><p>The campaign could not be read: ${esc(c.error)}</p></div>`;
     return;
   }
-  if(!list.length){
-    $('#leadList').innerHTML = `<div class="empty">Every lead has a mail written or has been written to already.
-      New ones appear here when the Hunter finds them.</div>`;
+  if(!c.exists){
+    $('#campaign').innerHTML = `<div class="build">
+      <div><h3 style="margin:0;font-size:15px">Build your campaign</h3>
+        <p class="lede" style="margin:4px 0 0">The agency reads your services, photographs and number off
+          your website and lays out a finished mail from ${esc(c.business||'your company')}. Add an offer if
+          you have one &mdash; it is shown word for word, exactly as you type it. Nothing is sent.</p></div>
+      <div class="field"><label for="bOffer">Your offer (optional)</label>
+        <input id="bOffer" maxlength="160" placeholder="e.g. 10% off shower glass booked this month"></div>
+      <div class="pair">
+        <div class="field"><label for="bUntil">Valid until (optional)</label>
+          <input id="bUntil" maxlength="40" placeholder="e.g. 31 October"></div>
+        <div class="field"><label for="bFocus">Lead with (optional)</label>
+          <input id="bFocus" maxlength="160" placeholder="e.g. repairs for property managers"></div>
+      </div>
+      <div class="btnrow"><button class="btn go" id="buildBtn" onclick="buildCampaign(this)">Build the campaign</button></div>
+    </div>`;
     return;
   }
-  const rows = list.slice(0, LEAD_SHOWN).map(l=>{
-    const [tone, word] = LEAD_STATE[l.state] || ['', ''];
-    const status = l.state==='no' ? esc(l.why || 'cannot be written to')
-                 : `<span class="pill ${tone}">${esc(word)}</span>`;
-    const pickable = l.state==='ready' || l.state==='held';
-    return `<div class="lead${LEADPICK.has(l.id)?' picked':''}${pickable?'':' off'}" data-lead="${l.id}">
-      ${pickable ? `<input type="checkbox" aria-label="Write to ${escA(l.company||l.email)}"
-          ${LEADPICK.has(l.id)?'checked':''} onchange="pickLead(${l.id}, this.checked)">` : '<span></span>'}
-      <div class="who"><b>${esc(l.company||'(no name)')}</b><span>${[l.area,(l.segment||'').replace(/_/g,' '),
-        'found '+ago(l.found_at)].filter(Boolean).map(esc).join(' · ')}</span></div>
-      <div class="addr">${esc(l.email||'no email address')}</div>
-      <div class="st">${status}</div>
-    </div>`;}).join('');
-  $('#leadList').innerHTML = `<div class="leads">${rows}${list.length>LEAD_SHOWN
-    ? `<div class="more-leads">and ${list.length-LEAD_SHOWN} more on file — write for these first and the next ones move up.</div>` : ''}</div>`;
+
+  const a = c.audit || {};
+  const stops = (a.blocking||[]), notes = [...(a.warnings||[]), ...(c.warnings||[])];
+  const cp = c.copy || {};
+  const state = c.status === 'approved'
+    ? `<div class="state approved"><b>Approved ${esc(ago(c.approved_at))}</b>Tick who gets it below and press Send. Change
+         anything here and it goes back to draft until you approve it again.</div>`
+    : `<div class="state draft"><b>Draft — waiting for your yes</b>Read the mail on the left. Nothing goes out until
+         you approve it.</div>`;
+  const checks = (stops.length || notes.length) ? `<ul class="checks">
+      ${stops.map(s=>`<li class="stop">${esc(s)}</li>`).join('')}
+      ${notes.map(s=>`<li class="note">${esc(s)}</li>`).join('')}</ul>` : '';
+  const f = (id, label, val, attrs='') => `<div class="field"><label for="${id}">${label}</label>
+      <input id="${id}" value="${escA(val||'')}" ${attrs} oninput="CAMP_DIRTY=true"></div>`;
+  const t = (id, label, val, rows=3) => `<div class="field"><label for="${id}">${label}</label>
+      <textarea id="${id}" rows="${rows}" oninput="CAMP_DIRTY=true">${esc(val||'')}</textarea></div>`;
+
+  $('#campaign').innerHTML = `<div class="camp">
+    <div>
+      <div class="camp-top"><span>Subject</span> <b>${esc(c.subject)}</b>
+        <span>· shown as ${esc(c.for)} would see it</span>
+        <span>· ${c.photos} photograph${c.photos===1?'':'s'}</span></div>
+      <div class="frame"><iframe sandbox title="The campaign mail" srcdoc="${escA(c.html)}"></iframe></div>
+    </div>
+    <aside class="side">
+      ${state}
+      ${checks ? `<div><h3>What the Auditor says</h3>${checks}</div>` : ''}
+      <div>
+        <h3>Your offer</h3>
+        <p class="hint">Shown in its own box, word for word. Leave it empty for no offer.</p>
+        <div class="field" style="margin-top:8px"><input id="cOffer" maxlength="160" value="${escA(c.offer)}"
+          placeholder="e.g. 10% off shower glass booked this month" oninput="CAMP_DIRTY=true"></div>
+        <div class="field" style="margin-top:8px"><input id="cUntil" maxlength="40" value="${escA(c.offer_until)}"
+          placeholder="Valid until (optional)" oninput="CAMP_DIRTY=true"></div>
+      </div>
+      <div class="pair">
+        ${f('cPhone', 'Phone', c.phone, 'maxlength="30"')}
+        ${f('cWhats', 'WhatsApp', c.whatsapp, 'maxlength="30"')}
+      </div>
+      <details>
+        <summary>Change the wording yourself</summary>
+        ${f('cSubject', 'Subject line', cp.subject, 'maxlength="70"')}
+        ${f('cHeadline', 'Headline', cp.headline, 'maxlength="80"')}
+        ${t('cPre', 'Line under the headline', cp.preheader, 2)}
+        ${t('cIntro', 'Introduction (a blank line between paragraphs)', cp.intro, 7)}
+        ${t('cWhy', 'Why clients choose us (one per line)', (cp.why_us||[]).join('\n'), 5)}
+        ${t('cCta', 'The invitation above the buttons', cp.cta, 3)}
+      </details>
+      <div class="btnrow">
+        <button class="btn" onclick="saveCampaign(this)">Save changes</button>
+        <button class="btn go" ${stops.length || c.status==='approved' ? 'disabled' : ''}
+          onclick="approveCampaign(this)">${c.status==='approved' ? 'Approved' : 'Approve this campaign'}</button>
+      </div>
+      <div>
+        <h3>Have the agency rewrite it</h3>
+        <p class="hint">Fresh wording from the agency; your offer, number and photographs stay. You read it again before anything goes.</p>
+        <div class="field" style="margin-top:8px"><input id="cFocus" maxlength="160" value="${escA(cp.focus||'')}"
+          placeholder="What should it lead with? (optional)" oninput="CAMP_DIRTY=true"></div>
+        <div class="btnrow" style="margin-top:8px"><button class="btn glass" ${m.writing||!DATA.sectors.Leads?'disabled':''}
+          onclick="rewriteCampaign(this)">${m.writing ? 'Writing…' : 'Rewrite the wording'}</button></div>
+      </div>
+      <div>
+        <h3>See it in your own inbox</h3>
+        <div class="field" style="margin-top:8px"><input id="cTest" type="email" maxlength="120"
+          value="${escA(DATA.mails.from||'')}" placeholder="your@email.com" oninput="CAMP_DIRTY=true"></div>
+        <div class="btnrow" style="margin-top:8px"><button class="btn" ${DATA.mails.ready?'':'disabled'}
+          onclick="testCampaign(this)">Send me a test</button></div>
+      </div>
+      <div class="btnrow"><button class="btn quiet stop" onclick="startOver(this)">Start again from your website</button></div>
+    </aside>
+  </div>`;
 }
-function pickLead(id, on){
-  on ? LEADPICK.add(id) : LEADPICK.delete(id);
-  drawLeads(DATA.mails);
+
+async function campAct(what, data, ids){
+  WORKING = true;
+  let j;
+  try{
+    const r = await fetch('/api/review/act', {method:'POST', headers:{'Content-Type':'application/json'},
+                                               body: JSON.stringify({do: what, ids: ids||[], data: data||{}})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  WORKING = false;
+  return j;
 }
-function pickLeads(on){
-  for(const l of (DATA.mails.leads||[])) if(l.state==='ready'||l.state==='held') on ? LEADPICK.add(l.id) : LEADPICK.delete(l.id);
-  drawLeads(DATA.mails);
+const val = id => ($('#'+id) ? $('#'+id).value : undefined);
+
+async function buildCampaign(btn){
+  btn.disabled = true; btn.innerHTML = '<span class="busy">Reading your website for photographs…</span>';
+  const j = await campAct('campaign_create', {offer: val('bOffer')||'', offer_until: val('bUntil')||'', focus: val('bFocus')||''});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  CAMP_SIG = ''; await load();
 }
-async function writeFor(ids, btn){
-  if(!ids.length) return;
-  if(ids.length > 25){ toast('Up to 25 at a time — untick some, and write the rest next.', 'bad'); return; }
+async function saveCampaign(btn, quiet){
+  const data = {offer: val('cOffer'), offer_until: val('cUntil'), phone: val('cPhone'), whatsapp: val('cWhats')};
+  if($('#cSubject')){
+    Object.assign(data, {subject: val('cSubject'), headline: val('cHeadline'), preheader: val('cPre'),
+                         intro: val('cIntro'), why_us: val('cWhy'), cta: val('cCta')});
+  }
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  const j = await campAct('campaign_save', data);
+  if(!quiet || !j.ok) toast(j.head || j.error || 'Saved.', j.ok ? 'good' : 'bad');
+  CAMP_DIRTY = false; CAMP_SIG = ''; await load();
+  return j;
+}
+async function approveCampaign(btn){
+  if(CAMP_DIRTY){
+    const s = await saveCampaign(null, true);
+    if(!s.ok) return;
+  }
+  const c = DATA.mails.campaign || {};
+  if(!confirm('Approve this campaign' + (c.offer ? ` — including your offer “${c.offer}”` : '') +
+              '?\n\nNothing is sent yet: you tick who gets it next.')) return;
+  btn.disabled = true; btn.textContent = 'Approving…';
+  const j = await campAct('campaign_approve');
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  CAMP_SIG = ''; await load();
+}
+async function rewriteCampaign(btn){
+  if(CAMP_DIRTY){ const s = await saveCampaign(null, true); if(!s.ok) return; }
   btn.disabled = true; btn.textContent = 'Starting…';
   let j;
   try{
-    const r = await fetch('/api/review/start/draft-mails', {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids})});
+    const r = await fetch('/api/review/start/campaign-rewrite', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({focus: val('cFocus')||''})});
     j = await r.json();
   }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
-  if(!j.ok){ toast(j.error || 'Could not start it.', 'bad'); btn.disabled = false; return; }
-  LEADPICK.clear();
-  toast(`Writing ${ids.length} mail${ids.length===1?'':'s'}. Each appears under step 2 when it is finished.`, 'good');
+  toast(j.ok ? 'The agency is rewriting it. This page shows the new version when it is ready — usually within a minute.'
+             : (j.error || 'Could not start it.'), j.ok ? 'good' : 'bad');
   setTimeout(load, 2500);
+}
+async function testCampaign(btn){
+  const to = (val('cTest')||'').trim();
+  if(!to){ toast('Type your email address first.', 'bad'); return; }
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const j = await campAct('campaign_test', {to});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  btn.disabled = false; btn.textContent = 'Send me a test';
+}
+async function startOver(btn){
+  if(!confirm('Start again from your website? The current wording is put away and a fresh campaign is built. Your offer is kept.')) return;
+  const c = DATA.mails.campaign || {};
+  btn.disabled = true; btn.innerHTML = '<span class="busy">Reading your website…</span>';
+  const j = await campAct('campaign_create', {offer: c.offer||'', offer_until: c.offer_until||'', focus: (c.copy||{}).focus||''});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  CAMP_SIG = ''; await load();
+}
+
+// ---- who gets it ----
+const RECPICK = new Set();
+let REC_ALL = false;
+const REC_STATE = {
+  ready: ['', 'ready'],
+  going: ['ok', 'approved — goes with the next allowance'],
+  sent:  ['ok', 'written to already'],
+};
+function drawRecipients(m){
+  const all = m.recipients || [];
+  const ready = all.filter(r=>r.state==='ready');
+  const live = new Set(ready.map(r=>r.id));
+  for(const id of [...RECPICK]) if(!live.has(id)) RECPICK.delete(id);
+  const list = REC_ALL ? all : all.filter(r=>r.state!=='no');
+  const c = m.campaign || {};
+  const left = Math.max(0, (m.cap||0) - (m.sent_today||0));
+  const canSend = c.exists && c.status==='approved' && m.ready && DATA.sectors.Leads && RECPICK.size>0;
+  const why = !c.exists ? 'Build and approve the campaign first'
+            : c.status!=='approved' ? 'Approve the campaign first'
+            : !m.ready ? 'Set up your email first' : '';
+  $('#recHead').textContent = all.length ? `${ready.length} ready · ${all.length} collected` : '';
+  $('#recTools').innerHTML = all.length ? `
+    <label><input type="checkbox" ${ready.length && ready.every(r=>RECPICK.has(r.id))?'checked':''}
+      ${ready.length?'':'disabled'} onchange="pickRecs(this.checked)"> Tick all ready</label>
+    <button class="btn quiet" onclick="REC_ALL=!REC_ALL;drawRecipients(DATA.mails)">${REC_ALL?'Hide the ones that cannot be sent':'Show every lead'}</button>
+    <span class="sp"></span>
+    ${RECPICK.size > left && left >= 0 ? `<span style="font-size:12px;color:var(--amber)">${left} can go today; the rest go with the next allowance</span>` : ''}
+    <button class="btn go" ${canSend?'':'disabled'} title="${escA(why)}" onclick="sendCampaign(this)">
+      ${RECPICK.size ? `Send the campaign to ${RECPICK.size}` : (why || 'Tick leads to send to')}</button>` : '';
+  if(!all.length){
+    $('#recList').innerHTML = `<div class="empty">No leads collected yet. The Hunter finds them when Leads runs.</div>`;
+    return;
+  }
+  if(!list.length){
+    $('#recList').innerHTML = `<div class="empty">No lead can be sent the campaign right now. Show every lead to see why.</div>`;
+    return;
+  }
+  $('#recList').innerHTML = `<div class="leads">${list.slice(0, 200).map(r=>{
+    const [tone, word] = REC_STATE[r.state] || ['', ''];
+    const status = r.state==='no' ? esc(r.why || 'cannot be sent')
+      : `<span class="pill ${tone}">${esc(word)}</span>` + (r.state==='ready' && r.old_draft
+          ? `<br><span style="font-size:11.5px">replaces its one-off draft</span>` : '');
+    const pickable = r.state==='ready';
+    return `<div class="lead${RECPICK.has(r.id)?' picked':''}${pickable?'':' off'}">
+      ${pickable ? `<input type="checkbox" aria-label="Send to ${escA(r.company||r.email)}"
+          ${RECPICK.has(r.id)?'checked':''} onchange="pickRec(${r.id}, this.checked)">` : '<span></span>'}
+      <div class="who"><b>${esc(r.company||'(no name)')}</b><span>${[r.area,(r.segment||'').replace(/_/g,' '),
+        'found '+ago(r.found_at)].filter(Boolean).map(esc).join(' · ')}</span></div>
+      <div class="addr">${esc(r.email||'no email address')}</div>
+      <div class="st">${status}</div>
+    </div>`;}).join('')}</div>`;
+}
+function pickRec(id, on){ on ? RECPICK.add(id) : RECPICK.delete(id); drawRecipients(DATA.mails); }
+function pickRecs(on){
+  for(const r of (DATA.mails.recipients||[])) if(r.state==='ready') on ? RECPICK.add(r.id) : RECPICK.delete(r.id);
+  drawRecipients(DATA.mails);
+}
+async function sendCampaign(btn){
+  const ids = [...RECPICK];
+  if(!ids.length) return;
+  const m = DATA.mails;
+  const names = (m.recipients||[]).filter(r=>RECPICK.has(r.id)).map(r=>r.company||r.email);
+  const left = Math.max(0, (m.cap||0) - (m.sent_today||0));
+  if(!confirm(`Send the campaign to ${ids.length} lead${ids.length===1?'':'s'} from ${m.from}?` +
+     (ids.length > left ? `\n\n${left} go now; the other ${ids.length-left} go with the next allowance.` : '') +
+     `\n\n` + names.join('\n'))) return;
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const j = await campAct('campaign_send', {}, ids);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  RECPICK.clear();
+  await load();
+}
+async function discardOld(){
+  if(!confirm('Put away every one-off draft? None of them will be sent. The campaign is not affected.')) return;
+  const j = await campAct('discard_old');
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  PICKED.clear();
+  await load();
 }
 
 function pick(id, on){

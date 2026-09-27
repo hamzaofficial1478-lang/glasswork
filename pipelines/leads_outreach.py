@@ -64,6 +64,7 @@ does not want he discards, and they are never sent.
 """
 import argparse
 import json
+import re
 import sys
 import time
 
@@ -91,13 +92,18 @@ def _company():
                 "areas": uae.served()}
 
 
-def eligible(limit=BATCH, only_ids=None, log=True):
+def eligible(limit=BATCH, only_ids=None, log=True, for_campaign=False):
     """
     Leads that may be written to, and why each rejected one may not.
 
     The refusals are the useful half. A pass that says "nothing to send" and
     does not say why is indistinguishable from a broken pass, which is exactly
     how the agency spent weeks collecting leads and writing to nobody.
+
+    `for_campaign`: the one campaign mail replaces any one-off draft still
+    waiting for a lead, so a waiting draft does not stop the campaign going to
+    it. Mail already approved or sent still does — a business is approached
+    once.
     """
     import sqlite3
     c = sqlite3.connect(board.DB, timeout=30)
@@ -110,10 +116,14 @@ def eligible(limit=BATCH, only_ids=None, log=True):
         for r in c.execute("SELECT DISTINCT lead_id FROM outreach_log"
                            " WHERE direction='sent'"):
             touched.add(r[0])
-        queued = set()
-        for r in c.execute("SELECT lead_id FROM outreach_queue"
+        queued, going = set(), set()
+        for r in c.execute("SELECT lead_id, status FROM outreach_queue"
                            " WHERE status IN ('pending','approved','sent')"):
             queued.add(r[0])
+            if r[1] != "pending":
+                going.add(r[0])
+        if for_campaign:
+            queued = going
     finally:
         c.close()
 
@@ -133,7 +143,9 @@ def eligible(limit=BATCH, only_ids=None, log=True):
             continue
         if r["id"] in queued:
             cannot.append({"id": r["id"], "company": name,
-                           "why": "a draft for this one is already queued"})
+                           "why": ("already approved — it goes out on the next pass"
+                                   if for_campaign or r["id"] in going else
+                                   "a draft for this one is already queued")})
             continue
         if (r.get("stage") or "new") not in ("new", "nurture"):
             cannot.append({"id": r["id"], "company": name,
@@ -167,7 +179,7 @@ def draft_for(lead, company, owner_voice=""):
     if not written.get("ok"):
         return {"ok": False, "lead": lead, "service": label,
                 "error": "could not write it: " + str(written.get("error"))}
-    draft = written["draft"]
+    draft = _tidy(written["draft"])
     v = auditor.check_outreach(draft, lead=lead, company=company,
                                service_label=label)
     if not v["pass"]:
@@ -186,15 +198,57 @@ def draft_for(lead, company, owner_voice=""):
             "audit": v, "used": written.get("used")}
 
 
-def run(agent=AGENT, dry_run=False, limit=BATCH, only_ids=None) -> dict:
-    """One pass. `only_ids`: write for just these leads — the Mail room's ticks."""
+def _tidy(draft) -> str:
+    """Chat-window formatting off a written draft: '**' and lines of '---'."""
+    text = re.sub(r"(?m)^\s*-{3,}\s*$\n?", "", str(draft or ""))
+    return text.replace("**", "").strip()
+
+
+def run(agent=AGENT, dry_run=False, limit=BATCH, only_ids=None, per_lead=False) -> dict:
+    """
+    One pass. `only_ids`: write for just these leads — the Mail room's ticks.
+
+    `per_lead`: the old way, one model-written mail per lead. Off by default:
+    "we can use 1 mail for all leads no need to write different mails for each
+    lead". The pass now gets the campaign ready for him instead (see
+    pipelines/campaign.py) and says how many leads are waiting for it.
+    """
     with board.agent_run(agent) as run_row:
-        out = _run(agent, dry_run, limit, only_ids)
+        out = _run(agent, dry_run, limit, only_ids, per_lead=per_lead)
         run_row.note(out.get("head") or out.get("error") or "nothing to do")
         return out
 
 
-def _run(agent, dry_run, limit, only_ids=None) -> dict:
+def _campaign_pass(agent, task, sent) -> dict:
+    """
+    The daily pass, campaign-style: no per-lead writing. If there is no
+    campaign yet, the standard one is built from his website for him to read
+    (no model call). Nothing is sent that he has not approved and ticked.
+    """
+    from . import campaign
+    camp = campaign.current()
+    can, cannot = eligible(limit=400, for_campaign=True, log=False)
+    if not camp:
+        camp = campaign.create().get("campaign") or {}
+        head = ("built your campaign mail from your website — read it and approve it "
+                "in the Mail room")
+    elif camp.get("status") != "approved":
+        head = "your campaign mail is waiting for you to read and approve in the Mail room"
+    else:
+        head = "your campaign is approved"
+    head += (f"; {len(can)} lead(s) are ready for it — tick them there and press Send"
+             if can else "; no new lead is waiting for it")
+    if sent:
+        head += f". {len(sent)} mail(s) you approved earlier were sent."
+    board.finish_task(task["id"], agent, {"ready": len(can), "campaign": camp.get("id"),
+                                          "sent": len(sent), "head": head}, status="done")
+    return {"ok": True, "agent": agent, "task": task["id"], "eligible": len(can),
+            "not_eligible": cannot[:20], "sent": sent, "queued": [], "held": [],
+            "campaign": camp.get("id"), "head": head,
+            "cap": mail.daily_cap(), "sent_today": mail.sent_today()}
+
+
+def _run(agent, dry_run, limit, only_ids=None, per_lead=False) -> dict:
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off — you turned this "
                                       "sector off, so nothing goes out."}
@@ -211,6 +265,9 @@ def _run(agent, dry_run, limit, only_ids=None) -> dict:
             return {"ok": True, "agent": agent, "sent": sent, "queued": [],
                     "head": f"{len(sent)} mail(s) you approved were sent"}
         return dispatch.nothing_here(SECTOR, agent)
+
+    if not per_lead and not dry_run:
+        return _campaign_pass(agent, task, sent)
 
     company = _company()
     can, cannot = eligible(limit, only_ids=only_ids)
@@ -324,9 +381,24 @@ def _send_approved(room, ids=None, failed=None):
                            "why": f"Security stopped it: {bad[0]['why']}"})
             continue
         draft = f"Subject: {q['subject']}\n\n{q['body']}"
-        r = mail._smtp_send(lead, draft)
+        extra = {}
+        if q.get("campaign_id"):
+            # A campaign mail goes out as the campaign he approved — and only
+            # while it is still the one he approved. Changed wording since he
+            # ticked it means he has not said yes to what would now be sent.
+            from . import campaign
+            ready = campaign.for_queued(q, lead)
+            if not ready.get("ok"):
+                board.mark_outreach_stale(q["id"], ready["why"])
+                failed.append({"id": q["id"], "company": q["company"],
+                               "to": q["to_email"], "why": ready["why"]})
+                continue
+            draft, extra = ready["draft"], ready["extra"]
+        r = mail._smtp_send(lead, draft, **extra)
         if r.get("ok"):
-            mail.log_outreach(q["lead_id"], draft, channel="email")
+            # _smtp_send has already written the outreach_log row. Writing a
+            # second one here counted every mail twice against his daily
+            # limit, so ten a day was really five.
             _mark_contacted(q["lead_id"])
             board.mark_outreach_sent(q["id"], True, "approved by the owner")
             out.append({"id": q["id"], "lead_id": q["lead_id"], "company": q["company"],
@@ -494,6 +566,8 @@ def main():
                     help="with --preview, also send that one mail to this "
                          "address (yours) so you can see it in an inbox")
     ap.add_argument("--limit", type=int, default=BATCH)
+    ap.add_argument("--per-lead", action="store_true",
+                    help="the old way: one written mail per lead instead of the campaign")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -535,7 +609,7 @@ def main():
                     print("    " + line)
         return 0
 
-    r = run(dry_run=a.dry_run, limit=a.limit)
+    r = run(dry_run=a.dry_run, limit=a.limit, per_lead=a.per_lead)
     print(json.dumps(r) if a.json else as_text(r))
     return deskwork.exit_code(r)
 

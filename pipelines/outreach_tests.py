@@ -399,7 +399,7 @@ def test_the_writer_and_the_auditor_agree():
             lid = board.add_lead_if_new({"company": "Al Noor", "email": "info@alnoor.ae"})
             board.post_task("Leads", "Write outreach mails", "d", created_by="owner",
                             desk="leads-outreach")
-            r = O._run(O.AGENT, dry_run=False, limit=5)
+            r = O._run(O.AGENT, dry_run=False, limit=5, per_lead=True)
             check("the pass says it wrote one and why it stopped",
                   "the Auditor stopped 1" in r["head"], True)
             from coordination import review

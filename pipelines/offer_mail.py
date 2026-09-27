@@ -147,7 +147,7 @@ HEAVY_BYTES = 400_000
 CARD_H = 170
 
 
-def check_photos(services, timeout=12, drop_heavy=False) -> tuple:
+def check_photos(services, timeout=12, drop_heavy=False, sizes=None) -> tuple:
     """
     Ask his server what each photograph actually is, before putting it in an email.
 
@@ -168,6 +168,10 @@ def check_photos(services, timeout=12, drop_heavy=False) -> tuple:
     out, keyed by service, so lighten() can put it straight back if there is no
     stock picture to replace it with. Without that, an empty stock shelf did
     not make the email lighter, it made it emptier.
+
+    `sizes`, when given a dict, is filled with each photograph's weight in
+    bytes, so a caller choosing only a few (the campaign's poster) can take
+    the lightest.
     """
     import urllib.request
     out, warns, heavy, originals = [], [], [], {}
@@ -182,6 +186,8 @@ def check_photos(services, timeout=12, drop_heavy=False) -> tuple:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 kind = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 size = int(r.headers.get("Content-Length") or 0)
+            if sizes is not None:
+                sizes[photo] = size
         except Exception:
             # Cannot tell. Keep it: the picture is probably fine and the check
             # is the thing that failed.
@@ -298,8 +304,10 @@ def contact_of(html="") -> dict:
 def business() -> dict:
     """Who the email is from. Settings, then sensible defaults."""
     g = lambda k, d="": (mail.setting(k) or d).strip()   # noqa: E731
+    # Not AGENCY_NAME: that is this program's name ("World Deal Technical
+    # Agency"), and a customer is written to by the company, not by its software.
     return {
-        "name": g("BUSINESS_NAME") or g("AGENCY_NAME") or "World Deal Technical Services",
+        "name": g("BUSINESS_NAME") or "World Deal Technical Services",
         "tagline": g("BUSINESS_TAGLINE") or "Glass, aluminium and wooden works",
         "areas": [a.strip() for a in
                   (g("BUSINESS_AREAS") or ", ".join(uae.EMIRATES)).split(",")
