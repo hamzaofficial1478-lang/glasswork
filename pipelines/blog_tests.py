@@ -297,6 +297,20 @@ def test_the_real_connector_adds_a_post_and_takes_it_away():
         print("  --  skipped: PHP is not installed on this machine. The connector itself "
               "runs on your website, where PHP is.")
         return
+    # A PHP on this PC (XAMPP and the like) without the SQLite driver, or older
+    # than 8, cannot run the stand-in site — that says nothing about the code,
+    # and must not turn the suite red and stop a release.
+    try:
+        mods = subprocess.run(["php", "-r", "echo PHP_MAJOR_VERSION, ' ', "
+                               "extension_loaded('pdo_sqlite') ? 'yes' : 'no';"],
+                              capture_output=True, text=True, encoding="utf-8",
+                              timeout=20).stdout.split()
+    except Exception:
+        mods = []
+    if len(mods) != 2 or int(mods[0] or 0) < 8 or mods[1] != "yes":
+        print("  --  skipped: this PC's PHP cannot run the stand-in site (it needs PHP 8 with "
+              "SQLite). The connector itself runs on your website.")
+        return
     root = _site()
     port = _free_port()
     srv = subprocess.Popen(["php", "-S", f"127.0.0.1:{port}", "-t", str(root)],

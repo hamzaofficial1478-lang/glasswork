@@ -406,13 +406,19 @@ def test_the_test_run_never_writes_in_his_cabinet():
     body = src.split("def tests():", 1)[1].split("\ndef ", 1)[0]
     check("run.py --tests points every suite at a throwaway cabinet",
           'os.environ["AGENCY_DB"]' in body and "mkdtemp" in body, True)
+    # Compared as paths, not text: Windows writes the same path with
+    # backslashes, and its temp folder can have a space in it ("C:\\Users\\Your
+    # Name\\..."), which is how this check first went red on his PC only.
+    import tempfile
+    target = Path(tempfile.gettempdir()) / "not-his.db"
     code = ("import coordination.board as b, coordination.agent_chat as a,"
             " coordination.targets as t, coordination.briefing as r;"
-            " print(b.DB, a.DB, t.DB, r.DB)")
+            " print('|'.join(str(x) for x in (b.DB, a.DB, t.DB, r.DB)))")
     out = subprocess.run([sys.executable, "-c", code], cwd=str(root), capture_output=True,
                          text=True, encoding="utf-8",
-                         env={**os.environ, "AGENCY_DB": "/tmp/not-his.db"}).stdout.split()
-    check("and the code that opens the cabinet follows it", out, ["/tmp/not-his.db"] * 4)
+                         env={**os.environ, "AGENCY_DB": str(target)}).stdout.strip().split("|")
+    check("and the code that opens the cabinet follows it",
+          [Path(x) == target for x in out], [True] * 4)
 
 
 def main():
