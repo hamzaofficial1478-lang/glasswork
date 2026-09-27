@@ -40,6 +40,7 @@ that file for the whole list.
 """
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -822,6 +823,166 @@ def plan_replace(find, replace, s=None) -> dict:
                      if total else
                      f"'{find}' does not appear in any of the {len(looked)} "
                      "files I can read")}
+
+
+# ---------------------------------------------------------------------------
+# ONE EMAIL ADDRESS ON HIS WEBSITE — HIS
+# ---------------------------------------------------------------------------
+#
+# "the mail on webiste is dummy while our orignal contact mail is
+#  teamworlddeal@worlddealtechnicalservices.com so i want you to fix that where
+#  ever the dummy mail is showing"
+#
+# His footer carried info@worlddealtechnicalservices.ae — a domain with no mail
+# at all, so every enquiry sent to it vanished — and the business details for
+# Google said info@worlddealtechnicalservices.com. Nobody needs to know which
+# dummy is where: any address on his own domains that is not the one he reads
+# is swapped for it, on every page and the shared header and footer, in one
+# pass — each page read once and written once, gently, like everything else.
+# Other people's addresses are never touched.
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}")
+
+
+def right_email() -> str:
+    """The address he actually reads: BUSINESS_EMAIL, or the one he gave us."""
+    try:
+        from . import offer_mail
+        from .mail import setting
+        return (setting("BUSINESS_EMAIL") or "").strip() or offer_mail.DEFAULT_EMAIL
+    except Exception:
+        return "teamworlddeal@worlddealtechnicalservices.com"
+
+
+def _brand(s=None) -> str:
+    """'worlddealtechnicalservices' — the name his domains share, whatever the ending."""
+    try:
+        from coordination import site
+        host = site.site_host()
+    except Exception:
+        host = ""
+    host = (host or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    return host.split(".")[0] if host else ""
+
+
+def _his_other_addresses(html, right, brand) -> dict:
+    """{address: times} for addresses on his own domains that are not `right`."""
+    out = {}
+    if not brand:
+        return out
+    for m in _EMAIL_RE.finditer(html or ""):
+        addr = m.group(0)
+        domain = addr.rsplit("@", 1)[1].lower()
+        if addr.lower() == right.lower():
+            continue
+        if brand in domain.split("."):
+            out[addr] = out.get(addr, 0) + 1
+    return out
+
+
+# The files a page pulls in, read off the page's own source — his contact
+# details live in the shared footer, which is in no list of guesses.
+_INCLUDE_RE = re.compile(r"""(?:include|require)(?:_once)?\s*\(?\s*(?:__DIR__\s*\.\s*)?['"]([^'"]+\.php)['"]""", re.I)
+FOOTER_GUESSES = ("includes/footer.php", "inc/footer.php", "partials/footer.php",
+                  "footer.php")
+
+
+def _walk(s=None):
+    """(name, html) for every page, then every file those pages include — each once."""
+    p = pages(s=s)
+    if not p.get("ok"):
+        yield None, p
+        return
+    todo = [x["page"] for x in (p.get("pages") or [])]
+    todo += [n for n in LIKELY_INCLUDES + FOOTER_GUESSES if n not in todo]
+    seen = set()
+    while todo:
+        name = todo.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        got = read_page(name, s=s)
+        if not got.get("ok"):
+            if got.get("unreachable"):
+                yield None, got
+                return
+            continue
+        html = got.get("html") or ""
+        for inc in _INCLUDE_RE.findall(html):
+            inc = inc.replace("\\", "/").lstrip("./").lstrip("/")
+            if inc and inc not in seen and inc not in todo and ".." not in inc:
+                todo.insert(0, inc)
+        yield name, html
+
+
+def plan_emails(s=None) -> dict:
+    """Where the addresses that are not his appear. Changes nothing."""
+    right, brand = right_email(), _brand(s)
+    if not brand:
+        return {"ok": False, "error": "no website is saved, so there is nothing to look at"}
+    found, per_page = {}, []
+    for name, html in _walk(s):
+        if name is None:
+            return {"ok": False, "unreachable": html.get("unreachable"),
+                    "error": html.get("error") or "could not list your pages"}
+        wrong = _his_other_addresses(html, right, brand)
+        if wrong:
+            per_page.append({"page": name, "wrong": wrong})
+            for a, n in wrong.items():
+                found[a] = found.get(a, 0) + n
+    return {"ok": True, "right": right, "wrong": found, "pages": per_page,
+            "times": sum(found.values())}
+
+
+def use_one_email(agent=AGENT, s=None, dry_run=False) -> dict:
+    """Every address on his own domains, on every page, made the one he reads."""
+    right, brand = right_email(), _brand(s)
+    refused = _may_write(agent)
+    if refused and not dry_run:
+        cid = _queue_for_him(agent, "use_one_email", "site", {
+            "change": {"call": "use_one_email"},
+            "why": f"{agent} wants every email address on your website to be {right}. "
+                   "Only the IT Releaser writes to your site, so it waits for your yes."})
+        return {"ok": False, "queued": cid, "error": refused}
+    changed, failed, swapped = [], [], {}
+    for name, html in _walk(s):
+        if name is None:
+            return {"ok": False, "unreachable": html.get("unreachable"),
+                    "error": html.get("error") or "could not list your pages",
+                    "changed": changed}
+        wrong = _his_other_addresses(html, right, brand)
+        if not wrong:
+            continue
+        new = html
+        for addr in sorted(wrong, key=len, reverse=True):
+            new = new.replace(addr, right)
+        times = sum(wrong.values())
+        if dry_run:
+            changed.append({"page": name, "times": times, "wrong": wrong})
+            continue
+        r = put_page(name, new, agent=agent, s=s, _action="replace", before=html,
+                     summary=(f"changed the email address to {right} "
+                              f"({times} time{'s' if times != 1 else ''}: "
+                              + ", ".join(sorted(wrong)) + ")"))
+        if r.get("ok"):
+            changed.append({"page": name, "times": times, "backup": r.get("backup")})
+            for a, n in wrong.items():
+                swapped[a] = swapped.get(a, 0) + n
+        elif r.get("unreachable"):
+            return {"ok": False, "unreachable": True, "error": r.get("error"),
+                    "changed": changed}
+        else:
+            failed.append({"page": name, "why": r.get("error")})
+    total = sum(c["times"] for c in changed)
+    head = (f"every email address on your website is now {right} — changed {total} "
+            f"time(s) on {len(changed)} page(s): " + ", ".join(sorted(swapped))
+            if changed and not dry_run else
+            (f"would change {total} address(es) on {len(changed)} page(s)" if dry_run
+             else f"every email address on your website was already {right}"))
+    return {"ok": not failed, "changed": changed, "failed": failed, "head": head,
+            "right": right, **({"error": f"{len(failed)} page(s) could not be written: "
+                                         + str(failed[0]["why"])} if failed else {})}
 
 
 def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:

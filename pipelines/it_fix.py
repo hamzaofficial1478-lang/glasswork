@@ -277,7 +277,9 @@ def fix_dead_email(issue, ctx):
     text = (issue["detail"] or "").lower()
     if "mail" not in text and "@" not in text:
         return None
-    right = (ctx.get("env", {}).get("BUSINESS_EMAIL") or "").strip()
+    # The address he reads. BUSINESS_EMAIL if he saved one; otherwise the one he
+    # has given us more than once — never "save it on /setup" while we know it.
+    right = (ctx.get("env", {}).get("BUSINESS_EMAIL") or "").strip() or site_api.right_email()
     if not right:
         return _advice(
             "There is an address on your site that cannot receive mail, and no "

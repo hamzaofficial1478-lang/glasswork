@@ -420,7 +420,15 @@ def _facts_text(f: dict) -> str:
     """The record, as the brain will see it. Deliberately blunt and complete."""
     w = f["who"]
     L = [f"YOU ARE: {w['agent']} — the {w['desk'].title()} in the {w['sector']} sector.",
-         f"YOUR JOB: {w['job']}.", ""]
+         f"YOUR JOB: {w['job']}."]
+    try:
+        from pipelines import site_api
+        L.append(f"HIS REAL CONTACT EMAIL: {site_api.right_email()} — any other address "
+                 "on his own domains shown on his website is wrong (use_one_email fixes "
+                 "every one of them).")
+    except Exception:
+        pass
+    L.append("")
 
     L.append("YOUR OWN RECORD (this is the only work you may claim):")
     if not f.get("ever_run"):
@@ -518,8 +526,10 @@ Hard rules:
   part you can answer and which you cannot, rather than reaching.
 - If your last run failed, lead with that. He needs to know before anything else.
 - If asked to do something the agency cannot do yet, say so and name what is missing.
-- You cannot take actions in this conversation. You can explain, and you can say
-  what you would do. Do not claim to have started anything.
+- You can RECORD work from this conversation (see below) — tickets, orders, a
+  text change on his website. You cannot carry the work out here yourself; the
+  desk that owns it does, and the Releaser is the only thing that writes to his
+  site. Say what you recorded and what happens next, never that it is done.
 - The "WHAT THE AGENCY IS HOLDING" counts are context about the building, not
   your work. Do not present them as things you did.
 
@@ -625,10 +635,12 @@ def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
         return _from_record(unrouted=route.get("error") or
                             f"no model routed to {w['sector']} yet")
 
+    from . import chat_actions
     r = call_task(w["brain_task"], [
-        {"role": "system", "content": SYSTEM + "\n\n--- YOUR RECORD ---\n" + record},
+        {"role": "system", "content": SYSTEM + "\n\n" + chat_actions.HOW
+                                      + "\n\n--- YOUR RECORD ---\n" + record},
         {"role": "user", "content": message or "What have you done today?"},
-    ], max_tokens=max_tokens, timeout=CHAT_TIMEOUT)
+    ], max_tokens=max(max_tokens, 700), timeout=CHAT_TIMEOUT)
 
     if not r.get("ok"):
         # A dead brain must not turn into silence — the owner asked a question
@@ -640,9 +652,14 @@ def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
     if not reply:
         return _from_record(brain_error="the brain returned nothing",
                             failovers=r.get("failovers", []))
+    # What he asked to have recorded is recorded — checked, by Python, never
+    # by the model — and the reply says what went on the board.
+    taken = chat_actions.take(reply, w["agent"], message)
+    reply = taken["reply"]
     _log(w, message, reply)
     return {"ok": True, "agent": w["agent"], "sector": w["sector"], "reply": reply,
             "brain": r.get("used"), "failovers": r.get("failovers", []),
+            "recorded": taken["done"], "not_recorded": taken["refused"],
             "offline": False, "record": record}
 
 

@@ -395,6 +395,7 @@ ALLOWED_CALLS = {
     "fix_canonical": "point every canonical tag at the right domain",
     "fix_address": "put the saved address where the placeholder is",
     "apply_schema": "put the business markup on the pages that should carry it",
+    "use_one_email": "make every email address on the website the one he reads",
 }
 
 

@@ -399,7 +399,7 @@ def tests():
             "coordination.deskwork_tests",
             "coordination.uae_tests",
             "coordination.inbox_tests",
-            "coordination.review_tests",
+            "coordination.review_tests", "coordination.chat_actions_tests",
             "coordination.leftovers_tests",
             "coordination.sitepace_tests",
             "coordination.daygate_tests",
