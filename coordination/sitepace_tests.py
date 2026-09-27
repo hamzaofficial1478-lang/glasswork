@@ -21,6 +21,8 @@ import sqlite3
 import tempfile
 import threading
 import time
+import http.client
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -118,6 +120,20 @@ def test_the_first_closed_door_stops_every_desk():
                   "leaving it alone until" in refused, True)
         finally:
             srv.close()
+
+    print("\nHowever Windows words the hang-up, it counts:")
+    for name, err in (
+            ("10053, wrapped by urllib", urllib.error.URLError(ConnectionAbortedError(
+                10053, "An established connection was aborted by the software in your "
+                       "host machine"))),
+            ("10054, wrapped by urllib", urllib.error.URLError(ConnectionResetError(
+                10054, "An existing connection was forcibly closed by the remote host"))),
+            ("10053, bare", ConnectionAbortedError(10053, "[WinError 10053] An established "
+                                                          "connection was aborted")),
+            ("no answer at all", http.client.RemoteDisconnected(
+                "Remote end closed connection without response"))):
+        with _Cabinet():
+            check(f"  {name}", sitepace.told_to_stop("http://127.0.0.1/", error=err), True)
 
     print("\nOrdinary answers do not count as a closed door:")
     with _Cabinet():

@@ -391,7 +391,32 @@ def test_no_file_is_read_at_the_mercy_of_the_machines_codepage():
           (None, None))
 
 
+def test_the_test_run_never_writes_in_his_cabinet():
+    """
+    "'carpet cleaning' is not a service this business sells" arrived in his
+    Activity at 18:16 — a test the Releaser ran before a release, writing into
+    his real cabinet. The whole run gets a throwaway cabinet of its own now.
+    """
+    print("\nThe test run has a cabinet of its own:")
+    import os
+    import subprocess
+    import sys
+    root = Path(__file__).parents[1]
+    src = (root / "run.py").read_text(encoding="utf-8")
+    body = src.split("def tests():", 1)[1].split("\ndef ", 1)[0]
+    check("run.py --tests points every suite at a throwaway cabinet",
+          'os.environ["AGENCY_DB"]' in body and "mkdtemp" in body, True)
+    code = ("import coordination.board as b, coordination.agent_chat as a,"
+            " coordination.targets as t, coordination.briefing as r;"
+            " print(b.DB, a.DB, t.DB, r.DB)")
+    out = subprocess.run([sys.executable, "-c", code], cwd=str(root), capture_output=True,
+                         text=True, encoding="utf-8",
+                         env={**os.environ, "AGENCY_DB": "/tmp/not-his.db"}).stdout.split()
+    check("and the code that opens the cabinet follows it", out, ["/tmp/not-his.db"] * 4)
+
+
 def main():
+    test_the_test_run_never_writes_in_his_cabinet()
     test_no_file_is_read_at_the_mercy_of_the_machines_codepage()
     test_classify()
     test_borrow_rules()

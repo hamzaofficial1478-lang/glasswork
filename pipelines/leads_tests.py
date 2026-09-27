@@ -749,7 +749,13 @@ def test_hunting_for_one_service():
 
     print("\nAsking for work we do not sell finds nobody, loudly:")
     check("no targets are planned", lh.plan_targets(service="carpet cleaning"), [])
-    out = lh.run(service="carpet cleaning", dry_run=True)
+    # On a throwaway cabinet: this refusal once landed in his real Activity.
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        out = lh.run(service="carpet cleaning", dry_run=True)
+    finally:
+        board.DB = real
     check("the hunt refuses", out["ok"], False)
     check("and says what we DO sell", "aluminium_doors" in out["error"], True)
 

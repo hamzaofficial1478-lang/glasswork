@@ -34,7 +34,8 @@ import sys
 import time
 from pathlib import Path
 
-DB = Path(__file__).parent / "agency.db"
+DB = Path(__import__("os").environ.get("AGENCY_DB")
+          or Path(__file__).parent / "agency.db")     # the test run's own cabinet
 
 # Each job: what it is, how progress is counted, and the point past which the
 # number stops being ambition and starts being a liability.

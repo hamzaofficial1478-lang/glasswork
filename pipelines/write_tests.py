@@ -289,6 +289,39 @@ def test_the_auditor_stops_the_four_things_that_matter():
         check(f"{label} — and never reached the approval queue", n, 0)
 
 
+def test_a_draft_the_auditor_holds_gets_one_more_go():
+    """
+    "nothing written — 1 held": a post on a price keyword quoted a figure and was
+    thrown away whole. The writer now gets the Auditor's reason and one more go.
+    """
+    print("\nA draft the Auditor holds is rewritten once, told why:")
+    db = _fresh_db()
+    _queue_a_brief(db)
+    import providers
+    calls = []
+
+    def brain(task, messages, max_tokens=512, timeout=0, **kw):
+        calls.append(messages[-1]["content"])
+        priced = len(calls) < 3 or "the Auditor held it" not in messages[-1]["content"]
+        body = GOOD_BODY + ("<p>Pergolas from AED 4,500.</p>" if priced else "")
+        return {"ok": True, "used": "stand-in", "rung": "own", "output": json.dumps({
+            "title": "Aluminium Pergolas in Sharjah", "meta": "Aluminium pergola sharjah.",
+            "h1": "Aluminium pergolas in Sharjah", "html": body, "note": "n"})}
+    with mock.patch.object(providers, "resolve_task", lambda t: {"ok": True, "task": t, "route": {}}), \
+         mock.patch.object(providers.ladder, "who_could_answer",
+                           lambda s: {"ok": True, "own": True, "own_error": "", "spare": 0, "why": ""}), \
+         mock.patch.object(providers, "think", brain), \
+         mock.patch.object(CW, "_theme_of_his_site", lambda: {}), \
+         mock.patch("pipelines.post_images.for_post", lambda brief, site, **_: []), \
+         mock.patch.dict("os.environ", {"BUSINESS_PHONE": "+971 4 123 4567",
+                                        "BUSINESS_WHATSAPP": "+971 50 987 6543",
+                                        "SITE_URL": "https://www.example.ae"}, clear=False):
+        out = CW.run()
+    check("the rewrite was told the Auditor's reason",
+          any("price or a concession" in c for c in calls), True)
+    check("and the clean rewrite is the one kept, not held", (len(out["pages"]), out["held"]), (1, []))
+
+
 def test_a_thin_page_is_not_published_either():
     print("\nA stub on his own domain competes with his real pages:")
     _fresh_db()
@@ -689,6 +722,7 @@ def main():
         test_it_uses_his_own_header_when_there_is_one()
         test_the_photo_slot_is_left_empty_on_purpose()
         test_the_auditor_stops_the_four_things_that_matter()
+        test_a_draft_the_auditor_holds_gets_one_more_go()
         test_a_thin_page_is_not_published_either()
         test_nothing_reaches_the_site_before_he_says_yes()
         test_when_he_says_yes_it_lands_and_the_loop_closes()

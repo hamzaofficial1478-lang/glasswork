@@ -102,7 +102,10 @@ MAX_PER_PASS = 1
 # far more than the 2,200 this used to allow, and the pages came back at 160
 # words partly because there was no room to write more.
 WRITE_TOKENS = 4000
-TOKENS = {"blog": 6500, "service_page": 4000}
+# A post planned by SEO runs to 1,200-2,000 words with a table and a FAQ; in
+# HTML inside JSON that is well past 6,500 tokens, and a reply cut off half way
+# is not JSON at all — the post is lost.
+TOKENS = {"blog": 9000, "service_page": 5000}
 
 # How long each kind is, and the least it may be before it is sent back to be
 # made fuller. "the program is writing like 150 to 160 words of too generic
@@ -169,7 +172,10 @@ that breaks one is thrown away:
   - No number of projects or clients, no client or building names, no \
     certificates, awards, ratings or percentages, no guarantees or warranty \
     terms. Years in the trade: only __YEARS__, if you mention it at all.
-  - No price, rate, discount or offer. That is the owner's call.
+  - No price, rate, discount or offer — no AED amount, no price range, no \
+    rate per metre or square foot, no "cheapest" or "best price". That is the \
+    owner's call. A post about cost explains what the cost depends on and how \
+    a quote is worked out, never the figure.
   - No code: no <script>, <style>, <form>, <iframe> or event attributes.
   - No placeholder of any kind.
 
@@ -895,6 +901,19 @@ def _write(agent, dry_run, only_id, limit, job=None):
             article = _standalone(page, brief, images)
             host = re.sub(r"^https?://(www\.)?", "", facts.get("site") or "").split("/")[0]
             verdict = auditor.check_page(article, brief, site_host=host)
+            if not verdict["pass"]:
+                # ONE MORE GO, TOLD EXACTLY WHY. "nothing written — 1 held": a
+                # post on "glass railing price in dubai" quoted an AED figure and
+                # was thrown away whole for one sentence. The Auditor's reason,
+                # word for word, is usually all a rewrite needs.
+                fixed = _ask_the_writer(brief, facts, kind=kind, images=images, pack=pack,
+                                        previous=page,
+                                        fix=["the Auditor held it: " + b for b in verdict["blocking"]])
+                if fixed.get("ok"):
+                    art2 = _standalone(fixed["page"], brief, images)
+                    v2 = auditor.check_page(art2, brief, site_host=host)
+                    if v2["pass"] and critic_check(fixed["page"], brief, facts)[0]:
+                        page, got, article, verdict = fixed["page"], fixed, art2, v2
             if not verdict["pass"]:
                 held.append({"id": row["id"], "title": row["title"],
                              "why": "the Auditor held it: " + verdict["blocking"][0]})

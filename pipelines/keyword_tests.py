@@ -99,6 +99,11 @@ def test_the_plan():
     check("a different job is not a keyword for this post",
           any("partition" in k for k in pack["secondary"]), False)
     check("the brief's own phrase is kept", "glass balustrade dubai" in pack["secondary"], True)
+    cheap = K.build({"primary_keyword": "glass railing"}, suggest=lambda q: [
+        "cheap glass railing dubai", "glass railing discount", "glass railing supplier dubai"],
+        serp=lambda q: {"ok": False}, fetch=lambda u: "", budget=5)
+    check("a word the post may not use is never handed over as a keyword",
+          [k for k in cheap["secondary"] if "cheap" in k or "discount" in k], [])
     check("questions people type are collected, once each",
           (len(pack["questions"]), sum("how much" in q for q in pack["questions"]),
            "what thickness glass for railing?" in pack["questions"]), (2, 1, True))
@@ -118,6 +123,8 @@ def test_the_plan():
           all(w in brief_lines for w in ("in the title", "in the <h1>", "first 100 words",
                                          "in at least one <h2>", "meta description")), True)
     check("and who it is up against", "#2 rivalglass.ae" in brief_lines, True)
+    check("a price keyword comes with the rule: explain the cost, never a figure",
+          "never a figure" in brief_lines, True)
 
     print("\n...without a Google search key it says so, and still plans the keywords:")
     pack2 = K.build({"primary_keyword": "glass railing"}, suggest=lambda q: SUGGEST,

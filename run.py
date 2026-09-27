@@ -387,6 +387,19 @@ def tests():
     local = "127.0.0.1,localhost,::1"
     os.environ["NO_PROXY"] = ",".join(x for x in (os.environ.get("NO_PROXY"), local) if x)
     os.environ["no_proxy"] = os.environ["NO_PROXY"]
+    # And never in HIS cabinet. "'carpet cleaning' is not a service this business
+    # sells" landed in his Activity at 18:16 — a test asking the Hunter for work
+    # we do not sell, run by the Releaser before a release, writing its answer
+    # into the real feed. Every suite now starts on a throwaway cabinet of its
+    # own; a test that forgets to make one writes there, not into his.
+    import sqlite3 as _sq
+    import tempfile as _tmp
+    scratch = Path(_tmp.mkdtemp(prefix="agency-tests-")) / "agency.db"
+    con = _sq.connect(scratch)
+    con.executescript((ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8"))
+    con.commit()
+    con.close()
+    os.environ["AGENCY_DB"] = str(scratch)
     mods = ["coordination.cabinet_tests", "coordination.floor_tests",
             "coordination.targets_tests", "coordination.hook_tests",
             "coordination.faults_tests", "coordination.comms_tests",

@@ -76,6 +76,10 @@ be it its this that these those as vs versus near me best top cheap price cost
 how what which why when where can does do should much uae dubai sharjah abu dhabi
 ajman al ras khaimah fujairah umm quwain company companies services service""".split())
 _TOKEN = re.compile(r"[a-z][a-z\-]{2,}")
+# Words the post may not use — a price concession is the owner's call — so they
+# are never handed to the writer as keywords to work in.
+NOT_OURS_TO_SAY = re.compile(r"\b(cheap|cheapest|discount\w*|offers?|deals?|free|best price|"
+                             r"lowest price|sale)\b")
 
 
 def _env(name):
@@ -292,7 +296,7 @@ def build(brief, kind="blog", site="", suggest=None, serp=None, fetch=None,
 
     def add(p, pts, why):
         p = _norm(p)
-        if not p or len(p) > 80:
+        if not p or len(p) > 80 or NOT_OURS_TO_SAY.search(p):
             return
         if why != "the brief" and not any(re.search(r"\b" + re.escape(j), p) for j in job):
             return                        # not about this job
@@ -487,6 +491,10 @@ def for_the_writer(pack, kind="blog") -> list:
             L += [f"    - {h}" for h in pack["headings_to_cover"]]
         L.append("  BEAT THEM ON: real trade detail, a clear comparison table, straight answers, "
                  "UAE conditions — the things a generic page lacks.")
+    if re.search(r"price|cost|rate|quote", " ".join([pack["primary"]] + list(pack.get("secondary") or []))):
+        L.append("  PRICE KEYWORDS: use the words, and explain what the cost depends on and how "
+                 "a quote is worked out — never a figure, an AED amount, a range or a rate. "
+                 "A page with one is thrown out.")
     L.append(f"  LENGTH: about {pack['target_words']} words"
              + (f" — the pages ranking now run to about {pack['rival_median_words']}"
                 if pack.get("rival_median_words") else ""))

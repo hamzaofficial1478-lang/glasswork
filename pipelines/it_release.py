@@ -457,8 +457,16 @@ def tests_pass(timeout=TEST_TIMEOUT) -> dict:
                 why_lines.append(s)
             elif s:
                 grab = False
-    head = ("the test suite is red — nothing goes on the website until it is "
-            "green again: " + ("; ".join(suites[:3]) or f"exit {p.returncode}"))
+    # WHAT FAILED FIRST, then what it means. "What actually failed: FAIL the
+    # age" was all he could read — the Activity line cut the sentence off
+    # after the suite names, before the check that failed.
+    names = [x.replace("FAIL", "").strip().replace("coordination.", "").replace("pipelines.", "")
+             for x in suites if "suite(s) failing" not in x]
+    first = next((w.replace("FAIL", "", 1).strip() for w in why_lines if w.startswith("FAIL")), "")
+    head = ("the test suite is red"
+            + (f" ({', '.join(names[:3])}" + (f": “{first[:110]}”" if first else "") + ")"
+               if names else f" (exit {p.returncode})")
+            + " — nothing goes on the website until it is green again")
     if why_lines:
         head += "\n\nWhat actually failed:\n" + "\n".join(
             "    " + w[:200] for w in why_lines[:10])

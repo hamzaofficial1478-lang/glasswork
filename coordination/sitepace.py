@@ -54,10 +54,19 @@ STRIKE_MEMORY = 60 * 60    # a clean hour and earlier drops are forgotten
 THROTTLED = 15 * 60
 BLOCK_STATUSES = {429, 503}
 # What a firewall shutting the door looks like from this side.
-BLOCK_WORDS = ("connection aborted", "remotedisconnected", "connectionreset",
+#
+# WINDOWS SAYS IT THREE WAYS. The same hang-up comes back on his PC as
+# 10054 "forcibly closed", or 10053 "An established connection was aborted by
+# the software in your host machine" — which one depends on whether the
+# request was still being sent when the door shut. 10053 matched none of these
+# words, so a hang-up was missed at random and the test suite went red on his
+# machine and green on Linux. And urllib wraps it (URLError), so the real
+# error's own name is read from inside as well — see told_to_stop.
+BLOCK_WORDS = ("connection aborted", "connection was aborted", "connectionaborted",
+               "remotedisconnected", "connectionreset",
                "connection reset", "closed connection", "forcibly closed",
                "unexpectedly closed", "connection refused", "eof occurred",
-               "unexpected_eof")
+               "unexpected_eof", "winerror 10053", "winerror 10054", "winerror 10061")
 
 _host_cache = None
 
@@ -164,7 +173,9 @@ def told_to_stop(url, status=None, error=None) -> bool:
     """Record a refusal from his site. True if it was one."""
     if not _active() or not _is_his(url):
         return False
-    text = f"{type(error).__name__}: {error}".lower() if error is not None else ""
+    inner = getattr(error, "reason", None)
+    text = (f"{type(error).__name__}: {type(inner).__name__ if inner is not None else ''}"
+            f" {error}".lower() if error is not None else "")
     blocked = (status in BLOCK_STATUSES) or any(w in text for w in BLOCK_WORDS)
     if not blocked:
         return False

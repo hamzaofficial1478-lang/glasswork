@@ -24,7 +24,9 @@ import json
 from contextlib import contextmanager
 from pathlib import Path
 
-DB = Path(__file__).parent / "agency.db"
+# AGENCY_DB is set by the test run only (run.py --tests), so no test can ever
+# write into his real cabinet — see run.py tests().
+DB = Path(os.environ.get("AGENCY_DB") or Path(__file__).parent / "agency.db")
 
 
 @contextmanager
