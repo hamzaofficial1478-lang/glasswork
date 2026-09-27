@@ -361,6 +361,7 @@ def _pages(c):
                          "keyword": b.get("primary_keyword") or "",
                          "held_for_seo": (r.get("status") or "").startswith("blocked_on_")})
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
+            "failed": sum(1 for x in recent if x.get("status") == "failed"),
             "for_blog": for_blog, "on_blog": on_blog, "blog_home": _blog_home(),
             "blog_backend": _blog_backend(),
             "to_write": to_write, "upcoming": upcoming,
@@ -477,7 +478,7 @@ def _ids(ids):
 
 CAMPAIGN_ACTS = ("campaign_create", "campaign_save", "campaign_approve",
                  "campaign_retire", "campaign_send", "campaign_test", "discard_old",
-                 "campaign_retry", "campaign_domain", "campaign_bounces")
+                 "campaign_retry", "campaign_domain", "campaign_bounces", "campaign_drop")
 
 
 def _campaign_act(do, ids, data) -> dict:
@@ -498,6 +499,8 @@ def _campaign_act(do, ids, data) -> dict:
         return campaign.send_test(str(data.get("to") or ""))
     if do == "campaign_retry":
         return campaign.retry(ids)
+    if do == "campaign_drop":
+        return campaign.drop_unsent(ids)
     if do == "campaign_domain":
         return campaign.use_sending_domain(str(data.get("domain") or ""))
     if do == "campaign_bounces":
@@ -741,6 +744,42 @@ def act(do, ids, data=None) -> dict:
         else:
             head = f"Turned down {len(done)} page(s). They will not be published."
         return {"ok": bool(done), "decided": done, "head": head}
+
+    if do in ("retry_page", "drop_page"):
+        # "if the post was unable to get post and gave the error now how can we
+        #  retry the same post?" — a page that could not be published is tried
+        # again on his press, through IT and the tests as before; or dropped.
+        done = []
+        with board._conn() as c:
+            board._migrate(c)
+            for i in ids:
+                r = c.execute("SELECT kind, status, detail FROM site_queue WHERE id=?",
+                              (i,)).fetchone()
+                if not r or r["kind"] != "new_page" or r["status"] != "failed":
+                    continue
+                if do == "retry_page":
+                    c.execute("UPDATE site_queue SET status='approved', decided_at=?,"
+                              " note='the owner pressed Try again' WHERE id=?",
+                              (board._now(), i))
+                else:
+                    c.execute("UPDATE site_queue SET status='rejected', decided_at=?,"
+                              " note='dropped by the owner after it could not be published'"
+                              " WHERE id=?", (board._now(), i))
+                    _d, ch = _page_of(r["detail"])
+                    if ch.get("content_id"):
+                        c.execute("UPDATE content_queue SET status='rejected' WHERE id=?",
+                                  (int(ch["content_id"]),))
+                done.append(i)
+        if not done:
+            return {"ok": False, "error": "That page is not waiting to be tried again."}
+        if do == "drop_page":
+            return {"ok": True, "decided": done, "head": f"Dropped {len(done)} page(s)."}
+        from coordination import chat_actions
+        started = chat_actions.start_release()
+        return {"ok": True, "decided": done, "head": (
+            f"Trying {len(done)} page(s) again. "
+            + ("IT runs the tests, then puts it on your website — a few minutes."
+               if started else "IT does it after the tests — press 'Put it live now' to start it."))}
 
     if do in ("rewrite", "discard_page"):
         done = []

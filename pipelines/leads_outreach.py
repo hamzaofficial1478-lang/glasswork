@@ -393,6 +393,11 @@ def _send_rows(room, ids, failed, out):
         c.close()
     for q in rows:
         if len(out) >= room:
+            # WRITTEN ON THE MAIL, not only in the pass's report. Without it the
+            # mail kept "waiting to send", the Mail room said "press Try again",
+            # and Try again hit the same full allowance — round and round.
+            _note_attempt(q["id"], "cap reached — today's allowance is used; it goes "
+                                   "tomorrow by itself")
             failed.append({"id": q["id"], "company": q["company"], "to": q["to_email"],
                            "why": "today's cap is used up — it goes on the next pass"})
             continue

@@ -322,6 +322,35 @@ def test_a_draft_the_auditor_holds_gets_one_more_go():
     check("and the clean rewrite is the one kept, not held", (len(out["pages"]), out["held"]), (1, []))
 
 
+def test_a_page_that_could_not_be_published_can_be_tried_again():
+    """
+    "if the post was unable to get post and gave the error now how can we retry
+     the same post? as there is no any try again button"
+    """
+    print("\nA page that could not be published can be tried again, or dropped:")
+    from coordination import review
+    db = _fresh_db()
+    _queue_a_brief(db)
+    _write()
+    with sqlite3.connect(db) as c:
+        qid = c.execute("SELECT id FROM site_queue").fetchone()[0]
+        c.execute("UPDATE site_queue SET status='failed', note='the test suite is red' WHERE id=?",
+                  (qid,))
+    pages = review.build()["pages"]
+    check("the Posts room counts it as needing him", pages["failed"], 1)
+    r = review.act("retry_page", [qid])
+    with sqlite3.connect(db) as c:
+        st = c.execute("SELECT status FROM site_queue WHERE id=?", (qid,)).fetchone()[0]
+    check("Try again hands it back to IT, approved", (r["ok"], st), (True, "approved"))
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE site_queue SET status='failed' WHERE id=?", (qid,))
+    review.act("drop_page", [qid])
+    with sqlite3.connect(db) as c:
+        st = c.execute("SELECT status FROM site_queue WHERE id=?", (qid,)).fetchone()[0]
+        cq = c.execute("SELECT status FROM content_queue").fetchone()[0]
+    check("Drop it turns it down, and the brief with it", (st, cq), ("rejected", "rejected"))
+
+
 def test_a_thin_page_is_not_published_either():
     print("\nA stub on his own domain competes with his real pages:")
     _fresh_db()
@@ -723,6 +752,7 @@ def main():
         test_the_photo_slot_is_left_empty_on_purpose()
         test_the_auditor_stops_the_four_things_that_matter()
         test_a_draft_the_auditor_holds_gets_one_more_go()
+        test_a_page_that_could_not_be_published_can_be_tried_again()
         test_a_thin_page_is_not_published_either()
         test_nothing_reaches_the_site_before_he_says_yes()
         test_when_he_says_yes_it_lands_and_the_loop_closes()

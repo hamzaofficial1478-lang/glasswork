@@ -472,7 +472,7 @@ function draw(){
   const needs = ((m.campaign||{}).exists && m.campaign.status !== 'approved' ? 1 : 0)
               + (m.recipients||[]).filter(r=>r.state==='stuck').length;
   const nb = (p.for_blog||[]).length;
-  const np = p.waiting.length + p.held.length + nb;
+  const np = p.waiting.length + p.held.length + nb + (p.failed||0);
   $('#nMails').textContent = needs; $('#nMails').classList.toggle('hot', needs>0);
   $('#nPages').textContent = np; $('#nPages').classList.toggle('hot', p.waiting.length + nb > 0);
   drawMails(m); drawPages(p); drawBar();
@@ -742,7 +742,7 @@ function drawRecipients(m){
   const pf = m.preflight || {ok: true, problems: []};
   const live = new Set(g.ready.map(r=>r.id));
   for(const id of [...RECPICK]) if(!live.has(id)) RECPICK.delete(id);
-  if(RTAB === null) RTAB = g.ready.length ? 'ready' : (g.failed.length ? 'failed' : 'sent');
+  if(RTAB === null) RTAB = g.ready.length ? 'ready' : (g.failed.length || g.queued.length ? 'failed' : 'sent');
   const bounced = g.sent.filter(r=>r.state==='bounced').length;
 
   // What stops every mail, above everything else.
@@ -769,8 +769,8 @@ function drawRecipients(m){
   const tab = (key, label, n, alert) => `<button class="rtab${RTAB===key?' on':''}${alert&&n?' alert':''}" role="tab"
       onclick="RTAB='${key}';drawRecipients(DATA.mails)">${label}<b>${n}</b></button>`;
   $('#recTabs').innerHTML = tab('ready', 'Ready to send', g.ready.length)
-    + tab('sent', 'Sent', g.sent.length + g.queued.length)
-    + tab('failed', "Didn't go", g.failed.length, true)
+    + tab('sent', 'Sent', g.sent.length)
+    + tab('failed', 'Not sent yet', g.failed.length + g.queued.length, g.failed.length > 0)
     + tab('cant', "Can't send", g.cant.length);
 
   const row = (r, pick, res) => `<div class="rrow${RECPICK.has(r.id)?' picked':''}">
@@ -826,18 +826,34 @@ function drawRecipients(m){
         ${g.sent.length ? `<button class="btn stop" ${SENTPICK.size ? '' : 'disabled'} onclick="deleteSent(false, this)">
           ${SENTPICK.size ? `Delete ${SENTPICK.size}` : 'Tick to delete'}</button>` : ''}
       </div>
-      ${list(g.queued.map(r => row(r, false, `<span class="pill">${/tomorrow/.test(r.why||'')?'tomorrow':'sending…'}</span>`))
-        .concat(g.sent.map(sentRow)))
-        || '<div class="empty">Nothing sent yet.</div>'}
+      ${list(g.sent.map(sentRow)) || '<div class="empty">Nothing sent yet.</div>'}
       ${bounced ? `<p class="say" style="margin-top:10px">${bounced} came back — those addresses are wrong or closed, and they are not written to again.</p>` : ''}`;
   }
   else if(RTAB === 'failed'){
-    html = g.failed.length ? `<p class="say">These were approved but did not go. The reason is next to each one.
-        Most often it is your mail server being busy for a moment — press Try again.</p>
-      <div class="sendrow"><span class="sp"></span>
-        <button class="btn go big" ${pf.ok && DATA.sectors.Leads && !pf.sending ? '' : 'disabled'} onclick="retryStuck(this)">Try again</button></div>
-      ${list(g.failed.map(r => row(r, false, `<span style="color:var(--danger)">${esc(plainWhy(r.why))}</span>`)))}`
-      : `<div class="empty">Nothing is stuck. Every approved mail has gone.</div>`;
+    // Stuck ones with the reason, and the ones on their way — all on this tab,
+    // so pressing Try again never sends him somewhere else to watch.
+    const ids = new Set(g.failed.map(r=>r.id));
+    for(const id of [...STUCKPICK]) if(!ids.has(id)) STUCKPICK.delete(id);
+    const stuckRow = r => `<div class="rrow${STUCKPICK.has(r.id)?' picked':''}">
+        <input type="checkbox" aria-label="Pick ${escA(r.company||r.email)}" ${STUCKPICK.has(r.id)?'checked':''}
+          onchange="STUCKPICK[this.checked?'add':'delete'](${r.id}); drawRecipients(DATA.mails)">
+        <div class="who"><b>${esc(r.company||'(no name)')}</b><span>${[r.area,(r.segment||'').replace(/_/g,' ')].filter(Boolean).map(esc).join(' · ')}</span></div>
+        <div class="addr">${esc(r.email)}</div>
+        <div class="res"><span style="color:var(--danger)">${esc(plainWhy(r.why))}</span></div></div>`;
+    const going = g.queued.map(r => row(r, false, /tomorrow/.test(r.why||'')
+        ? '<span class="pill">goes tomorrow</span> <span style="color:var(--muted)">today\'s allowance is used</span>'
+        : '<span class="busy">sending now…</span>'));
+    html = (g.failed.length || g.queued.length) ? `<p class="say">Approved, and not sent yet. ${g.failed.length
+        ? 'The reason is next to each one. Most often your mail server was busy for a moment — press Try again. If one keeps failing, tick it and delete it.'
+        : 'These are on their way.'}</p>
+      ${g.failed.length ? `<div class="sendrow">
+        <label class="say" style="margin:0;display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" ${g.failed.every(r=>STUCKPICK.has(r.id))?'checked':''} onchange="stuckAll(this.checked)"> Tick all</label>
+        <span class="sp"></span>
+        <button class="btn stop" ${STUCKPICK.size ? '' : 'disabled'} onclick="dropStuck(this)">${STUCKPICK.size ? `Delete ${STUCKPICK.size}` : 'Tick to delete'}</button>
+        <button class="btn go big" ${pf.ok && DATA.sectors.Leads && !pf.sending ? '' : 'disabled'} onclick="retryStuck(this)">${pf.sending ? 'Sending…' : 'Try again'}</button></div>` : ''}
+      ${list(g.failed.map(stuckRow).concat(going))}`
+      : `<div class="empty">Nothing is waiting. Every approved mail has gone.</div>`;
   }
   else {
     html = g.cant.length ? `<p class="say">These cannot be sent the mail, and why.</p>
@@ -895,9 +911,24 @@ async function sendCampaign(btn){
 }
 async function retryStuck(btn){
   btn.disabled = true; btn.textContent = 'Starting…';
-  const j = await campAct('campaign_retry');
+  const j = await campAct('campaign_retry', {}, STUCKPICK.size ? [...STUCKPICK] : []);
   toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
-  if(j.ok) RTAB = 'sent';
+  await load();
+}
+const STUCKPICK = new Set();          // mails that did not go, ticked to delete
+function stuckAll(on){
+  groups(DATA.mails.recipients || []).failed.forEach(r => on ? STUCKPICK.add(r.id) : STUCKPICK.delete(r.id));
+  drawRecipients(DATA.mails);
+}
+async function dropStuck(btn){
+  const n = STUCKPICK.size;
+  if(!confirm(`Delete ${n} mail${n===1?'':'s'} that did not go?\n\nThey will not be sent, and `
+      + `${n===1?'that business is':'those businesses are'} taken off your lists. `
+      + `${n===1?'It is':'They are'} kept on file, so the Hunter does not collect ${n===1?'it':'them'} again.`)) return;
+  btn.disabled = true;
+  const j = await campAct('campaign_drop', {}, [...STUCKPICK]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) STUCKPICK.clear();
   await load();
 }
 async function checkBounces(btn){
@@ -1238,6 +1269,9 @@ function drawPages(p){
   else if(p.to_write > 0 && DATA.sectors.Content) notes.push(`<div class="notice"><p><b>${p.to_write}</b> page${p.to_write===1?' is':'s are'}
     briefed and waiting to be written. Content writes one per run, or now if you ask.</p>
     <button class="btn glass" onclick="startJob('write-page', this)">Write the next page now</button></div>`);
+  if(p.failed) notes.push(`<div class="notice amber"><p><b>${p.failed} page${p.failed===1?'':'s'} could not be published.</b>
+    The reason is under Already decided, with a Try again button.</p>
+    <button class="btn" onclick="document.getElementById('pageRecent').scrollIntoView({behavior:'smooth'})">Show me</button></div>`);
   if(DATA.other_site_changes) notes.push(`<div class="notice"><p>${DATA.other_site_changes} other change${DATA.other_site_changes===1?'':'s'} to your
     site ${DATA.other_site_changes===1?'is':'are'} waiting in the office under <a href="/">Waiting on you</a>.</p></div>`);
   if((p.upcoming||[]).length) notes.push(`<div class="notice" style="display:block"><p style="margin:0 0 6px"><b>Next to be written</b></p>
@@ -1299,7 +1333,10 @@ function drawPages(p){
   $('#pageRecent').innerHTML = p.recent.length ? `<div class="logwrap"><table class="log">
     <tr><th>Page</th><th>What happened</th></tr>
     ${p.recent.map(x=>`<tr><td>${esc(x.title)}${x.file?'<br><span class="addr">/'+esc(x.file)+'</span>':''}</td>
-      <td>${label(x.status, x.note)}${x.note?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
+      <td>${label(x.status, x.note)}${x.note?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}
+        ${x.status === 'failed' ? `<div class="row" style="margin-top:8px">
+          <button class="btn go" onclick="decidePage('retry_page', ${x.id}, this)">Try again</button>
+          <button class="btn stop" onclick="decidePage('drop_page', ${x.id}, this)">Drop it</button></div>` : ''}</td></tr>`).join('')}
     </table></div>` : `<div class="empty">Nothing decided yet.</div>`;
 }
 
@@ -1307,6 +1344,8 @@ async function decidePage(what, id, btn){
   const words = {publish:'Approve this page for your website? IT runs the tests before it goes live.',
                  reject_page:'Turn this page down? It will not be published.',
                  rewrite:'Send this page back to be written again?',
+                 retry_page:'Try putting this page on your website again? IT runs the tests first.',
+                 drop_page:'Drop this page? It will not be published.',
                  discard_page:'Drop this held page?'}[what];
   if(!confirm(words)) return;
   btn.disabled = true;

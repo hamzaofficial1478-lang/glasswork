@@ -863,6 +863,7 @@ def recipients(ids=None) -> list:
         leads = [dict(r) for r in c.execute(
             "SELECT id, company, name, email, area, segment, source, stage, found_at,"
             " mailed_at FROM leads WHERE COALESCE(email,'')!='' AND sent_cleared_at IS NULL"
+            " AND COALESCE(stage,'')!='dropped'"
             " ORDER BY found_at DESC, id DESC LIMIT ?", (LIST_MOST,))]
         logged = {r[0] for r in c.execute(
             "SELECT DISTINCT lead_id FROM outreach_log WHERE direction='sent'")}
@@ -1002,10 +1003,20 @@ def send_queued(bounce_checks=(90, 360), sleep=None) -> dict:
     if not ready["ok"]:
         return {"ok": False, "error": " ".join(ready["problems"])}
     failed = []
-    with board.agent_run(AGENT) as run_row:
-        sent = leads_outreach._send_approved(ready["room"], failed=failed)
-        run_row.note(f"sent {len(sent)} mail(s), one every few seconds"
-                     + (f"; {len(failed)} did not go: {failed[0]['why']}" if failed else ""))
+    try:
+        with board.agent_run(AGENT) as run_row:
+            sent = leads_outreach._send_approved(ready["room"], failed=failed)
+            run_row.note(f"sent {len(sent)} mail(s), one every few seconds"
+                         + (f"; {len(failed)} did not go: {failed[0]['why']}" if failed else ""))
+    except Exception as e:
+        _left_waiting(f"the sender stopped: {type(e).__name__}: {e}")
+        raise
+    # NOTHING IS LEFT SAYING "waiting". A mail this pass did not reach — for a
+    # reason nobody wrote down — says so, instead of looking as if it were
+    # about to go.
+    if not any(f.get("id") == 0 for f in failed):
+        _left_waiting("the sender finished without sending it — press Try again, or "
+                      "Delete it if it keeps happening")
     # A bounce comes back a minute or a few after sending. Look twice.
     found = 0
     if sent:
@@ -1128,6 +1139,40 @@ def _queue(camp, lead, r, v) -> int:
              r["html"])).lastrowid
 
 
+def _left_waiting(why):
+    try:
+        with board._conn() as c:
+            c.execute("UPDATE outreach_queue SET note=? WHERE status='approved' AND note=?",
+                      (why[:600], WAITING))
+    except Exception:
+        pass
+
+
+def drop_unsent(lead_ids) -> dict:
+    """
+    "add the delete button here too so we can delete the mails that are still
+     not sending after many tries" — the mail is not sent, and the business is
+    taken off the Mail room's lists. It stays on file, so it is never collected
+    again as if it were new.
+    """
+    ids = [int(i) for i in lead_ids or []]
+    if not ids:
+        return {"ok": False, "error": "Tick the mails to delete first."}
+    marks = ",".join("?" * len(ids))
+    with board._conn() as c:
+        board._migrate(c)
+        n = c.execute(f"UPDATE outreach_queue SET status='rejected', decided_at=?,"
+                      f" note='deleted by the owner — not sent'"
+                      f" WHERE lead_id IN ({marks}) AND status IN ('approved','stale','pending','held')",
+                      (board._now(), *ids)).rowcount
+        c.execute(f"UPDATE leads SET stage='dropped' WHERE id IN ({marks}) AND mailed_at IS NULL",
+                  ids)
+    return {"ok": True, "deleted": n, "head": (
+        f"Deleted {n} mail{'' if n == 1 else 's'} that did not go. "
+        f"{'That business is' if len(ids) == 1 else 'Those businesses are'} off your lists "
+        "and will not be collected again.")}
+
+
 def _note(qid, why):
     try:
         with board._conn() as c:
@@ -1181,6 +1226,14 @@ def retry(lead_ids=None) -> dict:
         c.close()
     if not qids:
         return {"ok": False, "error": "Nothing approved is waiting to be sent."}
+    if ready.get("room", 1) <= 0:
+        # Said now, in words — not a Try again that quietly does nothing.
+        for q in qids:
+            _note(q, "cap reached — today's allowance is used; it goes tomorrow by itself")
+        return {"ok": False, "error": (
+            f"Today's allowance of {ready.get('cap')} mails is used up, so nothing more can "
+            "go today. These are kept and go by themselves tomorrow — or raise the daily "
+            "limit on Setup and press Try again.")}
     for q in qids:
         _note(q, WAITING)
     started = start_sending()
@@ -1257,7 +1310,11 @@ def main():
     ap.add_argument("--until", default="")
     a = ap.parse_args()
     if a.send_queued:
-        r = send_queued()
+        try:
+            r = send_queued()
+        except Exception as e:
+            print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"}))
+            return 1
         print(json.dumps({**{k: v for k, v in r.items() if k != "sent"},
                           "sent": len(r.get("sent") or [])}, default=str))
         return 0

@@ -1501,7 +1501,7 @@ def _backfill_mailed(c):
 # A lead the owner can do something with: it has an address, and nobody has
 # written to it yet. Every list of leads he sees uses this, so a business
 # with no address, or one already mailed, is never offered to him again.
-MAILABLE = "COALESCE(email,'')!='' AND mailed_at IS NULL"
+MAILABLE = "COALESCE(email,'')!='' AND mailed_at IS NULL AND COALESCE(stage,'')!='dropped'"
 
 
 def mark_mailed(lead_id, at=None):

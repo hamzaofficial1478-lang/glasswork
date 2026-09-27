@@ -174,13 +174,71 @@ def test_the_same_business_met_again_brings_its_address():
           None)
 
 
+def test_a_stuck_mail_is_never_a_loop_and_can_be_deleted():
+    """
+    "there are 2 mails not getting sent when ever i try to send them it again
+     redirect me to the sent mails ... add the delete button here too"
+    """
+    print("\nA mail the allowance stopped says so, instead of 'press Try again' for ever:")
+    from unittest import mock
+    _fresh()
+    lids = [_lead(n, e) for n, e in (("365 Holiday Homes Rental", "info@365luxuryhomes.com"),
+                                     ("RGA Real Estate", "info@rga.ae"))]
+    c = sqlite3.connect(board.DB)
+    for lid in lids:
+        c.execute("INSERT INTO outreach_queue(lead_id,company,to_email,subject,body,status,"
+                  "campaign_id,note,queued_at) VALUES(?,?,?,?,?,'approved',1,'owner approved',1)",
+                  (lid, "x", "x", "S", "B"))
+    c.commit()
+    c.close()
+    full = {"ok": True, "problems": [], "room": 0, "cap": 10, "sender": "a@b.ae"}
+    with mock.patch.object(mail, "preflight", lambda: full):
+        r = campaign.retry()
+    check("Try again with today's allowance used says so in words",
+          (r["ok"], "allowance of 10 mails is used up" in r["error"]), (False, True))
+    states = {x["id"]: (x["state"], x["why"]) for x in campaign.recipients()}
+    check("and both show as going tomorrow, not as stuck",
+          [states[i] for i in lids], [("queued", "goes with tomorrow's allowance")] * 2)
+
+    print("\n...the sender itself writes the reason on each mail it could not send:")
+    c = sqlite3.connect(board.DB)
+    c.execute("UPDATE outreach_queue SET note=?", (campaign.WAITING,))
+    c.commit()
+    c.close()
+    failed = []
+    with mock.patch.object(mail, "batch", __import__("contextlib").nullcontext):
+        leads_outreach._send_rows(0, None, failed, [])
+    check("a full allowance is written on the mail",
+          all("cap reached" in n for (n,) in sql("SELECT note FROM outreach_queue")), True)
+    c = sqlite3.connect(board.DB)
+    c.execute("UPDATE outreach_queue SET note=?", (campaign.WAITING,))
+    c.commit()
+    c.close()
+    campaign._left_waiting("the sender finished without sending it — press Try again")
+    check("and nothing is ever left saying 'waiting' after a pass",
+          sql("SELECT count(*) FROM outreach_queue WHERE note=?", (campaign.WAITING,))[0][0], 0)
+
+    print("\n...and one that keeps failing can be deleted:")
+    r = review.act("campaign_drop", [lids[0]])
+    check("deleted", (r["ok"], r["deleted"]), (True, 1))
+    check("the mail will not be sent",
+          sql("SELECT status FROM outreach_queue WHERE lead_id=?", (lids[0],))[0][0], "rejected")
+    check("the business is off the Mail room's lists",
+          lids[0] in [x["id"] for x in campaign.recipients()], False)
+    check("and off the Leads section", lids[0] in [x["id"] for x in leads_view.build("all")["leads"]],
+          False)
+    check("but kept, so it is not collected again",
+          _lead("365 Holiday Homes Rental", "info@365luxuryhomes.com"), None)
+
+
 def main():
     real = board.DB
     try:
         for t in (test_only_leads_he_can_mail_are_listed,
                   test_mailed_once_is_never_listed_again,
                   test_sent_mail_can_be_deleted_and_downloaded,
-                  test_the_same_business_met_again_brings_its_address):
+                  test_the_same_business_met_again_brings_its_address,
+                  test_a_stuck_mail_is_never_a_loop_and_can_be_deleted):
             t()
     finally:
         board.DB = real
