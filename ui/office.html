@@ -1592,13 +1592,20 @@ async function openLeads(scope){
       + 'Could not read the leads' + (j&&j.error?': '+esc(j.error):'.') + '</p>';
     return;
   }
-  $('#leadHead').textContent = `· ${j.head} · ${j.total} on file in total`;
-  const mailDoor = `<a class="pbtn" href="/mail" style="display:block;text-align:center;text-decoration:none;margin:0 0 14px">
+  $('#leadHead').textContent = `· ${j.head} · ${j.total} waiting to be mailed`;
+  /* Only leads he can act on: an address, and nobody has written to them yet.
+     The rest are kept — that is what stops the Hunter collecting them again —
+     and he is told where they went rather than wondering. */
+  const kept = (j.mailed || j.no_address) ? `<p style="color:var(--faint);font-size:11.5px;margin:0 0 12px;line-height:1.6">`
+      + (j.mailed ? `${j.mailed} already mailed — they are in the Mail room under Sent, and are never mailed again. ` : '')
+      + (j.no_address ? `${j.no_address} with no email are kept only so they are never collected twice.` : '')
+      + `</p>` : '';
+  const mailDoor = kept + `<a class="pbtn" href="/mail" style="display:block;text-align:center;text-decoration:none;margin:0 0 14px">
       Write and send mails to these leads &rarr;</a>`;
   $('#leadToday').style.borderColor = LEAD_SCOPE==='today' ? 'var(--glass)' : '';
   $('#leadAll').style.borderColor   = LEAD_SCOPE==='all'   ? 'var(--glass)' : '';
   if(!j.leads.length){
-    $('#leadBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+    $('#leadBody').innerHTML = kept + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
       + esc(j.head) + `. The Hunter finds these when the day runs; the Scanner drops `
       + `anyone already on file so nobody is contacted twice.</p>`;
     return;

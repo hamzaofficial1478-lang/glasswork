@@ -196,12 +196,18 @@ td, strong, em, a, blockquote, and the image markers>",
  "note": "<one line on what you led with and why>"}"""
 
 KIND_NOTES = {
-    "blog": ("THIS IS A BLOG ARTICLE, not a sales page. Pick a title a customer "
-             "would actually search or click — a question they have, a choice "
-             "they are making, a mistake to avoid — built around the phrase "
-             "below. Teach them something they did not know. Include a short "
-             "section of three to five real questions customers ask, each as an "
-             "<h3> with a straight answer. End with how to get the job looked at."),
+    "blog": ("THIS IS A BLOG ARTICLE WRITTEN TO RANK, not a sales page. SEO has "
+             "given you a keyword plan below; the piece is built on it. Title: the "
+             "main keyword near the start, then what the reader gets, under 60 "
+             "characters. Open by answering what the searcher wants in the first two "
+             "or three sentences, with the main keyword in the first one. Then <h2> "
+             "sections that follow what people searching this want to know — cost "
+             "and what drives it, the types and which suits what, how the job is "
+             "done, how to choose a contractor, looking after it in UAE conditions — "
+             "each heading carrying a keyword where it reads naturally. Short "
+             "paragraphs. One comparison <table>. A FAQ section answering the "
+             "questions in the plan, each as an <h3>. End with how to get the job "
+             "looked at. Teach them something they did not know."),
     "service_page": ("THIS IS A SERVICE PAGE. Lead with what the job involves "
                      "and how quickly he can come and measure. Then the options "
                      "and trade-offs, how the work is done, and what to expect."),
@@ -283,7 +289,7 @@ def next_brief(con, limit=MAX_PER_PASS, only_id=None) -> list:
 # ---------------------------------------------------------------------------
 
 def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
-                    fix=None, previous=None) -> dict:
+                    fix=None, previous=None, pack=None) -> dict:
     """
     The Content brain writes the body. Returns {ok, page|error, brain}.
 
@@ -302,19 +308,25 @@ def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
 
     lines = [KIND_NOTES.get(kind, KIND_NOTES["service_page"]), "",
              f"THE SUBJECT: {brief.get('title') or ''}",
-             f"WHAT IT IS FOR: {brief.get('angle') or ''}",
-             f"THE PHRASE IT IS BRIEFED FOR: {brief.get('primary_keyword') or ''}"]
-    sec = brief.get("secondary_keywords") or []
-    if sec:
-        lines.append("OTHER PHRASES PEOPLE SEARCH: " + ", ".join(sec[:10]))
+             f"WHAT IT IS FOR: {brief.get('angle') or ''}"]
+    if pack:
+        from . import seo_keywords
+        lines += seo_keywords.for_the_writer(pack, kind)
+        lines.append("")
+    else:
+        lines.append(f"THE PHRASE IT IS BRIEFED FOR: {brief.get('primary_keyword') or ''}")
+        sec = brief.get("secondary_keywords") or []
+        if sec:
+            lines.append("OTHER PHRASES PEOPLE SEARCH: " + ", ".join(sec[:10]))
     area = brief.get("area") or ""
     if area and area != "UAE-wide":
         lines.append(f"THE AREA: {area}")
     else:
         lines.append("THE AREA: the whole UAE — "
                      + ", ".join(facts.get("areas") or []))
-    lines.append(f"HOW LONG: {LENGTH.get(kind, LENGTH['service_page'])} — full, "
-                 "specific and useful; never padded")
+    lines.append("HOW LONG: " + (f"about {pack['target_words']} words" if pack and
+                                 pack.get("target_words") else LENGTH.get(kind, LENGTH['service_page']))
+                 + " — full, specific and useful; never padded")
     for m in (brief.get("must_include") or []):
         # The photographs are handled below, from real files; the old brief
         # line about them would only make the writer leave a gap.
@@ -598,10 +610,13 @@ def _as_text(html) -> str:
     return re.sub(r"\n\s*\n\s*\n+", "\n\n", t).strip()
 
 
-def for_his_blog(page, brief, images=(), site="") -> dict:
-    """Everything he pastes into his blog backend, each piece on its own."""
+def for_his_blog(page, brief, images=(), site="", pack=None) -> dict:
+    """Everything that goes into his blog backend, each piece on its own."""
     title = str(page.get("title") or brief.get("title") or "").strip()
-    slug = blog_slug(title) or blog_slug(brief.get("primary_keyword")) or "post"
+    # The link name is the main keyword — short, and saying what the post is
+    # about to anyone reading the address, Google included.
+    slug = blog_slug((pack or {}).get("primary")) or blog_slug(title) \
+        or blog_slug(brief.get("primary_keyword")) or "post"
     imgs = [{**i, "src": _absolute(i.get("src"), site)} for i in images or []]
     body = _place_images(str(page.get("html") or "").strip(), imgs)
     body = body.replace(PHOTO_SLOT, "").strip()
@@ -621,7 +636,8 @@ def for_his_blog(page, brief, images=(), site="") -> dict:
     # His post page prints the title itself; a second one in the article is a
     # page with two headlines.
     body = re.sub(r"^\s*<h1\b[^>]*>.*?</h1>\s*", "", body, count=1, flags=re.I | re.S)
-    words = [brief.get("primary_keyword")] + list(brief.get("secondary_keywords") or [])[:5]
+    words = ([pack.get("primary")] + list(pack.get("secondary") or [])[:7] if pack else
+             [brief.get("primary_keyword")] + list(brief.get("secondary_keywords") or [])[:5])
     return {"title": title[:120], "slug": slug,
             "meta": str(page.get("meta") or "").strip()[:160],
             "keywords": ", ".join(w for w in words if w),
@@ -829,7 +845,18 @@ def _write(agent, dry_run, only_id, limit, job=None):
                 images = post_images.for_post(brief, facts.get("site") or "")
             except Exception:
                 images = []
-            got = _ask_the_writer(brief, facts, kind=kind, images=images)
+            # SEO'S KEYWORD PLAN FIRST. "the seo sector finds the keywords ... then
+            # it gives those keywords to the post room". Made by the SEO desk and
+            # kept on the brief, so a rewrite uses the same plan.
+            try:
+                from . import seo_keywords
+                pack = seo_keywords.plan_for(row["id"], brief, kind=kind,
+                                             site=facts.get("site") or "")
+            except Exception:
+                pack = {}
+            seo_check = (lambda pg: seo_keywords.check(pg, pack, kind)) if pack else \
+                (lambda pg: {"problems": [], "score": None})
+            got = _ask_the_writer(brief, facts, kind=kind, images=images, pack=pack)
             if not got.get("ok"):
                 held.append({"id": row["id"], "title": row["title"],
                              "why": got.get("error")})
@@ -839,13 +866,15 @@ def _write(agent, dry_run, only_id, limit, job=None):
             # ONE SECOND GO, TOLD WHY: too short, phrases that read as
             # machine-written, or something the Critic needs. Kept only if it
             # is better than the first.
-            first = voice_problems(page, kind) + critic_check(page, brief, facts)[1]
+            first = (voice_problems(page, kind) + critic_check(page, brief, facts)[1]
+                     + seo_check(page)["problems"])
             if first:
                 again = _ask_the_writer(brief, facts, kind=kind, images=images,
-                                        fix=first, previous=page)
+                                        fix=first, previous=page, pack=pack)
                 if again.get("ok"):
                     second = (voice_problems(again["page"], kind)
-                              + critic_check(again["page"], brief, facts)[1])
+                              + critic_check(again["page"], brief, facts)[1]
+                              + seo_check(again["page"])["problems"])
                     if len(second) < len(first) or (
                             len(second) == len(first)
                             and words_in(again["page"]) > words_in(page)):
@@ -873,11 +902,14 @@ def _write(agent, dry_run, only_id, limit, job=None):
                        html=article)
                 continue
 
+            report = seo_check(page)
+            seo = seo_keywords.summary(pack, report) if pack else {}
             if kind == "blog":
-                blog = for_his_blog(page, brief, images, facts.get("site") or "")
+                blog = for_his_blog(page, brief, images, facts.get("site") or "",
+                                    pack=pack)
                 if not dry_run:
                     _store(con, row["id"], page, "for_blog", verdict["warnings"], False,
-                           html=article, blog=blog)
+                           html=article, blog=blog, seo=seo)
                     if kind != (row.get("type") or ""):
                         con.execute("UPDATE content_queue SET type=? WHERE id=?",
                                     (kind, row["id"]))
@@ -885,7 +917,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
                 pages.append({"id": row["id"], "title": blog["title"], "kind": kind,
                               "images": len(images or []), "page": blog["url"],
                               "how": "for-your-blog", "words": verdict["words"],
-                              "queued": None, "for_blog": True,
+                              "queued": None, "for_blog": True, "seo_score": report.get("score"),
                               "warnings": verdict["warnings"], "brain": got.get("brain")})
                 continue
 
@@ -898,7 +930,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
             queued = None
             if not dry_run:
                 _store(con, row["id"], page, "drafted", verdict["warnings"], False,
-                       html=html)
+                       html=html, seo=seo)
                 # Nested under 'change', because that is the shape the Releaser
                 # reads — see it_release.plan_of. A payload the Releaser cannot
                 # parse comes back to him as "this approval does not carry a
@@ -964,7 +996,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
         con.close()
 
 
-def _store(con, qid, page, status, notes, dry_run, html="", blog=None):
+def _store(con, qid, page, status, notes, dry_run, html="", blog=None, seo=None):
     if dry_run:
         return
     body = dict(page)
@@ -972,6 +1004,8 @@ def _store(con, qid, page, status, notes, dry_run, html="", blog=None):
         body["_page_html"] = html
     if blog:
         body["_for_blog"] = blog
+    if seo:
+        body["_seo"] = seo
     if notes:
         body["_held_because"] = list(notes)[:8]
     con.execute("UPDATE content_queue SET draft=?, status=? WHERE id=?",

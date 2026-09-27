@@ -856,9 +856,14 @@ def recipients(ids=None) -> list:
     from . import leads_outreach
     c = _conn()
     try:
+        board._migrate(c)
+        # Only businesses with an address: "those who have no mail there is no
+        # need to add them". And a sent mail he deleted from the list stays
+        # deleted — the lead is still marked as mailed, so it never comes back.
         leads = [dict(r) for r in c.execute(
-            "SELECT id, company, name, email, area, segment, source, stage, found_at"
-            " FROM leads ORDER BY found_at DESC, id DESC LIMIT ?", (LIST_MOST,))]
+            "SELECT id, company, name, email, area, segment, source, stage, found_at,"
+            " mailed_at FROM leads WHERE COALESCE(email,'')!='' AND sent_cleared_at IS NULL"
+            " ORDER BY found_at DESC, id DESC LIMIT ?", (LIST_MOST,))]
         logged = {r[0] for r in c.execute(
             "SELECT DISTINCT lead_id FROM outreach_log WHERE direction='sent'")}
         rows = [dict(r) for r in c.execute(
@@ -889,9 +894,9 @@ def recipients(ids=None) -> list:
         w = went.get(l["id"])
         if w and w.get("bounced_at"):
             st, why, at = "bounced", w.get("bounce_reason") or "it came back", w.get("sent_at") or 0
-        elif w or l["id"] in logged:
+        elif w or l["id"] in logged or l.get("mailed_at"):
             st, why = "sent", (w or {}).get("note") or "sent"
-            at = (w or {}).get("sent_at") or 0
+            at = (w or {}).get("sent_at") or l.get("mailed_at") or 0
         elif l["id"] in going:
             st, why = _approved_state(going[l["id"]], busy)
         elif l["id"] in why_not:

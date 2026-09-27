@@ -117,8 +117,8 @@ def test_the_mail_room_lists_every_lead_and_where_it_stands():
         check("ready to write", st[ready]["state"], "ready")
         check("a mail already written", st[drafted]["state"], "drafted")
         check("written to already", st[sent]["state"], "sent")
-        check("no address: cannot, and says why",
-              (st[noaddr]["state"], st[noaddr]["why"]), ("no", "no address on file"))
+        # "the lead that have no mail do not list that only leads with mails"
+        check("a lead with no address is not listed at all", noaddr in st, False)
 
 
 def test_write_only_for_the_ticked_leads():

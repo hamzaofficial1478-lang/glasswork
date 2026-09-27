@@ -199,6 +199,20 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="btnrow"><button class="pbtn" id="saveGsc">Save Search Console</button><span class="inl dim" id="gscMsg"></span></div>
       </div>
 
+      <div class="cred">
+        <div class="cred-h"><b>Google search — who ranks for a keyword</b></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Lets SEO see which websites Google shows for a keyword
+          before a post is written, and read what those pages cover. Free for up to 100 searches a day — the agency uses
+          two or three per post. Without it SEO still researches the keywords, but cannot see who ranks.</p>
+        <ol class="hint" style="margin:0 0 10px;padding-left:18px;line-height:1.7">
+          <li>Go to <code>programmablesearchengine.google.com</code>, press <b>Add</b>, choose <b>Search the entire web</b>, create it and copy its <b>Search engine ID</b>.</li>
+          <li>In <code>console.cloud.google.com</code> (the same project as Search Console is fine) turn on the <b>Custom Search API</b>, then <b>Credentials → Create credentials → API key</b>.</li>
+        </ol>
+        <div class="field"><label>Search engine ID</label><input id="cse_id" placeholder="e.g. 017576662512468239146:omuauf_lfve"></div>
+        <div class="field"><label>API key</label><input id="cse_key" type="password" placeholder="leave blank to keep saved"></div>
+        <div class="btnrow"><button class="pbtn" id="saveCse">Save Google search</button><span class="inl dim" id="cseMsg"></span></div>
+      </div>
+
     </div>
   </section>
 
@@ -736,6 +750,9 @@ $('#saveEmail').onclick=()=>saveIntegration('email',{
   SMTP_HOST:$('#em_host').value.trim(),SMTP_PORT:$('#em_port').value.trim(),SMTP_USER:$('#em_user').value.trim(),
   SMTP_PASS:$('#em_pass').value,MAIL_FROM:$('#em_from').value.trim(),MAIL_FROM_NAME:$('#em_fromname').value.trim()
 },$('#saveEmail'),$('#emailMsg'),['em_pass']);
+$('#saveCse').onclick=()=>saveIntegration('serp',{
+  GOOGLE_CSE_ID:$('#cse_id').value.trim(),GOOGLE_CSE_KEY:$('#cse_key').value.trim()
+},$('#saveCse'),$('#cseMsg'),['cse_key']);
 $('#saveGsc').onclick=()=>saveIntegration('gsc',{
   GSC_PROPERTY:$('#gsc_prop').value.trim(),GSC_SERVICE_ACCOUNT_JSON:$('#gsc_json').value
 },$('#saveGsc'),$('#gscMsg'),['gsc_json']);
@@ -966,6 +983,9 @@ async function loadSettings(){
   if(em.passSet) $('#em_pass').placeholder='saved — leave blank to keep';
   $('#gsc_prop').value=gsc.property||'';
   if(gsc.serviceAccountSet) $('#gsc_json').placeholder='saved — leave blank to keep';
+  const serp=ig.serp||{};
+  $('#cse_id').value=serp.id||'';
+  if(serp.keySet) $('#cse_key').placeholder='saved — leave blank to keep';
 }
 
 async function loadProviders(){

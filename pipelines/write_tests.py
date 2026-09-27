@@ -527,10 +527,14 @@ def test_a_post_is_full_specific_and_has_pictures():
     check("NOT put on his site as a page of its own", n_site, 0)
     check("but ready for his blog", (status, out["pages"][0].get("for_blog")), ("for_blog", True))
     check("and recorded as an article", typ, "blog")
-    check("with the link name his blog uses",
-          blog["slug"], "choosing-an-aluminium-pergola-in-sharjah")
+    check("with the main keyword as its link name",
+          blog["slug"], "aluminium-pergola-sharjah")
     check("and the address it will have there", blog["url"],
-          "https://www.example.ae/blog-details.php?slug=choosing-an-aluminium-pergola-in-sharjah")
+          "https://www.example.ae/blog-details.php?slug=aluminium-pergola-sharjah")
+    draft_seo = json.loads(draft).get("_seo") or {}
+    check("SEO's keyword plan is kept with it, for the Posts room",
+          (draft_seo.get("primary"), draft_seo.get("score") is not None),
+          ("aluminium pergola sharjah", True))
     check("his post page prints the title, so the article has no second one",
           "<h1" in html, False)
     check("his own photograph is in it, at an address that works from his backend",

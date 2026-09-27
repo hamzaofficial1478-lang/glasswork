@@ -698,7 +698,9 @@ def build():
                       "off_note": sw.get("note", "")})
 
     # ---- header metrics ----
-    leads_today = _one(c, "SELECT count(*) FROM leads WHERE found_at>=?", (day0,))
+    # The same leads the tile opens onto: an address, and not mailed yet.
+    leads_today = _one(c, "SELECT count(*) FROM leads WHERE found_at>=? AND "
+                          + board.MAILABLE, (day0,))
     spend = _one(c, "SELECT COALESCE(SUM(usd_cost),0) FROM agent_runs WHERE started_at>=?", (day0,), 0.0)
     spend += _one(c, "SELECT COALESCE(SUM(usd_cost),0) FROM borrows WHERE granted_at>=?", (day0,), 0.0)
     # Crawler requests are billed per call and borrow nothing, so they land in
@@ -993,7 +995,7 @@ _DETAIL = {
     "Leads": ("leads",
               "SELECT id, COALESCE(company,'') AS a, COALESCE(email,'') AS b,"
               " COALESCE(area,'') AS c, stage AS d, found_at AS at"
-              " FROM leads ORDER BY found_at DESC LIMIT 40",
+              " FROM leads WHERE " + board.MAILABLE + " ORDER BY found_at DESC LIMIT 40",
               ("company", "email", "area", "stage")),
     "Report": ("daily reports",
                "SELECT id, day AS a, summary AS b, COALESCE(health_score,'') AS c,"

@@ -138,7 +138,7 @@ def eligible(limit=BATCH, only_ids=None, log=True, for_campaign=False):
             cannot.append({"id": r["id"], "company": name,
                            "why": "no address on file"})
             continue
-        if r["id"] in touched:
+        if r["id"] in touched or r.get("mailed_at"):
             cannot.append({"id": r["id"], "company": name,
                            "why": "already written to — a firm is approached once"})
             continue

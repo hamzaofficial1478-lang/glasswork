@@ -1287,6 +1287,14 @@ _ADDED_COLUMNS = (
     ("leads",        "address",      "TEXT"),
     ("leads",        "contact_kind", "TEXT"),
     ("leads",        "evidence",     "TEXT"),
+    # WHEN THIS BUSINESS WAS FIRST MAILED — on the lead itself, for good.
+    # "make sure the lead of mail get once that should not again get listed".
+    # The outreach log is cleared after thirty days, and the lead would have
+    # come back as "ready" the day after. The lead is never cleared.
+    ("leads",        "mailed_at",    "INTEGER"),
+    # He deleted this lead's sent mail from the Mail room's list. The lead is
+    # still marked as mailed (above), so it is never listed or mailed again.
+    ("leads",        "sent_cleared_at", "INTEGER"),
 )
 
 # WHY THIS LIST NO LONGER DECIDES ANYTHING
@@ -1470,6 +1478,63 @@ def _migrate(c):
         _backfill_keys(c)
     except Exception:
         pass
+    try:
+        _backfill_mailed(c)
+    except Exception:
+        pass
+
+
+def _backfill_mailed(c):
+    """Mark every lead already written to, from the log and the sent campaign mail."""
+    c.execute("UPDATE leads SET mailed_at = COALESCE("
+              " (SELECT min(at) FROM outreach_log o WHERE o.lead_id=leads.id"
+              "   AND o.direction='sent'),"
+              " (SELECT min(sent_at) FROM outreach_queue q WHERE q.lead_id=leads.id"
+              "   AND q.status='sent'))"
+              " WHERE mailed_at IS NULL AND (id IN (SELECT lead_id FROM outreach_log"
+              "   WHERE direction='sent') OR id IN (SELECT lead_id FROM outreach_queue"
+              "   WHERE status='sent'))")
+
+
+# A lead the owner can do something with: it has an address, and nobody has
+# written to it yet. Every list of leads he sees uses this, so a business
+# with no address, or one already mailed, is never offered to him again.
+MAILABLE = "COALESCE(email,'')!='' AND mailed_at IS NULL"
+
+
+def mark_mailed(lead_id, at=None):
+    """This business has been written to. Once, for good."""
+    if not lead_id:
+        return
+    with _conn() as c:
+        _migrate(c)
+        c.execute("UPDATE leads SET mailed_at=COALESCE(mailed_at, ?) WHERE id=?",
+                  (int(at or _now()), int(lead_id)))
+
+
+def fill_missing_email(lead: dict):
+    """
+    The same business met again, this time with an address. If the one on
+    file has none, and nobody has written to it, the address is added to it —
+    still one lead, now one that can be mailed. Returns its id, or None.
+    """
+    email = _norm(lead.get("email"))
+    if not email or "@" not in email:
+        return None
+    pk, dk, ck = _keys_of(lead)
+    with _conn() as c:
+        _migrate(c)
+        if c.execute("SELECT 1 FROM leads WHERE lower(email)=?", (email,)).fetchone():
+            return None                   # that address is already somebody's
+        for col, key in (("domain_key", dk), ("phone_key", pk), ("company_key", ck)):
+            if not key:
+                continue
+            r = c.execute(f"SELECT id FROM leads WHERE {col}=? AND COALESCE(email,'')=''"
+                          " AND mailed_at IS NULL ORDER BY id LIMIT 1", (key,)).fetchone()
+            if r:
+                c.execute("UPDATE leads SET email=? WHERE id=?", (email, r["id"]))
+                return r["id"]
+    return None
 
 
 def _backfill_keys(c):

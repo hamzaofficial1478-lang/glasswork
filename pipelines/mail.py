@@ -593,9 +593,16 @@ def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=N
                 "needs_owner,at) VALUES(?,?,?,?,?,0,?)",
                 (lead_id, channel, direction, (body or "")[:4000], reply_class,
                  int(__import__("time").time())))
-            return cur.lastrowid
+            row = cur.lastrowid
     except Exception:
         return None
+    if direction == "sent" and lead_id:
+        # On the lead itself, for good — the log is cleared after thirty days.
+        try:
+            _board.mark_mailed(lead_id)
+        except Exception:
+            pass
+    return row
 
 
 # ---------------------------------------------------------------------------

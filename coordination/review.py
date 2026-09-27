@@ -222,7 +222,8 @@ def _lead_list(c):
       no         cannot be written to, and why (no address, Security, stage)
     """
     leads = _rows(c, "SELECT id, company, name, email, area, segment, source,"
-                     " stage, found_at FROM leads ORDER BY found_at DESC, id DESC"
+                     " stage, found_at FROM leads WHERE COALESCE(email,'')!=''"
+                     " AND sent_cleared_at IS NULL ORDER BY found_at DESC, id DESC"
                      " LIMIT ?", (LEAD_LIST,))
     if not leads:
         return []
@@ -267,8 +268,10 @@ def _page_of(detail):
 
 
 def _pages(c):
-    briefs = {r["id"]: _json(r.get("brief"), {}) or {}
-              for r in _rows(c, "SELECT id, brief FROM content_queue")}
+    briefs, seo_of = {}, {}
+    for r in _rows(c, "SELECT id, brief, draft FROM content_queue"):
+        briefs[r["id"]] = _json(r.get("brief"), {}) or {}
+        seo_of[r["id"]] = (_json(r.get("draft"), {}) or {}).get("_seo") or {}
     waiting, approved, recent = [], [], []
     for s in _rows(c, "SELECT * FROM site_queue WHERE kind='new_page'"
                       " ORDER BY queued_at DESC, id DESC LIMIT 60"):
@@ -282,7 +285,7 @@ def _pages(c):
                "queued_at": s.get("queued_at") or 0, "status": s.get("status"),
                "note": s.get("note") or ""}
         if s.get("status") == "pending":
-            waiting.append({**row, "html": ch.get("html") or ""})
+            waiting.append({**row, "html": ch.get("html") or "", "seo": seo_of.get(cid) or {}})
         elif s.get("status") == "approved":
             approved.append(row)
         elif len(recent) < 12:
@@ -330,6 +333,7 @@ def _pages(c):
                "posted_at": blog.get("posted_at") or 0,
                "warnings": page.get("_held_because") or [],
                "at": r.get("created_at") or 0, "moving": moving,
+               "seo": page.get("_seo") or {},
                "on_backend": bool(back.get("id")), "backend_notes": back.get("notes") or [],
                "plain_page": ({"page": plain.get("page"), "site_queue": plain.get("site_queue"),
                                "down": plain.get("down") or ""} if plain.get("page") else None)}
@@ -529,6 +533,8 @@ def _campaign_act(do, ids, data) -> dict:
     return {"ok": False, "error": f"not something this page does: {do!r}"}
 
 
+SENT_ACTS = ("sent_delete", "sent_delete_all")
+
 BLOG_ACTS = ("blog_posted", "blog_drop", "blog_rewrite", "take_down",
              "blog_publish", "blog_unpublish", "blog_check")
 
@@ -680,6 +686,8 @@ def act(do, ids, data=None) -> dict:
         return _campaign_act(do, ids, data)
     if do in BLOG_ACTS:
         return _blog_act(do, ids, data)
+    if do in SENT_ACTS:
+        return sent_delete(ids, everything=(do == "sent_delete_all"))
     if not ids:
         return {"ok": False, "error": "nothing was picked"}
     when = time.strftime("%Y-%m-%d %H:%M")
@@ -825,6 +833,86 @@ def publish_now() -> dict:
     return it_release.run()
 
 
+# ---------------------------------------------------------------------------
+# HIS SENT MAIL: DELETE FROM THE LIST, OR TAKE IT AWAY AS A SPREADSHEET
+# ---------------------------------------------------------------------------
+#
+# "there should be the button to delete the mails sent or to download them in
+#  CSV file"
+#
+# Deleting takes the mail off his list and wipes its words. It does NOT forget
+# that the business was written to: the lead keeps its mailed mark, so it is
+# never listed or mailed again — the one promise that must survive a tidy-up.
+
+def sent_delete(ids=None, everything=False) -> dict:
+    with board._conn() as c:
+        board._migrate(c)
+        q = "SELECT id FROM leads WHERE mailed_at IS NOT NULL AND sent_cleared_at IS NULL"
+        args = []
+        if not everything:
+            ids = _ids(ids)
+            if not ids:
+                return {"ok": False, "error": "Tick the sent mails to delete first."}
+            q += " AND id IN (%s)" % ",".join("?" * len(ids))
+            args = ids
+        found = [r["id"] for r in c.execute(q, args)]
+        if not found:
+            return {"ok": False, "error": "None of those is a sent mail on the list."}
+        marks = ",".join("?" * len(found))
+        c.execute(f"UPDATE leads SET sent_cleared_at=? WHERE id IN ({marks})",
+                  (board._now(), *found))
+        c.execute(f"UPDATE outreach_queue SET body='', html='' WHERE lead_id IN ({marks})"
+                  " AND status IN ('sent','rejected')", found)
+        c.execute(f"UPDATE outreach_log SET body='' WHERE lead_id IN ({marks})"
+                  " AND direction='sent'", found)
+    n = len(found)
+    return {"ok": True, "deleted": n, "head": (
+        f"Deleted {n} sent mail{'' if n == 1 else 's'} from the list. The agency still "
+        f"remembers {'that business was' if n == 1 else 'these businesses were'} written "
+        "to, so none is listed or mailed again.")}
+
+
+def _cell(v) -> str:
+    """A spreadsheet cell that is only ever text — a scraped company name that
+    starts with = must not become a formula on his computer."""
+    v = "" if v is None else str(v)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+
+
+def sent_csv() -> dict:
+    """Every business ever mailed, as a CSV he can open in Excel."""
+    import csv
+    import io
+    c = _conn()
+    try:
+        rows = _rows(c, """
+            SELECT l.company, l.name, l.email, l.area, l.segment, l.mailed_at,
+                   l.sent_cleared_at,
+                   (SELECT subject FROM outreach_queue q WHERE q.lead_id=l.id
+                      AND q.status IN ('sent','rejected') ORDER BY q.id DESC LIMIT 1) AS subject,
+                   (SELECT bounced_at FROM outreach_queue q WHERE q.lead_id=l.id
+                      AND q.bounced_at IS NOT NULL ORDER BY q.id DESC LIMIT 1) AS bounced_at,
+                   (SELECT bounce_reason FROM outreach_queue q WHERE q.lead_id=l.id
+                      AND q.bounced_at IS NOT NULL ORDER BY q.id DESC LIMIT 1) AS bounce_reason
+              FROM leads l WHERE l.mailed_at IS NOT NULL ORDER BY l.mailed_at DESC""")
+    finally:
+        c.close()
+    when = lambda t: time.strftime("%Y-%m-%d %H:%M", time.localtime(int(t))) if t else ""
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Company", "Email", "Area", "Type of business", "Sent on", "Subject",
+                "Came back", "Why it came back", "Deleted from the list"])
+    for r in rows:
+        w.writerow([_cell(r.get("company") or r.get("name")), _cell(r.get("email")),
+                    _cell(r.get("area")), _cell((r.get("segment") or "").replace("_", " ")),
+                    when(r.get("mailed_at")), _cell(r.get("subject")),
+                    "yes" if r.get("bounced_at") else "",
+                    _cell(r.get("bounce_reason")),
+                    when(r.get("sent_cleared_at"))])
+    return {"ok": True, "rows": len(rows), "csv": buf.getvalue(),
+            "name": "sent-mails-" + time.strftime("%Y-%m-%d") + ".csv"}
+
+
 def main():
     ap = argparse.ArgumentParser(description="What is waiting for the owner to read.")
     ap.add_argument("--json", action="store_true")
@@ -835,6 +923,7 @@ def main():
     ap.add_argument("--publish-now", action="store_true")
     ap.add_argument("--campaign-rewrite", action="store_true")
     ap.add_argument("--focus", default=None, help="with --campaign-rewrite: what to lead with")
+    ap.add_argument("--sent-csv", action="store_true", help="every business mailed, as CSV")
     a = ap.parse_args()
     try:
         if a.act:
@@ -848,6 +937,8 @@ def main():
             out = write_page()
         elif a.publish_now:
             out = publish_now()
+        elif a.sent_csv:
+            out = sent_csv()
         else:
             out = build()
     except Exception as e:

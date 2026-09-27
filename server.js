@@ -396,7 +396,7 @@ const API_CAPABILITIES = [
   "password", "activity", "activity-seen", "activity-clear", "sector", "usage",
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
-  "stuck", "release", "campaign-retry", "campaign-domain",
+  "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {
@@ -459,6 +459,8 @@ const GSC_SA_PATH = path.join(__dirname, "config", "gsc-service-account.local.js
 // widget on the site and the owner answers them himself — no agent read it.
 const INTEGRATIONS = {
   email: { fields: ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_FROM_NAME"], secret: ["SMTP_PASS"] },
+  // Google Programmable Search: who ranks for a keyword, before a post is written.
+  serp: { fields: ["GOOGLE_CSE_ID", "GOOGLE_CSE_KEY"], secret: ["GOOGLE_CSE_KEY"] },
 };
 
 // read .env into a { KEY: value } map (used only to report what's filled)
@@ -473,7 +475,7 @@ const ENV_KEYS = new Set([
   "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
   "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
-  "GOOGLE_PLACES_API_KEY", "GSC_PROPERTY",
+  "GOOGLE_PLACES_API_KEY", "GSC_PROPERTY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
   "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
   "CRAWLER_ON_OWN_SITE", "LEADS_ALLOW_INDIVIDUALS",
   "SEO_SEEDS", "SEO_AREAS", "SEO_STRIKING_TO", "SEO_W_AREA", "SEO_W_ENQUIRIES",
@@ -913,7 +915,7 @@ app.post("/api/integration", async (req, res) => {
     const vals = b.values || {};
     const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
 
-    if (group === "email") {
+    if (group === "email" || group === "serp") {
       const map = INTEGRATIONS[group];
       const partial = {};
       for (const f of map.fields) {
@@ -1324,6 +1326,17 @@ function campaignData(d) {
 // sending goes through his mail server one message at a time.
 const REVIEW_TIMEOUT = { send: 300000, campaign_send: 300000, campaign_create: 180000,
                          campaign_test: 90000, campaign_retry: 300000 };
+// "a button to delete the mails sent or to download them in CSV file" — every
+// business ever mailed, as a spreadsheet. A byte-order mark first so Excel on
+// Windows reads Arabic and accented names as they are.
+app.get("/api/mail/sent.csv", async (_req, res) => {
+  const j = await pyModule("coordination.review", ["--sent-csv"], 60000);
+  if (!j || !j.ok) return res.status(500).type("text/plain").send((j && j.error) || "could not build the file");
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${String(j.name || "sent-mails.csv").replace(/[^\w.-]/g, "")}"`);
+  res.send("\ufeff" + String(j.csv || ""));
+});
+
 app.post("/api/review/act", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
@@ -1554,6 +1567,7 @@ app.get("/api/settings", async (_q, res) => {
       email: { host: v("SMTP_HOST"), port: v("SMTP_PORT"), user: v("SMTP_USER"),
                from: v("MAIL_FROM"), fromName: v("MAIL_FROM_NAME"), passSet: set("SMTP_PASS") },
       gsc: { property: v("GSC_PROPERTY"), serviceAccountSet: fs.existsSync(GSC_SA_PATH) },
+      serp: { id: v("GOOGLE_CSE_ID"), keySet: set("GOOGLE_CSE_KEY") },
     },
   });
 });

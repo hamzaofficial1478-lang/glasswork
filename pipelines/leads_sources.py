@@ -610,7 +610,7 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
     needs Security clearance and an owner-approved route, neither of which lives
     in this function.
     """
-    stored, dupes, refused, personal = [], [], [], []
+    stored, dupes, refused, personal, filled = [], [], [], [], []
     for c in candidates:
         ok, why = screen_lead(c)
         if not ok:
@@ -623,6 +623,10 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
             personal.append(c.get("company"))
         # dedup BEFORE the store — re-approaching a firm burns the relationship
         if board.lead_seen(c.get("email"), c.get("phone"), c.get("company")):
+            # Still one lead — but if the one on file has no address and this
+            # find brings one, the lead can be mailed now.
+            if board.fill_missing_email(c):
+                filled.append(c.get("company"))
             dupes.append(c.get("company"))
             continue
         # Stored WITH how we can reach them, so nobody has to re-derive it later
@@ -634,7 +638,7 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
         else:
             stored.append({"id": lid, "company": c.get("company")})
     return {"stored": stored, "duplicates": dupes, "refused": refused,
-            "personal_data_held": personal, "contacted": 0,
+            "personal_data_held": personal, "contacted": 0, "address_added": filled,
             "agent": agent, "sector": sector}
 
 

@@ -178,6 +178,22 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
 details.copyin{margin-top:12px}
 details.copyin>summary{cursor:pointer;font-size:13px;color:var(--glass)}
 .conn ol{margin:6px 0 0;padding-left:20px}
+details.seo{margin-top:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:9px 12px}
+details.seo>summary{cursor:pointer;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;list-style:none}
+details.seo>summary::-webkit-details-marker{display:none}
+.score{font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line2)}
+.score.good{border-color:rgba(92,192,136,.55);color:var(--ok)}
+.score.mid{border-color:rgba(234,165,67,.55);color:var(--amber)}
+.score.low{border-color:rgba(229,86,91,.55);color:var(--danger)}
+.seo h4{margin:12px 0 4px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.kw{display:flex;flex-wrap:wrap;gap:6px}
+.kw span{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
+.kw span.on{border-color:rgba(92,192,136,.5);color:var(--ok)}
+.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 14px;font-size:12.5px}
+.checks .y{color:var(--ok)} .checks .n{color:var(--danger)}
+table.rank{width:100%;border-collapse:collapse;font-size:12.5px}
+table.rank td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:top}
+table.rank td.n{font-family:'IBM Plex Mono',monospace;color:var(--muted);white-space:nowrap}
 
 .log{width:100%;border-collapse:collapse;font-size:12.5px}
 .logwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
@@ -387,7 +403,7 @@ details.old[open]>summary{color:var(--text)}
 <script>
 /* The Mail room's buttons need a server that knows them. An old one gets a
    banner, not a silent "unknown action". */
-try{ Stale.check(['campaign-retry','campaign-domain']); }catch(e){}
+try{ Stale.check(['campaign-retry','campaign-domain','sent-csv']); }catch(e){}
 </script>
 <script>
 const $ = s => document.querySelector(s);
@@ -786,15 +802,32 @@ function drawRecipients(m){
       : `<div class="empty">Everyone with an address has been written to. New leads appear here when the Hunter finds them.</div>`;
   }
   else if(RTAB === 'sent'){
+    const sentIds = new Set(g.sent.map(r=>r.id));
+    for(const id of [...SENTPICK]) if(!sentIds.has(id)) SENTPICK.delete(id);
+    const sentRow = r => `<div class="rrow${SENTPICK.has(r.id)?' picked':''}">
+        <input type="checkbox" aria-label="Pick ${escA(r.company||r.email)}" ${SENTPICK.has(r.id)?'checked':''}
+          onchange="SENTPICK[this.checked?'add':'delete'](${r.id}); drawRecipients(DATA.mails)">
+        <div class="who"><b>${esc(r.company||'(no name)')}</b><span>${[r.area,(r.segment||'').replace(/_/g,' ')].filter(Boolean).map(esc).join(' · ')}</span></div>
+        <div class="addr">${esc(r.email)}</div>
+        <div class="res">${r.state==='bounced'
+          ? `<span class="pill bad">came back</span> <span style="color:var(--danger)">${esc(r.why)}</span>`
+          : `<span class="pill ok">sent</span> ${r.sent_at ? esc(ago(r.sent_at)) : ''}${/Sent folder/.test(r.why||'') && !/no copy/.test(r.why||'') ? ' · copy in Sent' : ''}`}</div></div>`;
     html = `<p class="say">Your mail server took these and sent them on${m.copies_in_sent === true ? ' — a copy of each is in your mailbox’s Sent folder' : m.copies_in_sent === false ? ' (a copy could not be saved to your Sent folder this time)' : ''}.
         If one comes back (a wrong address, a full mailbox), it shows here as <b>came back</b> — press
-        <b>Check for bounces</b> to look in your inbox now.</p>
-      <div class="sendrow"><span class="sp"></span>
-        <button class="btn" onclick="checkBounces(this)">Check for bounces</button></div>
+        <b>Check for bounces</b> to look in your inbox now. A business on this list is never mailed again,
+        even after you delete it from here.</p>
+      <div class="sendrow">
+        ${g.sent.length ? `<label class="say" style="margin:0;display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" ${g.sent.length && g.sent.every(r=>SENTPICK.has(r.id))?'checked':''}
+            onchange="g_sentAll(this.checked)"> Tick all</label>` : ''}
+        <span class="sp"></span>
+        <a class="btn" href="/api/mail/sent.csv" download>Download as CSV</a>
+        <button class="btn" onclick="checkBounces(this)">Check for bounces</button>
+        ${g.sent.length ? `<button class="btn stop" ${SENTPICK.size ? '' : 'disabled'} onclick="deleteSent(false, this)">
+          ${SENTPICK.size ? `Delete ${SENTPICK.size}` : 'Tick to delete'}</button>` : ''}
+      </div>
       ${list(g.queued.map(r => row(r, false, `<span class="pill">${/tomorrow/.test(r.why||'')?'tomorrow':'sending…'}</span>`))
-        .concat(g.sent.map(r => row(r, false, r.state==='bounced'
-          ? `<span class="pill bad">came back</span> <span style="color:var(--danger)">${esc(r.why)}</span>`
-          : `<span class="pill ok">sent</span> ${r.sent_at ? esc(ago(r.sent_at)) : ''}${/Sent folder/.test(r.why||'') && !/no copy/.test(r.why||'') ? ' · copy in Sent' : ''}`))))
+        .concat(g.sent.map(sentRow)))
         || '<div class="empty">Nothing sent yet.</div>'}
       ${bounced ? `<p class="say" style="margin-top:10px">${bounced} came back — those addresses are wrong or closed, and they are not written to again.</p>` : ''}`;
   }
@@ -814,6 +847,24 @@ function drawRecipients(m){
 }
 
 // The mail server's own words, shortened to what he needs.
+const SENTPICK = new Set();          // sent mails he has ticked to delete
+function g_sentAll(on){
+  const sent = groups(DATA.mails.recipients || []).sent;
+  sent.forEach(r => on ? SENTPICK.add(r.id) : SENTPICK.delete(r.id));
+  drawRecipients(DATA.mails);
+}
+async function deleteSent(everything, btn){
+  const n = SENTPICK.size;
+  if(!confirm(`Delete ${n} sent mail${n===1?'':'s'} from this list?\n\nThe words of each mail are wiped. `
+      + `The agency still remembers these businesses were written to, so none is listed or mailed again. `
+      + `Download the CSV first if you want a copy.`)) return;
+  btn.disabled = true;
+  const j = await campAct(everything ? 'sent_delete_all' : 'sent_delete', {}, [...SENTPICK]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) SENTPICK.clear();
+  await load();
+}
+
 function plainWhy(w){
   w = String(w||'');
   if(/kept dropping|timed out|handshake|10054|unexpectedly closed|reset/i.test(w))
@@ -949,6 +1000,35 @@ function toggle(kind, id){
   drawPages(DATA.pages);
 }
 
+// ------------------------------------------------------- SEO's keywords ----
+// "the seo sector finds the keywords according to the post then it gives those
+//  keywords to the post room" — what SEO planned, who ranks, and how the post
+// measured up against the plan.
+function seoPanel(seo){
+  if(!seo || !seo.primary) return '';
+  const sc = seo.score, cls = sc == null ? '' : sc >= 80 ? 'good' : sc >= 60 ? 'mid' : 'low';
+  const used = new Set(seo.used || []);
+  return `<details class="seo"><summary><b>Keywords from SEO</b>
+      <span class="mono" style="color:var(--glass)">“${esc(seo.primary)}”</span>
+      ${sc == null ? '' : `<span class="score ${cls}">${sc}/100</span>`}
+      <span style="color:var(--muted);font-size:12px">${(seo.used||[]).length} of ${(seo.secondary||[]).length} supporting keywords used${seo.words ? ` · ${seo.words} words (aim ${seo.target_words})` : ''}</span></summary>
+    ${(seo.items||[]).length ? `<h4>How the post measures up</h4><div class="checks">${seo.items.map(i=>
+      `<div class="${i.ok?'y':'n'}">${i.ok?'✓':'✕'} ${esc(i.what)}</div>`).join('')}</div>` : ''}
+    ${(seo.secondary||[]).length ? `<h4>Supporting keywords</h4><div class="kw">${seo.secondary.map(k=>
+      `<span class="${used.has(k)?'on':''}">${used.has(k)?'✓ ':''}${esc(k)}</span>`).join('')}</div>` : ''}
+    ${(seo.questions||[]).length ? `<h4>Questions it answers</h4><div class="kw">${seo.questions.map(q=>`<span>${esc(q)}</span>`).join('')}</div>` : ''}
+    <h4>Who ranks for “${esc(seo.primary)}”</h4>
+    ${(seo.ranking||[]).length ? `<table class="rank">${seo.ranking.map(r=>{
+        const read = (seo.competitors||[]).find(c=>c.position===r.position);
+        return `<tr><td class="n">#${r.position}</td><td>${esc(r.domain)}<br><span style="color:var(--muted)">${esc(r.title)}</span></td>
+          <td class="n">${read ? read.words+' words' : ''}</td></tr>`;}).join('')}</table>
+        <p style="margin:6px 0 0;font-size:12.5px;color:var(--muted)">${seo.our_position ? `Your site is at #${seo.our_position} for this.` : 'Your site is not in the top 10 for this yet.'}</p>`
+      : `<p style="margin:0;font-size:12.5px;color:var(--muted)">${esc((seo.notes||[]).find(n=>/who ranks/.test(n)) || 'Not checked.')}
+         ${/Setup/.test((seo.notes||[]).join(' ')) ? ' <a href="/setup">Open Setup</a>' : ''}</p>`}
+    ${(seo.notes||[]).filter(n=>!/who ranks/.test(n)).map(n=>`<p style="margin:6px 0 0;font-size:12px;color:var(--muted)">${esc(n)}</p>`).join('')}
+  </details>`;
+}
+
 // ----------------------------------------------------------- his blog ----
 // "i had build the BAckend from where the blogs get uploaded and the blog is
 //  blog.php" — a post goes into his backend a piece at a time, each with its
@@ -1038,6 +1118,7 @@ function drawBlog(p){
       <h3>${esc(x.title)}</h3>
       <div class="meta">${[x.keyword ? 'for “'+x.keyword+'”' : '', x.at ? 'written '+ago(x.at) : ''].filter(Boolean).map(esc).join(' &middot; ')}</div>
       ${x.plain_page ? plainCopy(x, site) : ''}
+      ${seoPanel(x.seo)}
       ${x.moving && x.moving.status === 'approved' ? moveNote(x) : `
       ${moveNote(x)}
       ${x.moving ? '' : `<div class="go-blog"><button class="btn go" onclick="toBlog('blog_publish', ${x.id}, this)">Put it on my blog</button>
@@ -1172,6 +1253,7 @@ function drawPages(p){
       <div class="meta">${[x.file ? 'will be /'+x.file : '', x.keyword ? 'for “'+x.keyword+'”' : '', 'written '+ago(x.queued_at)].filter(Boolean).map(esc).join(' &middot; ')}</div>
       ${x.why?`<p class="why">${esc(x.why)}</p>`:''}
       ${(x.warnings||[]).length?`<ul class="reasons">${x.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:''}
+      ${seoPanel(x.seo)}
       <div class="row">
         <button class="btn quiet" onclick="toggle('w', ${x.id})">${OPEN.has('w:'+x.id)?'Hide the page':'Read the page'}</button>
         <span style="flex:1"></span>

@@ -7,6 +7,12 @@ skipped — and a lead count he cannot open is a score, not a tool.
 
 Read-only. Every field comes from the rows the Hunter, the Scanner and Outreach
 already wrote; nothing here is derived, guessed or scored.
+
+ONLY LEADS HE CAN MAIL. "the mails that are sent they should not shown in the
+leads section ... the lead that have no mail do not list that only leads with
+mails". A lead with no address, or one already written to, is kept in the
+cabinet — that is what stops the Hunter collecting it again — but it is not
+listed here. Sent mail lives in the Mail room's Sent list.
 """
 import argparse
 import json
@@ -58,7 +64,8 @@ def build(scope="today", limit=200) -> dict:
     c = _conn()
     try:
         board._migrate(c)
-        where, args = ("WHERE found_at >= ?", (day0,)) if scope == "today" else ("", ())
+        where, args = (("WHERE found_at >= ? AND " + board.MAILABLE, (day0,))
+                       if scope == "today" else ("WHERE " + board.MAILABLE, ()))
         rows = _rows(c, f"SELECT * FROM leads {where} ORDER BY found_at DESC"
                         f" LIMIT {int(limit)}", args)
         ids = [r["id"] for r in rows]
@@ -112,18 +119,24 @@ def build(scope="today", limit=200) -> dict:
                                else "not contacted yet"),
             })
 
-        total_all = _rows(c, "SELECT count(*) n FROM leads")
+        total_all = _rows(c, "SELECT count(*) n FROM leads WHERE " + board.MAILABLE)
         by_stage = {x["stage"] or "new": x["n"] for x in _rows(
-            c, "SELECT stage, count(*) n FROM leads GROUP BY stage")}
+            c, "SELECT stage, count(*) n FROM leads WHERE " + board.MAILABLE
+               + " GROUP BY stage")}
+        mailed = _rows(c, "SELECT count(*) n FROM leads WHERE mailed_at IS NOT NULL")
+        no_address = _rows(c, "SELECT count(*) n FROM leads WHERE COALESCE(email,'')=''")
         return {"ok": True, "scope": scope, "at": now,
                 "leads": out, "shown": len(out),
-                "today": len(_rows(c, "SELECT id FROM leads WHERE found_at>=?", (day0,))),
+                "today": len(_rows(c, "SELECT id FROM leads WHERE found_at>=? AND "
+                                      + board.MAILABLE, (day0,))),
                 "total": (total_all[0]["n"] if total_all else 0),
+                "mailed": (mailed[0]["n"] if mailed else 0),
+                "no_address": (no_address[0]["n"] if no_address else 0),
                 "by_stage": by_stage,
-                "head": (f"{len(out)} found today" if scope == "today" and out else
-                         f"{len(out)} on file" if out else
-                         "none today — the Hunter has not found anyone yet"
-                         if scope == "today" else "no leads on file yet")}
+                "head": (f"{len(out)} new today with an email" if scope == "today" and out else
+                         f"{len(out)} with an email, not mailed yet" if out else
+                         "none today with an email yet"
+                         if scope == "today" else "no lead with an email is waiting")}
     finally:
         c.close()
 
