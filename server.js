@@ -33,6 +33,51 @@ for (const m of ["get", "post", "put", "delete"]) {
   };
 }
 process.on("unhandledRejection", (e) => console.error("unhandled:", e && e.message || e));
+
+/* ---------------------------------------------------------------------------
+   THE CODE ON DISK, AGAINST THE CODE RUNNING
+   ---------------------------------------------------------------------------
+   "clicked on try again button ... the message appear unknow action"
+
+   The screens are re-read from disk on every refresh; this file is read once,
+   at start. He pulled an update, refreshed, got the new Mail room with its new
+   "Try again now" button — and the server still running was the one from
+   before, which had never heard of it. The fourth time a new screen has met an
+   old server (see ui/stale.js for the other three).
+
+   So the server watches its own file. Started by run.py (OFFICE_SUPERVISED=1),
+   it finishes whatever it is answering and exits with 75, and run.py starts
+   the new version straight away — nothing for him to do. Started any other
+   way, it cannot restart itself safely, so /api/ping says it is stale and
+   every screen puts up a banner saying to restart it. */
+const OWN_CODE = [__filename];
+function codeStamp() {
+  try {
+    const h = crypto.createHash("sha1");
+    for (const f of OWN_CODE) h.update(fs.readFileSync(f));
+    return h.digest("hex");
+  } catch (_) { return ""; }
+}
+const BOOT_CODE = codeStamp();
+function codeIsNewer() { const now = codeStamp(); return !!now && !!BOOT_CODE && now !== BOOT_CODE; }
+const SUPERVISED = process.env.OFFICE_SUPERVISED === "1";
+const RESTART_CODE = 75;
+let ACTIVE = 0;                                  // requests being answered right now
+app.use((req, res, next) => {
+  ACTIVE++;
+  let done = false;
+  const end = () => { if (!done) { done = true; ACTIVE--; } };
+  res.on("finish", end); res.on("close", end);
+  next();
+});
+if (SUPERVISED) {
+  setInterval(() => {
+    if (ACTIVE > 0 || !codeIsNewer()) return;
+    console.log("The office was updated — restarting to load the new version.");
+    process.exit(RESTART_CODE);
+  }, 4000).unref();
+}
+
 app.use(express.json());
 // NOTE: express.static is mounted AFTER the front-door middleware below, not
 // here. Mounted first it serves ui/setup.html at /setup.html to anybody, gate
@@ -351,11 +396,12 @@ const API_CAPABILITIES = [
   "password", "activity", "activity-seen", "activity-clear", "sector", "usage",
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
-  "stuck", "release",
+  "stuck", "release", "campaign-retry", "campaign-domain",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {
-  res.json({ ok: true, api: API_CAPABILITIES, started: SERVER_STARTED });
+  res.json({ ok: true, api: API_CAPABILITIES, started: SERVER_STARTED,
+             stale: codeIsNewer(), supervised: SUPERVISED });
 });
 
 /* THE BRAND, AND NOTHING ELSE.
@@ -1263,17 +1309,14 @@ app.post("/api/approve", async (req, res) => {
 app.get("/api/review", async (_q, res) =>
   res.json(await pyModule("coordination.review", ["--json"], 30000)));
 
-const REVIEW_ACTS = ["send", "discard", "publish", "reject_page", "rewrite", "discard_page",
-  "campaign_create", "campaign_save", "campaign_approve", "campaign_retire",
-  "campaign_send", "campaign_test", "discard_old", "campaign_retry", "campaign_domain"];
-// The campaign's fields, as he typed them: short strings only, nothing nested.
-const CAMPAIGN_KEYS = ["offer", "offer_until", "focus", "to", "subject", "preheader",
-  "headline", "intro", "why_us", "cta", "phone", "whatsapp", "domain"];
 function campaignData(d) {
+  // Short strings under plain names — whichever names review.py reads. Listing
+  // them here meant a field added later was silently dropped by a server
+  // started before it existed.
   const out = {};
   if (!d || typeof d !== "object") return out;
-  for (const k of CAMPAIGN_KEYS) {
-    if (typeof d[k] === "string") out[k] = d[k].slice(0, 1200);
+  for (const [k, v] of Object.entries(d).slice(0, 40)) {
+    if (/^[a-z_]{1,40}$/.test(k) && typeof v === "string") out[k] = v.slice(0, 2000);
   }
   return out;
 }
@@ -1286,14 +1329,19 @@ app.post("/api/review/act", async (req, res) => {
   if (!py) return res.json({ ok: false, error: NO_PY });
   const b = req.body || {};
   const act = String(b.do || "");
-  if (!REVIEW_ACTS.includes(act)) return res.json({ ok: false, error: "unknown action" });
+  // A name, not a list. The list lived here AND in coordination/review.py, and
+  // a server started before an update did not know the new names — "unknown
+  // action" on a button that worked. review.py refuses anything it does not
+  // do, so the shape is all this needs to check.
+  if (!/^[a-z_]{2,40}$/.test(act)) return res.json({ ok: false, error: "unknown action" });
   const ids = (Array.isArray(b.ids) ? b.ids : [])
     .map((x) => parseInt(x, 10)).filter(Number.isFinite).slice(0, 200);
   // Sending goes through his mail server one message at a time, so it gets
   // longer than a database write — but not unbounded.
   const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.review", "--act"], {
     cwd: __dirname, input: JSON.stringify({ do: act, ids, data: campaignData(b.data) }),
-    timeout: REVIEW_TIMEOUT[act] || 60000, maxBuffer: 8 * 1024 * 1024,
+    timeout: REVIEW_TIMEOUT[act] || (/send|retry|create/.test(act) ? 300000 : 60000),
+    maxBuffer: 8 * 1024 * 1024,
   });
   if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
   const out = String(r.stdout || "");

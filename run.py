@@ -479,22 +479,36 @@ def office():
     say(f"  {url}")
     say("  Leave this window open. Press Ctrl+C to stop.")
     say()
-    try:
-        proc = subprocess.Popen(["node", "server.js"], cwd=ROOT)
-    except FileNotFoundError:
-        say("  Node.js is not installed. Get it from nodejs.org, then run this again.")
-        return
-    time.sleep(2)
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        say()
-        say("  Stopping.")
-        proc.terminate()
+    # SUPERVISED: when an update changes server.js on disk, the server finishes
+    # what it is answering and exits with RESTART; this loop starts the new
+    # version at once. Without it, a pulled update gave him new screens talking
+    # to the old server — "unknown action" on a button that existed.
+    RESTART = 75
+    env = {**os.environ, "OFFICE_SUPERVISED": "1"}
+    opened = False
+    while True:
+        try:
+            proc = subprocess.Popen(["node", "server.js"], cwd=ROOT, env=env)
+        except FileNotFoundError:
+            say("  Node.js is not installed. Get it from nodejs.org, then run this again.")
+            return
+        if not opened:
+            time.sleep(2)
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+            opened = True
+        try:
+            code = proc.wait()
+        except KeyboardInterrupt:
+            say()
+            say("  Stopping.")
+            proc.terminate()
+            return
+        if code != RESTART:
+            return
+        say("  The office was updated — started the new version. Refresh the page.")
 
 
 def main():

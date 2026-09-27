@@ -34,6 +34,11 @@
   var HAVE = null;          // null = not asked yet, [] = old server, [...] = fine
   var REACHED = false;
   var NEED = [];
+  var STALE = false;        // the server says its own file changed since it started
+  var SUPERVISED = false;   // started by run.py, so it restarts itself
+  var STARTED = 0;          // when the answering server started — a change means it restarted
+  var RESTART = '<code style="background:rgba(0,0,0,.3);padding:2px 6px;border-radius:4px">' +
+                'python run.py</code>';
 
   function banner(msg) {
     var el = document.getElementById('staleBanner');
@@ -54,16 +59,52 @@
     el.innerHTML = msg;
   }
 
+  function clear() {
+    var el = document.getElementById('staleBanner');
+    if (el) { el.remove(); document.body.style.paddingTop = ''; }
+  }
+
   function report() {
     if (!REACHED) return;                       // server down is a different problem
     var missing = NEED.filter(function (c) { return HAVE.indexOf(c) < 0; });
-    if (!missing.length) return;
+    if (STALE && SUPERVISED) {
+      banner('<b>The office has been updated.</b><span>It is restarting itself to load the ' +
+             'new version &mdash; this clears in a few seconds. Then refresh the page.</span>');
+      return;
+    }
+    if (!missing.length && !STALE) { clear(); return; }
     banner(
-      '<b>The program running on this machine is older than this screen.</b>' +
-      '<span>Restart it &mdash; <code style="background:rgba(0,0,0,.3);padding:2px 6px;' +
-      'border-radius:4px">pm2 restart all</code>, or close the window it is running ' +
-      'in and start it again. Until you do, some controls here will do nothing when ' +
-      'you press them.</span>');
+      '<b>The office program running on this computer is older than this screen.</b>' +
+      '<span>Close the black window it runs in and start it again with ' + RESTART +
+      '. Until you do, some buttons here will say &ldquo;unknown action&rdquo; or do ' +
+      'nothing when you press them.</span>');
+  }
+
+  function ask(then) {
+    fetch('/api/ping', {cache: 'no-store'})
+      .then(function (r) {
+        REACHED = true;
+        // A 404 IS the answer: this server predates the route.
+        if (!r.ok) { HAVE = []; return null; }
+        return r.json();
+      })
+      .then(function (j) {
+        if (j === undefined) return;
+        HAVE = (j && j.api) || [];
+        STALE = !!(j && j.stale);
+        SUPERVISED = !!(j && j.supervised);
+        // It restarted under us with new code: the page itself may be older
+        // than the server now, so say so once rather than half-working.
+        if (j && STARTED && j.started && j.started !== STARTED && !STALE) {
+          banner('<b>The office restarted with an update.</b><span>Refresh this page to ' +
+                 'get the matching screen.</span>');
+          STARTED = j.started;
+          return 'shown';
+        }
+        if (j && j.started) STARTED = j.started;
+      })
+      .catch(function () { HAVE = HAVE || []; REACHED = false; })   // genuinely unreachable
+      .then(function (shown) { if (shown !== 'shown') report(); if (then) then(); });
   }
 
   var Stale = {
@@ -71,16 +112,9 @@
     check: function (needs, onKnown) {
       NEED = NEED.concat(needs || []);
       if (HAVE !== null) { report(); if (onKnown) onKnown(); return; }
-      fetch('/api/ping')
-        .then(function (r) {
-          REACHED = true;
-          // A 404 IS the answer: this server predates the route.
-          if (!r.ok) { HAVE = []; return null; }
-          return r.json();
-        })
-        .then(function (j) { HAVE = (j && j.api) || []; })
-        .catch(function () { HAVE = []; REACHED = false; })   // genuinely unreachable
-        .then(function () { report(); if (onKnown) onKnown(); });
+      ask(onKnown);
+      // A page left open all day must notice an update made while it was open.
+      if (!Stale._watching) { Stale._watching = setInterval(function () { ask(); }, 30000); }
     },
     /* Is this specific capability missing from the running server? */
     blocked: function (cap) {

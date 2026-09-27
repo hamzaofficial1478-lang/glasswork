@@ -303,6 +303,33 @@ def test_the_office_does_not_wait_for_a_run():
         inside.append(fn[-1] if fn else "?")
     check("spawnSync only in the version probe and the boot-time check",
           sorted(set(inside)), ["ensureDbSync", "resolvePython"])
+    # "clicked on try again ... the message appear unknow action": a pulled
+    # update, a refreshed screen, and the server still running the old code.
+    print("\n...and an update to the server loads itself:")
+    check("the server exits with 75 when its own file changes, if run.py started it",
+          "OFFICE_SUPERVISED" in src and "RESTART_CODE = 75" in src
+          and "process.exit(RESTART_CODE)" in src, True)
+    check("and no longer turns away a Mail room action it has not heard of",
+          "REVIEW_ACTS" not in src, True)
+    import run as _run
+    launched, codes = [], [75, 0]
+
+    class _Proc:
+        def wait(self):
+            return codes.pop(0)
+    real = (_run.subprocess.Popen, _run.webbrowser.open, _run.time.sleep, _run.say)
+    _run.subprocess.Popen = lambda cmd, **kw: launched.append(kw.get("env", {}).get(
+        "OFFICE_SUPERVISED")) or _Proc()
+    _run.webbrowser.open = lambda url: None
+    _run.time.sleep = lambda s: None
+    _run.say = lambda *a, **k: None
+    try:
+        _run.office()
+    finally:
+        (_run.subprocess.Popen, _run.webbrowser.open, _run.time.sleep, _run.say) = real
+    check("run.py starts it supervised, and starts it again when it asks",
+          launched, ["1", "1"])
+
     listen = src.find("app.listen(")
     calls = [m.start() for m in re.finditer(r"(?<!function )\bensureDbSync\(\)", src)]
     check("and the boot-time check runs only at boot",

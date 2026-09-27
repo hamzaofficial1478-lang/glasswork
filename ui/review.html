@@ -287,6 +287,12 @@ details.old[open]>summary{color:var(--text)}
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="/stale.js"></script>
+<script>
+/* The Mail room's buttons need a server that knows them. An old one gets a
+   banner, not a silent "unknown action". */
+try{ Stale.check(['campaign-retry','campaign-domain']); }catch(e){}
+</script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -544,6 +550,10 @@ async function campAct(what, data, ids){
     j = await r.json();
   }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
   WORKING = false;
+  if(j && !j.ok && j.error === 'unknown action')
+    j.error = 'The office program is older than this page, so it does not know this button yet. '
+            + 'Nothing was sent. Close the black window the office runs in and start it again with '
+            + 'python run.py, then press the button again.';
   return j;
 }
 const val = id => ($('#'+id) ? $('#'+id).value : undefined);
