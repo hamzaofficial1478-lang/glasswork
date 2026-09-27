@@ -847,6 +847,8 @@ def recipients(ids=None) -> list:
 
       ready    can be sent the campaign — tick it
       going    approved and waiting for tomorrow's allowance
+      stuck    approved, tried, and refused — with the reason, and a way to
+               try again once it is put right
       sent     already written to — a business is approached once
       no       cannot be written to, and why (no address, Security…)
     """
@@ -859,8 +861,8 @@ def recipients(ids=None) -> list:
         sent = {r[0] for r in c.execute(
             "SELECT DISTINCT lead_id FROM outreach_log WHERE direction='sent'")}
         rows = [dict(r) for r in c.execute(
-            "SELECT lead_id, status FROM outreach_queue WHERE status IN"
-            " ('pending','held','approved','sent')")]
+            "SELECT lead_id, status, note FROM outreach_queue WHERE status IN"
+            " ('pending','held','approved','sent') ORDER BY id")]
     finally:
         c.close()
     if ids:
@@ -868,7 +870,7 @@ def recipients(ids=None) -> list:
         leads = [l for l in leads if l["id"] in want]
     if not leads:
         return []
-    going = {r["lead_id"] for r in rows if r["status"] == "approved"}
+    going = {r["lead_id"]: (r.get("note") or "") for r in rows if r["status"] == "approved"}
     sent |= {r["lead_id"] for r in rows if r["status"] == "sent"}
     old = {r["lead_id"] for r in rows if r["status"] in ("pending", "held")}
     try:
@@ -883,7 +885,7 @@ def recipients(ids=None) -> list:
         if l["id"] in sent:
             st, why = "sent", "written to already"
         elif l["id"] in going:
-            st, why = "going", "approved — goes with the next allowance"
+            st, why = _approved_state(going[l["id"]])
         elif l["id"] in why_not:
             st, why = "no", why_not[l["id"]]
         else:
@@ -896,9 +898,29 @@ def recipients(ids=None) -> list:
     return out
 
 
+def _approved_state(note) -> tuple:
+    """An approved mail that has not gone: waiting its turn, or refused and why.
+
+    Every approved-but-unsent mail used to read "goes with the next allowance",
+    including seven the outreach rules had refused — so the screen said wait
+    while nothing would ever happen."""
+    why = (note or "").replace("not sent yet: ", "", 1).strip()
+    if not why or "allowance" in why or "cap reached" in why or \
+            why.startswith("owner approved"):
+        return "going", "approved — goes with the next allowance"
+    if "approved outreach domain" in why:
+        return "stuck", "refused: the Outreach domain on Setup does not match your email address"
+    return "stuck", why
+
+
+def stuck() -> list:
+    """Campaign mails he approved that were refused when they were tried."""
+    return [r for r in recipients() if r["state"] == "stuck"]
+
+
 def _extra(camp) -> dict:
     """What a campaign mail carries besides its words: the design, and who it is from."""
-    sender = (mail.setting("SMTP_FROM") or mail.setting("SMTP_USER") or "").strip()
+    sender = mail.sender_address()
     return {"from_name": business()["name"],
             "headers": ({"List-Unsubscribe": f"<mailto:{sender}?subject=unsubscribe>"}
                         if "@" in sender else {})}
@@ -947,6 +969,12 @@ def send(lead_ids) -> dict:
             pass
     if not ids:
         return {"ok": False, "error": "Tick at least one lead."}
+    # Anything that would refuse every mail is said now, before a single one is
+    # queued — not discovered seven times over and filed as "approved".
+    ready = mail.preflight()
+    if not ready["ok"]:
+        return {"ok": False, "error": " ".join(ready["problems"]),
+                "fix_domain": ready.get("fix_domain", "")}
     can, cannot = leads_outreach.eligible(limit=len(ids), only_ids=ids,
                                           for_campaign=True)
     failed = [{"id": x["id"], "company": x["company"], "why": x["why"]} for x in cannot]
@@ -1024,7 +1052,7 @@ def _queue(camp, lead, r, v) -> int:
 def _note(qid, why):
     try:
         with board._conn() as c:
-            c.execute("UPDATE outreach_queue SET note=? WHERE id=?", (why[:300], qid))
+            c.execute("UPDATE outreach_queue SET note=? WHERE id=?", (why[:600], qid))
     except Exception:
         pass
 
@@ -1037,10 +1065,81 @@ def send_test(to) -> dict:
         return {"ok": False, "error": "There is no campaign yet."}
     to = (to or "").strip()
     r = render(camp, {"company": "Your Business"})
-    out = mail.send_plain(to, "[TEST] " + r["subject"], r["text"], html=r["html"])
-    out["head"] = (f"Test sent to {to} — check your inbox (and the Promotions tab)."
+    # The same rules, sender name and headers as the real send: a test that
+    # arrives now means the campaign would leave too.
+    out = mail.send_plain(to, "[TEST] " + r["subject"], r["text"], html=r["html"],
+                          rehearse=True, **_extra(camp))
+    out["head"] = (f"Test sent to {to}, exactly as your leads will get it — check the "
+                   "inbox and the Promotions tab. Try your personal Gmail too: mail "
+                   "to your own address never leaves your mail server."
                    if out.get("ok") else "The test did not go: " + str(out.get("error")))
+    if not out.get("ok"):
+        out["fix_domain"] = mail.preflight().get("fix_domain", "")
     return out
+
+
+def retry(lead_ids=None) -> dict:
+    """
+    Try again, now, the campaign mails he approved that were refused — once
+    whatever refused them is put right. Only mails already approved; only the
+    campaign as it still stands (for_queued checks that).
+    """
+    from . import leads_outreach
+    if not board.sector_enabled(SECTOR):
+        return {"ok": False, "error": "Leads is switched off — turn it back on to send mail."}
+    ready = mail.preflight()
+    if not ready["ok"]:
+        return {"ok": False, "error": " ".join(ready["problems"]),
+                "fix_domain": ready.get("fix_domain", "")}
+    want = {int(i) for i in (lead_ids or [])}
+    c = _conn()
+    try:
+        qids = [r["id"] for r in c.execute(
+            "SELECT id, lead_id FROM outreach_queue WHERE status='approved'"
+            " AND campaign_id IS NOT NULL ORDER BY id")
+                if not want or r["lead_id"] in want]
+    finally:
+        c.close()
+    if not qids:
+        return {"ok": False, "error": "Nothing approved is waiting to be sent."}
+    failed = []
+    sent = leads_outreach._send_approved(ready["room"], ids=qids, failed=failed)
+    head = (f"Sent {len(sent)} of the {len(qids)} approved mail(s)." if sent
+            else "None of them went.")
+    if failed:
+        head += f" {len(failed)} did not: {failed[0]['company']} — {failed[0]['why']}"
+    with board.agent_run(AGENT) as run_row:
+        run_row.note(f"tried the approved campaign mails again — {len(sent)} sent"
+                     + (f", {len(failed)} did not go" if failed else ""))
+    return {"ok": bool(sent), "sent": sent, "failed": failed, "head": head}
+
+
+def use_sending_domain(domain) -> dict:
+    """
+    His one-click fix when the outreach domain on Setup does not match the
+    address his mail really goes from. Only ever the domain of his own
+    sending address — worked out here, not taken from the page — so the button
+    can set exactly one thing: the rule he already has, pointed at the mail
+    account he already uses.
+    """
+    ready = mail.preflight()
+    want = (ready.get("fix_domain") or "").strip().lower()
+    if not want:
+        return {"ok": True, "head": "Your sending domain already matches your email address."}
+    if (domain or "").strip().lower() != want:
+        return {"ok": False, "error": "That is not the domain your email is sent from."}
+    try:
+        from providers import integrations
+        r = integrations.write_env({"OUTREACH_DOMAIN": want})
+    except Exception as e:
+        r = {"ok": False, "error": str(e)}
+    if not r.get("ok"):
+        return {"ok": False, "error": "Could not save it: " + str(r.get("error"))}
+    with board.agent_run(AGENT) as run_row:
+        run_row.note(f"the owner set the outreach domain to {want}, the domain his "
+                     "email is sent from")
+    return {"ok": True, "head": f"Saved — outreach now goes from {want}. Press Try again "
+                                "to send the approved mails."}
 
 
 # ---------------------------------------------------------------------------

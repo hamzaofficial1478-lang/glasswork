@@ -177,9 +177,10 @@ def _mails(c):
     # THE CAMPAIGN — one mail from the company for every lead he ticks
     # (pipelines/campaign.py). Shown to him for a real lead, so the greeting he
     # reads is the one they will get.
-    campaign, recipients = {"exists": False}, []
+    campaign, recipients, preflight = {"exists": False}, [], {}
     try:
-        from pipelines import campaign as _campaign
+        from pipelines import campaign as _campaign, mail as _mail
+        preflight = _mail.preflight()
         recipients = _campaign.recipients()
         first = next((r for r in recipients if r["state"] == "ready"), None)
         campaign = _campaign.view({"company": first["company"]} if first else None)
@@ -188,7 +189,7 @@ def _mails(c):
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
             "leads_without_mail": unwritten, "writing": busy("leads-outreach", c),
             "leads": _lead_list(c), "campaign": campaign, "recipients": recipients,
-            **_mail_settings()}
+            "preflight": preflight, **_mail_settings()}
 
 
 # How many leads the Mail room lists. Newest first; the rest are on file.
@@ -351,7 +352,8 @@ def _ids(ids):
 
 
 CAMPAIGN_ACTS = ("campaign_create", "campaign_save", "campaign_approve",
-                 "campaign_retire", "campaign_send", "campaign_test", "discard_old")
+                 "campaign_retire", "campaign_send", "campaign_test", "discard_old",
+                 "campaign_retry", "campaign_domain")
 
 
 def _campaign_act(do, ids, data) -> dict:
@@ -370,6 +372,10 @@ def _campaign_act(do, ids, data) -> dict:
         return campaign.retire()
     if do == "campaign_test":
         return campaign.send_test(str(data.get("to") or ""))
+    if do == "campaign_retry":
+        return campaign.retry(ids)
+    if do == "campaign_domain":
+        return campaign.use_sending_domain(str(data.get("domain") or ""))
     if do == "campaign_send":
         s = _mail_settings()
         if not s["ready"]:

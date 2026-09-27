@@ -774,8 +774,54 @@ def test_a_dropped_google_connection_does_not_crash_the_desk():
           "connection was closed" in why and "not a problem with your setup" in why, True)
 
 
+def test_the_same_site_spelt_differently_is_used_not_refused():
+    """
+    "asked IT: Search Console 403 blocking keyword data — service account fix
+     needed" — when the account could already see the site, registered as a
+    domain property while Setup held the www address.
+    """
+    print("\nSearch Console: the same site under another spelling is used and kept:")
+    _stub_google()
+    import requests
+    from providers import integrations
+    root = Path(__file__).parents[1]
+    sa_path = root / seo_intel.GSC_SA
+    made = not sa_path.exists()
+    if made:
+        sa_path.parent.mkdir(parents=True, exist_ok=True)
+        sa_path.write_text("{}", encoding="utf-8")
+    real = (integrations.read_env, integrations.write_env, requests.post, requests.get)
+    integrations.read_env = lambda: {"GSC_PROPERTY": "https://www.example.ae/"}
+    saved, posted = [], []
+    integrations.write_env = lambda values, path=None: saved.append(values) or {"ok": True}
+
+    def post(url, **kw):
+        posted.append(url)
+        if "sc-domain" in url:
+            return _Resp(200, {"rows": [{"keys": ["shower glass dubai"], "impressions": 90,
+                                         "clicks": 2, "position": 11.2}]})
+        return _Resp(403, text="forbidden")
+    requests.post = post
+    requests.get = lambda url, **kw: _Resp(200, {"siteEntry": [
+        {"siteUrl": "sc-domain:example.ae"}, {"siteUrl": "https://other.ae/"}]})
+    try:
+        rows, why = seo_intel.gsc_queries()
+    finally:
+        (integrations.read_env, integrations.write_env, requests.post, requests.get) = real
+        if made:
+            sa_path.unlink()
+    check("the keyword data comes back", [r["phrase"] for r in rows], ["shower glass dubai"])
+    check("with no error", why, "")
+    check("asked under the spelling Google knows", "sc-domain%3Aexample.ae" in posted[-1], True)
+    check("and kept for next time", saved, [{"GSC_PROPERTY": "sc-domain:example.ae"}])
+    check("a different site is never taken for his",
+          seo_intel._bare_site("https://other.ae/") == seo_intel._bare_site("https://www.example.ae/"),
+          False)
+
+
 def main():
     test_it_works_with_no_paid_api()
+    test_the_same_site_spelt_differently_is_used_not_refused()
     test_nothing_is_hardcoded()
     test_it_asks_instead_of_shrugging()
     test_search_console_talks_to_the_right_endpoint()

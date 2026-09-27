@@ -352,17 +352,51 @@ def _which_403(creds, host, prop, get=None) -> str:
                 "and still refused. Give it a minute — a permission just "
                 "granted takes a moment — then try again.")
     # The usual case, and the useful one.
-    close = [s for s in seen
-             if s.replace("https://", "").replace("http://", "")
-                 .replace("www.", "").rstrip("/")
-             == prop.replace("https://", "").replace("http://", "")
-                 .replace("www.", "").rstrip("/")]
+    close = [s for s in seen if _bare_site(s) == _bare_site(prop)]
     tip = (f" That is the same site as yours written differently — set "
            f"GSC_PROPERTY to exactly: {close[0]}" if close else
            " Set GSC_PROPERTY to exactly one of those.")
     return (f"GSC_PROPERTY is {prop!r}, which is not one of the "
             f"{len(seen)} property(ies) this service account can see: "
             + ", ".join(repr(s) for s in seen[:6]) + "." + tip)
+
+
+def _bare_site(prop) -> str:
+    """'sc-domain:x.com', 'https://www.x.com/' and 'http://x.com' are one site."""
+    s = (prop or "").strip().lower()
+    for pre in ("sc-domain:", "https://", "http://", "www."):
+        if s.startswith(pre):
+            s = s[len(pre):]
+    return s.rstrip("/")
+
+
+def _same_site_property(creds, host, prop, get=None) -> str:
+    """
+    The property Google says this account CAN see that is the same site as
+    GSC_PROPERTY, written differently — or ''.
+
+    Search Console treats 'https://www.site.com/' and 'sc-domain:site.com' as
+    different properties. When he registered one and Setup holds the other,
+    every pull came back 403 and an IT ticket said "service account fix
+    needed" — when the account already had access and only the spelling was
+    off.
+    """
+    try:
+        if get is None:
+            import requests as _rq
+            get = _rq.get
+        r = get(host + "/webmasters/v3/sites", timeout=30,
+                headers={"Authorization": "Bearer " + creds.token})
+        if r.status_code != 200:
+            return ""
+        seen = [x.get("siteUrl") for x in (r.json().get("siteEntry") or [])
+                if x.get("siteUrl")]
+    except Exception:
+        return ""
+    same = [x for x in seen if x != prop and _bare_site(x) == _bare_site(prop)]
+    # A domain property covers every form of the site; prefer it.
+    same.sort(key=lambda x: 0 if x.startswith("sc-domain:") else 1)
+    return same[0] if same else ""
 
 
 def _dropped(e) -> bool:
@@ -470,6 +504,25 @@ def gsc_queries(days=90, limit=500):
         # 403 and 404 mean different things and the fix is different for each,
         # so neither is reported as a bare status code.
         if r.status_code == 403:
+            # THE SAME SITE, WRITTEN THE WAY GOOGLE KNOWS IT. If the account can
+            # see this site under another spelling, use that — and keep it, so
+            # the next pass does not trip over the same thing.
+            other = _same_site_property(creds, host, prop)
+            if other:
+                try:
+                    r2 = requests.post(
+                        host + "/webmasters/v3/sites/" + urllib.parse.quote(other, safe="")
+                        + "/searchAnalytics/query", timeout=45, json=body,
+                        headers={"Authorization": "Bearer " + creds.token})
+                except Exception:
+                    r2 = None
+                if r2 is not None and r2.status_code == 200:
+                    try:
+                        integrations.write_env({"GSC_PROPERTY": other})
+                    except Exception:
+                        pass
+                    rows = r2.json().get("rows") or []
+                    break
             # Google returns 403 for BOTH "you are not a user here" and "that
             # property does not exist as you typed it", because a property you
             # cannot see is indistinguishable from one that is not there. Naming

@@ -418,7 +418,7 @@ def _note_attempt(qid, why):
     try:
         with sqlite3.connect(board.DB, timeout=30) as c:
             c.execute("UPDATE outreach_queue SET note=? WHERE id=?",
-                      (f"not sent yet: {why}"[:300], qid))
+                      (f"not sent yet: {why}"[:600], qid))
     except Exception:
         pass
 

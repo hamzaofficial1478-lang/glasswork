@@ -32,6 +32,7 @@ enforces it). This composer only ever drafts on that basis.
 """
 
 import html as _html
+import re
 
 from coordination import uae
 from . import services
@@ -597,7 +598,8 @@ def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=N
         return None
 
 
-def send_plain(to: str, subject: str, body: str, html: str = "") -> dict:
+def send_plain(to: str, subject: str, body: str, html: str = "",
+               from_name: str = "", headers=None, rehearse: bool = False) -> dict:
     """
     One mail to an address the OWNER typed. Not outreach, and never treated as
     outreach.
@@ -619,6 +621,11 @@ def send_plain(to: str, subject: str, body: str, html: str = "") -> dict:
     contacted as a prospect. So this does neither — and in exchange it may
     only send to an address passed in by hand, never to anything read out of
     the leads table.
+
+    `rehearse=True` — the campaign's "Send me a test": the same sending-domain
+    rule, sender name and headers as the real thing, so a test that arrives
+    means the real mail would leave too. His first test arrived through a path
+    that skipped the domain rule, and the campaign then did not go at all.
     """
     import os
     import smtplib
@@ -633,11 +640,23 @@ def send_plain(to: str, subject: str, body: str, html: str = "") -> dict:
     if not host or not user:
         return {"ok": False, "error": "SMTP not configured (set it on /setup "
                                       "→ Delivery mail)"}
-    sender = (setting("SMTP_FROM") or user).strip()
+    sender = sender_address() or user
+    if rehearse:
+        wrong = domain_problem(sender)
+        if wrong:
+            return {"ok": False, "wrong_domain": True,
+                    "error": "your leads would not get this either: " + wrong}
     msg = EmailMessage()
-    msg["From"] = sender
+    if from_name:
+        from email.utils import formataddr
+        msg["From"] = formataddr((from_name, sender))
+    else:
+        msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject or "(no subject)"
+    for k, v in (headers or {}).items():
+        if k and v and k.lower() not in ("from", "to", "subject"):
+            msg[k] = v
     msg.set_content(body or "")
     if html:
         # add_alternative, not set_content: set_content would throw the plain
@@ -660,8 +679,104 @@ def send_plain(to: str, subject: str, body: str, html: str = "") -> dict:
                 srv.login(user, pw)
             srv.send_message(msg)
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return {"ok": False, "error": smtp_said(e)}
     return {"ok": True, "to": to, "from": sender}
+
+
+# ---------------------------------------------------------------------------
+# THE SENDING DOMAIN, AND SAYING PLAINLY WHY A MAIL DID NOT GO
+# ---------------------------------------------------------------------------
+#
+# "i approved the compaign and click on sent and it did no sent the mails while
+#  when i tested on my own mail it sent me the mail"
+#
+# The test went to his own inbox through send_plain, which never looks at the
+# outreach rules. The campaign went through _smtp_send, which refuses anything
+# not sent from the "Outreach domain" saved on Setup — compared letter for
+# letter, "@" + the setting. Setup told him to use "a subdomain, not your main
+# domain", his mailbox is on his main domain, and a website address typed with
+# https:// or www. never matched anything. Seven refusals, each one filed as
+# "approved — goes with the next allowance", and the reason on no screen.
+#
+# The rule stands — cold mail only from the domain he approved. What changed:
+# the setting is read the way a person types it, a subdomain of the approved
+# domain counts as on it, and when it really does not match, the refusal says
+# which address, which domain, and exactly what to change.
+
+def _bare_domain(value) -> str:
+    """'https://www.Example.com/contact' → 'example.com'; '@example.com' → 'example.com'."""
+    s = (value or "").strip().lower()
+    s = re.sub(r"^[a-z][a-z0-9+.-]*://", "", s)
+    s = s.split("/", 1)[0].split("?", 1)[0].strip()
+    if "@" in s:
+        s = s.rsplit("@", 1)[1]
+    s = s.strip(" .")
+    return s[4:] if s.startswith("www.") else s
+
+
+def sender_address() -> str:
+    """The address mail goes out from — the bare address, even if Setup holds
+    'Name <address>'."""
+    from email.utils import parseaddr
+    raw = (setting("SMTP_FROM") or setting("SMTP_USER") or "").strip()
+    return (parseaddr(raw)[1] or raw).strip()
+
+
+def domain_problem(sender=None) -> str:
+    """'' when the sender is on the approved outreach domain; otherwise what is
+    wrong and how to put it right, in his words."""
+    approved = _bare_domain(setting("OUTREACH_DOMAIN"))
+    if not approved:
+        return ""
+    addr = (sender or sender_address()).strip()
+    own = addr.rsplit("@", 1)[1].lower().strip() if "@" in addr else ""
+    if own and (own == approved or own.endswith("." + approved)):
+        return ""
+    return (f"your email sends from {addr or 'another address'}, which is not on the "
+            f"approved outreach domain ({approved}) saved on Setup. Change 'Outreach "
+            f"domain' on Setup to {own or 'the part after the @ in your address'}, or "
+            f"send from an address at {approved}.")
+
+
+def preflight() -> dict:
+    """
+    Could outreach be sent right now, and if not, why — checked before a single
+    mail is queued, so a refusal is a sentence on the screen instead of seven
+    mails parked as "approved".
+    """
+    problems = []
+    if not setting("SMTP_HOST").strip() or not setting("SMTP_USER").strip():
+        problems.append("Your email is not set up — add it on Setup → Integrations → "
+                        "Email (SMTP).")
+    wrong = domain_problem()
+    if wrong:
+        problems.append(wrong[:1].upper() + wrong[1:])
+    addr = sender_address()
+    own = addr.rsplit("@", 1)[1].lower() if "@" in addr else ""
+    room = max(0, daily_cap() - sent_today())
+    return {"ok": not problems, "problems": problems, "sender": addr,
+            "fix_domain": own if wrong and own else "", "room": room,
+            "cap": daily_cap()}
+
+
+def smtp_said(e) -> str:
+    """What the mail server actually answered, as a sentence he can act on."""
+    import smtplib
+
+    def text(v):
+        return v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        return (f"your mail server refused the login ({e.smtp_code} "
+                f"{text(e.smtp_error)[:160]}) — check the email password on Setup")
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        bits = [f"{to}: {code} {text(msg)[:120]}" for to, (code, msg) in e.recipients.items()]
+        return "the mail server would not deliver to " + "; ".join(bits)
+    if isinstance(e, smtplib.SMTPSenderRefused):
+        return (f"the mail server would not send from {text(e.sender)} "
+                f"({e.smtp_code} {text(e.smtp_error)[:160]})")
+    if isinstance(e, smtplib.SMTPResponseException):
+        return f"the mail server said {e.smtp_code} {text(e.smtp_error)[:200]}"
+    return f"could not reach the mail server: {type(e).__name__}: {e}"
 
 
 def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
@@ -710,12 +825,10 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
                          "Raise it on /setup → Daily orders if you really want more."}
 
     # --- the sending domain, as the handbook requires ------------------------
-    sender = (setting("SMTP_FROM") or user).strip()
-    domain = setting("OUTREACH_DOMAIN").strip().lower()
-    if domain and not sender.lower().endswith("@" + domain):
-        return {"ok": False,
-                "error": f"refusing to send: {sender} is not on the approved outreach "
-                         f"domain ({domain})"}
+    sender = sender_address()
+    wrong = domain_problem(sender)
+    if wrong:
+        return {"ok": False, "wrong_domain": True, "error": "refusing to send: " + wrong}
 
     subject, body = _split_subject(draft)
     msg = EmailMessage()
@@ -755,7 +868,7 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
             except Exception:
                 pass
     except Exception as e:
-        return {"ok": False, "error": f"SMTP refused the message: {e}"}
+        return {"ok": False, "error": smtp_said(e)}
 
     # It has gone. Record it before returning — a send we did not write down is
     # a send the cap cannot see and the Scanner cannot dedup against.

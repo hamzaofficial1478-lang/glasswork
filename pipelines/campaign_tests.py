@@ -75,8 +75,9 @@ class _Cabinet:
         mail.daily_cap = lambda: self.cap
         mail.sent_today = lambda con=None: len(self.sent)
         real_setting = self.real[5]
-        mail.setting = lambda k, d="": ("team@example.ae" if k in ("SMTP_FROM", "SMTP_USER")
-                                        else real_setting(k, d))
+        self.env = {"SMTP_HOST": "smtp.example.ae", "SMTP_USER": "team@example.ae",
+                    "SMTP_FROM": "team@example.ae", "OUTREACH_DOMAIN": ""}
+        mail.setting = lambda k, d="": (self.env[k] if k in self.env else real_setting(k, d))
         return self
 
     def __exit__(self, *a):
@@ -321,8 +322,87 @@ def test_the_agency_rewrite_never_makes_it_worse():
         check("  with his offer untouched", C.current()["offer"], OFFER)
 
 
+def test_a_mismatched_sending_domain_is_said_before_anything_is_queued():
+    """
+    "i approved the compaign and click on sent and it did no sent the mails
+     while when i tested on my own mail it sent me the mail"
+    """
+    print("\nA sending domain that does not match is said up front, with the fix:")
+    with _Cabinet() as cab:
+        ids = [_lead(f"Firm {i}", f"info@firm{i}.ae") for i in range(3)]
+        _approved()
+        cab.env["OUTREACH_DOMAIN"] = "mail.example.ae"      # what Setup told him to use
+        r = C.send(ids)
+        check("nothing is sent", (r["ok"], cab.sent), (False, []))
+        check("nothing is parked as 'approved'",
+              cab.sql("SELECT count(*) n FROM outreach_queue WHERE status='approved'")[0]["n"], 0)
+        check("it says which address and which domain",
+              "team@example.ae" in r["error"] and "mail.example.ae" in r["error"], True)
+        check("and offers the domain his mail really goes from", r["fix_domain"], "example.ae")
+        t = C.send_test("owner@example.ae")
+        check("the test rehearses the same rule — and says so",
+              (t["ok"], "leads would not get this either" in t["error"]), (False, True))
+
+        written = []
+        from providers import integrations
+        real_write = integrations.write_env
+        integrations.write_env = lambda values, path=None: (
+            written.append(values), cab.env.update(values)) and {"ok": True}
+        try:
+            check("his one click cannot set some other domain",
+                  C.use_sending_domain("evil.example")["ok"], False)
+            r = C.use_sending_domain("example.ae")
+        finally:
+            integrations.write_env = real_write
+        check("his one click saves the domain he already sends from",
+              written, [{"OUTREACH_DOMAIN": "example.ae"}])
+        check("and says so", r["ok"], True)
+        r = C.send(ids)
+        check("then the campaign goes", len(r["sent"]), 3)
+
+    print("\nThe setting is read the way a person types it:")
+    with _Cabinet() as cab:
+        for typed in ("example.ae", "https://www.example.ae/", "@example.ae", " Example.AE ",
+                      "www.example.ae"):
+            cab.env["OUTREACH_DOMAIN"] = typed
+            check(f"  {typed!r} matches team@example.ae", mail.domain_problem(), "")
+        cab.env["OUTREACH_DOMAIN"] = "example.ae"
+        cab.env["SMTP_FROM"] = "World Deal <team@mail.example.ae>"
+        check("  a sender on a subdomain of it, written with a name, is on it",
+              mail.domain_problem(), "")
+        cab.env["SMTP_FROM"] = "someone@gmail.com"
+        check("  another domain entirely is still refused",
+              "not on the approved outreach domain" in mail.domain_problem(), True)
+
+
+def test_a_refused_mail_says_why_and_can_be_tried_again():
+    print("\nA mail the server refuses says why, and can be tried again:")
+    with _Cabinet() as cab:
+        ids = [_lead(f"Firm {i}", f"info@firm{i}.ae") for i in range(2)]
+        _approved()
+        real = mail._smtp_send
+        mail._smtp_send = lambda lead, draft, **k: {
+            "ok": False, "error": "the mail server said 550 relay not permitted"}
+        try:
+            r = C.send(ids)
+        finally:
+            mail._smtp_send = real
+        check("nothing went", r["sent"], [])
+        rec = {x["id"]: x for x in C.recipients()}
+        check("the leads are not shown as 'waiting for the allowance'",
+              rec[ids[0]]["state"], "stuck")
+        check("they carry the server's own words",
+              "550 relay not permitted" in rec[ids[0]]["why"], True)
+        check("and the Mail room can list them", len(C.stuck()), 2)
+        r = C.retry()
+        check("Try again sends them once the fault is gone", len(r["sent"]), 2)
+        check("  and they read as written to", {x["state"] for x in C.recipients()}, {"sent"})
+
+
 def main():
     for t in (test_the_company_speaks,
+              test_a_mismatched_sending_domain_is_said_before_anything_is_queued,
+              test_a_refused_mail_says_why_and_can_be_tried_again,
               test_his_offer_word_for_word,
               test_he_approves_once_and_changes_mean_again,
               test_only_the_ticked_leads_get_it,

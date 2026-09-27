@@ -154,10 +154,45 @@ def test_suggested_and_confirmed_are_kept_apart():
         board.DB = real
 
 
+def test_a_dns_blip_is_not_a_missing_website():
+    """
+    "could not read https://worlddealtechnicalservices.com — refused: ... does
+     not resolve" — his own site, during a short drop on his connection.
+    """
+    print("\nA temporary DNS failure is asked again; a missing name is not:")
+    import socket
+    from . import competitors as K
+    real = (K.socket.getaddrinfo, K.time.sleep)
+    calls, waits = [], []
+    K.time.sleep = waits.append
+
+    def blip(host, port):
+        calls.append(host)
+        if len(calls) == 1:
+            raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+        return [(2, 1, 6, "", ("93.184.216.34", 0))]
+    K.socket.getaddrinfo = blip
+    try:
+        ok, why = K.host_verdict("worlddealtechnicalservices.com")
+        check("a blip on the line is asked again and passes", (ok, len(calls), waits), (True, 2, [2]))
+        calls.clear(); waits.clear()
+
+        def missing(host, port):
+            calls.append(host)
+            raise socket.gaierror(getattr(socket, "EAI_NONAME", -2), "Name or service not known")
+        K.socket.getaddrinfo = missing
+        ok, why = K.host_verdict("lapsed-business.ae")
+        check("a name that does not exist is asked once", (ok, len(calls), waits), (False, 1, []))
+        check("  and said plainly", "does not resolve" in why, True)
+    finally:
+        K.socket.getaddrinfo, K.time.sleep = real
+
+
 def main():
     test_the_setup_screen_can_add_and_remove_rivals()
     test_suggested_and_confirmed_are_kept_apart()
     test_a_rival_cannot_steer_our_http_client()
+    test_a_dns_blip_is_not_a_missing_website()
     _domain_tests()
     _parse_tests()
     _classify_tests()

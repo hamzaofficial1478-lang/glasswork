@@ -1265,10 +1265,10 @@ app.get("/api/review", async (_q, res) =>
 
 const REVIEW_ACTS = ["send", "discard", "publish", "reject_page", "rewrite", "discard_page",
   "campaign_create", "campaign_save", "campaign_approve", "campaign_retire",
-  "campaign_send", "campaign_test", "discard_old"];
+  "campaign_send", "campaign_test", "discard_old", "campaign_retry", "campaign_domain"];
 // The campaign's fields, as he typed them: short strings only, nothing nested.
 const CAMPAIGN_KEYS = ["offer", "offer_until", "focus", "to", "subject", "preheader",
-  "headline", "intro", "why_us", "cta", "phone", "whatsapp"];
+  "headline", "intro", "why_us", "cta", "phone", "whatsapp", "domain"];
 function campaignData(d) {
   const out = {};
   if (!d || typeof d !== "object") return out;
@@ -1280,7 +1280,7 @@ function campaignData(d) {
 // How long each may take: building reads his website for photographs, and
 // sending goes through his mail server one message at a time.
 const REVIEW_TIMEOUT = { send: 300000, campaign_send: 300000, campaign_create: 180000,
-                         campaign_test: 90000 };
+                         campaign_test: 90000, campaign_retry: 300000 };
 app.post("/api/review/act", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
@@ -1560,7 +1560,7 @@ app.get("/api/status", async (_q, res) => {
       hint: "Pick a long, private topic name and subscribe to it in the ntfy app." },
     { label: "Sending domain", optional: true, ok: has("OUTREACH_DOMAIN"),
       detail: has("OUTREACH_DOMAIN") ? e.OUTREACH_DOMAIN : "Not set — outreach stays off",
-      hint: "A subdomain you send cold email from." },
+      hint: "The domain of the address your mail is sent from — the part after the @." },
     { label: "Spend & outreach caps", optional: true, ok: has("DAILY_SPEND_CAP_USD") && has("OUTREACH_DAILY_CAP"),
       detail: (has("DAILY_SPEND_CAP_USD") && has("OUTREACH_DAILY_CAP"))
         ? `$${e.DAILY_SPEND_CAP_USD}/day spend, ${e.OUTREACH_DAILY_CAP} messages/day` : "Using safe defaults (15/day, 25/day)",

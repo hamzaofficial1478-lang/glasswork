@@ -238,6 +238,7 @@ details.old[open]>summary{color:var(--text)}
     <p class="lede">Every lead the Hunter has collected. Tick the ones to send to and press Send.
       A business already written to is never written to again, and Security looks at each one
       again as it goes.</p>
+    <div id="recWarn"></div>
     <div class="tools" id="recTools"></div>
     <div id="recList"></div>
     <h2>Already sent <small>the last twenty</small></h2>
@@ -416,11 +417,11 @@ function drawMails(m){
     ${m.approved.map(x=>`<tr><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td><td>${esc(x.subject)}</td>
       <td>${esc(x.note||'waiting for the next pass')}</td></tr>`).join('')}</table></div>` : '';
 
-  $('#mailRecent').innerHTML = m.recent.length ? `<div class="logwrap"><table class="log">
-    <tr><th>When</th><th>To</th><th>Subject</th><th>What happened</th></tr>
-    ${m.recent.map(x=>`<tr><td class="n">${esc(ago(x.at))}</td><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td>
-      <td>${esc(x.subject)}</td><td>${x.status==='sent'?'<span class="pill ok">sent</span>':'<span class="pill">not sent</span>'}
-      ${x.note&&x.status!=='sent'?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
+  const went = m.recent.filter(x=>x.status==='sent');
+  $('#mailRecent').innerHTML = went.length ? `<div class="logwrap"><table class="log">
+    <tr><th>When</th><th>To</th><th>Subject</th></tr>
+    ${went.map(x=>`<tr><td class="n">${esc(ago(x.at))}</td><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td>
+      <td>${esc(x.subject)}</td></tr>`).join('')}
     </table></div>` : `<div class="empty">Nothing sent yet.</div>`;
 }
 
@@ -598,6 +599,7 @@ async function testCampaign(btn){
   const j = await campAct('campaign_test', {to});
   toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
   btn.disabled = false; btn.textContent = 'Send me a test';
+  if(!j.ok) await load();
 }
 async function startOver(btn){
   if(!confirm('Start again from your website? The current wording is put away and a fresh campaign is built. Your offer is kept.')) return;
@@ -614,6 +616,7 @@ let REC_ALL = false;
 const REC_STATE = {
   ready: ['', 'ready'],
   going: ['ok', 'approved — goes with the next allowance'],
+  stuck: ['bad', 'approved, but not sent'],
   sent:  ['ok', 'written to already'],
 };
 function drawRecipients(m){
@@ -623,11 +626,35 @@ function drawRecipients(m){
   for(const id of [...RECPICK]) if(!live.has(id)) RECPICK.delete(id);
   const list = REC_ALL ? all : all.filter(r=>r.state!=='no');
   const c = m.campaign || {};
+  const pf = m.preflight || {ok: true, problems: []};
   const left = Math.max(0, (m.cap||0) - (m.sent_today||0));
-  const canSend = c.exists && c.status==='approved' && m.ready && DATA.sectors.Leads && RECPICK.size>0;
+  const canSend = c.exists && c.status==='approved' && m.ready && pf.ok && DATA.sectors.Leads && RECPICK.size>0;
   const why = !c.exists ? 'Build and approve the campaign first'
             : c.status!=='approved' ? 'Approve the campaign first'
-            : !m.ready ? 'Set up your email first' : '';
+            : !m.ready ? 'Set up your email first'
+            : !pf.ok ? 'Put the problem above right first' : '';
+
+  // WHY NOTHING WENT, where he will see it — above the button, before he
+  // presses it. "i approved the compaign and click on sent and it did no sent"
+  // — the reason was real and specific, and it was on no screen at all.
+  const stuck = all.filter(r=>r.state==='stuck');
+  const warn = [];
+  if(!pf.ok) warn.push(`<div class="notice amber" style="display:block">
+      <p style="margin:0 0 8px"><b>Mail cannot go out yet.</b></p>
+      ${(pf.problems||[]).map(x=>`<p style="margin:0 0 8px">${esc(x)}</p>`).join('')}
+      ${pf.fix_domain ? `<div class="btnrow"><button class="btn go" onclick="fixDomain('${escA(pf.fix_domain)}', this)">
+        Use ${esc(pf.fix_domain)} as my sending domain</button>
+        <a class="btn quiet" href="/setup" style="text-decoration:none">Or change it on Setup</a></div>` : ''}
+    </div>`);
+  const becauseAbove = !pf.ok && stuck.every(r=>/Outreach domain/.test(r.why||''));
+  if(stuck.length) warn.push(`<div class="notice" style="display:block;border-color:rgba(229,86,91,.5);background:var(--danger-dim)">
+      <p style="margin:0 0 6px"><b>${stuck.length} approved mail${stuck.length===1?' was':'s were'} not sent</b>
+        ${becauseAbove ? '— because of the problem above. Put it right, then press Try again now.'
+          : `— ${esc(stuck[0].why)}${new Set(stuck.map(r=>r.why)).size>1?' (the others say why under each lead)':''}`}</p>
+      <div class="btnrow"><button class="btn glass" ${pf.ok && DATA.sectors.Leads ? '' : 'disabled'}
+        onclick="retryStuck(this)">Try again now</button></div>
+    </div>`);
+  $('#recWarn').innerHTML = warn.join('');
   $('#recHead').textContent = all.length ? `${ready.length} ready · ${all.length} collected` : '';
   $('#recTools').innerHTML = all.length ? `
     <label><input type="checkbox" ${ready.length && ready.every(r=>RECPICK.has(r.id))?'checked':''}
@@ -649,7 +676,8 @@ function drawRecipients(m){
     const [tone, word] = REC_STATE[r.state] || ['', ''];
     const status = r.state==='no' ? esc(r.why || 'cannot be sent')
       : `<span class="pill ${tone}">${esc(word)}</span>` + (r.state==='ready' && r.old_draft
-          ? `<br><span style="font-size:11.5px">replaces its one-off draft</span>` : '');
+          ? `<br><span style="font-size:11.5px">replaces its one-off draft</span>` : '')
+      + (r.state==='stuck' ? `<br><span style="font-size:11.5px;color:var(--danger)" title="${escA(r.why)}">${esc((r.why||'').length>110 ? r.why.slice(0,107)+'…' : r.why)}</span>` : '');
     const pickable = r.state==='ready';
     return `<div class="lead${RECPICK.has(r.id)?' picked':''}${pickable?'':' off'}">
       ${pickable ? `<input type="checkbox" aria-label="Send to ${escA(r.company||r.email)}"
@@ -678,6 +706,20 @@ async function sendCampaign(btn){
   const j = await campAct('campaign_send', {}, ids);
   toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
   RECPICK.clear();
+  await load();
+}
+async function fixDomain(domain, btn){
+  if(!confirm(`Set your outreach sending domain to ${domain}?\n\nThat is the domain your email account `
+      + `already sends from. Cold mail will only ever go out from it.`)) return;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const j = await campAct('campaign_domain', {domain});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  await load();
+}
+async function retryStuck(btn){
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const j = await campAct('campaign_retry');
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
   await load();
 }
 async function discardOld(){

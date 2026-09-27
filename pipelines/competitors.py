@@ -113,6 +113,11 @@ def _now():
 # So: http and https only, public addresses only, and every redirect hop is
 # checked too — a perfectly ordinary rival URL is allowed to 302 to 127.0.0.1.
 
+# The resolver's "temporary failure" codes: EAI_AGAIN on Linux and macOS, and
+# WSATRY_AGAIN (11002) on Windows, where he runs it.
+_DNS_TRY_AGAIN = {getattr(socket, "EAI_AGAIN", -3), 11002}
+
+
 def host_verdict(host: str) -> tuple:
     """
     (ok, why) for one hostname. Two refusals, and they are NOT the same thing.
@@ -123,9 +128,23 @@ def host_verdict(host: str) -> tuple:
     thing to meet while harvesting leads, and it is worth saying plainly rather
     than dressing up as a security refusal.
     """
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception:
+    infos = None
+    for wait in (0, 2, 5):
+        if wait:
+            time.sleep(wait)
+        try:
+            infos = socket.getaddrinfo(host, None)
+            break
+        except socket.gaierror as e:
+            # "Try again" is the resolver saying the line dropped, not that
+            # the name does not exist — his own site was once reported as not
+            # existing during a thirty-second blip on his connection. A name
+            # that genuinely does not exist is not asked about three times.
+            if e.errno not in _DNS_TRY_AGAIN:
+                break
+        except Exception:
+            break
+    if infos is None:
         return False, f"{host} does not resolve — no such host, or DNS is down"
     if not infos:
         return False, f"{host} does not resolve to anything"
