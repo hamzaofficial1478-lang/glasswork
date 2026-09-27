@@ -295,11 +295,27 @@ def _day_start():
 ABANDONED_AFTER = 1800
 
 
-def reap_abandoned(now=None):
-    """Close queue rows whose waiter is long gone. Returns how many."""
+def reap_abandoned(now=None, wait=30):
+    """
+    Close queue rows whose waiter is long gone. Returns how many.
+
+    Looks before it writes. The office calls this on every refresh, and a
+    write has to queue behind whatever a day run is writing — so a refresh
+    that only needed to read sat on "Loading…" until the run let go. Nothing
+    to reap is now a pure read. With something to reap, `wait` caps how long
+    it will queue for the pen; the office passes a fraction of a second and
+    simply leaves the corpse for the next refresh if the cabinet is busy.
+    """
     now = now or _now()
     try:
         with _conn() as c:
+            n = c.execute(
+                "SELECT COUNT(*) FROM shelf_queue"
+                " WHERE status='waiting' AND enqueued_at < ?",
+                (now - ABANDONED_AFTER,)).fetchone()[0]
+            if not n:
+                return 0
+            c.execute(f"PRAGMA busy_timeout={int(max(0, wait) * 1000)};")
             cur = c.execute(
                 "UPDATE shelf_queue SET status='abandoned'"
                 " WHERE status='waiting' AND enqueued_at < ?",
@@ -341,7 +357,7 @@ def shelf_state(shelf_names=None, recent=5):
             names.add(r["resource"].split("shelf:", 1)[1])
 
         out = {}
-        reap_abandoned(now)
+        reap_abandoned(now, wait=0.3)
         for shelf in sorted(names):
             _lk = _rows("SELECT holder,acquired_at,expires_at FROM locks WHERE resource=?",
                         (_resource(shelf),))
@@ -356,7 +372,8 @@ def shelf_state(shelf_names=None, recent=5):
                  "data_class": q["data_class"], "waited_s": now - (q["enqueued_at"] or now)}
                 for q in _rows(
                     "SELECT * FROM shelf_queue WHERE shelf=? AND status='waiting'"
-                    " ORDER BY enqueued_at", (shelf,))
+                    " AND enqueued_at >= ? ORDER BY enqueued_at",
+                    (shelf, now - ABANDONED_AFTER))
             ]
             _sp = _rows("SELECT COALESCE(SUM(usd_cost),0) AS s FROM borrows"
                         " WHERE shelf=? AND granted_at>=?", (shelf, day0))

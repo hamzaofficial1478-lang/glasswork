@@ -35,6 +35,7 @@ The rule: one line per DECISION or DELIVERY, not one line per row written.
 """
 import argparse
 import json
+import re
 import sqlite3
 import time
 
@@ -324,7 +325,34 @@ def since(ts=None, limit=60) -> list:
     for e in ev:
         e["ago"] = _ago(now - e["at"])
         e["hhmm"] = time.strftime("%H:%M", time.localtime(e["at"])) if e["at"] else ""
+        door = _door(e)
+        if door:
+            e["door"], e["door_name"] = door
     return ev[:max(1, int(limit))]
+
+
+# "clicked on the mails that was written ... did not redirected to mail room"
+#
+# A line about mail he can read, or a post he can read, is a line he will
+# click. It now carries the room the thing is waiting in — only when the line
+# is about the thing itself, not about sectors talking or a call being scored.
+_MAIL_WORDS = re.compile(r"\b(e?mails?|drafts?|auditor held|sent to)\b", re.I)
+_POST_WORDS = re.compile(r"\b(wrote|written|drafted|drafts?|held|published|rewr\w+|"
+                         r"in_review|awaiting_review|blocked_on_\w+|posts?|blogs?)\b"
+                         r"|^finished: write", re.I)
+_TALK = ("asked ", "answered ", "a question", "logged a call", "scored ", "proposed",
+         "MD ", "the owner's order", "took the ", "put the ", "queued for")
+
+
+def _door(e):
+    what, who = (e.get("what") or ""), (e.get("who") or "")
+    if what.startswith(_TALK):
+        return None
+    if who.startswith("leads-outreach") and _MAIL_WORDS.search(what):
+        return "/mail", "Mail room"
+    if who.startswith("content-write") and _POST_WORDS.search(what):
+        return "/posts", "Posts room"
+    return None
 
 
 def read_mark(what="activity") -> int:

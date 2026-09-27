@@ -222,8 +222,37 @@ def test_nothing_picked_is_not_an_action():
         check("an unknown action is refused", review.act("delete_everything", [1])["ok"], False)
 
 
+def test_activity_lines_open_the_room():
+    print("\nA line in Activity about mail or a post opens the room it is in:")
+    from . import activity
+    with _Cabinet() as cab:
+        now = int(time.time())
+        for agent, note in (("leads-outreach", "wrote 3 mail(s): Al Noor Cafeteria, …"),
+                            ("leads-outreach", "nothing sent — the Auditor held all 7 draft(s)"),
+                            ("leads-outreach", "Nothing open on the Leads board."),
+                            ("leads-hunter", "collected 12 new leads")):
+            cab.sql("INSERT INTO agent_runs(agent,status,started_at,ended_at,note)"
+                    " VALUES(?,?,?,?,?)", (agent, "ok", now - 60, now - 30, note))
+        _written_page(cab)
+        board.post_request("Content", "SEO", "Guest-post pieces worth writing", "")
+        doors = {e["what"]: e.get("door") for e in activity.since(now - 3600, limit=100)}
+        check("the mail it wrote opens the Mail room",
+              doors.get("wrote 3 mail(s): Al Noor Cafeteria, …"), "/mail")
+        check("so does the mail the Auditor held",
+              doors.get("nothing sent — the Auditor held all 7 draft(s)"), "/mail")
+        check("the page it wrote opens the Posts room",
+              doors.get("drafted: Pergola in Dubai Marina"), "/posts")
+        check("a line with nothing to read opens nothing",
+              [doors.get("Nothing open on the Leads board."), doors.get("collected 12 new leads")],
+              [None, None])
+        check("nor does one sector asking another",
+              [d for w, d in doors.items() if w.startswith(("asked", "a question"))
+               and d], [])
+
+
 def main():
-    for t in (test_every_mail_is_there_whole,
+    for t in (test_activity_lines_open_the_room,
+              test_every_mail_is_there_whole,
               test_the_mail_room_lists_every_lead_and_where_it_stands,
               test_write_only_for_the_ticked_leads,
               test_send_refuses_without_his_email,

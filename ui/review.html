@@ -282,14 +282,24 @@ function toast(text, kind){
   clearTimeout(toast._t); toast._t = setTimeout(()=>{ t.className='toast'; }, 9000);
 }
 
+// A slow answer says so, and a lost one gives up and tries again on the next
+// tick — the room is never left blank with no word as to why.
 async function load(){
   if(WORKING) return;
+  const ctl = window.AbortController ? new AbortController() : null;
+  const slow = setTimeout(()=>{ if(!DATA) toast('Still reading — the agency is busy mid-run. This fills in on its own.'); }, 8000);
+  const cut = ctl ? setTimeout(()=>ctl.abort(), 60000) : 0;
   try{
-    const r = await fetch('/api/review');
+    const r = await fetch('/api/review', ctl ? {signal: ctl.signal} : {});
     const j = await r.json();
     if(!j.ok){ toast(j.error || 'Could not read what is waiting.', 'bad'); return; }
     DATA = j;
-  }catch(e){ toast('Could not reach the office server — is it still running?', 'bad'); return; }
+  }catch(e){
+    toast(e && e.name === 'AbortError'
+      ? 'The office took too long to answer. It will try again on its own.'
+      : 'Could not reach the office server — is it still running?', 'bad');
+    return;
+  }finally{ clearTimeout(slow); clearTimeout(cut); }
   draw();
 }
 

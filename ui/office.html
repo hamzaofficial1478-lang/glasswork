@@ -458,6 +458,10 @@ header>*{flex:none}
 .act .bd b{font-weight:500;display:block;word-break:break-word}
 .act .bd small{color:var(--muted);font-size:10.5px;font-family:'IBM Plex Mono',monospace}
 .act .bd em{font-style:normal;color:var(--faint);font-size:10px}
+.act.go{cursor:pointer}
+.act.go:hover .bd b{color:var(--glass)}
+.act .actdoor{display:inline-block;margin-top:3px;font-size:10.5px;color:var(--glass);text-decoration:none}
+.act .actdoor:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
 .act.live .bd b{color:var(--glass)}
 .ticker{position:fixed;left:0;right:0;bottom:0;height:34px;z-index:45;display:none;align-items:center;
         gap:14px;padding:0 22px;background:rgba(19,29,35,.94);backdrop-filter:blur(8px);
@@ -1336,8 +1340,14 @@ function renderActivity(){
     return;
   }
   const VERBS=['pushed','got','grabbed','delivered','errored'];
+  // A line about mail or a post opens the room it is waiting in. Plain links
+  // to pages the server hands out without asking Python anything, so they
+  // open at once even while the agency is mid-run.
+  const door = e => (e.door==='/mail'||e.door==='/posts') ? e.door : '';
   const row = e =>
-    `<div class="act ${oneOf(e.verb,VERBS)} ${e.level==='live'?'live':''}">`
+    `<div class="act ${oneOf(e.verb,VERBS)} ${e.level==='live'?'live':''}${door(e)?' go':''}"`
+    + (door(e) ? ` onclick="if(!event.target.closest('a'))location.href='${door(e)}'"` : '')
+    + `>`
     + `<span class="tm">${esc(e.hhmm)}</span>`
     + `<span class="vb">${esc(e.verb)}</span>`
     + `<span class="bd"><b>${esc(e.what)}</b>`
@@ -1345,6 +1355,7 @@ function renderActivity(){
     // just the room's own name repeated back
     + `<small>${esc(e.room||'—')}${e.who && e.who.toLowerCase()!==String(e.room||'').toLowerCase() ? ' · '+esc(e.who) : ''}</small>`
     + (e.detail?` <em>${esc(e.detail)}</em>`:'')
+    + (door(e) ? `<br><a class="actdoor" href="${door(e)}">open the ${esc(e.door_name||'room')} &rarr;</a>` : '')
     + `</span></div>`;
   const fresh = cut ? ev.filter(e=>e.at>cut) : ev;
   const older = cut ? ev.filter(e=>e.at<=cut) : [];

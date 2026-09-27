@@ -15,6 +15,24 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const app = express();
+
+// A route that waits on Python is async; an error thrown inside one would
+// otherwise never reach Express — the request would hang, or the server stop.
+// Each async handler is given its error path back.
+for (const m of ["get", "post", "put", "delete"]) {
+  const orig = app[m].bind(app);
+  app[m] = (route, ...handlers) => {
+    if (!handlers.length) return orig(route);          // app.get("setting")
+    return orig(route, ...handlers.map((h) =>
+      (typeof h === "function" && h.constructor && h.constructor.name === "AsyncFunction")
+        ? (req, res, next) => h(req, res, next).catch((e) => {
+            if (!res.headersSent) res.status(500).json({ ok: false, error: String(e && e.message || e) });
+            else next(e);
+          })
+        : h));
+  };
+}
+process.on("unhandledRejection", (e) => console.error("unhandled:", e && e.message || e));
 app.use(express.json());
 // NOTE: express.static is mounted AFTER the front-door middleware below, not
 // here. Mounted first it serves ui/setup.html at /setup.html to anybody, gate
@@ -91,7 +109,7 @@ app.use((req, res, next) => {
   return res.redirect("/login");
 });
 
-app.get("/login", (_q, res) => {
+app.get("/login", async (_q, res) => {
   res.type("html").send(`<!doctype html><meta charset="utf-8">
 <title>World Deal Technical Agency</title>
 <style>
@@ -182,7 +200,7 @@ app.post("/api/password", express.json(), (req, res) => {
     note: "Set. You have been signed out — sign in with it now." });
 });
 
-app.post("/api/logout", (req, res) => {
+app.post("/api/logout", async (req, res) => {
   SESSIONS.delete(cookieToken(req));
   SETUP_TICKETS.delete(setupToken(req));
   res.json({ ok: true });
@@ -304,14 +322,14 @@ app.post("/api/setup/unlock", express.urlencoded({ extended: false }), (req, res
 // Past the gate, and only past it.
 app.use(express.static(path.join(__dirname, "ui")));
 
-app.get("/", (_q, r) => r.sendFile(path.join(__dirname, "ui", "office.html")));
-app.get("/control", (_q, r) => r.sendFile(path.join(__dirname, "ui", "agency.html")));
-app.get("/setup", (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
-app.get("/status", (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
-app.get("/review", (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
+app.get("/", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "office.html")));
+app.get("/control", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "agency.html")));
+app.get("/setup", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
+app.get("/status", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
+app.get("/review", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
 // The two rooms, one page: /mail opens on the mail, /posts on the written pages.
-app.get("/mail", (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
-app.get("/posts", (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
+app.get("/mail", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
+app.get("/posts", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
 
 /* IS THE RUNNING PROGRAM OLDER THAN THE PAGE READING IT?
    The screens are files on disk, re-read on every refresh. This file is read
@@ -336,7 +354,7 @@ const API_CAPABILITIES = [
   "stuck", "release",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
-app.get("/api/ping", (_q, res) => {
+app.get("/api/ping", async (_q, res) => {
   res.json({ ok: true, api: API_CAPABILITIES, started: SERVER_STARTED });
 });
 
@@ -346,15 +364,15 @@ app.get("/api/ping", (_q, res) => {
    the SMTP user and the model routing — and /api/settings is behind the setup
    password now. A front-of-house screen should not be asking for the key
    cupboard to learn what the firm is called, so it asks for exactly this. */
-app.get("/api/brand", (_q, res) => {
+app.get("/api/brand", async (_q, res) => {
   res.json({ ok: true, agencyName: (readEnv().AGENCY_NAME || "").trim(),
-             website: siteLabel() });
+             website: await siteLabel() });
 });
 
 // STATE — the Control Room's snapshot. Reads the filing cabinet via Python
 // (coordination/state.py), then merges in the .env-derived connections here.
-app.get("/api/state", (_q, res) => {
-  const st = pyState();
+app.get("/api/state", async (_q, res) => {
+  const st = await pyState();
   if (!st || !st.ok) return res.json({ ok: false, error: (st && st.error) || "state unavailable" });
   st.connections = readConnections();
   res.json(st);
@@ -367,14 +385,14 @@ app.get("/api/state", (_q, res) => {
 // which assembles that desk's real record from the cabinet and asks the sector's
 // routed brain to explain it. Facts come from rows; the model only does the
 // wording. With no brain configured it still answers, from the record alone.
-app.post("/api/chat", (req, res) => {
+app.post("/api/chat", async (req, res) => {
   const b = req.body || {};
   const agent = String(b.agent || "").trim();
   const message = String(b.message || "").slice(0, 4000);
   if (!agent) return res.status(400).json({ ok: false, error: "Which agent?" });
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
-  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.agent_chat"], {
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.agent_chat"], {
     cwd: __dirname, input: JSON.stringify({ agent, message }),
     timeout: 180000, maxBuffer: 8 * 1024 * 1024,
   });
@@ -509,6 +527,83 @@ function resolvePython() {
 const NO_PY = "Python 3 wasn't found on this computer. Install Python 3 (python.org) and " +
   "restart the server, or set PYTHON_BIN to the full path of your python.exe / python3.";
 
+// ---- PYTHON WITHOUT FREEZING THE OFFICE ------------------------------------
+// "clicked on the mails that was written it just keep loading ... and at
+// sudden everything get stuck. no matter in which section i am doing anything
+// the work in progress should not get stop"
+//
+// Every Python call here used to be spawnSync, which stops the whole server
+// until Python finishes. One slow answer — "Check everything" calling each
+// model, a Claude team test, mail going out, the clear-up, or any call waiting
+// on the filing cabinet while a day run writes to it — and every other screen
+// waited behind it: the office showed "Loading…", the Mail room never opened.
+//
+// spawnAsync has the same shape as spawnSync (same options, same result) and
+// never blocks: the server keeps answering every other request while Python
+// works. At most MAX_PY run at once, the rest queue, so a burst of polls
+// cannot swamp the laptop; and identical read calls already in flight are
+// shared (see pyModule) rather than started twice.
+const MAX_PY = 8;
+let PY_RUNNING = 0;
+const PY_WAITING = [];
+function _pySlot() {
+  if (PY_RUNNING < MAX_PY) { PY_RUNNING++; return Promise.resolve(); }
+  return new Promise((resolve) => PY_WAITING.push(resolve));
+}
+function _pyFree() {
+  const next = PY_WAITING.shift();
+  if (next) next(); else PY_RUNNING = Math.max(0, PY_RUNNING - 1);
+}
+async function spawnAsync(cmd, args, opts) {
+  opts = opts || {};
+  await _pySlot();
+  return new Promise((resolve) => {
+    let child, done = false, timer = null;
+    const out = [], err = [];
+    let size = 0;
+    const cap = opts.maxBuffer || 8 * 1024 * 1024;
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      _pyFree();
+      resolve(r);
+    };
+    try {
+      child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, windowsHide: true });
+    } catch (e) {
+      return finish({ error: e, status: null, stdout: "", stderr: "" });
+    }
+    child.on("error", (e) => finish({ error: e, status: null,
+      stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() }));
+    child.stdout.on("data", (d) => { size += d.length; if (size <= cap) out.push(d); });
+    child.stderr.on("data", (d) => { if (err.length < 200) err.push(d); });
+    child.on("close", (code) => finish({ error: null, status: code,
+      stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() }));
+    if (opts.timeout) {
+      timer = setTimeout(() => {
+        try { child.kill(); } catch (_) {}
+        finish({ error: new Error(`took longer than ${Math.round(opts.timeout / 1000)}s and was stopped`),
+                 status: null, stdout: Buffer.concat(out).toString(),
+                 stderr: Buffer.concat(err).toString() });
+      }, opts.timeout);
+    }
+    try {
+      if (opts.input !== undefined) child.stdin.end(opts.input); else child.stdin.end();
+    } catch (_) {}
+  });
+}
+
+// Identical read calls already running are shared, not started again: the
+// office and the Mail room poll, and a slow answer must not stack up copies.
+const PY_INFLIGHT = new Map();
+function shared(key, make) {
+  if (PY_INFLIGHT.has(key)) return PY_INFLIGHT.get(key);
+  const p = make().finally(() => PY_INFLIGHT.delete(key));
+  PY_INFLIGHT.set(key, p);
+  return p;
+}
+
 // APPLY THE SCHEMA ON EVERY BOOT, not only when the cabinet looks missing.
 //
 // This used to skip the whole thing when dbBuilt() said yes — and dbBuilt() is
@@ -523,7 +618,7 @@ const NO_PY = "Python 3 wasn't found on this computer. Install Python 3 (python.
 // schema.sql is CREATE ... IF NOT EXISTS throughout, so running it every time
 // costs a few milliseconds and closes the hole permanently. Python's own
 // board._migrate does the same on its side; either route now heals a cabinet.
-function ensureDb() {
+function ensureDbSync() {
   const py = resolvePython();
   if (!py) return { built: dbBuilt(), ran: false, error: NO_PY };
   try {
@@ -536,11 +631,25 @@ function ensureDb() {
   }
 }
 
+// The same, without holding the server up — for use while it is serving.
+async function ensureDb() {
+  const py = resolvePython();
+  if (!py) return { built: dbBuilt(), ran: false, error: NO_PY };
+  try {
+    const r = await spawnAsync(py.cmd, [...py.prefix, "coordination/init_db.py"],
+                               { cwd: __dirname, timeout: 20000 });
+    return { built: dbBuilt(), ran: true,
+             error: r.status === 0 ? null : String(r.stderr || "") };
+  } catch (e) {
+    return { built: dbBuilt(), ran: true, error: e.message };
+  }
+}
+
 // shell into the Python provider module (the single code path for provider ops)
-function pyProvider(command, payload, timeoutMs) {
+async function pyProvider(command, payload, timeoutMs) {
   const py = resolvePython();
   if (!py) return { ok: false, error: NO_PY };
-  const r = spawnSync(py.cmd, [...py.prefix, "-m", "providers.api", command], {
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "providers.api", command], {
     cwd: __dirname, input: JSON.stringify(payload || {}),
     timeout: timeoutMs || 300000, maxBuffer: 8 * 1024 * 1024,
   });
@@ -555,9 +664,13 @@ function pyProvider(command, payload, timeoutMs) {
 // never a shell string, so an owner typing a quote into their daily orders
 // cannot turn into a command.
 function pyModule(mod, args, timeoutMs) {
+  return shared("m:" + mod + ":" + JSON.stringify(args || []),
+                () => _pyModule(mod, args, timeoutMs));
+}
+async function _pyModule(mod, args, timeoutMs) {
   const py = resolvePython();
   if (!py) return { ok: false, error: NO_PY };
-  const r = spawnSync(py.cmd, [...py.prefix, "-m", mod, ...(args || [])], {
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", mod, ...(args || [])], {
     cwd: __dirname, timeout: timeoutMs || 120000, maxBuffer: 8 * 1024 * 1024,
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
@@ -569,9 +682,12 @@ function pyModule(mod, args, timeoutMs) {
 
 // shell into the state reader (same single code path — the server reads no DB itself)
 function pyState() {
+  return shared("state", _pyState);
+}
+async function _pyState() {
   const py = resolvePython();
   if (!py) return { ok: false, error: NO_PY };
-  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.state"], {
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.state"], {
     cwd: __dirname, timeout: 30000, maxBuffer: 8 * 1024 * 1024,
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
@@ -591,8 +707,8 @@ function pyState() {
 //
 // Falls back to the raw .env values if Python cannot be reached, so the header
 // degrades to the real address rather than to somebody else's business.
-function siteLabel() {
-  const out = pyModule("coordination.site", ["--json"], 15000);
+async function siteLabel() {
+  const out = await pyModule("coordination.site", ["--json"], 15000);
   if (out && out.ok) return {
     siteName: out.siteName, siteHost: out.siteHost, siteInitials: out.siteInitials,
     siteSource: out.siteSource, siteConfigured: out.siteConfigured,
@@ -625,7 +741,7 @@ function readConnections() {
 }
 
 // ---- website (its own Save button) -----------------------------------------
-app.post("/api/website", (req, res) => {
+app.post("/api/website", async (req, res) => {
   try {
     const b = req.body || {};
     const cur = readEnv();
@@ -682,7 +798,7 @@ app.post("/api/website", (req, res) => {
       : conn.replace(/\s*$/, "\n") + siteLine + "\n";
     fs.writeFileSync(connPath, conn);
 
-    const db = ensureDb();
+    const db = await ensureDb();
     return res.json({ ok: true, mode, siteUrl, siteName,
                       database: db.built ? "ready" : "not built" });
   } catch (e) {
@@ -691,7 +807,7 @@ app.post("/api/website", (req, res) => {
 });
 
 // ---- optional extras (its own Save button; blank fields are left untouched) --
-app.post("/api/optional", (req, res) => {
+app.post("/api/optional", async (req, res) => {
   try {
     const b = req.body || {};
     const cur = readEnv();
@@ -744,7 +860,7 @@ app.post("/api/optional", (req, res) => {
 });
 
 // ---- external integrations (each saves on its own; secrets kept on blank) ---
-app.post("/api/integration", (req, res) => {
+app.post("/api/integration", async (req, res) => {
   try {
     const b = req.body || {};
     const group = String(b.group || "");
@@ -786,36 +902,36 @@ app.post("/api/integration", (req, res) => {
 // Every sector's brain is a Claude model (providers/claude_team.py). One row
 // saves on its own; the test makes one tiny real call per model, so it gets
 // the long timeout — Opus can take a while to say "OK" on a cold start.
-app.get("/api/team", (_q, res) => res.json(pyProvider("team", {})));
-app.post("/api/team/set", (req, res) => res.json(pyProvider("team_set", req.body)));
-app.post("/api/team/test", (req, res) => res.json(pyProvider("team_test", req.body, 600000)));
-app.post("/api/team/forget", (req, res) => res.json(pyProvider("team_forget", {})));
+app.get("/api/team", async (_q, res) => res.json(await pyProvider("team", {})));
+app.post("/api/team/set", async (req, res) => res.json(await pyProvider("team_set", req.body)));
+app.post("/api/team/test", async (req, res) => res.json(await pyProvider("team_test", req.body, 600000)));
+app.post("/api/team/forget", async (req, res) => res.json(await pyProvider("team_forget", {})));
 // The shelf's saved tools (keys masked) — the Setup page's shelf section reads it.
-app.get("/api/providers", (_q, res) => res.json(pyProvider("view", {})));
+app.get("/api/providers", async (_q, res) => res.json(await pyProvider("view", {})));
 
 // ---- the shelf (shared API cabinet) ----------------------------------------
 // Tool APIs (SEO data, stock graphics, email, crawler…) are shelf items; the
 // shelf board shows who holds each shelf, who's queued, and today's spend.
-app.post("/api/providers/tool", (req, res) => res.json(pyProvider("save_tool", req.body)));
-app.post("/api/providers/tool/delete", (req, res) => res.json(pyProvider("delete_tool", req.body)));
-app.post("/api/providers/tool/test", (req, res) => res.json(pyProvider("test_tool", req.body)));
-app.get("/api/shelves", (_q, res) => res.json(pyProvider("shelves", {})));
+app.post("/api/providers/tool", async (req, res) => res.json(await pyProvider("save_tool", req.body)));
+app.post("/api/providers/tool/delete", async (req, res) => res.json(await pyProvider("delete_tool", req.body)));
+app.post("/api/providers/tool/test", async (req, res) => res.json(await pyProvider("test_tool", req.body)));
+app.get("/api/shelves", async (_q, res) => res.json(await pyProvider("shelves", {})));
 // How much of each third-party allowance is gone. Counts are facts; the money
 // column is the owner's own rate from .env, never a quote from the provider.
-app.get("/api/usage", (_q, res) =>
-  res.json(pyModule("coordination.usage", ["--json"], 20000)));
+app.get("/api/usage", async (_q, res) =>
+  res.json(await pyModule("coordination.usage", ["--json"], 20000)));
 // What would reach the owner's phone right now, and what would not. Reads only
 // — the whole point is that he can see the list WITHOUT being sent it.
-app.get("/api/notify/preview", (_q, res) =>
-  res.json(pyModule("coordination.notify", ["--json"], 25000)));
+app.get("/api/notify/preview", async (_q, res) =>
+  res.json(await pyModule("coordination.notify", ["--json"], 25000)));
 
 // One sector in full: its score with the reasoning behind it, what it actually
 // produced, its tasks, its runs, and the requests either way. This is what a
 // room opens into when it is clicked — the owner asked to be able to read what
 // a sector made, not just how many rows it made.
-app.get("/api/sector/:key", (req, res) => {
+app.get("/api/sector/:key", async (req, res) => {
   const key = String(req.params.key || "").replace(/[^A-Za-z]/g, "").slice(0, 20);
-  res.json(pyModule("coordination.state", ["--sector", key], 25000));
+  res.json(await pyModule("coordination.state", ["--sector", key], 25000));
 });
 
 // ACTIVITY, with an unread count. `since` is the timestamp the browser last
@@ -827,19 +943,19 @@ app.get("/api/sector/:key", (req, res) => {
 // two different marks and clearing one left the other showing the same number.
 // `since` is still accepted for a caller asking a hypothetical; left off, the
 // stored mark is used, which is what both screens now do.
-app.get("/api/activity", (req, res) => {
+app.get("/api/activity", async (req, res) => {
   const since = parseInt(req.query.since, 10);
   const args = ["--json"];
   if (Number.isFinite(since) && since > 0) args.push("--since", String(since));
-  res.json(pyModule("coordination.activity", args, 25000));
+  res.json(await pyModule("coordination.activity", args, 25000));
 });
 
 // ---- the leads behind the number ---------------------------------------------
 // "Leads today: 0" with nothing behind it is a score, not a tool. This is who
 // they are, where they came from, and what is holding each one up.
-app.get("/api/leads", (req, res) => {
+app.get("/api/leads", async (req, res) => {
   const scope = req.query.scope === "all" ? "all" : "today";
-  res.json(pyModule("coordination.leads_view", ["--json", "--scope", scope], 25000));
+  res.json(await pyModule("coordination.leads_view", ["--json", "--scope", scope], 25000));
 });
 
 // ---- the owner's per-sector on/off switches ----------------------------------
@@ -848,44 +964,44 @@ app.get("/api/leads", (req, res) => {
 // the board can be claimed by it, and its step in the day is skipped and says
 // so. Enforced in coordination/board.py, not here, so a switch means the same
 // thing whether it was flipped on this screen or from a terminal.
-app.get("/api/sectors", (_q, res) => {
-  res.json(pyModule("coordination.state", ["--switches"], 25000));
+app.get("/api/sectors", async (_q, res) => {
+  res.json(await pyModule("coordination.state", ["--switches"], 25000));
 });
 
-app.post("/api/sectors", (req, res) => {
+app.post("/api/sectors", async (req, res) => {
   const b = req.body || {};
   const sector = String(b.sector || "").replace(/[^A-Za-z]/g, "").slice(0, 20);
   if (!sector) return res.status(400).json({ ok: false, error: "Which sector?" });
   const on = b.enabled === true || b.enabled === "true" || b.enabled === 1;
   const args = ["--switch", `${sector}=${on ? "on" : "off"}`];
   if (typeof b.note === "string" && b.note.trim()) args.push(b.note.trim().slice(0, 300));
-  res.json(pyModule("coordination.state", args, 25000));
+  res.json(await pyModule("coordination.state", args, 25000));
 });
 
 // ---- what the sectors have actually said to each other -----------------------
 // The office floor used to animate eight hardcoded phrases at random, which
 // looked like the agency working on a morning when nothing had run. Both the
 // beams and the readable panel come from here now — the real request board.
-app.get("/api/comms", (req, res) => {
+app.get("/api/comms", async (req, res) => {
   const n = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 40));
-  res.json(pyModule("coordination.comms", ["--json", "--limit", String(n)], 25000));
+  res.json(await pyModule("coordination.comms", ["--json", "--limit", String(n)], 25000));
 });
 
 // ---- faults in the agency itself --------------------------------------------
 // Not the website: the AGENTS. A stall, a crash, a claimed task nobody
 // finished, a sector ignoring another sector. Read-only here — the scan that
 // files and routes them runs as a step of the day, not off a page load.
-app.get("/api/faults", (req, res) => {
+app.get("/api/faults", async (req, res) => {
   const args = ["--json", "--list"];
   if (req.query.sector) args.push("--sector", String(req.query.sector).slice(0, 40));
-  res.json(pyModule("coordination.faults", args, 25000));
+  res.json(await pyModule("coordination.faults", args, 25000));
 });
 
 // Opening the panel IS reading it. The screen posts the timestamp of the newest
 // line it actually showed him — not its own clock, which can be wrong — and the
 // mark only ever moves forward, so a second tab holding an older read cannot
 // resurrect a count he has just cleared.
-app.post("/api/activity/seen", (req, res) => {
+app.post("/api/activity/seen", async (req, res) => {
   const b = req.body || {};
   const to = parseInt(b.seen_to, 10);
   // Three things the buttons on the panel can ask for. `clear` HIDES what has
@@ -894,19 +1010,19 @@ app.post("/api/activity/seen", (req, res) => {
   const flag = b.showAll ? "--show-all" : b.clear ? "--clear" : "--mark-read";
   const args = ["--json", flag];
   if (flag !== "--show-all" && Number.isFinite(to) && to > 0) args.push(String(to));
-  res.json(pyModule("coordination.activity", args, 25000));
+  res.json(await pyModule("coordination.activity", args, 25000));
 });
-app.post("/api/shelves/resolve", (req, res) => res.json(pyProvider("resolve_shelf", req.body)));
+app.post("/api/shelves/resolve", async (req, res) => res.json(await pyProvider("resolve_shelf", req.body)));
 
 // ---- channels + the whole-system sweep -------------------------------------
 // Both prove credentials without sending anything. The one exception is
 // notify:true, which posts to the owner's own ntfy topic and nowhere else.
-app.post("/api/integrations/test", (req, res) =>
-  res.json(pyProvider("test_integration", req.body)));
+app.post("/api/integrations/test", async (req, res) =>
+  res.json(await pyProvider("test_integration", req.body)));
 // A full sweep calls every model and every shelf API, so it gets its own,
 // longer budget than an ordinary provider command.
-app.post("/api/preflight", (req, res) =>
-  res.json(pyProvider("preflight", req.body, 900000)));
+app.post("/api/preflight", async (req, res) =>
+  res.json(await pyProvider("preflight", req.body, 900000)));
 
 // ---- THE RUN BUTTON ---------------------------------------------------------
 // Three endpoints, one for each beat of "check, ask me, then work".
@@ -919,14 +1035,14 @@ app.post("/api/preflight", (req, res) =>
 //                    Everything it does lands in the cabinet, which is what
 //                    /api/run/status and the office floor read.
 //   /api/run/status  where that process has got to.
-app.post("/api/run/check", (req, res) => {
+app.post("/api/run/check", async (req, res) => {
   const quick = !!(req.body && req.body.quick);
-  res.json(pyModule("pipelines.day_run",
+  res.json(await pyModule("pipelines.day_run",
     ["--check", "--json", ...(quick ? ["--quick"] : [])], 900000));
 });
 
-app.get("/api/run/status", (_q, res) =>
-  res.json(pyModule("pipelines.day_run", ["--status", "--json"], 60000)));
+app.get("/api/run/status", async (_q, res) =>
+  res.json(await pyModule("pipelines.day_run", ["--status", "--json"], 60000)));
 
 // ---- STOP ------------------------------------------------------------------
 // "there is no any stop button that makes the agents or overseer to understand
@@ -942,13 +1058,13 @@ app.get("/api/run/status", (_q, res) =>
 // The budget is the grace period plus room to kill and tidy up. It blocks on
 // purpose: he pressed Stop and is owed an answer about whether it stopped, not
 // an "asked it to" that leaves him watching the same screen.
-app.post("/api/run/stop", (req, res) => {
+app.post("/api/run/stop", async (req, res) => {
   const why = String((req.body && req.body.why) || "").slice(0, 300);
-  res.json(pyModule("pipelines.day_run",
+  res.json(await pyModule("pipelines.day_run",
     ["--stop", "--json", ...(why ? ["--why", why] : [])], 120000));
 });
 
-app.post("/api/run/start", (req, res) => {
+app.post("/api/run/start", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
   const b = req.body || {};
@@ -957,7 +1073,7 @@ app.post("/api/run/start", (req, res) => {
   // guard (the day_run resource lock); this one exists so the owner gets a
   // plain answer instead of a process that starts, loses the lock race and
   // dies silently a second later.
-  const st = pyModule("pipelines.day_run", ["--status", "--json"], 60000);
+  const st = await pyModule("pipelines.day_run", ["--status", "--json"], 60000);
   if (st && st.run && st.run.running) {
     return res.json({ ok: false, busy: true,
       why: "A day is already running — wait for it to finish. Two at once means two MDs planning the same day." });
@@ -1015,33 +1131,33 @@ app.post("/api/run/start", (req, res) => {
 // "add a button that should say resume or start from where you left ... it will
 //  finish that unanswered and queued tasks first". coordination/leftovers.py
 // reads and clears up; day_run.start(resume=True) runs only what is left.
-app.get("/api/leftovers", (_q, res) =>
-  res.json(pyModule("coordination.leftovers", ["--json"], 30000)));
-app.post("/api/leftovers/tidy", (_q, res) =>
-  res.json(pyModule("coordination.leftovers", ["--tidy", "--json"], 120000)));
-app.post("/api/leftovers/put-away", (_q, res) =>
-  res.json(pyModule("coordination.leftovers", ["--put-away", "--json"], 120000)));
+app.get("/api/leftovers", async (_q, res) =>
+  res.json(await pyModule("coordination.leftovers", ["--json"], 30000)));
+app.post("/api/leftovers/tidy", async (_q, res) =>
+  res.json(await pyModule("coordination.leftovers", ["--tidy", "--json"], 120000)));
+app.post("/api/leftovers/put-away", async (_q, res) =>
+  res.json(await pyModule("coordination.leftovers", ["--put-away", "--json"], 120000)));
 
-app.post("/api/run/resume", (_req, res) => {
+app.post("/api/run/resume", async (_req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
-  const st = pyModule("pipelines.day_run", ["--status", "--json"], 60000);
+  const st = await pyModule("pipelines.day_run", ["--status", "--json"], 60000);
   if (st && st.run && st.run.running) {
     return res.json({ ok: false, busy: true,
       why: "A day is already running — wait for it to finish." });
   }
   // Nothing to pick up is answered here, with the clear-up done, rather than
   // by a background process whose "nothing to do" he would never see.
-  const left = pyModule("coordination.leftovers", ["--json"], 30000);
+  const left = await pyModule("coordination.leftovers", ["--json"], 30000);
   if (left && left.ok && !left.resumable) {
-    const t = pyModule("coordination.leftovers", ["--tidy", "--json"], 120000);
+    const t = await pyModule("coordination.leftovers", ["--tidy", "--json"], 120000);
     return res.json({ ok: true, started: false, nothing: true, tidied: t,
       why: "Nothing to pick up — the last run finished and no sector has work waiting. "
          + ((t && t.head) || "") });
   }
   // The quick check (config only, no model calls) here, so a refusal reaches
   // him; the run itself then skips it rather than checking twice.
-  const pre = pyModule("pipelines.day_run", ["--check", "--quick", "--json"], 300000);
+  const pre = await pyModule("pipelines.day_run", ["--check", "--quick", "--json"], 300000);
   if (pre && pre.ok && !pre.ready) {
     return res.json({ ok: false, refused: true, preflight: pre,
       why: "Not resumed. " + (pre.blocking || []).slice(0, 3).join("; ")
@@ -1070,12 +1186,12 @@ app.post("/api/run/resume", (_req, res) => {
 // control room lists the last forty rows of all time. None of the three answers
 // "I pressed Run — what came out of it?". This does, and for a sector that
 // produced nothing it says which of the six reasons it was.
-app.get("/api/results", (q, res) => {
+app.get("/api/results", async (q, res) => {
   const args = ["--json"];
   const days = parseInt(q.query.days, 10);
   if (Number.isFinite(days) && days > 0) args.push("--days", String(Math.min(days, 365)));
   if (q.query.sector) args.push("--sector", String(q.query.sector).slice(0, 40));
-  res.json(pyModule("coordination.results", args, 60000));
+  res.json(await pyModule("coordination.results", args, 60000));
 });
 
 // ---- THROWING AWAY WHAT IS OLDER THAN THE WINDOW ----------------------------
@@ -1088,15 +1204,15 @@ app.get("/api/results", (q, res) => {
 // the file, so it ends by rewriting the database and emptying the write-ahead
 // log. Given a longer budget because rewriting the file takes as long as it
 // takes and being interrupted half way is the one thing it must not be.
-app.get("/api/purge", (q, res) => {
+app.get("/api/purge", async (q, res) => {
   const d = parseInt(q.query.days, 10);
-  res.json(pyModule("coordination.purge",
+  res.json(await pyModule("coordination.purge",
     ["--json", ...(Number.isFinite(d) && d > 0 ? ["--days", String(d)] : [])], 60000));
 });
 
-app.post("/api/purge", (req, res) => {
+app.post("/api/purge", async (req, res) => {
   const d = parseInt((req.body || {}).days, 10);
-  res.json(pyModule("coordination.purge",
+  res.json(await pyModule("coordination.purge",
     ["--run", "--json", ...(Number.isFinite(d) && d > 0 ? ["--days", String(d)] : [])],
     300000));
 });
@@ -1109,25 +1225,25 @@ app.post("/api/purge", (req, res) => {
 // database read and the panel does it on open. Looking at the site is a GET per
 // page, so it happens on the daily run and when he presses the button — never
 // on a poll.
-app.get("/api/site/changes", (q, res) => {
+app.get("/api/site/changes", async (q, res) => {
   const args = ["--json"];
   if (q.query.all) args.push("--all");
   if (q.query.outside) args.push("--outside");
   if (q.query.page) args.push("--page", String(q.query.page).slice(0, 200));
-  res.json(pyModule("coordination.changelog", args, 30000));
+  res.json(await pyModule("coordination.changelog", args, 30000));
 });
 
-app.post("/api/site/look", (_q, res) =>
-  res.json(pyModule("pipelines.site_watch", ["--json"], 180000)));
+app.post("/api/site/look", async (_q, res) =>
+  res.json(await pyModule("pipelines.site_watch", ["--json"], 180000)));
 
 // ---- the owner's yes or no on one amber item --------------------------------
 // The Control Room's Approve button used to change an opacity and say "sent to
 // the agent". This is where it now actually goes.
-app.post("/api/approve", (req, res) => {
+app.post("/api/approve", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
   const b = req.body || {};
-  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.approve"], {
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.approve"], {
     cwd: __dirname,
     input: JSON.stringify({ kind: String(b.kind || ""), id: b.id,
                             decision: String(b.decision || "") }),
@@ -1144,11 +1260,11 @@ app.post("/api/approve", (req, res) => {
 // "made a section where i can see if it write the post to publish and mail to
 //  sent i will approve both of them". coordination/review.py does the reading
 // and the deciding; these only carry it.
-app.get("/api/review", (_q, res) =>
-  res.json(pyModule("coordination.review", ["--json"], 30000)));
+app.get("/api/review", async (_q, res) =>
+  res.json(await pyModule("coordination.review", ["--json"], 30000)));
 
 const REVIEW_ACTS = ["send", "discard", "publish", "reject_page", "rewrite", "discard_page"];
-app.post("/api/review/act", (req, res) => {
+app.post("/api/review/act", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
   const b = req.body || {};
@@ -1158,7 +1274,7 @@ app.post("/api/review/act", (req, res) => {
     .map((x) => parseInt(x, 10)).filter(Number.isFinite).slice(0, 200);
   // Sending goes through his mail server one message at a time, so it gets
   // longer than a database write — but not unbounded.
-  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.review", "--act"], {
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.review", "--act"], {
     cwd: __dirname, input: JSON.stringify({ do: act, ids }),
     timeout: act === "send" ? 300000 : 60000, maxBuffer: 4 * 1024 * 1024,
   });
@@ -1174,7 +1290,7 @@ app.post("/api/review/act", (req, res) => {
 // the page watches the busy flags in /api/review.
 const REVIEW_JOBS = { "draft-mails": "--draft-mails", "write-page": "--write-page",
                       "publish-now": "--publish-now" };
-app.post("/api/review/start/:job", (req, res) => {
+app.post("/api/review/start/:job", async (req, res) => {
   const flag = REVIEW_JOBS[req.params.job];
   if (!flag) return res.json({ ok: false, error: "unknown job" });
   const py = resolvePython();
@@ -1202,15 +1318,15 @@ app.post("/api/review/start/:job", (req, res) => {
 // dead claims on its own pass; this is the manual door for when he is looking
 // at the desk. board.release_claim does the judging — it refuses a claim that
 // is merely slow unless he forces it, and records a forced one as forced.
-app.get("/api/stuck", (_q, res) =>
-  res.json(pyModule("coordination.release", ["--json"], 60000)));
+app.get("/api/stuck", async (_q, res) =>
+  res.json(await pyModule("coordination.release", ["--json"], 60000)));
 
-app.post("/api/release", (req, res) => {
+app.post("/api/release", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
   const b = req.body || {};
   if (!b.id) return res.status(400).json({ ok: false, error: "Send { id }." });
-  const r = spawnSync(py.cmd, [...py.prefix, "-m", "coordination.release", "--stdin"], {
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.release", "--stdin"], {
     cwd: __dirname,
     input: JSON.stringify({ id: String(b.id).slice(0, 64),
                             by: String(b.by || "owner").slice(0, 40),
@@ -1229,10 +1345,10 @@ app.post("/api/release", (req, res) => {
 // The same boxes the Run panel shows, settable without starting a day. One
 // form, one store: an order saved here is the order the MD reads when the day
 // runs, so there is no second place for the two to disagree.
-app.get("/api/orders", (_q, res) =>
-  res.json(pyModule("coordination.proposals", ["--json"], 60000)));
+app.get("/api/orders", async (_q, res) =>
+  res.json(await pyModule("coordination.proposals", ["--json"], 60000)));
 
-app.post("/api/orders", (req, res) => {
+app.post("/api/orders", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });
   const raw = (req.body || {}).orders;
@@ -1245,7 +1361,7 @@ app.post("/api/orders", (req, res) => {
     const text = String(v).slice(0, 4000).trim();
     // Arguments go through as an ARRAY, never a shell string, so an owner
     // typing a quote into his orders cannot turn into a command.
-    const r = pyModule("coordination.proposals", ["--order", sector, text, "--json"], 60000);
+    const r = await pyModule("coordination.proposals", ["--order", sector, text, "--json"], 60000);
     (r && r.ok !== false ? set : failed).push(sector);
   }
   res.json({ ok: failed.length === 0, set, failed,
@@ -1255,8 +1371,8 @@ app.post("/api/orders", (req, res) => {
 // ---- what every sector and agent is doing right now -------------------------
 // Both are also folded into /api/state so the office gets them in one poll;
 // these exist for anything that wants just the one thing.
-app.get("/api/readiness", (_q, res) =>
-  res.json(pyModule("coordination.readiness", ["--json"], 60000)));
+app.get("/api/readiness", async (_q, res) =>
+  res.json(await pyModule("coordination.readiness", ["--json"], 60000)));
 // (There was a second /api/activity handler here. Express answers with the
 // first route that matches, so it had never run once — but it took no `since`
 // and ignored the read mark, and the next person to reorder this file would
@@ -1267,10 +1383,10 @@ app.get("/api/readiness", (_q, res) =>
 // module has always had the functions, nothing had ever put them in the office.
 // Everything goes through pipelines.competitors so the normalising, the dedup
 // on domain and the suggested/confirmed split live in one place.
-app.get("/api/competitors", (_q, res) =>
-  res.json(pyModule("pipelines.competitors", ["--json"], 60000)));
+app.get("/api/competitors", async (_q, res) =>
+  res.json(await pyModule("pipelines.competitors", ["--json"], 60000)));
 
-app.post("/api/competitors", (req, res) => {
+app.post("/api/competitors", async (req, res) => {
   const b = req.body || {};
   const act = String(b.action || "").trim();
   const args = ["--json"];
@@ -1297,7 +1413,7 @@ app.post("/api/competitors", (req, res) => {
   }
   // --find goes out to OpenStreetMap across the emirates, so it gets
   // longer than the rest. The others are cabinet writes and are instant.
-  res.json(pyModule("pipelines.competitors", args,
+  res.json(await pyModule("pipelines.competitors", args,
                     act === "find" ? 300000 : 60000));
 });
 
@@ -1305,9 +1421,9 @@ app.post("/api/competitors", (req, res) => {
 // The numbers the agency works to. Read and written through coordination.targets
 // so the ceiling checks and the measurement live in one place — the server does
 // not know what a safe outreach volume is, and should not have an opinion.
-app.get("/api/targets", (_q, res) => res.json(pyModule("coordination.targets", ["--json"])));
+app.get("/api/targets", async (_q, res) => res.json(await pyModule("coordination.targets", ["--json"])));
 
-app.post("/api/targets", (req, res) => {
+app.post("/api/targets", async (req, res) => {
   const b = req.body || {};
   const args = [];
   const JOBS = ["leads", "mails", "posts", "site_checks"];
@@ -1323,20 +1439,20 @@ app.post("/api/targets", (req, res) => {
   if (typeof b.orders === "string") args.push("--orders", b.orders.slice(0, 4000));
   if (!args.length) return res.status(400).json({ ok: false, error: "Nothing to save." });
   args.push("--json");
-  return res.json(pyModule("coordination.targets", args));
+  return res.json(await pyModule("coordination.targets", args));
 });
 
 // ---- what our own website says we sell --------------------------------------
 // Reads SITE_URL and reconciles it against the service catalogue. Slow (it
 // fetches several pages), so it is only ever run on demand from the button.
-app.post("/api/site-services", (_q, res) =>
-  res.json(pyModule("pipelines.site_services", ["--json"], 180000)));
+app.post("/api/site-services", async (_q, res) =>
+  res.json(await pyModule("pipelines.site_services", ["--json"], 180000)));
 
 
 // ---- current settings (to pre-fill the setup form) -------------------------
 // Returns only non-secret values, plus a boolean for each secret so the form can
 // show "saved — leave blank to keep" instead of an empty box.
-app.get("/api/settings", (_q, res) => {
+app.get("/api/settings", async (_q, res) => {
   const e = readEnv();
   const v = (k) => e[k] || "";
   const set = (k) => !!(e[k] && e[k].trim());
@@ -1374,7 +1490,7 @@ app.get("/api/settings", (_q, res) => {
 });
 
 // ---- status ----------------------------------------------------------------
-app.get("/api/status", (_q, res) => {
+app.get("/api/status", async (_q, res) => {
   const e = readEnv();
   const has = (k) => !!(e[k] && e[k].trim());
   // Whether the machine is locked, so the Setup gate can tell the truth rather
@@ -1386,7 +1502,7 @@ app.get("/api/status", (_q, res) => {
   const fullReady = has("SITE_API_BASE") && has("SITE_API_TOKEN");
 
   // which Claude model each sector thinks with, and whether Claude is ready
-  const team = pyProvider("team", {});
+  const team = await pyProvider("team", {});
   const signedIn = !!(team && team.ready && (team.accounts || []).some((a) => a.ok));
   const brains = ((team && team.team) || []).map((t) => ({
     key: t.sector, label: t.label, ok: signedIn,
@@ -1500,7 +1616,7 @@ app.listen(PORT, HOST, () => {
   // Upgrade the cabinet on boot. schema.sql is CREATE TABLE IF NOT EXISTS
   // throughout, so this is safe to run every time and adds any table a newer
   // version introduced — an existing database is never left half-upgraded.
-  const db = ensureDb();
+  const db = ensureDbSync();
   if (db.built) console.log("filing cabinet ready");
   else console.log("filing cabinet NOT ready:", db.error || "unknown");
   console.log(`Agency running on http://${HOST}:${PORT}`);

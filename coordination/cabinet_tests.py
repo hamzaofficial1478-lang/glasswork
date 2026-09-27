@@ -236,6 +236,79 @@ def test_an_abandoned_waiter_is_reaped():
         board.DB = real
 
 
+def test_the_office_does_not_wait_for_a_run():
+    """
+    "no matter in which section i am doing anything the work in progress
+     should not get stop"
+
+    The office reads this board on every refresh, and the read used to write
+    (the reaper above) — so while a day run held the pen, every refresh sat on
+    "Loading…" until the run let go. A busy cabinet must cost the office a
+    moment, not the run's whole write. The corpse is still hidden, and still
+    reaped the next time the cabinet is free.
+    """
+    print("\nThe office's read does not queue behind a run's write:")
+    import sqlite3 as _sq
+    import threading
+    import time as _t
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        now = cabinet._now()
+        con = _sq.connect(board.DB)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("INSERT INTO shelf_queue(shelf,agent,sector,reason,data_class,"
+                    "status,enqueued_at) VALUES('seo_data','ghost','SEO','x',"
+                    "'internal','waiting',?)", (now - 4 * 86400,))
+        con.commit(); con.close()
+
+        held, let_go = threading.Event(), threading.Event()
+
+        def a_run_writing():
+            c = _sq.connect(board.DB, isolation_level=None, timeout=30)
+            c.execute("BEGIN IMMEDIATE")
+            c.execute("UPDATE shelf_queue SET reason='busy' WHERE agent='ghost'")
+            held.set()
+            let_go.wait(20)
+            c.execute("COMMIT"); c.close()
+
+        t = threading.Thread(target=a_run_writing, daemon=True)
+        t.start()
+        held.wait(5)
+        t0 = _t.time()
+        st = cabinet.shelf_state(["seo_data"])
+        took = _t.time() - t0
+        let_go.set(); t.join(10)
+        check("it answered while the run held the pen", took < 3, True)
+        check("the dead waiter is still not shown",
+              [q["agent"] for q in st["seo_data"]["queue"]], [])
+        cabinet.shelf_state(["seo_data"])
+        c = _sq.connect(board.DB)
+        left = c.execute("SELECT status FROM shelf_queue WHERE agent='ghost'").fetchone()[0]
+        c.close()
+        check("and it is put away once the cabinet is free", left, "abandoned")
+    finally:
+        board.DB = real
+
+    # The other half of the freeze was the office server itself: every Python
+    # call was spawnSync, which stops Node dead until it returns, so one slow
+    # answer (a check, a mail send, a busy cabinet) held every screen — the
+    # Mail room link included — on "Loading…". Only two may stay: the one-off
+    # Python version probe, and the cabinet check before the server serves.
+    print("\n...and the office server never stops to wait for Python:")
+    src = (Path(__file__).parents[1] / "server.js").read_text(encoding="utf-8")
+    inside = []
+    for m in re.finditer(r"\bspawnSync\(", src):
+        fn = re.findall(r"function\s+(\w+)\s*\(", src[:m.start()])
+        inside.append(fn[-1] if fn else "?")
+    check("spawnSync only in the version probe and the boot-time check",
+          sorted(set(inside)), ["ensureDbSync", "resolvePython"])
+    listen = src.find("app.listen(")
+    calls = [m.start() for m in re.finditer(r"(?<!function )\bensureDbSync\(\)", src)]
+    check("and the boot-time check runs only at boot",
+          bool(calls) and all(at > listen for at in calls), True)
+
+
 # ---------------------------------------------------------------------------
 # WINDOWS
 # ---------------------------------------------------------------------------
@@ -301,6 +374,7 @@ def main():
     test_brains_are_not_a_shelf()
     test_a_sectors_brain_is_never_on_a_shelf()
     test_an_abandoned_waiter_is_reaped()
+    test_the_office_does_not_wait_for_a_run()
     print("\n" + ("all cabinet tests passed" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0
 
