@@ -814,7 +814,7 @@ def build():
                     f"{n_pages} page(s) written and waiting for your yes" if n_pages else "",
                     f"{n_posts} post(s) ready to add to your blog" if n_posts else "") if t),
                 "why": ("Read each one in full before it goes on your website. A blog post "
-                        "is copied into your own blog backend from the Posts room.")})
+                        "goes into your own blog from the Posts room.")})
     except Exception:
         pass
     try:

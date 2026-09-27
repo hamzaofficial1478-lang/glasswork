@@ -782,3 +782,14 @@ CREATE TABLE IF NOT EXISTS site_pace (
   resting_until REAL DEFAULT 0,    -- his site said stop: leave it alone till then
   why           TEXT
 );
+
+-- ---- his blog --------------------------------------------------------------
+-- What the agency last saw of his own blog backend, through the connector's
+-- blog section (pipelines/blog_backend.py). One row. Read by the Posts room so
+-- it can say "connected" or what is missing without asking his site each time.
+CREATE TABLE IF NOT EXISTS blog_backend (
+  id          INTEGER PRIMARY KEY CHECK (id=1),
+  checked_at  INTEGER,
+  ok          INTEGER DEFAULT 0,
+  summary     TEXT                 -- JSON: table, posts, picture folder, or the error
+);

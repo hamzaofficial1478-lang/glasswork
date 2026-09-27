@@ -50,6 +50,10 @@ from coordination import board
 AGENT = "it-releaser"          # the only one allowed to write. Red line 1.
 SECTOR = "IT"
 TIMEOUT = 25
+OLD_CONNECTOR = ("the connector file on your website is the older one, which cannot add "
+                 "blog posts. Upload paste-into-your-site/agency-api.php from the agency "
+                 "folder to your site as agency-api/index.php, replacing the old one "
+                 "(leave token.php where it is), then press the button again.")
 
 # The marker the endpoint wraps a block in, so re-running replaces rather than
 # stacks. One id per kind of block, stable forever.
@@ -184,6 +188,10 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
                             "token on /setup matches the string inside "
                             "agency-api/token.php exactly — one trailing space "
                             "is enough to break it.")
+        elif e.code == 404 and str(out.get("error") or "").startswith("unknown endpoint"):
+            # The connector answered — it just predates this call.
+            out["old_connector"] = True
+            out["error"] = OLD_CONNECTOR
         elif e.code == 404:
             out["error"] = (f"nothing answered at {url}. Check the Admin API "
                             "address, and that agency-api/index.php really is "
@@ -1536,6 +1544,53 @@ def theme_of_his_site(s=None, most=3) -> dict:
     return {"ok": False, "why": ("none of your pages showed where its content starts "
                                  "and ends" + (f" (read {', '.join(tried)})" if tried else
                                                " — no .php page your site links to was found"))}
+
+
+# ---------------------------------------------------------------------------
+# HIS BLOG — the connector's blog section, and nothing else (blog_backend.py
+# decides what goes in each column; this only carries it)
+# ---------------------------------------------------------------------------
+
+def blog_schema(slug="", s=None) -> dict:
+    """His posts table as the connector sees it; with a slug, is a post there."""
+    return call("/blog" + ("/" + urllib.parse.quote(slug) if slug else ""), s=s, timeout=40)
+
+
+def _log_blog(action, slug, agent, r, summary, undo_cmd=""):
+    if not r.get("ok") and r.get("unreachable"):
+        return r
+    try:
+        from coordination import changelog
+        changelog.record(action, page=f"blog: {slug}", agent=agent,
+                         summary=summary if r.get("ok") else "",
+                         undo_cmd=undo_cmd if r.get("ok") else "", ok=bool(r.get("ok")),
+                         error="" if r.get("ok") else str(r.get("error") or "")[:300])
+    except Exception:
+        pass
+    return r
+
+
+def add_blog_post(post, image=None, agent=AGENT, s=None, title="", undo_cmd="") -> dict:
+    """One row into his blog's own posts table. The Releaser's job, and nobody else's."""
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    slug = next((str(v) for k, v in (post or {}).items() if "slug" in k.lower()), "")
+    r = call("/blog", "POST", {"post": post, "image": image}, s=s, timeout=90)
+    if r.get("taken"):
+        return r                          # not a change, and not a failure to log
+    return _log_blog("blog_post", slug, agent, r,
+                     f"added the post “{title or slug}” to your blog", undo_cmd=undo_cmd)
+
+
+def remove_blog_post(post_id, slug="", agent=AGENT, s=None, title="") -> dict:
+    """Take away a post the agency added. The connector refuses any other."""
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    r = call("/blog-remove", "POST", {"id": str(post_id)}, s=s, timeout=40)
+    return _log_blog("blog_remove", slug or r.get("slug") or str(post_id), agent, r,
+                     f"took the post “{title or slug}” off your blog")
 
 
 def _has_own_head(page, s=None) -> bool:

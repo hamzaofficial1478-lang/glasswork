@@ -287,6 +287,14 @@ def plan_of(row) -> dict:
     # confirmation has to be "the page is now there" rather than "the change
     # is in it". Reading the row as a plain page edit would have been quietly
     # wrong on all three.
+    # A POST FOR HIS BLOG goes into his own blog backend through the connector's
+    # blog section (pipelines/blog_backend) — a row in the table his blog page
+    # reads, not a file. And taken back out the same way.
+    if isinstance(change, dict) and (change.get("blog_post") or change.get("blog_remove")):
+        which = "blog_post" if change.get("blog_post") else "blog_remove"
+        return {"do": which, "content_id": change.get(which), "page": "blog",
+                "issue_id": issue, "why": d.get("why") or "", "row": row}
+
     if isinstance(change, dict) and change.get("html") and change.get("page") \
             and str(row.get("kind") or "") == "new_page":
         return {"do": "new_page", "page": change["page"], "html": change["html"],
@@ -555,7 +563,8 @@ def _work(agent, limit, dry_run, skip_tests):
 
     plans = [plan_of(r) for r in waiting]
     doable = [p for p in plans
-              if p["do"] in ("head_block", "call", "replace", "new_page", "page")]
+              if p["do"] in ("head_block", "call", "replace", "new_page", "page",
+                             "blog_post", "blog_remove")]
     noted = [p for p in plans if p["do"] == "noted"]
     refused = [p for p in plans if p["do"] == "refuse"]
 
@@ -698,6 +707,19 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
                 row["id"], "applied",
                 (f"written to {plan['page']} and confirmed on the page" if seen
                  else f"{plan['page']}" + UNCHECKED)
+                + (" (tests were skipped at your request)" if skipped_tests else ""))
+            return True
+
+        if plan["do"] in ("blog_post", "blog_remove"):
+            from . import blog_backend
+            fn = blog_backend.publish if plan["do"] == "blog_post" else blog_backend.remove
+            r = fn(plan.get("content_id"), agent=agent)
+            if not r.get("ok"):
+                return _fail_or_wait(plan, r, "your blog did not take it")
+            _close_ticket(plan.get("issue_id"))
+            board.mark_site_change(
+                row["id"], "applied",
+                (r.get("head") or "done")
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 

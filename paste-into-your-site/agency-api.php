@@ -30,14 +30,25 @@
  * only: token.txt on your server, and the agency's settings file on your PC.
  *
  * What it CANNOT do, no matter who holds the token:
- *   - delete anything, ever
+ *   - delete a page or any file you made, ever
  *   - touch any file outside your website folder
- *   - touch anything that is not a .php or .html page
- *   - run a command, read your database, or read any other file
+ *   - touch anything that is not a .php or .html page — except that it may
+ *     save a blog post's picture into the folder your blog's pictures are in
+ *   - run a command, or read any other file
+ *   - read or change your database, except your blog's posts table: it may add
+ *     a post to it, and take away only a post it added itself
  *   - overwrite itself or your token
  *
  * And every edit copies the old file to a backup first. Nothing an agent does
- * is one-way: /rollback puts a page back exactly as it was, in one call.
+ * is one-way: /rollback puts a page back exactly as it was, in one call, and
+ * /blog-remove takes away a post the agency added.
+ *
+ * YOUR BLOG (you said yes to this: "add the posts to my backend direct")
+ * The agency adds a post using the same database connection your own blog
+ * page uses — it finds the file blog-details.php already includes. Your
+ * database password never leaves your server and is never sent anywhere.
+ * If it cannot find that file, make agency-api/blog-db.php with one line:
+ *   <?php return ['host' => 'localhost', 'name' => 'DBNAME', 'user' => 'DBUSER', 'pass' => 'DBPASS'];
  *
  * You said you will fix whatever the agents break. This is here so that in
  * most cases you will not have to.
@@ -348,7 +359,8 @@ if ($route === '/health' && $method === 'GET') {
     reply(['ok' => true, 'status' => 'up', 'time' => time(),
            'site_root' => SITE_ROOT, 'php' => PHP_VERSION,
            'writable' => is_writable(SITE_ROOT),
-           'mode' => 'full-access', 'warnings' => $warn]);
+           'mode' => 'full-access', 'warnings' => $warn,
+           'connector' => 3, 'can' => ['pages', 'head', 'rollback', 'blog']]);
 }
 
 // --- what pages are there --------------------------------------------------
@@ -533,6 +545,495 @@ if ($route === '/rollback' && $method === 'POST') {
     if (!@copy($src, $full)) { fail(500, 'could not restore'); }
     reply(['ok' => true, 'page' => relative_to_site($full),
            'restored_from' => $which]);
+}
+
+// ---------------------------------------------------------------------------
+// YOUR BLOG
+//
+// "yes add the posts to my backend direct"
+//
+// Your posts live in your database and blog-details.php shows them in your
+// theme. A post saved as a file of its own sat outside all of that, so these
+// three calls put a post where your own backend would:
+//
+//   GET  ?do=blog              which table holds your posts, and its columns
+//   GET  ?do=blog&page=SLUG    is there already a post at that slug
+//   POST ?do=blog              add one post (and save its picture)
+//   POST ?do=blog-remove       take away a post THIS FILE added — no other
+//
+// ONE TABLE. The table is worked out here, on your server, from the query your
+// own blog-details.php runs — never taken from the request — so a token can
+// never be used to reach any other table. Nothing here reads a password,
+// sends one anywhere, or runs anything but the insert, the delete of its own
+// row, and the reads needed to check them.
+// ---------------------------------------------------------------------------
+
+// The posts this file added, so it can take away its own and nothing else.
+// Kept in the backups folder, which nobody can browse.
+const BLOG_RECORD = BACKUP_DIR . '/blog-posts.json';
+const BLOG_PAGES = ['blog-details.php', 'blog-detail.php', 'blog_details.php', 'single-blog.php',
+                    'blog-single.php', 'post.php', 'article.php', 'news-details.php', 'blog.php',
+                    'blogs.php'];
+const CONNECTION_GUESSES = ['config.php', 'db.php', 'database.php', 'connection.php', 'conn.php',
+                            'connect.php', 'dbconnect.php', 'db_connect.php', 'db_config.php',
+                            'includes/db.php', 'includes/config.php', 'includes/connection.php',
+                            'includes/database.php', 'inc/db.php', 'inc/config.php',
+                            'config/db.php', 'config/database.php', 'config/config.php',
+                            'admin/config.php', 'admin/db.php', 'admin/connection.php',
+                            'admin/includes/db.php', 'admin/includes/config.php'];
+// A picture is only ever saved into your blog's own picture folder, and never
+// into any of these, whatever that folder turns out to be.
+const IMAGE_NEVER_DIRS = ['admin', 'config', 'private', 'logs', 'tmp', 'agency-api', '.git', '.svn',
+                          'node_modules', 'vendor', 'backups', 'cache', 'wp-admin', 'wp-includes'];
+const IMAGE_MAX = 8 * 1024 * 1024;
+const SECRET_COLUMN = '/pass|token|secret|hash|salt|api_?key/i';
+
+function site_src(string $rel): string {
+    $f = SITE_ROOT . '/' . $rel;
+    return is_file($f) ? (string)file_get_contents($f) : '';
+}
+
+function includes_in(string $src): array {
+    preg_match_all('/(?:include|require)(?:_once)?\s*\(?\s*(?:__DIR__\s*\.\s*)?[\'"]([^\'"]+\.php)[\'"]/i',
+                   $src, $m);
+    return $m[1] ?? [];
+}
+
+function clean_rel(string $rel): string {
+    $rel = ltrim(str_replace('\\', '/', trim($rel)), '/');
+    while (str_starts_with($rel, './')) { $rel = substr($rel, 2); }
+    return $rel;
+}
+
+// A connection file connects and nothing else. One that sends visitors to a
+// login page would end this request, so it is never opened.
+function looks_like_connection(string $src): bool {
+    return (bool)preg_match('/new\s+PDO\s*\(|mysqli_connect\s*\(|new\s+mysqli\s*\(/i', $src)
+        && !preg_match('/header\s*\(\s*[\'"]\s*location/i', $src);
+}
+
+$GLOBALS['agency_connecting'] = '';
+register_shutdown_function(function () {
+    // A connection file that calls die() on a failed connection ends the
+    // request mid-way. Say so in words instead of leaving half a reply.
+    if (!empty($GLOBALS['agency_connecting'])) {
+        while (ob_get_level() > 0) { ob_end_clean(); }
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => 'your site\'s database connection file ('
+            . basename((string)$GLOBALS['agency_connecting']) . ') stopped while connecting, '
+            . 'so nothing was changed. Your blog may be having database trouble right now.']);
+    }
+});
+
+function open_connection(string $full) {
+    $here = getcwd();
+    @chdir(dirname($full));
+    $GLOBALS['agency_connecting'] = $full;
+    $handle = (static function (string $__file) {
+        ob_start();
+        try {
+            include $__file;
+        } catch (Throwable $e) {
+            ob_end_clean();
+            return null;
+        }
+        ob_end_clean();
+        foreach (get_defined_vars() as $v) {
+            if ($v instanceof PDO || $v instanceof mysqli) { return $v; }
+        }
+        // Some sites only define the details and connect later.
+        if (defined('DB_HOST') && defined('DB_NAME') && defined('DB_USER')) {
+            $pass = defined('DB_PASS') ? constant('DB_PASS')
+                  : (defined('DB_PASSWORD') ? constant('DB_PASSWORD') : '');
+            try {
+                return new PDO('mysql:host=' . constant('DB_HOST') . ';dbname=' . constant('DB_NAME')
+                               . ';charset=utf8mb4', (string)constant('DB_USER'), (string)$pass);
+            } catch (Throwable $e) {
+                return null;
+            }
+        }
+        return null;
+    })($full);
+    $GLOBALS['agency_connecting'] = '';
+    if ($here !== false) { @chdir($here); }
+    return $handle;
+}
+
+final class BlogDb {
+    public $h;
+    public string $via;
+    public function __construct($h, string $via) {
+        $this->h = $h;
+        $this->via = $via;
+        if ($h instanceof PDO) { $h->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION); }
+    }
+    public function driver(): string {
+        return $this->h instanceof PDO ? (string)$this->h->getAttribute(PDO::ATTR_DRIVER_NAME) : 'mysql';
+    }
+    public function rows(string $sql, array $args = []): array {
+        if ($this->h instanceof PDO) {
+            $st = $this->h->prepare($sql);
+            $st->execute(array_values($args));
+            return $st->fetchAll(PDO::FETCH_ASSOC);
+        }
+        $st = $this->h->prepare($sql);
+        if (!$st) { throw new RuntimeException((string)$this->h->error); }
+        if ($args) {
+            $vals = array_values($args);
+            $st->bind_param(str_repeat('s', count($vals)), ...$vals);
+        }
+        if (!$st->execute()) { throw new RuntimeException((string)$st->error); }
+        $res = $st->get_result();
+        return $res ? $res->fetch_all(MYSQLI_ASSOC) : [];
+    }
+    public function run(string $sql, array $args = []): string {
+        if ($this->h instanceof PDO) {
+            $st = $this->h->prepare($sql);
+            $st->execute(array_values($args));
+            return (string)$this->h->lastInsertId();
+        }
+        $st = $this->h->prepare($sql);
+        if (!$st) { throw new RuntimeException((string)$this->h->error); }
+        if ($args) {
+            $vals = array_values($args);
+            $st->bind_param(str_repeat('s', count($vals)), ...$vals);
+        }
+        if (!$st->execute()) { throw new RuntimeException((string)$st->error); }
+        return (string)$this->h->insert_id;
+    }
+}
+
+function db_problem(Throwable $e): string {
+    // The database's own words, minus anything that looks like a login.
+    $msg = preg_replace('/(user|password|using password)[^,;)]*/i', '$1 …', $e->getMessage());
+    return substr((string)$msg, 0, 240);
+}
+
+function blog_db(): BlogDb {
+    $own = __DIR__ . '/blog-db.php';
+    if (is_file($own)) {
+        $cfg = @include $own;
+        if (is_array($cfg) && !empty($cfg['name'])) {
+            try {
+                $pdo = new PDO('mysql:host=' . ($cfg['host'] ?? 'localhost') . ';dbname=' . $cfg['name']
+                               . ';charset=utf8mb4', (string)($cfg['user'] ?? ''), (string)($cfg['pass'] ?? ''));
+                return new BlogDb($pdo, 'agency-api/blog-db.php');
+            } catch (Throwable $e) {
+                fail(500, 'agency-api/blog-db.php is there but did not connect: ' . db_problem($e));
+            }
+        }
+    }
+    // The file your own blog page pulls in — then what THAT pulls in — then
+    // the usual names. Opened here, on your server; its contents go nowhere.
+    $queue = [];
+    foreach (BLOG_PAGES as $p) {
+        foreach (includes_in(site_src($p)) as $inc) { $queue[] = clean_rel($inc); }
+    }
+    $seen = [];
+    for ($i = 0; $i < count($queue) && $i < 20; $i++) {
+        $rel = $queue[$i];
+        if (isset($seen[$rel]) || strpos($rel, '..') !== false) { continue; }
+        $seen[$rel] = true;
+        foreach (includes_in(site_src($rel)) as $inc) { $queue[] = clean_rel($inc); }
+    }
+    foreach (array_unique(array_merge(array_keys($seen), CONNECTION_GUESSES)) as $rel) {
+        if (strpos($rel, '..') !== false || str_starts_with(strtolower($rel), 'agency-api/')
+            || preg_match('/token/i', $rel)) { continue; }
+        $full = realpath(SITE_ROOT . '/' . $rel);
+        if ($full === false || strpos($full, SITE_ROOT) !== 0 || !is_file($full)) { continue; }
+        if (!looks_like_connection((string)file_get_contents($full))) { continue; }
+        $h = open_connection($full);
+        if ($h) { return new BlogDb($h, basename($rel)); }
+    }
+    fail(422, 'Could not find the database connection your blog uses. Make '
+            . "agency-api/blog-db.php with one line:  <?php return ['host' => 'localhost', "
+            . "'name' => 'DBNAME', 'user' => 'DBUSER', 'pass' => 'DBPASS'];  using the details "
+            . 'from hPanel → Databases. It stays on your server.');
+}
+
+function safe_name(string $t): string {
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $t)) { fail(400, 'bad table or column name'); }
+    return $t;
+}
+
+function q_name(BlogDb $db, string $t): string {
+    return $db->driver() === 'mysql' ? '`' . safe_name($t) . '`' : '"' . safe_name($t) . '"';
+}
+
+function all_tables(BlogDb $db): array {
+    if ($db->driver() === 'sqlite') {
+        return array_column($db->rows("SELECT name FROM sqlite_master WHERE type='table'"), 'name');
+    }
+    return array_map(fn($r) => (string)array_values($r)[0], $db->rows('SHOW TABLES'));
+}
+
+function columns_of(BlogDb $db, string $t): array {
+    $out = [];
+    if ($db->driver() === 'sqlite') {
+        foreach ($db->rows('PRAGMA table_info(' . q_name($db, $t) . ')') as $c) {
+            $pk = (int)$c['pk'] === 1;
+            $out[] = ['name' => $c['name'], 'type' => strtolower((string)$c['type']),
+                      'null' => !(int)$c['notnull'] && !$pk, 'key' => $pk ? 'PRI' : '',
+                      'default' => $c['dflt_value'],
+                      'auto' => $pk && stripos((string)$c['type'], 'int') !== false];
+        }
+        return $out;
+    }
+    foreach ($db->rows('SHOW COLUMNS FROM ' . q_name($db, $t)) as $c) {
+        $out[] = ['name' => $c['Field'], 'type' => strtolower((string)$c['Type']),
+                  'null' => strtoupper((string)$c['Null']) === 'YES', 'key' => (string)$c['Key'],
+                  'default' => $c['Default'],
+                  'auto' => stripos((string)$c['Extra'], 'auto_increment') !== false];
+    }
+    return $out;
+}
+
+/** [table, columns] — the posts table your blog page reads, worked out here. */
+function blog_table(BlogDb $db): array {
+    $all = all_tables($db);
+    $by_slug = $named = [];
+    foreach (BLOG_PAGES as $p) {
+        $src = site_src($p);
+        if (preg_match_all('/\bFROM\s+[`"]?([A-Za-z0-9_]+)[`"]?([^;"\']{0,200})/i', $src, $m, PREG_SET_ORDER)) {
+            foreach ($m as $hit) {
+                if (stripos($hit[2], 'slug') !== false) { $by_slug[] = $hit[1]; } else { $named[] = $hit[1]; }
+            }
+        }
+    }
+    $guess = array_filter($all, fn($t) => preg_match('/blog|post|article|news/i', $t)
+                                          && !preg_match('/categor|comment|tag|like|view|user|admin|meta|image|gallery/i', $t));
+    $order = array_values(array_unique(array_merge($by_slug, $named, $guess)));
+    foreach ($order as $t) {
+        if (!in_array($t, $all, true)) { continue; }
+        $cols = columns_of($db, $t);
+        $names = implode(' ', array_column($cols, 'name'));
+        if (preg_match('/slug/i', $names) && preg_match('/content|body|description|detail|text|article/i', $names)) {
+            return [$t, $cols];
+        }
+    }
+    fail(422, 'Connected to your database, but could not tell which table holds your blog '
+            . 'posts — none has a slug and a content column.');
+}
+
+function pk_of(array $cols): string {
+    foreach ($cols as $c) { if ($c['key'] === 'PRI') { return $c['name']; } }
+    return '';
+}
+
+function slug_col(array $cols): string {
+    foreach ($cols as $c) { if (preg_match('/slug/i', $c['name'])) { return $c['name']; } }
+    return '';
+}
+
+/** How your post page shows each column: a folder in front of a picture, text escaped or not. */
+function blog_display(): array {
+    $page = '';
+    foreach (BLOG_PAGES as $p) {
+        if (is_file(SITE_ROOT . '/' . $p) && !preg_match('/^blogs?\.php$/', $p)) { $page = $p; break; }
+    }
+    $src = $page ? site_src($page) : '';
+    $list = site_src('blog.php') . site_src('blogs.php');
+    $var = '\$\w+(?:\s*\[\s*["\'](\w+)["\']\s*\]|->(\w+))';
+    $prefix = [];
+    if (preg_match_all('/src\s*=\s*["\']([^"\'<>]*)<\?(?:php\s+echo\s+|=\s*)(?:\w+\s*\(\s*)*' . $var . '/i',
+                       $src . $list, $m, PREG_SET_ORDER)) {
+        foreach ($m as $hit) {
+            $col = ($hit[2] ?? '') !== '' ? $hit[2] : ($hit[3] ?? '');
+            if ($col !== '' && !isset($prefix[$col])) { $prefix[$col] = $hit[1]; }
+        }
+    }
+    $escaped = [];
+    if (preg_match_all('/(?:htmlspecialchars|htmlentities|strip_tags)\s*\(\s*' . $var . '/i', $src, $m, PREG_SET_ORDER)) {
+        foreach ($m as $hit) { $escaped[] = ($hit[1] ?? '') !== '' ? $hit[1] : ($hit[2] ?? ''); }
+    }
+    $param = preg_match('/\$_GET\s*\[\s*["\'](\w+)["\']\s*\]/', $src, $pm) ? $pm[1] : 'slug';
+    return ['page' => $page, 'param' => $param, 'prefix' => $prefix,
+            'escaped' => array_values(array_unique(array_filter($escaped)))];
+}
+
+function blog_record(): array {
+    $r = is_file(BLOG_RECORD) ? json_decode((string)file_get_contents(BLOG_RECORD), true) : [];
+    return is_array($r) ? $r : [];
+}
+
+function save_record(array $r): void {
+    if (!is_dir(BACKUP_DIR)) {
+        @mkdir(BACKUP_DIR, 0755, true);
+        @file_put_contents(BACKUP_DIR . '/.htaccess', "Require all denied\nDeny from all\n");
+    }
+    @file_put_contents(BLOG_RECORD, json_encode(array_values($r), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+}
+
+function fetch_picture(string $url): string {
+    $host = (string)parse_url($url, PHP_URL_HOST);
+    $ip = $host !== '' ? gethostbyname($host) : '';
+    if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+        return '';
+    }
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true,
+                                CURLOPT_MAXREDIRS => 3, CURLOPT_TIMEOUT => 25,
+                                CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                                CURLOPT_USERAGENT => 'agency-api (saving a blog picture)']);
+        $data = curl_exec($ch);
+        curl_close($ch);
+        return is_string($data) ? $data : '';
+    }
+    $ctx = stream_context_create(['http' => ['timeout' => 25, 'follow_location' => 1, 'max_redirects' => 3]]);
+    return (string)@file_get_contents($url, false, $ctx, 0, IMAGE_MAX + 1);
+}
+
+/** Save a post's picture into the blog's picture folder. Returns its path from the site root. */
+function save_picture(array $img): string {
+    $dir = clean_rel((string)($img['dir'] ?? ''));
+    $dir = rtrim($dir, '/');
+    if (strpos($dir, '..') !== false || strpos($dir, "\0") !== false) { fail(400, 'bad picture folder'); }
+    foreach (explode('/', strtolower($dir)) as $part) {
+        if ($part !== '' && in_array($part, IMAGE_NEVER_DIRS, true)) {
+            fail(403, "the agency never saves anything into $dir");
+        }
+    }
+    $real = realpath(SITE_ROOT . ($dir === '' ? '' : '/' . $dir));
+    if ($real === false || strpos($real, SITE_ROOT) !== 0 || !is_dir($real)) {
+        fail(400, "the picture folder $dir is not there");
+    }
+    $from = trim((string)($img['from'] ?? ''));
+    if (preg_match('#^https?://#i', $from)) {
+        $data = fetch_picture($from);
+    } else {
+        $rel = clean_rel($from);
+        $src = realpath(SITE_ROOT . '/' . $rel);
+        $data = ($src !== false && strpos($src, SITE_ROOT) === 0 && strpos($rel, '..') === false
+                 && preg_match('/\.(jpe?g|png|webp|gif)$/i', $rel)) ? (string)file_get_contents($src) : '';
+    }
+    if ($data === '' || strlen($data) > IMAGE_MAX) { fail(422, 'the picture could not be fetched'); }
+    $info = @getimagesizefromstring($data);
+    $ext = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif']
+           [$info['mime'] ?? ''] ?? '';
+    if ($ext === '') { fail(422, 'that is not a picture'); }
+    $base = trim(preg_replace('/[^a-z0-9]+/', '-', strtolower((string)($img['name'] ?? 'post'))), '-');
+    $file = substr($base ?: 'post', 0, 60) . '-' . bin2hex(random_bytes(3)) . '.' . $ext;
+    if (@file_put_contents($real . '/' . $file, $data) === false) {
+        fail(500, "could not save the picture into $dir — check that folder's permissions");
+    }
+    return ($dir === '' ? '' : $dir . '/') . $file;
+}
+
+if (in_array($route, ['/blog', '/blog-remove'], true)) {
+    $db = blog_db();
+    try {
+        [$table, $cols] = blog_table($db);
+        $pk = pk_of($cols);
+        $slugc = slug_col($cols);
+        $names = array_column($cols, 'name');
+
+        if ($route === '/blog' && $method === 'GET') {
+            $slug = trim((string)($_GET['page'] ?? ''));
+            if ($slug !== '') {
+                $hit = $db->rows('SELECT ' . ($pk ? q_name($db, $pk) : '1') . ' AS id FROM ' . q_name($db, $table)
+                                 . ' WHERE ' . q_name($db, $slugc) . ' = ? LIMIT 1', [$slug]);
+                $ours = array_values(array_filter(blog_record(), fn($r) => ($r['slug'] ?? '') === $slug
+                                                                          && empty($r['removed'])));
+                reply(['ok' => true, 'table' => $table, 'slug' => $slug, 'found' => (bool)$hit,
+                       'id' => $hit ? (string)$hit[0]['id'] : '', 'ours' => (bool)$ours]);
+            }
+            $order = $pk ? ' ORDER BY ' . q_name($db, $pk) . ' DESC' : '';
+            $latest = $db->rows('SELECT * FROM ' . q_name($db, $table) . $order . ' LIMIT 1');
+            $shown = [];
+            foreach (($latest[0] ?? []) as $k => $v) {
+                $shown[$k] = preg_match(SECRET_COLUMN, (string)$k) ? '(hidden)'
+                           : (is_string($v) ? (function_exists('mb_substr') ? mb_substr($v, 0, 300)
+                                                                          : substr($v, 0, 300)) : $v);
+            }
+            $n = $db->rows('SELECT COUNT(*) AS n FROM ' . q_name($db, $table));
+            reply(['ok' => true, 'table' => $table, 'columns' => $cols, 'key' => $pk, 'slug_column' => $slugc,
+                   'latest' => $shown, 'count' => (int)($n[0]['n'] ?? 0), 'via' => $db->via,
+                   'driver' => $db->driver(), 'display' => blog_display(),
+                   'never_dirs' => IMAGE_NEVER_DIRS,
+                   'ours' => array_values(array_filter(blog_record(), fn($r) => empty($r['removed'])))]);
+        }
+
+        if ($route === '/blog' && $method === 'POST') {
+            $post = is_array($body['post'] ?? null) ? $body['post'] : [];
+            if (!$post) { fail(400, 'no post to add'); }
+            $row = [];
+            foreach ($post as $k => $v) {
+                if (!in_array($k, $names, true)) { fail(400, "your posts table has no column called $k"); }
+                foreach ($cols as $c) {
+                    if ($c['name'] === $k && $c['auto']) { fail(400, "$k is filled in by your database"); }
+                }
+                if (!is_scalar($v) && $v !== null) { fail(400, "$k must be plain text or a number"); }
+                if (is_string($v) && strlen($v) > 1024 * 1024) { fail(400, "$k is too long"); }
+                if ($v === '__NOW__') {
+                    $type = '';
+                    foreach ($cols as $c) { if ($c['name'] === $k) { $type = $c['type']; } }
+                    $v = preg_match('/^(int|bigint)/', $type) ? (string)time()
+                       : (preg_match('/^date$/', $type) ? date('Y-m-d') : date('Y-m-d H:i:s'));
+                }
+                $row[$k] = $v;
+            }
+            $slug = (string)($row[$slugc] ?? '');
+            if ($slugc === '' || $slug === '') { fail(400, 'a post needs its slug'); }
+            if ($db->rows('SELECT 1 AS x FROM ' . q_name($db, $table) . ' WHERE ' . q_name($db, $slugc)
+                          . ' = ? LIMIT 1', [$slug])) {
+                reply(['ok' => false, 'taken' => true, 'slug' => $slug,
+                       'error' => "your blog already has a post at $slug"], 409);
+            }
+            $picture = '';
+            $img = is_array($body['image'] ?? null) ? $body['image'] : null;
+            if ($img && in_array((string)($img['column'] ?? ''), $names, true)) {
+                $picture = save_picture($img);
+                $drop = clean_rel((string)($img['drop'] ?? ''));
+                $value = ($drop !== '' && str_starts_with($picture, $drop)) ? substr($picture, strlen($drop)) : $picture;
+                if (!empty($img['url_base'])) { $value = rtrim((string)$img['url_base'], '/') . '/' . $picture; }
+                $row[(string)$img['column']] = $value;
+            }
+            $keys = array_keys($row);
+            try {
+                $id = $db->run('INSERT INTO ' . q_name($db, $table) . ' ('
+                               . implode(', ', array_map(fn($k) => q_name($db, $k), $keys)) . ') VALUES ('
+                               . implode(', ', array_fill(0, count($keys), '?')) . ')', array_values($row));
+            } catch (Throwable $e) {
+                if ($picture !== '') { @unlink(SITE_ROOT . '/' . $picture); }
+                fail(422, 'your database would not take the post: ' . db_problem($e));
+            }
+            if ($pk && ($id === '' || $id === '0')) {
+                $hit = $db->rows('SELECT ' . q_name($db, $pk) . ' AS id FROM ' . q_name($db, $table)
+                                 . ' WHERE ' . q_name($db, $slugc) . ' = ? LIMIT 1', [$slug]);
+                $id = $hit ? (string)$hit[0]['id'] : '';
+            }
+            $rec = blog_record();
+            $rec[] = ['id' => $id, 'key' => $pk, 'table' => $table, 'slug' => $slug,
+                      'picture' => $picture, 'at' => date('c')];
+            save_record($rec);
+            reply(['ok' => true, 'table' => $table, 'id' => $id, 'slug' => $slug, 'picture' => $picture,
+                   'display' => blog_display()]);
+        }
+
+        if ($route === '/blog-remove' && $method === 'POST') {
+            $id = trim((string)($body['id'] ?? ''));
+            $rec = blog_record();
+            foreach ($rec as $i => $r) {
+                if ((string)($r['id'] ?? '') !== $id || $id === '' || !empty($r['removed'])) { continue; }
+                if (($r['table'] ?? '') !== $table || ($r['key'] ?? '') !== $pk || $pk === '') {
+                    fail(409, 'your posts table has changed since that post was added, so it was left alone');
+                }
+                $db->run('DELETE FROM ' . q_name($db, $table) . ' WHERE ' . q_name($db, $pk) . ' = ?', [$id]);
+                $pic = (string)($r['picture'] ?? '');
+                if ($pic !== '' && strpos($pic, '..') === false && is_file(SITE_ROOT . '/' . $pic)) {
+                    @unlink(SITE_ROOT . '/' . $pic);
+                }
+                $rec[$i]['removed'] = date('c');
+                save_record($rec);
+                reply(['ok' => true, 'removed' => $id, 'slug' => $r['slug'] ?? '']);
+            }
+            fail(403, 'only a post the agency added can be taken away, and that is not one of them');
+        }
+    } catch (Throwable $e) {
+        fail(500, 'your database said: ' . db_problem($e));
+    }
+    fail(405, 'not a way this door opens');
 }
 
 // --- prove the contact form still delivers ---------------------------------

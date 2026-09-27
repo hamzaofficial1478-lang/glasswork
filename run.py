@@ -409,7 +409,7 @@ def tests():
             "providers.local_tests",
             "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",
-            "pipelines.write_tests",
+            "pipelines.write_tests", "pipelines.blog_tests",
             "pipelines.leads_tests", "pipelines.harvest_tests",
             "pipelines.outreach_tests", "pipelines.campaign_tests", "pipelines.mailer_tests",
             "pipelines.osm_tests",

@@ -311,6 +311,16 @@ def _pages(c):
             continue
         b = _json(r.get("brief"), {}) or {}
         plain = blog.get("plain_page") or {}
+        # A press of "Put it on my blog" (or "Take it off") that IT has not
+        # finished: where it stands, straight off the change's own row.
+        moving = None
+        cid = blog.get("posting") or blog.get("removing")
+        if cid:
+            sq = c.execute("SELECT status, note FROM site_queue WHERE id=?", (cid,)).fetchone()
+            if sq and sq["status"] in ("approved", "failed"):
+                moving = {"change": cid, "status": sq["status"], "note": sq["note"] or "",
+                          "what": "posting" if blog.get("posting") else "removing"}
+        back = blog.get("backend") or {}
         row = {"id": r["id"], "title": blog.get("title") or r.get("title") or "",
                "keyword": b.get("primary_keyword") or "",
                "slug": blog.get("slug") or "", "meta": blog.get("meta") or "",
@@ -319,13 +329,15 @@ def _pages(c):
                "url": blog.get("posted_url") or blog.get("url") or "",
                "posted_at": blog.get("posted_at") or 0,
                "warnings": page.get("_held_because") or [],
-               "at": r.get("created_at") or 0,
+               "at": r.get("created_at") or 0, "moving": moving,
+               "on_backend": bool(back.get("id")), "backend_notes": back.get("notes") or [],
                "plain_page": ({"page": plain.get("page"), "site_queue": plain.get("site_queue"),
                                "down": plain.get("down") or ""} if plain.get("page") else None)}
         if r["status"] == "for_blog":
             for_blog.append(row)
         elif len(on_blog) < 12:
-            on_blog.append({k: row[k] for k in ("id", "title", "url", "posted_at", "plain_page")})
+            on_blog.append({k: row[k] for k in ("id", "title", "url", "posted_at", "plain_page",
+                                                "moving", "on_backend", "backend_notes")})
 
     counts = {}
     for r in _rows(c, "SELECT status, count(*) n FROM content_queue GROUP BY status"):
@@ -346,6 +358,7 @@ def _pages(c):
                          "held_for_seo": (r.get("status") or "").startswith("blocked_on_")})
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
             "for_blog": for_blog, "on_blog": on_blog, "blog_home": _blog_home(),
+            "blog_backend": _blog_backend(),
             "to_write": to_write, "upcoming": upcoming,
             "held_for_seo": sum(n for k, n in counts.items() if k.startswith("blocked_on_")),
             "site_resting": _site_resting(),
@@ -360,6 +373,15 @@ def _site():
         return (site_api.settings().get("site") or "").rstrip("/")
     except Exception:
         return ""
+
+
+def _blog_backend() -> dict:
+    """What the last look at his blog backend found — read from the cabinet, never his site."""
+    try:
+        from pipelines import blog_backend
+        return blog_backend.last_status()
+    except Exception:
+        return {}
 
 
 def _blog_home() -> str:
@@ -507,7 +529,8 @@ def _campaign_act(do, ids, data) -> dict:
     return {"ok": False, "error": f"not something this page does: {do!r}"}
 
 
-BLOG_ACTS = ("blog_posted", "blog_drop", "blog_rewrite", "take_down")
+BLOG_ACTS = ("blog_posted", "blog_drop", "blog_rewrite", "take_down",
+             "blog_publish", "blog_unpublish", "blog_check")
 
 
 def _blog_draft(c, cid):
@@ -520,9 +543,15 @@ def _blog_draft(c, cid):
 def _blog_act(do, ids, data) -> dict:
     """His blog posts: he put it up, drop it, write it again, take the plain copy down."""
     data = data if isinstance(data, dict) else {}
+    if do == "blog_check":
+        from pipelines import blog_backend
+        r = blog_backend.check()
+        return {**r, "head": r.get("head") or r.get("error")}
     if not ids:
         return {"ok": False, "error": "nothing was picked"}
     cid = ids[0]
+    if do in ("blog_publish", "blog_unpublish"):
+        return _to_his_blog(do, cid)
     with board._conn() as c:
         board._migrate(c)
         draft, status = _blog_draft(c, cid)
@@ -581,6 +610,68 @@ def _blog_act(do, ids, data) -> dict:
         + ("IT runs the tests, then points it at your blog — a minute or two."
            if started else "IT does it after the tests, on its next run or when you press "
                            "'Put it live now'."))}
+
+
+def _to_his_blog(do, cid) -> dict:
+    """
+    "yes add the posts to my backend direct" — his press is his yes. The post
+    goes to the Releaser, the one door to his site: tests first, then the row
+    in his blog's own table (pipelines/blog_backend).
+    """
+    posting = do == "blog_publish"
+    with board._conn() as c:
+        board._migrate(c)
+        draft, status = _blog_draft(c, cid)
+        blog = (draft or {}).get("_for_blog") or {}
+        if not blog:
+            return {"ok": False, "error": "That post is not waiting for your blog any more."}
+        if posting and status != "for_blog":
+            return {"ok": False, "error": "That post is already on your blog."}
+        if not posting and not (blog.get("backend") or {}).get("id"):
+            return {"ok": False, "error": "The agency did not add that post, so it cannot take "
+                                          "it off — do it in your backend."}
+        busy_with = blog.get("posting") or blog.get("removing")
+        if busy_with:
+            r = c.execute("SELECT status FROM site_queue WHERE id=?", (busy_with,)).fetchone()
+            if r and r["status"] == "approved":
+                return {"ok": True, "change": busy_with,
+                        "head": "IT is already on it — it shows here when it is done."}
+    title = blog.get("title") or "the post"
+    # Not connected when last looked: look again now, so an old connector file
+    # is said in a second, not after the whole test run.
+    try:
+        from pipelines import blog_backend
+        if not blog_backend.last_status().get("ok"):
+            seen = blog_backend.check()
+            if not seen.get("ok") and not seen.get("unreachable"):
+                return {"ok": False, "error": "Nothing was sent to your blog: " + str(seen.get("error"))}
+    except Exception:
+        pass
+    change = board.queue_site_change("it-releaser", "blog_post" if posting else "blog_remove", {
+        "change": {("blog_post" if posting else "blog_remove"): cid},
+        "title": (f"Put “{title[:70]}” on your blog" if posting
+                  else f"Take “{title[:70]}” off your blog"),
+        "why": ("The owner pressed Put it on my blog in the Posts room. It goes into the "
+                "table your own blog page reads, through the connector on your site."
+                if posting else
+                "The owner pressed Take it off my blog. Only a post the agency added can be "
+                "taken off this way.")})
+    board.decide_site_change(change, "approved")
+    with board._conn() as c:
+        draft, _st = _blog_draft(c, cid)
+        draft["_for_blog"].pop("posting", None)
+        draft["_for_blog"].pop("removing", None)
+        draft["_for_blog"]["posting" if posting else "removing"] = change
+        c.execute("UPDATE content_queue SET draft=? WHERE id=?",
+                  (json.dumps(draft, indent=2), cid))
+    from coordination import chat_actions
+    started = chat_actions.start_release()
+    when = ("IT runs the tests, then puts it in — usually a few minutes."
+            if started else "IT does it after the tests, on its next run or when you press "
+                            "'Put it live now'.")
+    return {"ok": True, "change": change,
+            "head": (f"“{title}” is going on your blog (change #{change}). " if posting
+                     else f"Taking “{title}” off your blog (change #{change}). ") + when}
 
 
 def act(do, ids, data=None) -> dict:

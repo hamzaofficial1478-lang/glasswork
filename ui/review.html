@@ -169,6 +169,15 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
 .plain{margin-top:10px;border:1px solid rgba(234,165,67,.45);background:var(--amber-dim);border-radius:10px;
   padding:9px 12px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .plain p{margin:0;flex:1 1 260px}
+.go-blog{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.go-blog .msg{font-size:12.5px;color:var(--muted)}
+.moving{margin-top:12px;border-radius:10px;padding:9px 12px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.moving.bad{border:1px solid rgba(229,86,91,.45);background:var(--danger-dim)}
+.moving p{margin:0;flex:1 1 260px}
+.bnotes{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)}
+details.copyin{margin-top:12px}
+details.copyin>summary{cursor:pointer;font-size:13px;color:var(--glass)}
+.conn ol{margin:6px 0 0;padding-left:20px}
 
 .log{width:100%;border-collapse:collapse;font-size:12.5px}
 .logwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
@@ -342,8 +351,10 @@ details.old[open]>summary{color:var(--text)}
     <div id="pageNotice"></div>
     <h2>Ready for your blog <small id="blogHead"></small></h2>
     <p class="lede">Blog posts go into your own blog backend, so they appear in your blog list and
-      open at <span class="mono">blog-details.php</span> in your theme &mdash; the agency does not
-      put them on your site as pages of their own. Each piece has its own Copy button.</p>
+      open at <span class="mono">blog-details.php</span> in your theme &mdash; never as pages of their
+      own. Press <b>Put it on my blog</b> and IT adds it straight to your blog after the tests, or copy
+      it in yourself.</p>
+    <div id="blogConn"></div>
     <div id="blogList"></div>
     <div id="blogDone"></div>
     <h2>Pages ready for your yes <small id="pageHead"></small></h2>
@@ -985,26 +996,66 @@ function plainCopy(x, site){
     <button class="btn stop" onclick="blogAct('take_down', ${x.id}, this)">Take it down</button></div>`;
 }
 
+function drawConn(bk){
+  const check = `<button class="btn glass" onclick="blogCheck(this)">${bk.checked_at ? 'Check again' : 'Check the connection'}</button>`;
+  if(bk.ok) return `<div class="notice conn"><p>Connected to your blog &mdash; the <span class="mono">${esc(bk.table)}</span> table,
+      ${esc(bk.posts)} post${bk.posts==1?'':'s'}${bk.checked_at ? ', checked '+esc(ago(bk.checked_at)) : ''}.</p>${check}</div>`;
+  if(bk.old_connector) return `<div class="notice amber conn" style="display:block"><p style="margin:0 0 4px"><b>One step on your
+      side before the agency can post to your blog.</b> Your website has the older connector file.</p>
+      <ol><li>In hPanel open <b>File Manager</b> and go into your website's <span class="mono">agency-api</span> folder.</li>
+        <li>Upload <span class="mono">paste-into-your-site/agency-api.php</span> from the agency folder on your PC, and rename it
+          <span class="mono">index.php</span>, replacing the old one. Leave <span class="mono">token.php</span> as it is.</li>
+        <li>Press the button below.</li></ol><div style="margin-top:10px">${check}</div></div>`;
+  if(bk.error) return `<div class="notice amber conn"><p>The agency could not reach your blog: ${esc(bk.error)}</p>${check}</div>`;
+  return `<div class="notice conn"><p>The agency has not looked at your blog backend yet.</p>${check}</div>`;
+}
+
+function moveNote(x){
+  const m = x.moving;
+  if(!m) return '';
+  if(m.status === 'approved') return `<div class="moving"><span class="busy">${m.what === 'posting'
+      ? 'IT is putting it on your blog — tests first, then the post.' : 'IT is taking it off your blog.'}</span></div>`;
+  return `<div class="moving bad"><p>${m.what === 'posting' ? 'It did not go on your blog' : 'It was not taken off'}:
+      ${esc(m.note || 'no reason was given')}</p>
+      <button class="btn" onclick="toBlog('${m.what === 'posting' ? 'blog_publish' : 'blog_unpublish'}', ${x.id}, this)">Try again</button></div>`;
+}
+
 function drawBlog(p){
   const list = p.for_blog || [], done = p.on_blog || [];
+  const bk = p.blog_backend || {};
   const site = String(p.blog_home || '').replace(/\/blog\.php$/, '');
-  const sig = JSON.stringify([list.map(x=>[x.id, x.title, (x.plain_page||{}).down]),
-                              done.map(x=>[x.id, x.url, (x.plain_page||{}).down]),
+  const sig = JSON.stringify([list.map(x=>[x.id, x.title, (x.plain_page||{}).down, x.moving]),
+                              done.map(x=>[x.id, x.url, (x.plain_page||{}).down, x.moving]),
+                              [bk.ok, bk.checked_at, bk.error, bk.old_connector],
                               [...OPEN].filter(k=>k.startsWith('b:'))]);
   if(sig === BLOGSIG) return;         // never redraw under his typing
   BLOGSIG = sig;
   for(const x of list) BLOG[x.id] = x;
+  $('#blogConn').innerHTML = drawConn(bk);
   $('#blogHead').textContent = list.length ? `${list.length} post${list.length===1?'':'s'}` : '';
   $('#blogList').innerHTML = list.length ? list.map(x=>`
     <article class="page" data-id="${x.id}">
       <h3>${esc(x.title)}</h3>
       <div class="meta">${[x.keyword ? 'for “'+x.keyword+'”' : '', x.at ? 'written '+ago(x.at) : ''].filter(Boolean).map(esc).join(' &middot; ')}</div>
       ${x.plain_page ? plainCopy(x, site) : ''}
+      ${x.moving && x.moving.status === 'approved' ? moveNote(x) : `
+      ${moveNote(x)}
+      ${x.moving ? '' : `<div class="go-blog"><button class="btn go" onclick="toBlog('blog_publish', ${x.id}, this)">Put it on my blog</button>
+        <span class="msg">${bk.ok ? 'IT adds it to your blog after the tests.' : 'Needs the connection above — or copy it in yourself.'}</span></div>`}`}
+      <div class="row">
+        <button class="btn quiet" onclick="toggle('b', ${x.id})">${OPEN.has('b:'+x.id) ? 'Hide the post' : 'Read the post'}</button>
+        <span style="flex:1"></span>
+        <button class="btn stop" onclick="blogAct('blog_drop', ${x.id}, this)">Drop it</button>
+        <button class="btn" onclick="blogAct('blog_rewrite', ${x.id}, this)">Write it again</button>
+      </div>
+      ${frameFor('b', x.id, x.html ? '<h1>' + esc(x.title) + '</h1>' + x.html : '')}
+      <details class="copyin" ${OPEN.has('c:'+x.id) || (!bk.ok && !OPEN.has('c-:'+x.id)) ? 'open' : ''} ontoggle="copyOpen(${x.id}, this.open)">
+      <summary>Copy it in yourself instead</summary>
       <ol class="steps">
         <li>Open your blog backend and start a new post.</li>
         <li>Copy each piece below into the matching box. If the article box has a <b>Source</b> or <b>&lt;&gt;</b> button, paste the HTML there; if it is a plain box, use the plain text.</li>
         <li>Save the pictures and upload them to the post.</li>
-        <li>Publish it in your backend, then press <b>It's on my blog</b> below.</li>
+        <li>Publish it in your backend, then press <b>I put it on my blog</b> below.</li>
       </ol>
       <div class="fields">
         ${field(x.id, 'title', 'Title', x.title)}
@@ -1021,24 +1072,19 @@ function drawBlog(p){
               ${img.alt ? `<button class="btn copy" onclick="copyAlt(${x.id}, ${i}, this)">Copy alt text</button>` : ''}</div>
           </div>`).join('')}</div></div>` : ''}
       </div>
-      <div class="row">
-        <button class="btn quiet" onclick="toggle('b', ${x.id})">${OPEN.has('b:'+x.id) ? 'Hide the post' : 'Read the post'}</button>
-        <span style="flex:1"></span>
-        <button class="btn stop" onclick="blogAct('blog_drop', ${x.id}, this)">Drop it</button>
-        <button class="btn" onclick="blogAct('blog_rewrite', ${x.id}, this)">Write it again</button>
-      </div>
-      ${frameFor('b', x.id, x.html ? '<h1>' + esc(x.title) + '</h1>' + x.html : '')}
       <div class="posted">
         <input id="posted${x.id}" value="${escA(POSTED[x.id] ?? x.url)}" oninput="POSTED[${x.id}]=this.value"
                aria-label="The post's address on your blog" spellcheck="false">
-        <button class="btn go" onclick="blogPosted(${x.id}, this)">It's on my blog</button>
+        <button class="btn" onclick="blogPosted(${x.id}, this)">I put it on my blog</button>
       </div>
+      </details>
     </article>`).join('')
     : `<div class="empty">No post is waiting to go on your blog.</div>`;
 
   $('#blogDone').innerHTML = done.length ? `<div class="logwrap" style="margin-bottom:6px"><table class="log">
     <tr><th>On your blog</th><th>Address</th></tr>
-    ${done.map(x=>`<tr><td>${esc(x.title)}${x.plain_page && !x.plain_page.down
+    ${done.map(x=>`<tr><td>${esc(x.title)}${(x.backend_notes||[]).length ? `<ul class="bnotes">${x.backend_notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+        ${moveNote(x)}${x.on_backend && !x.moving ? `<div style="margin-top:6px"><button class="btn copy stop" onclick="toBlog('blog_unpublish', ${x.id}, this)">Take it off my blog</button></div>` : ''}${x.plain_page && !x.plain_page.down
         ? `<br><span style="color:var(--amber)">the plain copy is still at /${esc(x.plain_page.page)}</span>
            <button class="btn copy stop" onclick="blogAct('take_down', ${x.id}, this)">Take it down</button>`
         : (x.plain_page ? `<br><span style="color:var(--muted)">plain copy: ${esc(x.plain_page.down)}</span>` : '')}</td>
@@ -1054,6 +1100,30 @@ async function blogAct(what, id, btn){
   if(words && !confirm(words)) return;
   btn.disabled = true;
   const j = await campAct(what, {}, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  BLOGSIG = '';
+  await load();
+}
+
+function copyOpen(id, open){
+  OPEN.delete('c:'+id); OPEN.delete('c-:'+id);
+  OPEN.add((open ? 'c:' : 'c-:') + id);
+}
+
+async function toBlog(what, id, btn){
+  const words = {blog_publish:'Put this post on your blog? IT runs the tests first, then adds it to your blog backend.',
+                 blog_unpublish:'Take this post off your blog? Only a post the agency added can be taken off.'}[what];
+  if(!confirm(words)) return;
+  btn.disabled = true;
+  const j = await campAct(what, {}, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  BLOGSIG = '';
+  await load();
+}
+
+async function blogCheck(btn){
+  btn.disabled = true; btn.textContent = 'Looking at your blog…';
+  const j = await campAct('blog_check', {}, []);
   toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
   BLOGSIG = '';
   await load();

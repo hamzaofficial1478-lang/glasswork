@@ -52,8 +52,9 @@ site. If no page of his can be read, it says so plainly in the approval rather
 than shipping a page that looks foreign.
 
 A BLOG POST IS NOT A PAGE. His posts live in his own blog backend and show
-through blog-details.php in his theme; a post goes to the Posts room ready to
-paste in there, never onto his site as a file of its own.
+through blog-details.php in his theme; a post goes to the Posts room, and from
+there into his blog's own table (pipelines/blog_backend) — never onto his site
+as a file of its own.
 """
 import argparse
 import json
@@ -558,10 +559,14 @@ def _theme_of_his_site():
 # His posts live in his own backend, which stores them in his database and
 # shows them through blog.php and blog-details.php in his theme. A post put up
 # as a file of its own sits outside all of that: no layout, not in his blog
-# list, not at his blog's address. The agency may not touch his admin area or
-# his database, so a written post is made ready for him to paste in — title,
-# link name, short description, the article and its pictures, each on its own
-# with a Copy button in the Posts room — and he says when it is up.
+# list, not at his blog's address. So a written post is made ready for his
+# blog — title, link name, short description, the article and its pictures —
+# and waits in the Posts room.
+#
+# "yes add the posts to my backend direct" — from there one press sends it,
+# through the Releaser, into the table his blog page reads (blog_backend.py).
+# His admin area is still never touched: the connector adds the row itself.
+# Each piece also has a Copy button, for pasting it in by hand.
 
 BLOG_POST_URL = "{site}/blog-details.php?slug={slug}"
 
@@ -948,7 +953,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
         if len(pages) > len(posts):
             bits.append(f"{len(pages) - len(posts)} page(s) written and waiting for your yes")
         if posts:
-            bits.append(f"{len(posts)} post(s) ready for your blog — copy them in from "
+            bits.append(f"{len(posts)} post(s) ready for your blog — put them on it from "
                         "the Posts room")
         summary = "; ".join(bits) if bits else f"nothing written — {len(held)} held"
         return {"ok": True, "agent": agent, "pages": pages, "held": held,
