@@ -209,6 +209,7 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
       <span class="sp"></span>
     </div>
     <div class="mails" id="mailList"></div>
+    <div id="mailHeld"></div>
     <div id="mailApproved"></div>
     <h2>Already decided <small>the last twenty</small></h2>
     <div id="mailRecent"></div>
@@ -347,6 +348,25 @@ function drawMails(m){
     </article>`;}).join('')
     : `<div class="empty">No mail is waiting for you.${m.leads_without_mail>0?'':' When the Hunter finds new leads, a mail for each one appears here.'}</div>`;
 
+  // WRITTEN, BUT STOPPED BY THE AUDITOR. "if the job finished then why i did
+  // not see any mail written?" — because held drafts used to be dropped. They
+  // are shown here with the reason, and can be written again; they can never
+  // be sent as they are.
+  const held = m.held || [];
+  $('#mailHeld').innerHTML = held.length ? `<h2>Stopped by the Auditor <small>${held.length} — written, but not fit to send as they are</small></h2>
+    <p class="lede">The agency wrote these, then its own checker refused them for the reason in red. They
+      cannot be sent. Press Write it again and the agency rewrites it with the reason in mind.</p>
+    <div class="mails">${held.map(x=>`<article class="mail" style="border-color:rgba(229,86,91,.45)">
+      <span></span>
+      <div class="mhead"><b>${esc(x.company||'(no company name)')}</b><span class="addr">${esc(x.to)}</span></div>
+      <div class="meta">written ${esc(ago(x.queued_at))}</div>
+      <div class="notes" style="color:var(--danger)">${(x.why||[]).map(esc).join('<br>')}</div>
+      <div class="subj"><span>Subject:</span> ${esc(x.subject)}</div>
+      <div class="body">${esc(x.body)}</div>
+      <div class="row" style="grid-column:2"><button class="btn glass" ${DATA.sectors.Leads&&!m.writing?'':'disabled'}
+        onclick="writeFor([${Number(x.lead_id)||0}], this)">Write it again</button></div>
+    </article>`).join('')}</div>` : '';
+
   $('#mailApproved').innerHTML = m.approved.length ? `<h2>Approved, not sent yet <small>they go on the next Leads pass</small></h2>
     <div class="logwrap"><table class="log"><tr><th>To</th><th>Subject</th><th>Why it has not gone</th></tr>
     ${m.approved.map(x=>`<tr><td>${esc(x.company)}<br><span class="addr">${esc(x.to)}</span></td><td>${esc(x.subject)}</td>
@@ -363,15 +383,16 @@ function drawMails(m){
 const LEAD_STATE = {
   ready:    ['', 'no mail yet'],
   drafted:  ['amber', 'mail written — read it below'],
+  held:     ['bad', 'the Auditor stopped it — tick to write again'],
   approved: ['ok', 'approved, going out'],
   sent:     ['ok', 'written to already'],
   no:       ['', ''],
 };
 function drawLeads(m){
   const all = m.leads || [];
-  const live = new Set(all.filter(l=>l.state==='ready').map(l=>l.id));
+  const live = new Set(all.filter(l=>l.state==='ready'||l.state==='held').map(l=>l.id));
   for(const id of [...LEADPICK]) if(!live.has(id)) LEADPICK.delete(id);
-  const ready = all.filter(l=>l.state==='ready');
+  const ready = all.filter(l=>l.state==='ready'||l.state==='held');
   const list = LEAD_ALL ? all : ready;
   $('#leadHead').textContent = all.length
     ? `${ready.length} ready to write · ${all.length} collected` : '';
@@ -397,7 +418,7 @@ function drawLeads(m){
     const [tone, word] = LEAD_STATE[l.state] || ['', ''];
     const status = l.state==='no' ? esc(l.why || 'cannot be written to')
                  : `<span class="pill ${tone}">${esc(word)}</span>`;
-    const pickable = l.state==='ready';
+    const pickable = l.state==='ready' || l.state==='held';
     return `<div class="lead${LEADPICK.has(l.id)?' picked':''}${pickable?'':' off'}" data-lead="${l.id}">
       ${pickable ? `<input type="checkbox" aria-label="Write to ${escA(l.company||l.email)}"
           ${LEADPICK.has(l.id)?'checked':''} onchange="pickLead(${l.id}, this.checked)">` : '<span></span>'}
@@ -414,7 +435,7 @@ function pickLead(id, on){
   drawLeads(DATA.mails);
 }
 function pickLeads(on){
-  for(const l of (DATA.mails.leads||[])) if(l.state==='ready') on ? LEADPICK.add(l.id) : LEADPICK.delete(l.id);
+  for(const l of (DATA.mails.leads||[])) if(l.state==='ready'||l.state==='held') on ? LEADPICK.add(l.id) : LEADPICK.delete(l.id);
   drawLeads(DATA.mails);
 }
 async function writeFor(ids, btn){

@@ -349,6 +349,70 @@ def test_it_will_not_run_on_a_stopped_sector_or_an_empty_board():
         check("and it says what it looked at", "board" in r["error"].lower(), True)
 
 
+def test_the_writer_and_the_auditor_agree():
+    """
+    "nothing sent — the Auditor held all 7 draft(s)" and an empty Mail room.
+    The brief told the writer "a tradesman with 10+ years" and never asked for
+    an opt-out line; the Auditor refused "10 years" and any mail without one.
+    """
+    print("\nHis real years in the trade are a fact; made-up numbers are not:")
+    ten = GOOD.replace("I run a glass", "I have run a glass").replace(
+        "workshop and", "workshop for 10 years and")
+    check("'10 years' passes", auditor.check_outreach(ten)["pass"], True)
+    check("'15 years' is caught",
+          auditor.check_outreach(ten.replace("10 years", "15 years"))["pass"], False)
+    check("'200 projects' is caught",
+          auditor.check_outreach(GOOD.replace("shopfronts around", "200 projects around"))["pass"],
+          False)
+
+    print("\nThe brief asks for what the Auditor checks:")
+    from . import mail
+    b = mail.writing_brief({"company": "Al Noor", "area": "Al Quoz"}, {"areas": ["Dubai"]})
+    check("it asks for an opt-out line", any("opt out" in m for m in b["must_include"]), True)
+    check("and no longer asks for a 'proof point' it has none of",
+          any("proof point" in m for m in b["must_include"]), False)
+
+    print("\nA refused draft gets one rewrite, told why:")
+    real = (mail._write_copy, mail.revise_copy)
+    no_stop = GOOD.replace("If this is not useful, reply stop and I will not write again.", "")
+    mail._write_copy = lambda brain, brief, agent="": {"ok": True, "draft": no_stop}
+    asked = []
+    mail.revise_copy = lambda brief, draft, problems, agent="": (
+        asked.append(problems) or {"ok": True, "draft": GOOD})
+    try:
+        d = O.draft_for({"id": 1, "company": "Al Noor Cafeteria", "email": "info@alnoor.ae",
+                         "area": "Al Quoz"}, {"name": "World Deal", "areas": ["Dubai"]})
+    finally:
+        mail._write_copy, mail.revise_copy = real
+    check("the rewrite was told the reason", any("opt-out" in p for p in asked[0]), True)
+    check("and the fixed draft is the one kept", d["audit"]["pass"], True)
+
+    print("\nA draft still refused is kept and shown, never dropped:")
+    real_draft = O.draft_for
+    O.draft_for = lambda lead, company, owner_voice="": {
+        "ok": True, "lead": lead, "service": "glass work", "service_key": "glass",
+        "draft": "Subject: Hi\n\nhi", "subject": "Hi", "body": "hi",
+        "audit": {"pass": False, "words": 1, "warnings": [],
+                  "blocking": ["no way to make it stop"]}}
+    try:
+        with _Cabinet():
+            lid = board.add_lead_if_new({"company": "Al Noor", "email": "info@alnoor.ae"})
+            board.post_task("Leads", "Write outreach mails", "d", created_by="owner",
+                            desk="leads-outreach")
+            r = O._run(O.AGENT, dry_run=False, limit=5)
+            check("the pass says it wrote one and why it stopped",
+                  "the Auditor stopped 1" in r["head"], True)
+            from coordination import review
+            m = review.build()["mails"]
+            check("the Mail room shows the held draft", len(m["held"]), 1)
+            check("with the reason", m["held"][0]["why"], ["no way to make it stop"])
+            check("and the lead can be ticked to write again",
+                  next(l["state"] for l in m["leads"] if l["id"] == lid), "held")
+            check("nothing held is ever pending to send", board.pending_outreach(), [])
+    finally:
+        O.draft_for = real_draft
+
+
 def main():
     for t in (test_a_good_mail_passes,
               test_the_things_that_must_never_leave,
@@ -357,7 +421,8 @@ def main():
               test_an_amber_task_cannot_be_claimed_until_he_says_yes,
               test_every_mail_waits_for_his_tick,
               test_a_business_is_approached_once,
-              test_it_will_not_run_on_a_stopped_sector_or_an_empty_board):
+              test_it_will_not_run_on_a_stopped_sector_or_an_empty_board,
+              test_the_writer_and_the_auditor_agree):
         t()
     print()
     if _fail:

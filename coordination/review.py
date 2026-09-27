@@ -137,6 +137,17 @@ def _mails(c):
                      "segment": m.get("lead_segment") or "",
                      "source": m.get("lead_source") or "",
                      "phone": m.get("lead_phone") or ""}})
+    # Drafts the Auditor refused: shown with the reason, never sendable. Only
+    # the newest per lead — an older one was replaced by a later attempt.
+    held = []
+    for m in _rows(c, "SELECT * FROM outreach_queue WHERE status='held'"
+                      " ORDER BY queued_at DESC, id DESC"):
+        audit = _json(m.get("audit"), {}) or {}
+        held.append({"id": m["id"], "lead_id": m.get("lead_id"),
+                     "company": m.get("company") or "", "to": m.get("to_email") or "",
+                     "subject": m.get("subject") or "", "body": m.get("body") or "",
+                     "queued_at": m.get("queued_at") or 0,
+                     "why": audit.get("blocking") or []})
     approved = [{"id": m["id"], "company": m.get("company") or "",
                  "to": m.get("to_email") or "", "subject": m.get("subject") or "",
                  "note": m.get("note") or ""}
@@ -163,7 +174,7 @@ def _mails(c):
         ).fetchone()[0]
     except sqlite3.Error:
         pass
-    return {"waiting": waiting, "approved": approved, "recent": recent,
+    return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
             "leads_without_mail": unwritten, "writing": busy("leads-outreach", c),
             "leads": _lead_list(c), **_mail_settings()}
 
@@ -189,8 +200,8 @@ def _lead_list(c):
         return []
     state = {}
     for q in _rows(c, "SELECT lead_id, status FROM outreach_queue"
-                      " WHERE status IN ('pending','approved','sent')"):
-        rank = {"pending": 1, "approved": 2, "sent": 3}
+                      " WHERE status IN ('held','pending','approved','sent')"):
+        rank = {"held": 0, "pending": 1, "approved": 2, "sent": 3}
         cur = state.get(q["lead_id"])
         if not cur or rank[q["status"]] > rank[cur]:
             state[q["lead_id"]] = q["status"]
@@ -209,6 +220,8 @@ def _lead_list(c):
         st = {"pending": "drafted", "approved": "approved", "sent": "sent"}.get(
             state.get(l["id"]), "")
         why = ""
+        if not st and state.get(l["id"]) == "held" and not why_not.get(l["id"]):
+            st = "held"                   # can be ticked and written again
         if not st:
             why = why_not.get(l["id"], "")
             st = "no" if why else "ready"

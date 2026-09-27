@@ -170,6 +170,16 @@ def draft_for(lead, company, owner_voice=""):
     draft = written["draft"]
     v = auditor.check_outreach(draft, lead=lead, company=company,
                                service_label=label)
+    if not v["pass"]:
+        # ONE SECOND GO, TOLD WHY. The reasons are specific ("no opt-out
+        # line", "claims '15 years'"), and one rewrite with them usually
+        # clears it — cheaper than losing the lead for a missing sentence.
+        again = mail.revise_copy(brief, draft, v["blocking"])
+        if again.get("ok"):
+            v2 = auditor.check_outreach(again["draft"], lead=lead, company=company,
+                                        service_label=label)
+            if v2["pass"] or len(v2["blocking"]) < len(v["blocking"]):
+                draft, v = again["draft"], v2
     subject, body = auditor.split_subject(draft)
     return {"ok": True, "lead": lead, "service": label, "service_key": key,
             "draft": draft, "subject": subject, "body": body,
@@ -227,6 +237,12 @@ def _run(agent, dry_run, limit, only_ids=None) -> dict:
 
         if not d["audit"]["pass"]:
             held.append({**line, "why": d["audit"]["blocking"]})
+            if not dry_run:
+                # Kept, so he can read what was written and why it cannot go.
+                board.queue_outreach(
+                    lead["id"], lead.get("company"), lead.get("email"),
+                    d["subject"], d["body"], service=d["service"],
+                    audit=d["audit"], by=agent, held=True)
             continue
         if dry_run:
             continue
@@ -369,16 +385,19 @@ def _head(sent, queued, held, failed, drafted, dry_run):
     if dry_run:
         return (f"dry run — drafted {len(drafted)}, "
                 f"{len(held)} would be held by the Auditor, nothing sent")
-    if queued:
-        return (f"{len(queued)} mail(s) written and waiting on you. Tick the "
-                "ones you want in the Mail room and press Send."
-                + (f" {len(sent)} you approved earlier were sent." if sent else ""))
+    if queued or held:
+        # Written, and where each one is — never "nothing sent", which read as
+        # a failure on a pass whose job was writing, not sending.
+        return (f"wrote {len(queued) + len(held)} mail(s): "
+                + (f"{len(queued)} waiting for your tick in the Mail room"
+                   if queued else "none passed the Auditor")
+                + (f"; the Auditor stopped {len(held)} — the Mail room shows each "
+                   "one and why" if held else "")
+                + (f". {len(sent)} you approved earlier were sent." if sent else "."))
     if sent:
         return (f"{len(sent)} mail(s) sent"
                 + (f", {len(held)} held by the Auditor" if held else "")
                 + (f", {len(failed)} failed" if failed else ""))
-    if held:
-        return f"nothing sent — the Auditor held all {len(held)} draft(s)"
     if failed:
         return f"nothing sent — {len(failed)} draft(s) failed: {failed[0].get('why')}"
     return "nothing to send"

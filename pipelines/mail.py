@@ -51,8 +51,9 @@ _TYPES = {
 # not by tricks. Each maps to something the business actually has.
 _LEVERS = [
     "open with the reader's own context (their area + the exact service)",
-    "one concrete proof point — a real nearby completed job or a real review",
-    "specifics over adjectives (materials, timeline, a real number)",
+    "one concrete, true detail — the material, how the job is done, how soon "
+    "he can come and measure — never an invented job, client or review",
+    "specifics over adjectives (the glass, the frame, the fixing), not claims",
     "a single, low-friction ask (WhatsApp beats a form in the UAE)",
     "short: aim 90–130 words, one idea, one call to action",
     "the owner's plain British-English voice — no corporate filler",
@@ -87,6 +88,38 @@ def setting(name: str, default: str = "") -> str:
         return (integrations.read_env().get(name) or "").strip() or default
     except Exception:
         return default
+
+
+def _years() -> int:
+    try:
+        from coordination import auditor
+        return auditor.verified_years()
+    except Exception:
+        return 10
+
+
+def revise_copy(brief, draft, problems, agent="") -> dict:
+    """
+    One second go at a draft the Auditor refused, told exactly why. Cheaper
+    than throwing the lead away, and the reasons are specific enough ("no
+    opt-out line", "claims '15 years'") that one pass usually fixes them.
+    """
+    try:
+        from providers import think
+    except Exception:                                        # pragma: no cover
+        return {"ok": False, "error": "no provider layer available"}
+    prompt = ("You wrote this outreach email and a checker refused it. Rewrite it "
+              "so every problem below is fixed, keep what was good, and return "
+              "only the subject line then the body.\n\nPROBLEMS:\n"
+              + "\n".join(f"- {p}" for p in problems)
+              + "\n\nYOUR DRAFT:\n" + str(draft)
+              + "\n\nTHE BRIEF AGAIN:\n" + _brief_to_text(brief))
+    r = think("leads", [{"role": "user", "content": prompt}],
+              agent=agent or "leads-outreach", max_tokens=400,
+              reason="fixing an outreach draft the Auditor refused")
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error", "brain unavailable")}
+    return {"ok": True, "draft": r["output"], "used": r.get("used")}
 
 
 def email_type(stage: str) -> dict:
@@ -153,13 +186,23 @@ def writing_brief(lead: dict, company: dict, owner_voice: str = "") -> dict:
         "also_offer": related,
         "language": "British English",
         "length_words": [90, 130],
-        "voice": owner_voice or "plain, human, confident, no filler — a tradesman with 10+ years, writing like a person",
+        "voice": owner_voice or (f"plain, human, confident, no filler — a tradesman "
+                                 f"with {_years()}+ years in the trade, writing like a person"),
         "attention_levers": _LEVERS,
+        # Every line here is one the Auditor checks afterwards. The brief used
+        # to ask for "one real proof point" and no opt-out, and the Auditor
+        # refused every draft for exactly those — so the two now say the same.
         "must_include": [f"{label} — this is what the email is ABOUT, lead with it",
                          "the reader's area, by name",
-                         "one real proof point",
-                         "one clear ask"],
+                         "one concrete, true detail about how the job is done",
+                         "one clear ask",
+                         "a last line that lets them opt out, e.g. \"If this is not "
+                         "useful, reply stop and I will not write again.\""],
         "must_avoid": ["fake project photos", "invented reviews or numbers",
+                       "any number of projects or clients, any client's name, any "
+                       "certificate or award — there are none to cite",
+                       "'we have worked with…', 'our clients include…', 'leading', 'best'",
+                       f"any number of years other than {_years()}",
                        "any price or special deal (owner sign-off only)", "walls of text",
                        "listing every service in the body — the related ones belong "
                        "in the footer block, not the paragraph"],

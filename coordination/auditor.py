@@ -74,9 +74,41 @@ UNBACKED = (
     r"\bour clients? include\b",
     r"\bwe are the (?:number one|leading|best|largest)\b",
     r"\bawarded?\b", r"\bcertified by\b", r"\biso[- ]?900\d\b",
-    r"\b\d{2,}\s*(?:\+\s*)?(?:years|projects|clients)\b",
+    r"\b\d{2,}\s*(?:\+\s*)?(?:projects|clients|jobs completed)\b",
     r"\b(?:100|99)\s*%\b",
 )
+
+# Years in the trade are different: he has them, and he has said how many
+# (BUSINESS_YEARS, default 10 — the same figure the offer mail uses). The mail
+# writer was TOLD to sound like "a tradesman with 10+ years", and this rule then
+# refused every mail that said so — seven drafts in a row, none shown to him.
+# A number of years up to his real figure is a fact; more than that is not.
+YEARS = r"\b(\d{1,2})\s*(?:\+\s*)?(?:years|yrs)\b"
+
+
+def verified_years() -> int:
+    import os
+    v = (os.environ.get("BUSINESS_YEARS") or "").strip()
+    if not v and os.environ.get("AGENCY_IGNORE_DOTENV") != "1":
+        try:
+            from providers import integrations
+            v = (integrations.read_env().get("BUSINESS_YEARS") or "").strip()
+        except Exception:
+            v = ""
+    try:
+        return int(re.sub(r"\D", "", v) or 10)
+    except ValueError:
+        return 10
+
+
+def _unbacked(text) -> list:
+    """Claims nobody can stand behind — his real years in the trade excepted."""
+    out = _hits(text, UNBACKED)
+    yours = verified_years()
+    for m in re.finditer(YEARS, text or "", re.I):
+        if int(m.group(1)) > yours:
+            out.append(m.group(0).strip())
+    return out
 
 # A cold mail must say how to stop it. Any one of these counts.
 OPT_OUT = (
@@ -135,7 +167,7 @@ def check_outreach(draft, lead=None, company=None, service_label="") -> dict:
         for h in _hits(text, CONCESSION):
             blocking.append(f"it names a price or a concession ({h!r}) — that is "
                             "the owner's call, not an agent's")
-        for h in _hits(text, UNBACKED):
+        for h in _unbacked(text):
             blocking.append(f"it claims something nobody can stand behind: {h!r}")
         if not subject:
             blocking.append("no subject line")
@@ -209,7 +241,12 @@ def check_outreach(draft, lead=None, company=None, service_label="") -> dict:
 #                                     is what everyone else's page already is
 
 MIN_PAGE_WORDS = 220
-MAX_PAGE_WORDS = 1400
+MAX_PAGE_WORDS = 1800
+
+# Stock libraries whose photographs may appear — only captioned as an
+# illustration, never passed off as his own work (pipelines/post_images).
+STOCK_HOSTS = ("images.pexels.com", "cdn.pixabay.com", "pixabay.com")
+ILLUSTRATIVE = "Illustrative photo"
 
 # Anything that executes, embeds, or reaches off the page for code. A content
 # agent writes prose and markup; it does not write behaviour.
@@ -260,7 +297,7 @@ def check_page(html, brief=None, site_host="") -> dict:
         for h in _hits(text, CONCESSION):
             blocking.append(f"it names a price or a concession ({h!r}) — that is "
                             "the owner's call, not an agent's")
-        for h in _hits(text, UNBACKED):
+        for h in _unbacked(text):
             blocking.append(f"it claims something nobody can stand behind: {h!r}. "
                             "Ten years of real finished jobs is the edge here; an "
                             "invented credential is how you lose it")
@@ -276,17 +313,26 @@ def check_page(html, brief=None, site_host="") -> dict:
             blocking.append(f"{words} words. Under {MIN_PAGE_WORDS} it is a stub, "
                             "and a stub on his own domain competes with his real pages")
 
-        host = re.escape(site_host) if site_host else r"$^"
-        for p in FOREIGN_IMAGE:
-            m = re.search(p % host, html or "", re.I)
-            if m:
-                blocking.append("it links a photograph from somebody else's site. "
-                                "Only his own finished work goes on these pages")
-                break
+        mine = (site_host or "").lower().replace("www.", "")
+        for src in re.findall(r"<img\b[^>]*src\s*=\s*[\"'](https?://[^\"']+)", html or "", re.I):
+            h = (re.match(r"https?://([^/:]+)", src) or [None, ""])[1].lower()
+            if mine and h.replace("www.", "") == mine:
+                continue
+            if h in STOCK_HOSTS:
+                if ILLUSTRATIVE.lower() not in (html or "").lower():
+                    blocking.append("a stock photograph is not labelled as an "
+                                    "illustration — a customer must never be shown "
+                                    "somebody else's glass as his work")
+                    break
+                continue
+            blocking.append("it links a photograph from somebody else's site. "
+                            "Only his own finished work, or a labelled stock "
+                            "illustration, goes on these pages")
+            break
 
         if words > MAX_PAGE_WORDS:
-            warnings.append(f"{words} words — long for a service page; the ones "
-                            "that win jobs are short and specific")
+            warnings.append(f"{words} words — long even for an article; check "
+                            "it earns every section")
         heads = len(re.findall(r"<h[23]\b", html or "", re.I))
         if heads < 2:
             warnings.append(f"{heads} subheading(s) — a page a person scans needs "

@@ -218,6 +218,8 @@ CREATE TABLE IF NOT EXISTS outreach_queue (
   service    TEXT,
   audit      TEXT,                   -- JSON: what the Auditor said about it
   status     TEXT DEFAULT 'pending', -- pending | approved | rejected | sent | stale
+                                     -- | held (the Auditor refused it; shown, never sent)
+                                     -- | replaced (a newer draft took its place)
   queued_by  TEXT,
   queued_at  INTEGER,
   decided_at INTEGER,

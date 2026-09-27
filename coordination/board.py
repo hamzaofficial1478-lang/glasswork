@@ -2458,14 +2458,35 @@ def mark_site_change(change_id, status, note=""):
 # rather than a permission prompt he has to answer every morning.
 
 def queue_outreach(lead_id, company, to_email, subject, body, service="",
-                   audit=None, by="leads-outreach"):
+                   audit=None, by="leads-outreach", held=False):
     """Hold one drafted mail for the owner. Returns the row id.
 
     ASK ONCE: the same draft to the same address, still pending, is not queued
     again. The Hunter runs daily and would otherwise fill his list with copies.
+
+    `held`: the Auditor refused it. It is kept — status 'held', with the
+    reasons in `audit` — so the Mail room can show him what was written and
+    why it cannot go, rather than the draft vanishing and the room staying
+    empty after a run that reported writing seven. A held draft can never be
+    sent; only a newer draft for the same lead replaces it.
     """
+    if held:
+        with _conn() as c:
+            _migrate(c)
+            c.execute("UPDATE outreach_queue SET status='replaced' WHERE lead_id=?"
+                      " AND status='held'", (lead_id,))
+            cur = c.execute(
+                "INSERT INTO outreach_queue(lead_id,company,to_email,subject,body,"
+                "service,audit,status,queued_by,queued_at)"
+                " VALUES(?,?,?,?,?,?,?, 'held', ?, ?)",
+                (lead_id, company, (to_email or "").strip().lower(), subject, body,
+                 service, json.dumps(audit or {}), by, _now()))
+            return cur.lastrowid
     with _conn() as c:
         _migrate(c)
+        # A fresh draft for this lead replaces any held one.
+        c.execute("UPDATE outreach_queue SET status='replaced' WHERE lead_id=?"
+                  " AND status='held'", (lead_id,))
         dup = c.execute(
             "SELECT id FROM outreach_queue WHERE status='pending'"
             " AND to_email=? AND subject=? LIMIT 1",
