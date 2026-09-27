@@ -846,10 +846,11 @@ def recipients(ids=None) -> list:
     Every lead, newest first, and where each stands for the campaign:
 
       ready    can be sent the campaign — tick it
-      going    approved and waiting for tomorrow's allowance
-      stuck    approved, tried, and refused — with the reason, and a way to
+      queued   approved, sending now or waiting for tomorrow's allowance
+      stuck    approved, tried, and not sent — with the reason, and a way to
                try again once it is put right
-      sent     already written to — a business is approached once
+      sent     gone — his mail server took it, and when
+      bounced  it came back: the address does not exist, or was refused
       no       cannot be written to, and why (no address, Security…)
     """
     from . import leads_outreach
@@ -858,11 +859,12 @@ def recipients(ids=None) -> list:
         leads = [dict(r) for r in c.execute(
             "SELECT id, company, name, email, area, segment, source, stage, found_at"
             " FROM leads ORDER BY found_at DESC, id DESC LIMIT ?", (LIST_MOST,))]
-        sent = {r[0] for r in c.execute(
+        logged = {r[0] for r in c.execute(
             "SELECT DISTINCT lead_id FROM outreach_log WHERE direction='sent'")}
         rows = [dict(r) for r in c.execute(
-            "SELECT lead_id, status, note FROM outreach_queue WHERE status IN"
-            " ('pending','held','approved','sent') ORDER BY id")]
+            "SELECT lead_id, status, note, sent_at, bounced_at, bounce_reason"
+            " FROM outreach_queue WHERE status IN ('pending','held','approved','sent')"
+            " OR (status='rejected' AND bounced_at IS NOT NULL) ORDER BY id")]
     finally:
         c.close()
     if ids:
@@ -870,8 +872,9 @@ def recipients(ids=None) -> list:
         leads = [l for l in leads if l["id"] in want]
     if not leads:
         return []
+    busy = sending()
     going = {r["lead_id"]: (r.get("note") or "") for r in rows if r["status"] == "approved"}
-    sent |= {r["lead_id"] for r in rows if r["status"] == "sent"}
+    went = {r["lead_id"]: r for r in rows if r["status"] in ("sent", "rejected")}
     old = {r["lead_id"] for r in rows if r["status"] in ("pending", "held")}
     try:
         _can, cannot = leads_outreach.eligible(limit=LIST_MOST * 2, log=False,
@@ -882,10 +885,15 @@ def recipients(ids=None) -> list:
         why_not = {l["id"]: f"could not be checked ({e})" for l in leads}
     out = []
     for l in leads:
-        if l["id"] in sent:
-            st, why = "sent", "written to already"
+        at = 0
+        w = went.get(l["id"])
+        if w and w.get("bounced_at"):
+            st, why, at = "bounced", w.get("bounce_reason") or "it came back", w.get("sent_at") or 0
+        elif w or l["id"] in logged:
+            st, why = "sent", (w or {}).get("note") or "sent"
+            at = (w or {}).get("sent_at") or 0
         elif l["id"] in going:
-            st, why = _approved_state(going[l["id"]])
+            st, why = _approved_state(going[l["id"]], busy)
         elif l["id"] in why_not:
             st, why = "no", why_not[l["id"]]
         else:
@@ -894,20 +902,25 @@ def recipients(ids=None) -> list:
                     "greeting": greeting(l), "email": l.get("email") or "",
                     "area": l.get("area") or "", "segment": l.get("segment") or "",
                     "found_at": l.get("found_at") or 0, "state": st, "why": why,
-                    "old_draft": l["id"] in old})
+                    "sent_at": at, "old_draft": l["id"] in old})
     return out
 
 
-def _approved_state(note) -> tuple:
-    """An approved mail that has not gone: waiting its turn, or refused and why.
+WAITING = "waiting to send"
+
+
+def _approved_state(note, busy=False) -> tuple:
+    """An approved mail that has not gone: on its way, or not sent and why.
 
     Every approved-but-unsent mail used to read "goes with the next allowance",
     including seven the outreach rules had refused — so the screen said wait
     while nothing would ever happen."""
     why = (note or "").replace("not sent yet: ", "", 1).strip()
-    if not why or "allowance" in why or "cap reached" in why or \
-            why.startswith("owner approved"):
-        return "going", "approved — goes with the next allowance"
+    if "allowance" in why or "cap reached" in why:
+        return "queued", "goes with tomorrow's allowance"
+    if not why or why.startswith("owner approved") or why.startswith(WAITING):
+        return (("queued", "sending — one every few seconds") if busy else
+                ("stuck", "not sent yet — press Try again to send it now"))
     if "approved outreach domain" in why:
         return "stuck", "refused: the Outreach domain on Setup does not match your email address"
     return "stuck", why
@@ -916,6 +929,87 @@ def _approved_state(note) -> tuple:
 def stuck() -> list:
     """Campaign mails he approved that were refused when they were tried."""
     return [r for r in recipients() if r["state"] == "stuck"]
+
+
+# ---------------------------------------------------------------------------
+# SENDING IN THE BACKGROUND
+# ---------------------------------------------------------------------------
+#
+# Mails now go one every five to eight seconds, over one connection. Ten of
+# them is over a minute — too long to hold a button down for, and a page that
+# waits that long looks frozen. So Send queues them and starts a sender in the
+# background; the Mail room shows each one move to Sent as it goes, and he can
+# leave the page. The same sender (leads_outreach._send_approved) runs on the
+# day pass, and only one ever runs at a time (its lock).
+
+def sending() -> bool:
+    """Is a batch of mail going out right now?"""
+    from . import leads_outreach
+    c = _conn()
+    try:
+        r = c.execute("SELECT holder, expires_at, pid FROM locks WHERE resource=?",
+                      (leads_outreach.SEND_LOCK,)).fetchone()
+    except sqlite3.Error:
+        r = None
+    finally:
+        c.close()
+    if not r or (r["expires_at"] or 0) < int(time.time()):
+        return False
+    try:
+        return board.process_alive(r["pid"]) if r["pid"] else True
+    except Exception:
+        return True
+
+
+def _spawn():
+    """The sender, as its own process, so it outlives the page's request."""
+    import os
+    import subprocess
+    from pathlib import Path
+    kw = {"cwd": str(Path(__file__).parents[1]), "stdin": subprocess.DEVNULL,
+          "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if os.name == "nt":
+        from coordination import console
+        kw["creationflags"] = console.background_flags()
+    else:
+        kw["start_new_session"] = True
+    subprocess.Popen([sys.executable, "-m", "pipelines.campaign", "--send-queued"], **kw)
+
+
+def start_sending() -> dict:
+    if sending():
+        return {"ok": True, "already": True}
+    try:
+        _spawn()
+    except Exception as e:
+        return {"ok": False, "error": f"could not start the sender: {e}"}
+    return {"ok": True}
+
+
+def send_queued(bounce_checks=(90, 360), sleep=None) -> dict:
+    """
+    The background sender: every approved mail, one every few seconds, over
+    one connection — then a look in his inbox for anything that came back.
+    """
+    from . import leads_outreach
+    sleep = sleep or time.sleep
+    ready = mail.preflight()
+    if not ready["ok"]:
+        return {"ok": False, "error": " ".join(ready["problems"])}
+    failed = []
+    with board.agent_run(AGENT) as run_row:
+        sent = leads_outreach._send_approved(ready["room"], failed=failed)
+        run_row.note(f"sent {len(sent)} mail(s), one every few seconds"
+                     + (f"; {len(failed)} did not go: {failed[0]['why']}" if failed else ""))
+    # A bounce comes back a minute or a few after sending. Look twice.
+    found = 0
+    if sent:
+        waited = 0
+        for at in bounce_checks or ():
+            sleep(max(0, at - waited))
+            waited = at
+            found += mail.check_bounces(days=2).get("new", 0)
+    return {"ok": True, "sent": sent, "failed": failed, "bounced": found}
 
 
 def _extra(camp) -> dict:
@@ -949,12 +1043,13 @@ def send(lead_ids) -> dict:
     """
     The Mail room's Send: the approved campaign to exactly these leads.
 
-    Inside today's allowance they go now; beyond it they are approved and go
-    with the next pass (his tick is the yes). Security looks at each one again,
-    a business already written to is skipped, and the cap and the sending
-    domain are enforced where they always are, in mail._smtp_send.
+    Queued now, sent in the background one every few seconds (send_queued).
+    Security looks at each one again as it goes, a business already written to
+    is skipped, and the cap and the sending domain are enforced where they
+    always are, in mail._smtp_send. Beyond today's allowance they wait for
+    tomorrow's — his tick is the yes.
     """
-    from . import leads_outreach, security_screen
+    from . import leads_outreach
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off — turn it back on to send mail."}
     camp = current()
@@ -978,9 +1073,7 @@ def send(lead_ids) -> dict:
     can, cannot = leads_outreach.eligible(limit=len(ids), only_ids=ids,
                                           for_campaign=True)
     failed = [{"id": x["id"], "company": x["company"], "why": x["why"]} for x in cannot]
-    room = max(0, mail.daily_cap() - mail.sent_today())
-    extra = _extra(camp)
-    sent, later = [], []
+    queued, later = 0, 0
     for lead in can:
         r = render(camp, lead)
         v = auditor.check_outreach(r["draft"], lead=lead, owner_offer=his_words(camp),
@@ -990,44 +1083,25 @@ def send(lead_ids) -> dict:
                            "why": "the Auditor stops it: " + v["blocking"][0]})
             continue
         qid = _queue(camp, lead, r, v)
-        if len(sent) >= room:
-            later.append({"id": lead["id"], "company": lead.get("company"),
-                          "to": lead.get("email")})
+        if queued >= ready["room"]:
+            later += 1
             _note(qid, "not sent yet: today's allowance is used up — it goes on the next pass")
-            continue
-        bad = [f for f in security_screen.scan_lead(lead)
-               if f["severity"] in ("high", "critical")]
-        if bad:
-            board.mark_outreach_sent(qid, False, f"Security: {bad[0]['why']}"[:200])
-            failed.append({"id": lead["id"], "company": lead.get("company"),
-                           "why": f"Security stopped it: {bad[0]['why']}"})
-            continue
-        res = mail._smtp_send(lead, r["draft"], html=r["html"], **extra)
-        if res.get("ok"):
-            board.mark_outreach_sent(qid, True, "the campaign, approved and ticked by the owner")
-            leads_outreach._mark_contacted(lead["id"])
-            sent.append({"id": lead["id"], "company": lead.get("company"),
-                         "to": lead.get("email")})
-        elif res.get("capped"):
-            later.append({"id": lead["id"], "company": lead.get("company"),
-                          "to": lead.get("email")})
-            _note(qid, "not sent yet: " + res.get("error", "the daily allowance is used up"))
         else:
-            _note(qid, "not sent yet: " + res.get("error", "the mail server refused it"))
-            failed.append({"id": lead["id"], "company": lead.get("company"),
-                           "why": res.get("error", "the mail server refused it")})
-    head = (f"Sent the campaign to {len(sent)} lead(s)." if sent else "Nothing was sent now.")
+            _note(qid, WAITING)
+        queued += 1
+    started = start_sending() if queued - later > 0 else {"ok": True}
+    now = queued - later
+    head = (f"Sending to {now} lead(s), one every few seconds — about "
+            f"{max(1, round(now * 7 / 60))} minute(s). You can leave this page; each "
+            "one moves to Sent as it goes." if now else "Nothing to send now.")
     if later:
-        head += (f" {len(later)} more are approved and go with the next allowance "
-                 f"(your limit is {mail.daily_cap()} a day).")
+        head += f" {later} more go with tomorrow's allowance (your limit is {ready['cap']} a day)."
     if failed:
-        head += f" {len(failed)} could not go: {failed[0]['company']} — {failed[0]['why']}"
-    with board.agent_run(AGENT) as run_row:
-        run_row.note(f"sent the campaign to {len(sent)} lead(s)"
-                     + (f", {len(later)} for the next pass" if later else "")
-                     + (f", {len(failed)} could not go" if failed else ""))
-    return {"ok": bool(sent or later), "sent": sent, "later": later, "failed": failed,
-            "head": head, "cap": mail.daily_cap(), "sent_today": mail.sent_today()}
+        head += f" {len(failed)} could not be queued: {failed[0]['company']} — {failed[0]['why']}"
+    if not started.get("ok"):
+        head += " " + started.get("error", "")
+    return {"ok": bool(queued), "queued": queued, "later": later, "failed": failed,
+            "head": head}
 
 
 def _queue(camp, lead, r, v) -> int:
@@ -1080,11 +1154,11 @@ def send_test(to) -> dict:
 
 def retry(lead_ids=None) -> dict:
     """
-    Try again, now, the campaign mails he approved that were refused — once
-    whatever refused them is put right. Only mails already approved; only the
-    campaign as it still stands (for_queued checks that).
+    Try again, now, the campaign mails he approved that did not go — once
+    whatever stopped them is put right. Only mails already approved; only the
+    campaign as it still stands (for_queued checks that). Sent in the
+    background, one every few seconds, like any other send.
     """
-    from . import leads_outreach
     if not board.sector_enabled(SECTOR):
         return {"ok": False, "error": "Leads is switched off — turn it back on to send mail."}
     ready = mail.preflight()
@@ -1102,16 +1176,14 @@ def retry(lead_ids=None) -> dict:
         c.close()
     if not qids:
         return {"ok": False, "error": "Nothing approved is waiting to be sent."}
-    failed = []
-    sent = leads_outreach._send_approved(ready["room"], ids=qids, failed=failed)
-    head = (f"Sent {len(sent)} of the {len(qids)} approved mail(s)." if sent
-            else "None of them went.")
-    if failed:
-        head += f" {len(failed)} did not: {failed[0]['company']} — {failed[0]['why']}"
-    with board.agent_run(AGENT) as run_row:
-        run_row.note(f"tried the approved campaign mails again — {len(sent)} sent"
-                     + (f", {len(failed)} did not go" if failed else ""))
-    return {"ok": bool(sent), "sent": sent, "failed": failed, "head": head}
+    for q in qids:
+        _note(q, WAITING)
+    started = start_sending()
+    if not started.get("ok"):
+        return {"ok": False, "error": started.get("error")}
+    return {"ok": True, "queued": len(qids),
+            "head": f"Trying {len(qids)} again, one every few seconds. Each one moves to "
+                    "Sent as it goes."}
 
 
 def use_sending_domain(domain) -> dict:
@@ -1161,6 +1233,7 @@ def view(sample=None) -> dict:
             "tiles": camp.get("tiles") or [], "warnings": camp.get("warnings") or [],
             "audit": camp.get("audit") or {}, "subject": r["subject"],
             "html": r["html"], "for": greeting(lead),
+            "for_name": tidy_name(lead.get("company")) or "a lead",
             "phone": con["phone"], "whatsapp": con["whatsapp"],
             "business": business()["name"],
             "photos": sum(1 for t in camp.get("tiles") or [] if t.get("photo"))}
@@ -1171,9 +1244,21 @@ def main():
     ap.add_argument("--show", action="store_true")
     ap.add_argument("--html", default="", help="write the mail as a lead sees it here")
     ap.add_argument("--create", action="store_true")
+    ap.add_argument("--send-queued", action="store_true",
+                    help="send the approved campaign mail now, one every few seconds")
+    ap.add_argument("--bounces", action="store_true",
+                    help="look in your inbox for mail that came back")
     ap.add_argument("--offer", default="")
     ap.add_argument("--until", default="")
     a = ap.parse_args()
+    if a.send_queued:
+        r = send_queued()
+        print(json.dumps({**{k: v for k, v in r.items() if k != "sent"},
+                          "sent": len(r.get("sent") or [])}, default=str))
+        return 0
+    if a.bounces:
+        print(json.dumps(mail.check_bounces(), default=str))
+        return 0
     if a.create:
         r = create(a.offer, a.until)
         print(r["campaign"]["audit"].get("why"))

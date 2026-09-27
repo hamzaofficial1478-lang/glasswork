@@ -1274,6 +1274,9 @@ _ADDED_COLUMNS = (
     # a queued mail is, and the designed version that goes with the text.
     ("outreach_queue", "campaign_id", "INTEGER"),
     ("outreach_queue", "html",        "TEXT"),
+    # A mail that came back (a bounce report in his inbox, or refused outright).
+    ("outreach_queue", "bounced_at",   "INTEGER"),
+    ("outreach_queue", "bounce_reason", "TEXT"),
     # What the Harvester read off the business's own website — the details Maps
     # does not hold. `whatsapp` is filled ONLY from a click-to-chat button the
     # business published itself; `evidence` records where every detail came

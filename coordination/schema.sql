@@ -226,7 +226,9 @@ CREATE TABLE IF NOT EXISTS outreach_queue (
   sent_at    INTEGER,
   note       TEXT,
   campaign_id INTEGER,               -- the campaign this mail is (pipelines/campaign)
-  html       TEXT                    -- the designed version that goes with the text
+  html       TEXT,                   -- the designed version that goes with the text
+  bounced_at INTEGER,                -- it came back: a bounce report, or refused
+  bounce_reason TEXT                 -- why, in plain words
 );
 CREATE INDEX IF NOT EXISTS idx_outq_status ON outreach_queue(status);
 

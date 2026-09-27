@@ -598,6 +598,266 @@ def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=N
         return None
 
 
+# ---------------------------------------------------------------------------
+# ONE CONNECTION, A PAUSE BETWEEN MAILS, AND A COPY IN HIS SENT FOLDER
+# ---------------------------------------------------------------------------
+#
+# "it sent the mails but how can i confirm if the mails are sent or not i
+#  checked into my mail sent there is nothing and also again it get failed as i
+#  think it should sent the mails with delay like ... 5 to 8 seconds"
+#
+# Both halves were right.
+#
+#   the failures     every mail opened its own connection and logged in again,
+#                    back to back. His mail server (Hostinger, relaying through
+#                    MailChannels) answered a burst of logins by timing out the
+#                    handshake and resetting connections — "The handshake
+#                    operation timed out", "WinError 10054", "Connection
+#                    unexpectedly closed". Now a batch logs in once, waits five
+#                    to eight seconds between mails, and a dropped connection
+#                    is opened again and the mail tried again, twice, a little
+#                    later each time.
+#
+#   the Sent folder  sending through SMTP never puts a copy in Sent — a mail
+#                    program does that itself, separately. So the mail went
+#                    and nothing showed it. Each mail now also goes into the
+#                    Sent folder of his own mailbox (IMAP), where he looks.
+
+PACE = (5.0, 8.0)          # seconds between two mails in one batch
+TRIES = 3                  # a dropped connection: this many goes in all
+RETRY_AFTER = 10           # seconds before the first retry; doubled for the next
+SENT_FOLDERS = ("Sent", "INBOX.Sent", "Sent Items", "Sent Messages", "INBOX/Sent",
+                "Sent Mail")
+
+_BATCH = None              # the Mailer every send inside `with batch():` shares
+
+
+def _transient(e) -> bool:
+    """A connection that fell over, or a 4xx "try later" — worth another go."""
+    import smtplib
+    import socket
+    import ssl
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        return all(400 <= int(code) < 500 for code, _m in e.recipients.values())
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        return False
+    if isinstance(e, smtplib.SMTPResponseException):
+        return 400 <= e.smtp_code < 500
+    return isinstance(e, (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,
+                          TimeoutError, ConnectionError, socket.timeout, ssl.SSLError,
+                          OSError))
+
+
+def _refused_address(e) -> bool:
+    """The receiving server said this address is no good (5xx on the recipient)."""
+    import smtplib
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        return any(int(code) >= 500 for code, _m in e.recipients.values())
+    return False
+
+
+def _imap_host() -> str:
+    h = setting("IMAP_HOST").strip()
+    if h:
+        return h
+    s = setting("SMTP_HOST").strip().lower()
+    return ("imap." + s[5:]) if s.startswith("smtp.") else s
+
+
+def imap_open(timeout=20):
+    """His own mailbox, over IMAP, with the same login as sending."""
+    import imaplib
+    try:
+        port = int((setting("IMAP_PORT") or "993").strip() or 993)
+    except ValueError:
+        port = 993
+    im = imaplib.IMAP4_SSL(_imap_host(), port, timeout=timeout)
+    im.login(setting("SMTP_USER").strip(), setting("SMTP_PASS"))
+    return im
+
+
+def sent_folder(im) -> str:
+    """The folder his mail program calls Sent — by its flag first, then its name."""
+    typ, data = im.list()
+    names = []
+    for raw in data or []:
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw or "")
+        m = re.match(r'\((?P<flags>[^)]*)\)\s+(?:"[^"]*"|NIL)\s+(?P<name>.+)$', line.strip())
+        if not m:
+            continue
+        name = m.group("name").strip()
+        if len(name) > 1 and name[0] == '"' and name[-1] == '"':
+            name = name[1:-1]
+        if "\\sent" in m.group("flags").lower():
+            return name
+        names.append(name)
+    for want in SENT_FOLDERS:
+        for n in names:
+            if n.lower() == want.lower():
+                return n
+    return ""
+
+
+class Mailer:
+    """
+    One SMTP login for a whole batch, a pause between mails, a fresh
+    connection when the server drops one, and a copy of each mail in his Sent
+    folder. Use as `with Mailer() as m: m.deliver(msg)`, or let _smtp_send
+    use the batch opened by `with batch():`.
+    """
+
+    def __init__(self, pace=PACE, sleep=None, copies=True):
+        import time as _t
+        self.pace, self.copies = pace, copies
+        self.sleep = sleep or _t.sleep
+        self.srv, self.imap, self.folder = None, None, None
+        self.last, self.gap = 0.0, 0.0
+        self.copy_error = ""
+        self.sent = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.close()
+
+    def _open(self):
+        import smtplib
+        host = setting("SMTP_HOST").strip()
+        user = setting("SMTP_USER").strip()
+        pw = setting("SMTP_PASS")
+        try:
+            port = int((setting("SMTP_PORT") or "587").strip() or 587)
+        except ValueError:
+            port = 587
+        if port == 465:
+            srv = smtplib.SMTP_SSL(host, port, timeout=30)
+        else:
+            srv = smtplib.SMTP(host, port, timeout=30)
+            srv.ehlo()
+            if srv.has_extn("starttls"):
+                srv.starttls()
+                srv.ehlo()
+        if pw:
+            srv.login(user, pw)
+        return srv
+
+    def _drop(self):
+        if self.srv is not None:
+            try:
+                self.srv.quit()
+            except Exception:
+                pass
+        self.srv = None
+
+    def close(self):
+        self._drop()
+        if self.imap is not None:
+            try:
+                self.imap.logout()
+            except Exception:
+                pass
+        self.imap = None
+
+    def _copy(self, msg) -> bool:
+        """A copy in his Sent folder. Never stops a send if it cannot."""
+        if not self.copies or self.copy_error:
+            return False
+        try:
+            import imaplib
+            import time as _t
+            if self.imap is None:
+                self.imap = imap_open()
+                self.folder = sent_folder(self.imap)
+                if not self.folder:
+                    self.copy_error = "your mailbox has no Sent folder that could be found"
+                    return False
+            box = f'"{self.folder}"' if " " in self.folder else self.folder
+            typ, _d = self.imap.append(box, "\\Seen", imaplib.Time2Internaldate(_t.time()),
+                                       msg.as_bytes())
+            if typ != "OK":
+                self.copy_error = f"your mailbox would not take the copy ({typ})"
+                return False
+            return True
+        except Exception as e:
+            self.copy_error = f"could not save a copy to your Sent folder ({type(e).__name__}: {e})"
+            self.imap = None
+            return False
+
+    def deliver(self, msg) -> dict:
+        """Send one message. {ok, error, transient, refused, copied}."""
+        import random
+        import time as _t
+        if self.last:
+            wait = self.gap - (_t.monotonic() - self.last)
+            if wait > 0:
+                self.sleep(wait)
+        err = None
+        for attempt in range(TRIES):
+            try:
+                if self.srv is None:
+                    self.srv = self._open()
+                self.srv.send_message(msg)
+                self.last, self.gap = _t.monotonic(), random.uniform(*self.pace)
+                self.sent += 1
+                return {"ok": True, "copied": self._copy(msg)}
+            except Exception as e:
+                err = e
+                self._drop()
+                if not _transient(e) or attempt == TRIES - 1:
+                    break
+                self.sleep(RETRY_AFTER * (2 ** attempt))
+        self.last, self.gap = _t.monotonic(), random.uniform(*self.pace)
+        said = smtp_said(err)
+        if _transient(err):
+            said = (f"your mail server kept dropping the connection ({said}) — tried "
+                    f"{TRIES} times. It is tried again on the next run, or press Try again.")
+        return {"ok": False, "error": said, "transient": _transient(err),
+                "refused": _refused_address(err)}
+
+
+class batch:
+    """`with batch():` — every _smtp_send inside shares one Mailer (one login,
+    paced, with Sent copies). Nested batches share the outer one."""
+
+    def __init__(self, **kw):
+        self.kw, self.mine = kw, False
+
+    def __enter__(self):
+        global _BATCH
+        if _BATCH is None:
+            _BATCH, self.mine = Mailer(**self.kw), True
+        return _BATCH
+
+    def __exit__(self, *a):
+        global _BATCH
+        if self.mine and _BATCH is not None:
+            _BATCH.close()
+            _BATCH = None
+
+
+def _message(sender, to, subject, body, html="", from_name="", headers=None):
+    """The message itself: text, the designed version beside it, and the
+    headers a receiving server looks for before it trusts a mail."""
+    from email.message import EmailMessage
+    from email.utils import formataddr, formatdate, make_msgid
+    msg = EmailMessage()
+    msg["From"] = formataddr((from_name, sender)) if from_name else sender
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=(sender.rsplit("@", 1)[-1] or None))
+    for k, v in (headers or {}).items():
+        if k and v and k.lower() not in ("from", "to", "subject", "date", "message-id"):
+            msg[k] = v
+    msg.set_content(body or "")
+    if html:
+        # add_alternative, not set_content: set_content would throw the plain
+        # text away and leave a message with no text part at all.
+        msg.add_alternative(html, subtype="html")
+    return msg
+
+
 def send_plain(to: str, subject: str, body: str, html: str = "",
                from_name: str = "", headers=None, rehearse: bool = False) -> dict:
     """
@@ -627,16 +887,11 @@ def send_plain(to: str, subject: str, body: str, html: str = "",
     means the real mail would leave too. His first test arrived through a path
     that skipped the domain rule, and the campaign then did not go at all.
     """
-    import os
-    import smtplib
-    from email.message import EmailMessage
-
     to = (to or "").strip()
     if "@" not in to or " " in to:
         return {"ok": False, "error": f"not an email address: {to!r}"}
     host = setting("SMTP_HOST").strip()
     user = setting("SMTP_USER").strip()
-    pw = setting("SMTP_PASS")
     if not host or not user:
         return {"ok": False, "error": "SMTP not configured (set it on /setup "
                                       "→ Delivery mail)"}
@@ -646,40 +901,11 @@ def send_plain(to: str, subject: str, body: str, html: str = "",
         if wrong:
             return {"ok": False, "wrong_domain": True,
                     "error": "your leads would not get this either: " + wrong}
-    msg = EmailMessage()
-    if from_name:
-        from email.utils import formataddr
-        msg["From"] = formataddr((from_name, sender))
-    else:
-        msg["From"] = sender
-    msg["To"] = to
-    msg["Subject"] = subject or "(no subject)"
-    for k, v in (headers or {}).items():
-        if k and v and k.lower() not in ("from", "to", "subject"):
-            msg[k] = v
-    msg.set_content(body or "")
-    if html:
-        # add_alternative, not set_content: set_content would throw the plain
-        # text away and leave a message with no text part at all.
-        msg.add_alternative(html, subtype="html")
-    try:
-        port = int((setting("SMTP_PORT") or "587").strip() or 587)
-    except ValueError:
-        port = 587
-    try:
-        srv = (smtplib.SMTP_SSL(host, port, timeout=30) if port == 465
-               else smtplib.SMTP(host, port, timeout=30))
-        with srv:
-            if port != 465:
-                try:
-                    srv.starttls()
-                except Exception:
-                    pass
-            if pw:
-                srv.login(user, pw)
-            srv.send_message(msg)
-    except Exception as e:
-        return {"ok": False, "error": smtp_said(e)}
+    msg = _message(sender, to, subject or "(no subject)", body, html, from_name, headers)
+    with Mailer(copies=False) as m:
+        r = m.deliver(msg)
+    if not r["ok"]:
+        return {"ok": False, "error": r["error"]}
     return {"ok": True, "to": to, "from": sender}
 
 
@@ -803,13 +1029,8 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
       the send is LOGGED, before we return. An unlogged send is invisible to the
       cap, to the dedup promise, and to every counter the owner reads.
     """
-    import os
-    import smtplib
-    from email.message import EmailMessage
-
     host = setting("SMTP_HOST").strip()
     user = setting("SMTP_USER").strip()
-    pw = setting("SMTP_PASS")
     to = (lead.get("email") or "").strip()
     if not host or not user:
         return {"ok": False, "error": "SMTP not configured (set it on /setup → Integrations)"}
@@ -831,50 +1052,24 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
         return {"ok": False, "wrong_domain": True, "error": "refusing to send: " + wrong}
 
     subject, body = _split_subject(draft)
-    msg = EmailMessage()
-    if from_name:
-        from email.utils import formataddr
-        msg["From"] = formataddr((from_name, sender))
+    msg = _message(sender, to, subject or "Glass & aluminium work", body or draft,
+                   html, from_name, headers)
+    # Inside `with batch():` the batch's connection, pace and Sent copies are
+    # shared; on its own, one mail gets a Mailer of its own.
+    if _BATCH is not None:
+        r = _BATCH.deliver(msg)
     else:
-        msg["From"] = sender
-    msg["To"] = to
-    msg["Subject"] = subject or "Glass & aluminium work"
-    for k, v in (headers or {}).items():
-        if k and v and k.lower() not in ("from", "to", "subject"):
-            msg[k] = v
-    msg.set_content(body or draft)
-    if html:
-        msg.add_alternative(html, subtype="html")
-
-    try:
-        port = int((setting("SMTP_PORT") or "587").strip() or 587)
-    except ValueError:
-        port = 587
-    try:
-        if port == 465:
-            srv = smtplib.SMTP_SSL(host, port, timeout=30)
-        else:
-            srv = smtplib.SMTP(host, port, timeout=30)
-            srv.ehlo()
-            if srv.has_extn("starttls"):
-                srv.starttls()
-                srv.ehlo()
-        try:
-            srv.login(user, pw)
-            srv.send_message(msg)
-        finally:
-            try:
-                srv.quit()
-            except Exception:
-                pass
-    except Exception as e:
-        return {"ok": False, "error": smtp_said(e)}
+        with Mailer() as m:
+            r = m.deliver(msg)
+    if not r["ok"]:
+        return {"ok": False, "error": r["error"], "transient": r.get("transient"),
+                "refused": r.get("refused")}
 
     # It has gone. Record it before returning — a send we did not write down is
     # a send the cap cannot see and the Scanner cannot dedup against.
     row = log_outreach(lead.get("id"), draft)
     return {"ok": True, "to": to, "outreach_log_id": row,
-            "sent_today": already + 1, "cap": cap}
+            "sent_today": already + 1, "cap": cap, "copied": bool(r.get("copied"))}
 
 
 def preview(lead: dict, company: dict, draft: str = "", write_html_to: str = "") -> dict:
@@ -901,6 +1096,170 @@ def preview(lead: dict, company: dict, draft: str = "", write_html_to: str = "")
         Path(write_html_to).write_text(out["html"], encoding="utf-8")
         out["written_to"] = write_html_to
     return out
+
+# ---------------------------------------------------------------------------
+# BOUNCES — the mails that came back, read out of his own inbox
+# ---------------------------------------------------------------------------
+#
+# "Undelivered Mail Returned to Sender ... <mqasim@uniquerealestate.ae>: host
+#  smtp.google.com said: 550-5.1.1 The email account that you tried to reach
+#  does not exist."
+#
+# His mail server accepted the mail and passed it on; the receiving side sent
+# it back. That report lands in HIS inbox, not the agency's, so the Mail room
+# kept calling the lead "written to" while the address did not exist. The
+# reports are read from his inbox — read-only, nothing marked, moved or
+# deleted — and the mail and the lead are marked as bounced, with the reason in
+# plain words.
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+           "Nov", "Dec")
+BOUNCE_FROM = ("MAILER-DAEMON", "postmaster", "Mail Delivery")
+_ADDR = r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+
+
+def bounce_words(status="", said="") -> str:
+    """What a bounce means, in his words."""
+    t = f"{status} {said}".lower()
+    if re.search(r"5\.1\.[0-3]|does not exist|no such user|user unknown|unknown user|"
+                 r"not found|invalid recipient|address rejected|nosuchuser|"
+                 r"mailbox unavailable|recipient.*(?:unknown|rejected)", t):
+        return "the address does not exist"
+    if re.search(r"5\.2\.2|mailbox full|quota|over quota|insufficient storage", t):
+        return "their mailbox is full"
+    if re.search(r"5\.1\.2|domain.*(?:not found|does not exist)|host not found|"
+                 r"no mx|name service error", t):
+        return "that domain does not take mail"
+    if re.search(r"5\.7\.|spam|blocked|blacklist|blocklist|policy|rejected due|"
+                 r"not authori[sz]ed|dmarc|spf", t):
+        return "their server refused it as unwanted mail"
+    s = " ".join(str(said or "").split())
+    return "it came back: " + (s[:140] if s else (status or "no reason given"))
+
+
+def parse_bounce(raw) -> list:
+    """
+    The failed recipients in one bounce report: [{address, status, said, words}].
+    Reads the standard delivery-status part when there is one, and the
+    "<address>: host ... said: 550 ..." text Postfix writes when there is not.
+    Delayed-delivery warnings (4.x.x) are not bounces and are left out.
+    """
+    import email
+    from email import policy
+    msg = email.message_from_bytes(raw if isinstance(raw, bytes) else str(raw).encode(),
+                                   policy=policy.default)
+    found = {}
+    for part in msg.walk():
+        if part.get_content_type() != "message/delivery-status":
+            continue
+        blocks = part.get_payload() if part.is_multipart() else []
+        if not isinstance(blocks, list):
+            blocks = []
+        for b in blocks:
+            rcpt = str(b.get("Final-Recipient") or b.get("Original-Recipient") or "")
+            m = re.search(_ADDR, rcpt)
+            if not m:
+                continue
+            status = str(b.get("Status") or "").strip()
+            action = str(b.get("Action") or "").strip().lower()
+            if action and action not in ("failed",):
+                continue
+            if status and not status.startswith("5"):
+                continue
+            said = " ".join(str(b.get("Diagnostic-Code") or "").split())
+            said = re.sub(r"^smtp;\s*", "", said, flags=re.I)
+            found[m.group(0).lower()] = {"address": m.group(0).lower(), "status": status,
+                                         "said": said[:300]}
+    if not found:
+        text = ""
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                try:
+                    text += part.get_content() + "\n"
+                except Exception:
+                    pass
+        for m in re.finditer(r"<(" + _ADDR + r")>:\s*(.+?)(?=\n\s*\n|\n<|\Z)", text, re.S):
+            said = " ".join(m.group(2).split())
+            code = re.search(r"\b([45]\d\d)[ -]([45]\.\d{1,3}\.\d{1,3})?", said)
+            if code and code.group(1).startswith("4"):
+                continue
+            found[m.group(1).lower()] = {
+                "address": m.group(1).lower(),
+                "status": (code.group(2) or code.group(1)) if code else "",
+                "said": said[:300]}
+    out = []
+    for f in found.values():
+        f["words"] = bounce_words(f["status"], f["said"])
+        out.append(f)
+    return out
+
+
+def read_bounces(days=10, im=None) -> dict:
+    """Bounce reports in his inbox from the last `days` days. Read-only."""
+    import time as _t
+    own = im is None
+    try:
+        im = im or imap_open()
+    except Exception as e:
+        return {"ok": False, "error": f"could not open your mailbox to look for bounces "
+                                      f"({type(e).__name__}: {e})", "bounces": []}
+    try:
+        im.select("INBOX", readonly=True)
+        d = _t.localtime(_t.time() - days * 86400)
+        since = f"{d.tm_mday:02d}-{_MONTHS[d.tm_mon - 1]}-{d.tm_year}"
+        ids = []
+        for who in BOUNCE_FROM:
+            typ, data = im.search(None, f'(SINCE {since} FROM "{who}")')
+            for i in ((data or [b""])[0] or b"").split():
+                if i not in ids:
+                    ids.append(i)
+        out = []
+        for i in ids[-200:]:
+            typ, parts = im.fetch(i, "(BODY.PEEK[])")
+            raw = next((p[1] for p in parts or [] if isinstance(p, tuple)), b"")
+            for b in parse_bounce(raw):
+                b["message"] = i.decode() if isinstance(i, bytes) else str(i)
+                out.append(b)
+        return {"ok": True, "bounces": out, "looked_at": len(ids)}
+    except Exception as e:
+        return {"ok": False, "error": f"could not read the bounce reports "
+                                      f"({type(e).__name__}: {e})", "bounces": []}
+    finally:
+        if own:
+            try:
+                im.logout()
+            except Exception:
+                pass
+
+
+def mark_bounces(bounces) -> int:
+    """Mark the mails (and their leads) that came back. Returns how many are new."""
+    import sqlite3
+    import time as _t
+    from coordination import board as _board
+    new = 0
+    with sqlite3.connect(_board.DB, timeout=30) as c:
+        _board._migrate(c)
+        for b in bounces or []:
+            addr = (b.get("address") or "").strip().lower()
+            if not addr:
+                continue
+            cur = c.execute(
+                "UPDATE outreach_queue SET bounced_at=?, bounce_reason=?"
+                " WHERE lower(to_email)=? AND status='sent' AND bounced_at IS NULL",
+                (int(_t.time()), (b.get("words") or "it came back")[:200], addr))
+            new += cur.rowcount or 0
+            c.execute("UPDATE leads SET stage='bounced' WHERE lower(email)=?", (addr,))
+    return new
+
+
+def check_bounces(days=10) -> dict:
+    """Read his inbox for bounces and mark them. {ok, new, bounces, error}."""
+    r = read_bounces(days)
+    if not r.get("ok"):
+        return {"ok": False, "new": 0, "bounces": [], "error": r.get("error")}
+    n = mark_bounces(r["bounces"])
+    return {"ok": True, "new": n, "bounces": r["bounces"], "looked_at": r.get("looked_at", 0)}
 
 
 if __name__ == "__main__":  # show the EMAIL, not the plan (pure, no side effects)

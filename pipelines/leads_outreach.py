@@ -73,6 +73,7 @@ from . import mail, security_screen, services
 
 AGENT = "leads-outreach"
 SECTOR = "Leads"
+SEND_LOCK = "outreach_send"   # one batch of outgoing mail at a time
 
 # How many to draft in one pass. One model call each; he asked the Hunter for
 # ten leads and wants a mail written for every one of them, so a pass covers
@@ -240,6 +241,16 @@ def _campaign_pass(agent, task, sent) -> dict:
              if can else "; no new lead is waiting for it")
     if sent:
         head += f". {len(sent)} mail(s) you approved earlier were sent."
+    # Anything that came back since the last pass — read from his inbox,
+    # read-only — is marked, so a wrong address stops looking "written to".
+    if mail.setting("SMTP_PASS"):
+        try:
+            b = mail.check_bounces(days=10)
+            if b.get("new"):
+                head += (f" {b['new']} mail(s) came back (wrong or closed address) — "
+                         "marked in the Mail room.")
+        except Exception:
+            pass
     board.finish_task(task["id"], agent, {"ready": len(can), "campaign": camp.get("id"),
                                           "sent": len(sent), "head": head}, status="done")
     return {"ok": True, "agent": agent, "task": task["id"], "eligible": len(can),
@@ -347,9 +358,26 @@ def _send_approved(room, ids=None, failed=None):
     draft was written may have been flagged since. A send that fails because
     the cap is full or the mail server did not answer stays 'approved' and
     goes on the next pass — his yes is not thrown away over a busy server.
+
+    One send at a time (the SEND_LOCK), over one connection, a few seconds
+    apart (mail.batch): his mail server dropped connections when every mail
+    logged in on its own, back to back.
     """
     out = []
     failed = failed if failed is not None else []
+    if not board.acquire_lock(SEND_LOCK, AGENT, wait=False, ttl=1800):
+        failed.append({"id": 0, "company": "", "to": "",
+                       "why": "another send is already going — these go with it, or "
+                              "on the next pass"})
+        return out
+    try:
+        with mail.batch():
+            return _send_rows(room, ids, failed, out)
+    finally:
+        board.release_lock(SEND_LOCK, AGENT)
+
+
+def _send_rows(room, ids, failed, out):
     import sqlite3
     c = sqlite3.connect(board.DB, timeout=30)
     c.row_factory = sqlite3.Row
@@ -400,10 +428,21 @@ def _send_approved(room, ids=None, failed=None):
             # second one here counted every mail twice against his daily
             # limit, so ten a day was really five.
             _mark_contacted(q["lead_id"])
-            board.mark_outreach_sent(q["id"], True, "approved by the owner")
+            copy = mail._BATCH.copy_error if mail._BATCH is not None else ""
+            board.mark_outreach_sent(
+                q["id"], True,
+                "sent — a copy is in your Sent folder" if r.get("copied") else
+                ("sent" + (f" (no copy in your Sent folder: {copy})" if copy else "")))
             out.append({"id": q["id"], "lead_id": q["lead_id"], "company": q["company"],
                         "to": q["to_email"], "subject": q["subject"],
                         "service": q["service"], "words": 0})
+        elif r.get("refused"):
+            # The receiving server said the address itself is no good. Asking
+            # again will not change that, so it is marked as came-back now.
+            board.mark_outreach_sent(q["id"], False, "the address was refused")
+            _bounced(q["id"], q["lead_id"], mail.bounce_words("", r.get("error", "")))
+            failed.append({"id": q["id"], "company": q["company"], "to": q["to_email"],
+                           "why": r.get("error", "the address was refused")})
         else:
             # Left 'approved' so the next pass tries again, with the reason
             # written where the Mail room shows it.
@@ -411,6 +450,17 @@ def _send_approved(room, ids=None, failed=None):
             failed.append({"id": q["id"], "company": q["company"], "to": q["to_email"],
                            "why": r.get("error", "the send boundary refused it")})
     return out
+
+
+def _bounced(qid, lead_id, why):
+    import sqlite3
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE outreach_queue SET bounced_at=?, bounce_reason=? WHERE id=?",
+                      (int(time.time()), why[:200], qid))
+            c.execute("UPDATE leads SET stage='bounced' WHERE id=?", (lead_id,))
+    except Exception:
+        pass
 
 
 def _note_attempt(qid, why):

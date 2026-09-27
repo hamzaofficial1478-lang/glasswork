@@ -44,7 +44,10 @@ class _Cabinet:
     """A throwaway cabinet, his site never read, and the mail server faked."""
     def __enter__(self):
         self.real = (board.DB, C.tiles_from_site, mail._smtp_send, mail.daily_cap,
-                     mail.sent_today, mail.setting)
+                     mail.sent_today, mail.setting, C._spawn)
+        # The sender runs in the background for real; here it runs in place,
+        # straight away, with no pauses and no inbox to read.
+        C._spawn = lambda: C.send_queued(bounce_checks=(), sleep=lambda s: None)
         d = Path(tempfile.mkdtemp())
         db = d / "agency.db"
         con = sqlite3.connect(db)
@@ -82,7 +85,7 @@ class _Cabinet:
 
     def __exit__(self, *a):
         (board.DB, C.tiles_from_site, mail._smtp_send, mail.daily_cap,
-         mail.sent_today, mail.setting) = self.real
+         mail.sent_today, mail.setting, C._spawn) = self.real
 
     def sql(self, q, args=()):
         c = sqlite3.connect(board.DB)
@@ -223,8 +226,9 @@ def test_only_the_ticked_leads_get_it():
         check("  by Security", "Security" in r["failed"][0]["why"], True)
         cab.cap = 2
         r = C.send(ids)
-        check("two go now", len(r["sent"]), 2)
-        check("two wait for the next allowance", len(r["later"]), 2)
+        check("two go now", len(cab.sent), 2)
+        check("two wait for the next allowance", r["later"], 2)
+        check("  and he is told so", "tomorrow's allowance" in r["head"], True)
         waiting = cab.sql("SELECT id, campaign_id, html FROM outreach_queue"
                           " WHERE status='approved'")
         check("  kept as his approved campaign mail", (len(waiting), bool(waiting[0]["html"])), (2, True))
@@ -358,7 +362,7 @@ def test_a_mismatched_sending_domain_is_said_before_anything_is_queued():
               written, [{"OUTREACH_DOMAIN": "example.ae"}])
         check("and says so", r["ok"], True)
         r = C.send(ids)
-        check("then the campaign goes", len(r["sent"]), 3)
+        check("then the campaign goes", len(cab.sent), 3)
 
     print("\nThe setting is read the way a person types it:")
     with _Cabinet() as cab:
@@ -387,7 +391,7 @@ def test_a_refused_mail_says_why_and_can_be_tried_again():
             r = C.send(ids)
         finally:
             mail._smtp_send = real
-        check("nothing went", r["sent"], [])
+        check("nothing went", cab.sent, [])
         rec = {x["id"]: x for x in C.recipients()}
         check("the leads are not shown as 'waiting for the allowance'",
               rec[ids[0]]["state"], "stuck")
@@ -395,7 +399,7 @@ def test_a_refused_mail_says_why_and_can_be_tried_again():
               "550 relay not permitted" in rec[ids[0]]["why"], True)
         check("and the Mail room can list them", len(C.stuck()), 2)
         r = C.retry()
-        check("Try again sends them once the fault is gone", len(r["sent"]), 2)
+        check("Try again sends them once the fault is gone", len(cab.sent), 2)
         check("  and they read as written to", {x["state"] for x in C.recipients()}, {"sent"})
 
 

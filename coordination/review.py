@@ -181,6 +181,7 @@ def _mails(c):
     try:
         from pipelines import campaign as _campaign, mail as _mail
         preflight = _mail.preflight()
+        preflight["sending"] = _campaign.sending()
         recipients = _campaign.recipients()
         first = next((r for r in recipients if r["state"] == "ready"), None)
         campaign = _campaign.view({"company": first["company"]} if first else None)
@@ -189,7 +190,20 @@ def _mails(c):
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
             "leads_without_mail": unwritten, "writing": busy("leads-outreach", c),
             "leads": _lead_list(c), "campaign": campaign, "recipients": recipients,
-            "preflight": preflight, **_mail_settings()}
+            "preflight": preflight, "copies_in_sent": _copies_in_sent(c),
+            **_mail_settings()}
+
+
+def _copies_in_sent(c):
+    """Did the last mail sent also land in his Sent folder? None if unknown."""
+    r = _rows(c, "SELECT note FROM outreach_queue WHERE status='sent'"
+                 " ORDER BY sent_at DESC, id DESC LIMIT 1")
+    note = (r[0]["note"] if r else "") or ""
+    if "copy is in your Sent folder" in note:
+        return True
+    if "no copy in your Sent folder" in note:
+        return False
+    return None
 
 
 # How many leads the Mail room lists. Newest first; the rest are on file.
@@ -353,7 +367,7 @@ def _ids(ids):
 
 CAMPAIGN_ACTS = ("campaign_create", "campaign_save", "campaign_approve",
                  "campaign_retire", "campaign_send", "campaign_test", "discard_old",
-                 "campaign_retry", "campaign_domain")
+                 "campaign_retry", "campaign_domain", "campaign_bounces")
 
 
 def _campaign_act(do, ids, data) -> dict:
@@ -376,6 +390,15 @@ def _campaign_act(do, ids, data) -> dict:
         return campaign.retry(ids)
     if do == "campaign_domain":
         return campaign.use_sending_domain(str(data.get("domain") or ""))
+    if do == "campaign_bounces":
+        from pipelines import mail as _mail
+        r = _mail.check_bounces()
+        if not r.get("ok"):
+            return {"ok": False, "error": r.get("error")}
+        n = r.get("new", 0)
+        return {**r, "head": (f"Found {n} mail(s) that came back — they are marked in "
+                              "Sent." if n else "Nothing has come back. Every mail sent "
+                              "is still delivered as far as your inbox shows.")}
     if do == "campaign_send":
         s = _mail_settings()
         if not s["ready"]:

@@ -256,8 +256,11 @@ def test_the_message_that_goes_out_has_both_halves():
         def __enter__(self): return self
         def __exit__(self, *a): return False
         def starttls(self): pass
+        def ehlo(self): pass
+        def has_extn(self, name): return name == "starttls"
         def login(self, *a): pass
         def send_message(self, msg): sent["msg"] = msg
+        def quit(self): pass
 
     import smtplib
     real_smtp, real_ssl = smtplib.SMTP, smtplib.SMTP_SSL
