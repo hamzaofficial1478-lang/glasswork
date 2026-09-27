@@ -105,7 +105,32 @@ def _queue_a_brief(db, brief=None):
                    json.dumps(brief or BRIEF)))
 
 
-def _write(body=GOOD_BODY, include="", **kw):
+# One of his own pages, the way his site is built: a head of its own, his
+# header and footer pulled in, a banner and sections in between.
+HIS_PAGE = """<?php $page_title = 'Glass Work in Dubai | World Deal'; ?>
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Glass Work in Dubai | World Deal</title>
+<meta name="description" content="Glass work across Dubai.">
+<link rel="canonical" href="https://www.example.ae/glass-work.php">
+<link rel="stylesheet" href="assets/css/style.css">
+</head><body>
+<?php include 'includes/header.php'; ?>
+<div class="page-banner"><h1>Glass Work</h1></div>
+<section class="service"><h2>Frameless glass</h2><p>Our glass work across Dubai.</p></section>
+<section class="gallery"><img src="assets/img/glass1.jpg" alt="glass"></section>
+<?php include 'includes/footer.php'; ?>
+<script src="assets/js/main.js"></script>
+</body></html>
+"""
+
+
+def _theme():
+    from . import site_api
+    return {"ok": True, "page": "glass-work.php", "php": True, **site_api._frame_of(HIS_PAGE)}
+
+
+def _write(body=GOOD_BODY, theme=None, **kw):
     """Run the Writer with a stand-in brain and no site to read."""
     import providers
     # Both seams: the Writer asks the LADDER whether anything could write
@@ -118,7 +143,7 @@ def _write(body=GOOD_BODY, include="", **kw):
                            lambda s: {"ok": True, "own": True, "own_error": "",
                                       "spare": 0, "why": ""}), \
          mock.patch.object(providers, "think", _brain(body)), \
-         mock.patch.object(CW, "_include_of_his_site", lambda: include), \
+         mock.patch.object(CW, "_theme_of_his_site", lambda: theme or {}), \
          mock.patch("pipelines.post_images.for_post",
                     kw.pop("images", None) or (lambda brief, site, **_: [])), \
          mock.patch.dict("os.environ", {
@@ -175,25 +200,41 @@ def test_a_written_page_is_queued_and_not_published():
 
 
 def test_it_uses_his_own_header_when_there_is_one():
-    print("\nSo it looks like the rest of his site:")
+    """
+    "this link that program post it is plain no any layout no any design ...
+     the website pages are .php not .html"
+    """
+    print("\nSo it looks like the rest of his site — built in the frame of his own page:")
     db = _fresh_db()
     _queue_a_brief(db)
-    out = _write(include="includes/header.php")
+    out = _write(theme=_theme())
     p = out["pages"][0]
     check("a php page, not a standalone html one", p["page"].endswith(".php"), True)
-    check("and it says which route it took", p["how"], "php-include")
+    check("and it says which route it took", p["how"], "his-theme")
 
     with sqlite3.connect(db) as c:
         detail = json.loads(c.execute("SELECT detail FROM site_queue").fetchone()[0])
     html = detail["change"]["html"]
-    check("it pulls his header in", "includes/header.php" in html, True)
-    check("and the approval says it will match his site",
-          "look like the rest of your site" in detail["why"], True)
+    check("his head and styles come with it", "assets/css/style.css" in html, True)
+    check("it pulls his header in", "include 'includes/header.php'" in html, True)
+    check("and his footer and scripts", "include 'includes/footer.php'" in html
+          and "assets/js/main.js" in html, True)
+    check("the page it was copied from stays out of it",
+          ("Frameless glass" in html, "page-banner" in html), (False, False))
+    check("it carries its own title, not his page's",
+          ("<title>Aluminium Pergolas in Sharjah</title>" in html,
+           "Glass Work in Dubai" in html), (True, False))
+    check("and its own description", "Aluminium pergolas across Sharjah." in html, True)
+    check("and does not claim his page's address", "canonical" in html, False)
+    check("the new content is in the middle", html.index("includes/header.php")
+          < html.index("What the job involves") < html.index("includes/footer.php"), True)
+    check("and the approval says whose layout it wears",
+          "frame of your own glass-work.php" in detail["why"], True)
 
     print("\n...and says so plainly when there is not one:")
     db = _fresh_db()
     _queue_a_brief(db)
-    out = _write(include="")
+    out = _write(theme={})
     with sqlite3.connect(db) as c:
         detail = json.loads(c.execute("SELECT detail FROM site_queue").fetchone()[0])
     check("standalone", out["pages"][0]["how"], "standalone")
@@ -275,7 +316,7 @@ def test_when_he_says_yes_it_lands_and_the_loop_closes():
     print("\nHe approves it:")
     db = _fresh_db()
     _queue_a_brief(db)
-    _write(include="includes/header.php")
+    _write(theme=_theme())
     with sqlite3.connect(db) as c:
         qid = c.execute("SELECT id FROM site_queue").fetchone()[0]
     board.decide_approval("site_change", qid, "approved")
@@ -468,7 +509,7 @@ def test_a_post_is_full_specific_and_has_pictures():
     with mock.patch.object(providers.ladder, "who_could_answer",
                            lambda s: {"ok": True, "own": True, "own_error": "", "spare": 0, "why": ""}), \
          mock.patch.object(providers, "think", two_drafts), \
-         mock.patch.object(CW, "_include_of_his_site", lambda: ""), \
+         mock.patch.object(CW, "_theme_of_his_site", lambda: {}), \
          mock.patch("pipelines.post_images.for_post", lambda brief, site, **_: pics), \
          mock.patch.dict("os.environ", {"BUSINESS_PHONE": "+971 4 123 4567",
                                         "BUSINESS_WHATSAPP": "+971 50 987 6543",
@@ -478,17 +519,30 @@ def test_a_post_is_full_specific_and_has_pictures():
     check("it went back once, with the reason", len(calls), 2)
     check("the revision was told it was too short", "it is " in calls[1] and "words" in calls[1], True)
     with sqlite3.connect(db) as c:
-        row = c.execute("SELECT detail FROM site_queue").fetchone()
-        typ = c.execute("SELECT type FROM content_queue").fetchone()[0]
-    html = json.loads(row[0])["change"]["html"]
-    check("the fuller second draft is the one queued", "What to ask before you buy" in html, True)
-    check("under its own blog address", json.loads(row[0])["change"]["page"].startswith("blog-"), True)
+        n_site = c.execute("SELECT count(*) FROM site_queue").fetchone()[0]
+        typ, status, draft = c.execute("SELECT type, status, draft FROM content_queue").fetchone()
+    blog = json.loads(draft)["_for_blog"]
+    html = blog["html"]
+    check("the fuller second draft is the one kept", "What to ask before you buy" in html, True)
+    check("NOT put on his site as a page of its own", n_site, 0)
+    check("but ready for his blog", (status, out["pages"][0].get("for_blog")), ("for_blog", True))
     check("and recorded as an article", typ, "blog")
-    check("his own photograph is in it", '/assets/img/pages/pergola.jpg' in html, True)
+    check("with the link name his blog uses",
+          blog["slug"], "choosing-an-aluminium-pergola-in-sharjah")
+    check("and the address it will have there", blog["url"],
+          "https://www.example.ae/blog-details.php?slug=choosing-an-aluminium-pergola-in-sharjah")
+    check("his post page prints the title, so the article has no second one",
+          "<h1" in html, False)
+    check("his own photograph is in it, at an address that works from his backend",
+          'src="https://www.example.ae/assets/img/pages/pergola.jpg"' in html, True)
+    check("and listed to upload", blog["images"][0]["src"],
+          "https://www.example.ae/assets/img/pages/pergola.jpg")
     check("the stock one is labelled as an illustration",
           "Illustrative photo — Pexels" in html, True)
     check("no 'photos go here' gap when his own are in",
           CW.PHOTO_SLOT in html, False)
+    check("a plain-text copy for a plain box", ("What to ask before you buy" in blog["text"],
+                                               "<" in blog["text"]), (True, False))
 
     print("\nThe Auditor lets a labelled stock photo through, never an unlabelled one:")
     labelled = GOOD_BODY + ('<figure><img src="https://images.pexels.com/p/1.jpeg" alt="a">'
@@ -511,6 +565,115 @@ def test_a_post_is_full_specific_and_has_pictures():
     check("the pergola, not the logo", [g["src"] for g in got], ["/assets/img/pages/pergola-villa.jpg"])
 
 
+def test_his_theme_is_read_off_a_page_his_site_links_to():
+    """
+    "the website pages are .php not .html that home.html page is not live the
+     home.php page is live and all .php pages are connected to website"
+    """
+    print("\nHis layout is read off one of his live .php pages:")
+    from . import site_api
+    inline = ("<!doctype html><html><head><title>About us</title>"
+              '<link rel="stylesheet" href="css/site.css"></head><body>'
+              '<header class="top"><nav><a href="index.php">Home</a></nav></header>'
+              "<section><h1>About</h1><p>" + "Ten years of glass. " * 10 + "</p></section>"
+              "<footer>World Deal · Dubai</footer><script src=\"js/app.js\"></script></body></html>")
+    f = site_api._frame_of(inline)
+    check("a page with its header written inline: the header is kept",
+          ('<nav><a href="index.php">Home</a></nav></header>' in f.get("top", ""),
+           "<footer>" in f.get("bottom", "")), (True, True))
+    check("and its own content is not", "Ten years of glass" in f.get("top", "") + f.get("bottom", ""),
+          False)
+    check("a page that shows no frame gives none", site_api._frame_of("<p>" + "x " * 200 + "</p>"), {})
+
+    listing = ["home.html", "default.php", "index.php", "about.php", "glass-work.php",
+               "blog-glass-railing-uae-cost.html", "agency-api.php"]
+    check("the candidates: a service page first, never home.html or default.php",
+          site_api._theme_candidates(listing), ["glass-work.php", "about.php", "index.php"])
+    read = []
+
+    def read_page(name, s=None):
+        read.append(name)
+        return {"ok": True, "html": HIS_PAGE} if name == "glass-work.php" else \
+            {"ok": False, "error": "no such page"}
+    with mock.patch.object(site_api, "why_cannot_read", lambda s=None: ""), \
+         mock.patch.object(site_api, "settings", lambda env=None: {"site": "https://www.example.ae"}), \
+         mock.patch.object(site_api, "live_pages", lambda s=None: listing), \
+         mock.patch.object(site_api, "read_page", read_page):
+        got = site_api.theme_of_his_site()
+    check("it takes the frame of his service page", (got["ok"], got["page"]),
+          (True, "glass-work.php"))
+    check("after reading just that one page", read, ["glass-work.php"])
+
+
+def test_old_blog_pages_move_to_his_blog_and_the_plain_copy_comes_down():
+    """
+    "the post it wrote was not even showing on website and it was directly
+     uploaded with .html format while the website have the theme of showing
+     the blog and i had build the BAckend from where the blogs get uploaded"
+    """
+    print("\nPosts queued as pages before the change go to his blog instead:")
+    from coordination import review
+    db = _fresh_db()
+    body = GOOD_BODY + '<figure><img src="/assets/img/railing.jpg" alt="Railing we fitted"></figure>'
+    page_html = CW._standalone({"title": "Glass railing cost in the UAE", "meta": "What it costs.",
+                                "html": body}, BRIEF)
+    with sqlite3.connect(db) as c:
+        for i, st in ((1, "applied"), (2, "pending")):
+            c.execute("INSERT INTO content_queue(id,title,type,brief,draft,status,created_at)"
+                      " VALUES(?,?,?,?,?,?,1)",
+                      (i, "Railing", "blog", json.dumps(BRIEF),
+                       json.dumps({"title": f"Glass railing cost in the UAE {i}",
+                                   "meta": "What it costs.", "html": body,
+                                   "_page_html": page_html}),
+                       "published" if st == "applied" else "drafted"))
+            c.execute("INSERT INTO site_queue(agent,kind,detail,status,queued_at)"
+                      " VALUES('content-writer','new_page',?,?,1)",
+                      (json.dumps({"change": {"page": f"blog-glass-railing-{i}.html",
+                                              "html": page_html, "content_id": i},
+                                   "title": "Railing"}), st))
+    with mock.patch.object(review, "_site", lambda: "https://www.example.ae"):
+        pages = review.build()["pages"]
+        check("both are ready for his blog", sorted(x["id"] for x in pages["for_blog"]), [1, 2])
+        check("the one still waiting is no longer offered as a page", pages["waiting"], [])
+        with sqlite3.connect(db) as c:
+            note = c.execute("SELECT status, note FROM site_queue WHERE id=2").fetchone()
+        check("  and says where it went", (note[0], "Ready for your blog" in note[1]),
+              ("rejected", True))
+        live = next(x for x in pages["for_blog"] if x["id"] == 1)
+        check("the one already up is listed with its plain copy",
+              live["plain_page"]["page"], "blog-glass-railing-1.html")
+        check("its picture works from his backend",
+              "https://www.example.ae/assets/img/railing.jpg" in live["html"], True)
+        check("moved once, not on every look", review._move_old_blog_pages(), 0)
+
+        print("\n...Take it down points the plain copy at his blog, through IT:")
+        r = review.act("take_down", [1])
+        check("done", r["ok"], True)
+        with sqlite3.connect(db) as c:
+            c.row_factory = sqlite3.Row
+            row = dict(c.execute("SELECT * FROM site_queue WHERE id=?", (r["change"],)).fetchone())
+        plan = IR.plan_of(row)
+        check("an approved change for the Releaser — his press is his yes",
+              (row["status"], plan["do"], plan["page"]),
+              ("approved", "page", "blog-glass-railing-1.html"))
+        check("that sends visitors to his blog and tells Google to drop it",
+              ("https://www.example.ae/blog.php" in plan["html"], "noindex" in plan["html"]),
+              (True, True))
+        check("pressed twice is still one change",
+              review.act("take_down", [1]).get("change"), None)
+
+        print("\n...and he says when a post is on his blog:")
+        r = review.act("blog_posted", [2], {"url": "https://www.example.ae/blog-details.php?slug=x"})
+        check("marked", r["ok"], True)
+        pages = review.build()["pages"]
+        check("off the waiting list", [x["id"] for x in pages["for_blog"]], [1])
+        check("and on the 'on your blog' list with his address",
+              [(x["id"], x["url"]) for x in pages["on_blog"]],
+              [(2, "https://www.example.ae/blog-details.php?slug=x")])
+        check("an address that is not one is refused",
+              review.act("blog_posted", [1], {"url": "my blog"})["ok"], False)
+
+
 def main():
     real = board.DB
     _fresh_db()
@@ -529,6 +692,8 @@ def main():
         test_the_queue_refuses_a_payload_it_would_have_to_cut()
         test_it_only_writes_briefs_that_are_ready()
         test_a_post_is_full_specific_and_has_pictures()
+        test_his_theme_is_read_off_a_page_his_site_links_to()
+        test_old_blog_pages_move_to_his_blog_and_the_plain_copy_comes_down()
     finally:
         board.DB = real
 

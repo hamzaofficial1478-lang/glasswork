@@ -145,6 +145,31 @@ h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
 .pill.bad{border-color:rgba(229,86,91,.5);color:var(--danger)}
 .pill.amber{border-color:rgba(234,165,67,.5);color:var(--amber)}
 
+/* ---- a post ready for his own blog backend ---- */
+.steps{margin:10px 0 0;padding-left:20px;font-size:13px;color:#cbd8de;max-width:72ch}
+.steps li{margin:2px 0}
+.fields{display:grid;gap:10px;margin-top:12px}
+.field{border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--panel2);min-width:0}
+.field .lab{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.field .lab b{color:var(--text);font-weight:500;font-size:12.5px}
+.field .lab .sp{flex:1}
+.field .val{margin-top:5px;font-size:13.5px;overflow-wrap:anywhere}
+.field .val.mono{font-size:12.5px;color:var(--glass)}
+.field .long{margin-top:6px;max-height:120px;overflow:auto;font-size:12px;line-height:1.5;color:#b9c9d0;
+  white-space:pre-wrap;overflow-wrap:anywhere;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.btn.copy{padding:4px 11px;font-size:12px}
+.btn.copy.done{border-color:rgba(92,192,136,.55);color:var(--ok)}
+.pics{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+.pic{width:168px;font-size:11.5px;color:var(--muted)}
+.pic img{display:block;width:168px;height:112px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--raise)}
+.pic .row{margin-top:6px;gap:6px}
+.posted{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.posted input{flex:1 1 280px;min-width:0;padding:8px 10px;border-radius:9px;border:1px solid var(--line2);
+  background:var(--bg);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.plain{margin-top:10px;border:1px solid rgba(234,165,67,.45);background:var(--amber-dim);border-radius:10px;
+  padding:9px 12px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.plain p{margin:0;flex:1 1 260px}
+
 .log{width:100%;border-collapse:collapse;font-size:12.5px}
 .logwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .log th{text-align:left;font-weight:500;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line);
@@ -315,10 +340,17 @@ details.old[open]>summary{color:var(--text)}
   <section id="pages">
     <div class="strip" id="pageFacts"></div>
     <div id="pageNotice"></div>
-    <h2>Ready for your yes <small id="pageHead"></small></h2>
-    <p class="lede">Written, and passed the writer's and the Auditor's checks. Read the page
-      as it would appear. Approving it hands it to IT, which runs the tests and then puts it
-      on your website &mdash; nothing goes live before that.</p>
+    <h2>Ready for your blog <small id="blogHead"></small></h2>
+    <p class="lede">Blog posts go into your own blog backend, so they appear in your blog list and
+      open at <span class="mono">blog-details.php</span> in your theme &mdash; the agency does not
+      put them on your site as pages of their own. Each piece has its own Copy button.</p>
+    <div id="blogList"></div>
+    <div id="blogDone"></div>
+    <h2>Pages ready for your yes <small id="pageHead"></small></h2>
+    <p class="lede">Service pages, written and passed the writer's and the Auditor's checks. Each
+      is built inside the layout of one of your own pages, so it has your menu and footer.
+      Approving it hands it to IT, which runs the tests and then puts it on your website &mdash;
+      nothing goes live before that.</p>
     <div id="pageList"></div>
     <div id="pageApproved"></div>
     <h2>Held back by the checks <small id="heldHead"></small></h2>
@@ -412,9 +444,10 @@ function draw(){
   // The tab counts what needs him: a mail waiting for his OK, or mail that did not go.
   const needs = ((m.campaign||{}).exists && m.campaign.status !== 'approved' ? 1 : 0)
               + (m.recipients||[]).filter(r=>r.state==='stuck').length;
-  const np = p.waiting.length + p.held.length;
+  const nb = (p.for_blog||[]).length;
+  const np = p.waiting.length + p.held.length + nb;
   $('#nMails').textContent = needs; $('#nMails').classList.toggle('hot', needs>0);
-  $('#nPages').textContent = np; $('#nPages').classList.toggle('hot', p.waiting.length>0);
+  $('#nPages').textContent = np; $('#nPages').classList.toggle('hot', p.waiting.length + nb > 0);
   drawMails(m); drawPages(p); drawBar();
 }
 
@@ -905,9 +938,143 @@ function toggle(kind, id){
   drawPages(DATA.pages);
 }
 
+// ----------------------------------------------------------- his blog ----
+// "i had build the BAckend from where the blogs get uploaded and the blog is
+//  blog.php" — a post goes into his backend a piece at a time, each with its
+// own Copy button, and he says when it is up.
+const BLOG = {};                 // id -> post, for the Copy buttons
+const POSTED = {};               // id -> the address he typed, kept across refreshes
+let BLOGSIG = '';
+
+async function copyText(text, btn){
+  let ok = false;
+  try{ await navigator.clipboard.writeText(text); ok = true; }catch(e){}
+  if(!ok){
+    const t = document.createElement('textarea');
+    t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try{ ok = document.execCommand('copy'); }catch(e){}
+    t.remove();
+  }
+  if(btn){
+    const was = btn.textContent;
+    btn.textContent = ok ? 'Copied' : 'Could not copy';
+    btn.classList.toggle('done', ok);
+    setTimeout(()=>{ btn.textContent = was; btn.classList.remove('done'); }, 1600);
+  }
+  if(!ok) toast('Your browser would not copy it. Open "Read the post", select the text and press Ctrl+C.', 'bad');
+}
+function copyField(id, key, btn){ const p = BLOG[id]; if(p) copyText(String(p[key] || ''), btn); }
+function copyAlt(id, i, btn){ const img = ((BLOG[id] || {}).images || [])[i]; if(img) copyText(img.alt || '', btn); }
+
+function field(id, key, label, value, opts){
+  opts = opts || {};
+  if(!value) return '';
+  return `<div class="field"><div class="lab"><b>${esc(label)}</b>${opts.hint ? `<span>${esc(opts.hint)}</span>` : ''}<span class="sp"></span>
+    <button class="btn copy" onclick="copyField(${id}, '${key}', this)">Copy</button></div>
+    ${opts.long ? `<div class="long">${esc(value)}</div>` : `<div class="val${opts.mono ? ' mono' : ''}">${esc(value)}</div>`}</div>`;
+}
+
+function plainCopy(x, site){
+  const pp = x.plain_page;
+  if(pp.down) return `<div class="plain"><p>The plain copy at <span class="mono">/${esc(pp.page)}</span> is being
+    taken down (${esc(pp.down)}). Once IT has done it, that address sends visitors to your blog.</p></div>`;
+  return `<div class="plain"><p>An earlier plain copy of this post is live at
+    <a href="${escA(site + '/' + pp.page)}" target="_blank" rel="noopener">/${esc(pp.page)}</a> &mdash; outside your blog,
+    with none of your layout. Take it down once the post is in your blog.</p>
+    <button class="btn stop" onclick="blogAct('take_down', ${x.id}, this)">Take it down</button></div>`;
+}
+
+function drawBlog(p){
+  const list = p.for_blog || [], done = p.on_blog || [];
+  const site = String(p.blog_home || '').replace(/\/blog\.php$/, '');
+  const sig = JSON.stringify([list.map(x=>[x.id, x.title, (x.plain_page||{}).down]),
+                              done.map(x=>[x.id, x.url, (x.plain_page||{}).down]),
+                              [...OPEN].filter(k=>k.startsWith('b:'))]);
+  if(sig === BLOGSIG) return;         // never redraw under his typing
+  BLOGSIG = sig;
+  for(const x of list) BLOG[x.id] = x;
+  $('#blogHead').textContent = list.length ? `${list.length} post${list.length===1?'':'s'}` : '';
+  $('#blogList').innerHTML = list.length ? list.map(x=>`
+    <article class="page" data-id="${x.id}">
+      <h3>${esc(x.title)}</h3>
+      <div class="meta">${[x.keyword ? 'for “'+x.keyword+'”' : '', x.at ? 'written '+ago(x.at) : ''].filter(Boolean).map(esc).join(' &middot; ')}</div>
+      ${x.plain_page ? plainCopy(x, site) : ''}
+      <ol class="steps">
+        <li>Open your blog backend and start a new post.</li>
+        <li>Copy each piece below into the matching box. If the article box has a <b>Source</b> or <b>&lt;&gt;</b> button, paste the HTML there; if it is a plain box, use the plain text.</li>
+        <li>Save the pictures and upload them to the post.</li>
+        <li>Publish it in your backend, then press <b>It's on my blog</b> below.</li>
+      </ol>
+      <div class="fields">
+        ${field(x.id, 'title', 'Title', x.title)}
+        ${field(x.id, 'slug', 'Link name', x.slug, {mono:true, hint:'the slug — what comes after ?slug='})}
+        ${field(x.id, 'meta', 'Short description', x.meta, {hint:'for your blog list and for Google'})}
+        ${field(x.id, 'keywords', 'Keywords', x.keywords)}
+        ${field(x.id, 'html', 'The article — HTML', x.html, {long:true, hint:'with headings and pictures in place'})}
+        ${field(x.id, 'text', 'The article — plain text', x.text, {long:true, hint:'for a plain box'})}
+        ${(x.images||[]).length ? `<div class="field"><div class="lab"><b>Pictures</b><span>open one, then right-click → Save image as</span></div>
+          <div class="pics">${x.images.map((img, i)=>`<div class="pic">
+            <a href="${escA(img.src)}" target="_blank" rel="noopener"><img src="${escA(img.src)}" alt="${escA(img.alt)}" loading="lazy"></a>
+            <div style="margin-top:4px">${img.own ? 'Your own photo' : esc(img.credit || 'Illustrative photo — keep its caption')}</div>
+            <div class="row"><a class="btn copy" href="${escA(img.src)}" target="_blank" rel="noopener">Open</a>
+              ${img.alt ? `<button class="btn copy" onclick="copyAlt(${x.id}, ${i}, this)">Copy alt text</button>` : ''}</div>
+          </div>`).join('')}</div></div>` : ''}
+      </div>
+      <div class="row">
+        <button class="btn quiet" onclick="toggle('b', ${x.id})">${OPEN.has('b:'+x.id) ? 'Hide the post' : 'Read the post'}</button>
+        <span style="flex:1"></span>
+        <button class="btn stop" onclick="blogAct('blog_drop', ${x.id}, this)">Drop it</button>
+        <button class="btn" onclick="blogAct('blog_rewrite', ${x.id}, this)">Write it again</button>
+      </div>
+      ${frameFor('b', x.id, x.html ? '<h1>' + esc(x.title) + '</h1>' + x.html : '')}
+      <div class="posted">
+        <input id="posted${x.id}" value="${escA(POSTED[x.id] ?? x.url)}" oninput="POSTED[${x.id}]=this.value"
+               aria-label="The post's address on your blog" spellcheck="false">
+        <button class="btn go" onclick="blogPosted(${x.id}, this)">It's on my blog</button>
+      </div>
+    </article>`).join('')
+    : `<div class="empty">No post is waiting to go on your blog.</div>`;
+
+  $('#blogDone').innerHTML = done.length ? `<div class="logwrap" style="margin-bottom:6px"><table class="log">
+    <tr><th>On your blog</th><th>Address</th></tr>
+    ${done.map(x=>`<tr><td>${esc(x.title)}${x.plain_page && !x.plain_page.down
+        ? `<br><span style="color:var(--amber)">the plain copy is still at /${esc(x.plain_page.page)}</span>
+           <button class="btn copy stop" onclick="blogAct('take_down', ${x.id}, this)">Take it down</button>`
+        : (x.plain_page ? `<br><span style="color:var(--muted)">plain copy: ${esc(x.plain_page.down)}</span>` : '')}</td>
+      <td>${x.url ? `<a class="addr" href="${escA(x.url)}" target="_blank" rel="noopener">${esc(x.url)}</a>` : ''}</td></tr>`).join('')}
+    </table></div>` : '';
+}
+
+async function blogAct(what, id, btn){
+  const words = {blog_drop:'Drop this post? It will not be offered again.',
+                 blog_rewrite:'Send this post back to be written again?',
+                 take_down:'Take the plain copy off your website? IT runs the tests first. Then that address '
+                          + 'sends visitors to your blog, and Google is told to drop it.'}[what];
+  if(words && !confirm(words)) return;
+  btn.disabled = true;
+  const j = await campAct(what, {}, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  BLOGSIG = '';
+  await load();
+}
+
+async function blogPosted(id, btn){
+  const url = ($('#posted'+id) || {}).value || '';
+  btn.disabled = true;
+  const j = await campAct('blog_posted', {url}, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) delete POSTED[id];
+  BLOGSIG = '';
+  btn.disabled = false;
+  await load();
+}
+
 function drawPages(p){
+  drawBlog(p);
   $('#pageFacts').innerHTML = [
-    `<div class="fact${p.waiting.length?' warn':''}"><div class="v">${p.waiting.length}</div><div class="l">ready for your yes</div></div>`,
+    `<div class="fact${(p.for_blog||[]).length?' warn':''}"><div class="v">${(p.for_blog||[]).length}</div><div class="l">ready for your blog</div></div>`,
+    `<div class="fact${p.waiting.length?' warn':''}"><div class="v">${p.waiting.length}</div><div class="l">pages for your yes</div></div>`,
     `<div class="fact"><div class="v">${p.held.length}</div><div class="l">held back by the checks</div></div>`,
     `<div class="fact"><div class="v">${p.to_write}</div><div class="l">briefed, waiting to be written</div></div>`,
     p.held_for_seo ? `<div class="fact"><div class="v">${p.held_for_seo}</div><div class="l">waiting on SEO to clear</div></div>` : '',
@@ -943,7 +1110,7 @@ function drawPages(p){
       </div>
       ${frameFor('w', x.id, x.html)}
     </article>`).join('')
-    : `<div class="empty">No written page is waiting for you.</div>`;
+    : `<div class="empty">No service page is waiting for you.</div>`;
 
   // An approved page that could not go yet says why, and when it goes by itself.
   const rest = p.site_resting || {};
@@ -974,12 +1141,13 @@ function drawPages(p){
     </article>`).join('')
     : `<div class="empty">Nothing is held back.</div>`;
 
-  const label = s => ({applied:'<span class="pill ok">on the site</span>', failed:'<span class="pill bad">could not publish</span>',
-                       rejected:'<span class="pill">turned down</span>'}[s] || `<span class="pill">${esc(s)}</span>`);
+  const label = (s, note) => /Ready for your blog/.test(note||'') ? '<span class="pill">moved to your blog</span>'
+    : ({applied:'<span class="pill ok">on the site</span>', failed:'<span class="pill bad">could not publish</span>',
+        rejected:'<span class="pill">turned down</span>'}[s] || `<span class="pill">${esc(s)}</span>`);
   $('#pageRecent').innerHTML = p.recent.length ? `<div class="logwrap"><table class="log">
     <tr><th>Page</th><th>What happened</th></tr>
     ${p.recent.map(x=>`<tr><td>${esc(x.title)}${x.file?'<br><span class="addr">/'+esc(x.file)+'</span>':''}</td>
-      <td>${label(x.status)}${x.note?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
+      <td>${label(x.status, x.note)}${x.note?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}</td></tr>`).join('')}
     </table></div>` : `<div class="empty">Nothing decided yet.</div>`;
 }
 

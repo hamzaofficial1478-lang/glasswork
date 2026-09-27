@@ -220,10 +220,23 @@ def detect(now=None) -> list:
 
         # 2. A RUN THAT RAISED. Already over, but it left work undone and it will
         #    almost certainly raise again the next time it is asked.
+        #    AND A DESK THAT HAS SINCE RUN CLEANLY IS NOT CRASHING.
+        #
+        #    "look at them the seo is crashing again and again why?" — it was
+        #    not. One crash at 12:59 (a dropped Google login, before the fix for
+        #    it reached his machine) stayed a live fault for twenty-four hours,
+        #    because any error in the last day counted. The strategist ran
+        #    cleanly again and again after it, and every Overseer pass still
+        #    re-filed the one crash to IT, SEO and the Director — which read as
+        #    a desk falling over all afternoon. Same test as a stall: the agent
+        #    finishing a run after the crash is the recovery.
         day0 = now - 24 * 3600
         for r in _rows(c, "SELECT r.id, r.agent, r.ended_at, r.note, t.title"
                           " FROM agent_runs r LEFT JOIN tasks t ON t.id=r.task_id"
                           " WHERE r.status='error' AND r.ended_at >= ?"
+                          "   AND NOT EXISTS (SELECT 1 FROM agent_runs b"
+                          "     WHERE b.agent=r.agent AND b.status='ok'"
+                          "       AND b.started_at >= r.ended_at)"
                           " ORDER BY r.ended_at DESC LIMIT 40", (day0,)):
             out.append({
                 "key": f"crash:{r['id']}",
@@ -497,7 +510,15 @@ def _still_true(c, f, now):
                     " AND started_at > ? LIMIT 1",
                     (f["agent"], int(r["started_at"] or 0))).fetchone()
                 return not back
-            return r["status"] == "error"
+            if r["status"] != "error":
+                return False
+            # A crash is over when the same agent has finished a run since.
+            ended = c.execute("SELECT ended_at FROM agent_runs WHERE id=?",
+                              (rid,)).fetchone()[0] or 0
+            back = c.execute("SELECT 1 FROM agent_runs WHERE agent=? AND status='ok'"
+                             " AND started_at >= ? LIMIT 1",
+                             (f["agent"], int(ended))).fetchone()
+            return not back
         if kind == "abandoned" and ev.startswith("tasks#"):
             tid = ev.split("#", 1)[1]
             r = c.execute("SELECT status, claimed_at FROM tasks WHERE id=?", (tid,)).fetchone()

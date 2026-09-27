@@ -549,7 +549,8 @@ def _room_stats(c, key, day0, open_tasks):
         perf = _one(c, "SELECT perf FROM lighthouse ORDER BY at DESC LIMIT 1", default=None)
         return [f"{perf if perf is not None else '—'} perf score", f"{issues} tickets open"], _clamp(base - issues * 6, 55, 96)
     if key == "Content":
-        review = _one(c, "SELECT count(*) FROM content_queue WHERE status IN ('drafted','in_review')")
+        review = _one(c, "SELECT count(*) FROM content_queue"
+                         " WHERE status IN ('drafted','in_review','for_blog')")
         queued = _one(c, "SELECT count(*) FROM content_queue WHERE status IN ('idea','briefed','approved')")
         # A page held for another sector's call is real work, not nothing — if it
         # isn't shown, six finished briefs look like an idle room.
@@ -802,12 +803,18 @@ def build():
     try:
         n_pages = c.execute("SELECT count(*) FROM site_queue WHERE status='pending'"
                             " AND kind='new_page'").fetchone()[0]
-        if n_pages:
+        # A post for his own blog backend waits on him just the same.
+        n_posts = c.execute("SELECT count(*) FROM content_queue"
+                            " WHERE status='for_blog'").fetchone()[0]
+        if n_pages or n_posts:
             approvals.append({
                 "kind": "review_pages", "id": "pages", "lvl": "amber · Content",
-                "link": "/posts", "count": n_pages,
-                "text": f"{n_pages} page(s) written and waiting for your yes",
-                "why": "Read each one in full before it goes on your website."})
+                "link": "/posts", "count": n_pages + n_posts,
+                "text": "; ".join(t for t in (
+                    f"{n_pages} page(s) written and waiting for your yes" if n_pages else "",
+                    f"{n_posts} post(s) ready to add to your blog" if n_posts else "") if t),
+                "why": ("Read each one in full before it goes on your website. A blog post "
+                        "is copied into your own blog backend from the Posts room.")})
     except Exception:
         pass
     try:

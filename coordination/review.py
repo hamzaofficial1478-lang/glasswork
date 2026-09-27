@@ -46,6 +46,7 @@ WHAT EACH BUTTON DOES, AND WHAT STILL GUARDS IT
 """
 import argparse
 import json
+import re
 import sqlite3
 import sys
 import time
@@ -298,6 +299,34 @@ def _pages(c):
                      "html": page.get("_page_html") or page.get("html") or "",
                      "at": r.get("created_at") or 0})
 
+    # READY FOR HIS BLOG: posts go into his own blog backend, never onto a page
+    # of their own (content_write.for_his_blog).
+    for_blog, on_blog = [], []
+    for r in _rows(c, "SELECT id, title, brief, draft, status, created_at FROM content_queue"
+                      " WHERE status IN ('for_blog','published') AND draft LIKE '%_for_blog%'"
+                      " ORDER BY id DESC LIMIT 40"):
+        page = _json(r.get("draft"), {}) or {}
+        blog = page.get("_for_blog") or {}
+        if not blog:
+            continue
+        b = _json(r.get("brief"), {}) or {}
+        plain = blog.get("plain_page") or {}
+        row = {"id": r["id"], "title": blog.get("title") or r.get("title") or "",
+               "keyword": b.get("primary_keyword") or "",
+               "slug": blog.get("slug") or "", "meta": blog.get("meta") or "",
+               "keywords": blog.get("keywords") or "", "html": blog.get("html") or "",
+               "text": blog.get("text") or "", "images": blog.get("images") or [],
+               "url": blog.get("posted_url") or blog.get("url") or "",
+               "posted_at": blog.get("posted_at") or 0,
+               "warnings": page.get("_held_because") or [],
+               "at": r.get("created_at") or 0,
+               "plain_page": ({"page": plain.get("page"), "site_queue": plain.get("site_queue"),
+                               "down": plain.get("down") or ""} if plain.get("page") else None)}
+        if r["status"] == "for_blog":
+            for_blog.append(row)
+        elif len(on_blog) < 12:
+            on_blog.append({k: row[k] for k in ("id", "title", "url", "posted_at", "plain_page")})
+
     counts = {}
     for r in _rows(c, "SELECT status, count(*) n FROM content_queue GROUP BY status"):
         counts[r["status"] or ""] = r["n"]
@@ -316,12 +345,53 @@ def _pages(c):
                          "keyword": b.get("primary_keyword") or "",
                          "held_for_seo": (r.get("status") or "").startswith("blocked_on_")})
     return {"waiting": waiting, "approved": approved, "recent": recent, "held": held,
+            "for_blog": for_blog, "on_blog": on_blog, "blog_home": _blog_home(),
             "to_write": to_write, "upcoming": upcoming,
             "held_for_seo": sum(n for k, n in counts.items() if k.startswith("blocked_on_")),
             "site_resting": _site_resting(),
             "published": counts.get("published", 0),
             "writing": busy("content-writer", c),
             "publishing": busy("it-releaser", c)}
+
+
+def _site():
+    try:
+        from pipelines import site_api
+        return (site_api.settings().get("site") or "").rstrip("/")
+    except Exception:
+        return ""
+
+
+def _blog_home() -> str:
+    """His blog's list page — where a taken-down plain copy sends people."""
+    s = _site()
+    return s + "/blog.php" if s else ""
+
+
+def _move_old_blog_pages():
+    """Blog posts queued as pages before — moved to his blog. Writes only when there are some."""
+    c = _conn()
+    found = False
+    try:
+        for r in _rows(c, "SELECT detail FROM site_queue WHERE kind='new_page'"
+                          " AND status IN ('pending','approved','applied')"
+                          " AND detail LIKE '%\"blog-%' LIMIT 40"):
+            cid = (_page_of(r.get("detail"))[1] or {}).get("content_id")
+            q = c.execute("SELECT draft FROM content_queue WHERE id=?",
+                          (int(cid),)).fetchone() if cid else None
+            if q and "_for_blog" not in (q[0] or ""):
+                found = True
+                break
+    except (sqlite3.Error, ValueError, TypeError):
+        found = False
+    finally:
+        c.close()
+    if not found:
+        return 0
+    from pipelines import content_write
+    with board._conn() as w:
+        board._migrate(w)
+        return content_write.blogs_off_the_site_queue(w, _site())
 
 
 def _site_resting() -> dict:
@@ -334,6 +404,10 @@ def _site_resting() -> dict:
 
 
 def build() -> dict:
+    try:
+        _move_old_blog_pages()
+    except Exception:
+        pass
     c = _conn()
     try:
         # Only changes he could actually decide — the same rule as "Waiting on
@@ -433,10 +507,88 @@ def _campaign_act(do, ids, data) -> dict:
     return {"ok": False, "error": f"not something this page does: {do!r}"}
 
 
+BLOG_ACTS = ("blog_posted", "blog_drop", "blog_rewrite", "take_down")
+
+
+def _blog_draft(c, cid):
+    r = c.execute("SELECT draft, status FROM content_queue WHERE id=?", (cid,)).fetchone()
+    if not r:
+        return None, None
+    return _json(r["draft"], {}) or {}, r["status"]
+
+
+def _blog_act(do, ids, data) -> dict:
+    """His blog posts: he put it up, drop it, write it again, take the plain copy down."""
+    data = data if isinstance(data, dict) else {}
+    if not ids:
+        return {"ok": False, "error": "nothing was picked"}
+    cid = ids[0]
+    with board._conn() as c:
+        board._migrate(c)
+        draft, status = _blog_draft(c, cid)
+        blog = (draft or {}).get("_for_blog") or {}
+        if not blog:
+            return {"ok": False, "error": "That post is not waiting for your blog any more."}
+        if do == "blog_posted":
+            url = str(data.get("url") or "").strip() or blog.get("url") or ""
+            if url and not re.match(r"https?://", url, re.I):
+                return {"ok": False, "error": "That does not look like a web address — "
+                                              "paste the post's address from your browser."}
+            blog.update(posted_url=url[:400], posted_at=int(time.time()))
+            draft["_for_blog"] = blog
+            c.execute("UPDATE content_queue SET draft=?, status='published' WHERE id=?",
+                      (json.dumps(draft, indent=2), cid))
+            plain = blog.get("plain_page") or {}
+            return {"ok": True, "head": (
+                "Marked as on your blog." + (
+                    f" The old plain copy at /{plain['page']} is still up — press "
+                    "'Take it down' so Google only finds the real one."
+                    if plain.get("page") and not plain.get("down") else ""))}
+        if do in ("blog_drop", "blog_rewrite"):
+            if status != "for_blog":
+                return {"ok": False, "error": "That post is already on your blog."}
+            if do == "blog_drop":
+                c.execute("UPDATE content_queue SET status='rejected' WHERE id=?", (cid,))
+                return {"ok": True, "head": "Dropped. It will not be offered again."}
+            c.execute("UPDATE content_queue SET status='briefed', draft=NULL WHERE id=?", (cid,))
+            return {"ok": True, "head": "Sent back to be written again — Content picks it "
+                                        "up on its next pass, or press 'Write the next page now'."}
+        # take_down
+        plain = blog.get("plain_page") or {}
+        if not plain.get("page"):
+            return {"ok": False, "error": "There is no plain copy of this post on your site."}
+        if plain.get("down"):
+            return {"ok": True, "head": "Already being taken down — see Already decided."}
+        go_to = blog.get("posted_url") or _blog_home() or "/"
+    from pipelines import content_write
+    change = board.queue_site_change("it-releaser", "page", {
+        "change": {"page": plain["page"], "whole_page": True,
+                   "html": content_write.take_down_page(plain["page"], go_to)},
+        "title": f"Take down the plain copy of “{blog.get('title', '')[:60]}”",
+        "why": (f"The owner pressed Take it down. /{plain['page']} was put up as a page of "
+                "its own, outside his blog and his theme. It now sends visitors to "
+                f"{go_to} and tells Google to drop it.")})
+    board.decide_site_change(change, "approved")
+    with board._conn() as c:
+        draft, _st = _blog_draft(c, cid)
+        draft["_for_blog"]["plain_page"]["down"] = f"change #{change}"
+        c.execute("UPDATE content_queue SET draft=? WHERE id=?",
+                  (json.dumps(draft, indent=2), cid))
+    from coordination import chat_actions
+    started = chat_actions.start_release()
+    return {"ok": True, "change": change, "head": (
+        f"Taking /{plain['page']} down (change #{change}). "
+        + ("IT runs the tests, then points it at your blog — a minute or two."
+           if started else "IT does it after the tests, on its next run or when you press "
+                           "'Put it live now'."))}
+
+
 def act(do, ids, data=None) -> dict:
     ids = _ids(ids)
     if do in CAMPAIGN_ACTS:
         return _campaign_act(do, ids, data)
+    if do in BLOG_ACTS:
+        return _blog_act(do, ids, data)
     if not ids:
         return {"ok": False, "error": "nothing was picked"}
     when = time.strftime("%Y-%m-%d %H:%M")

@@ -46,9 +46,14 @@ page ships with a marked, empty slot where his pictures go, and the Auditor
 warns that the page is not finished until they are in. An agent going and
 finding a stock photograph of somebody else's balustrade is worse than a gap.
 
-IT DOES NOT MATCH HIS TEMPLATE BY GUESSING. If his site has a header include it
-uses it, so the page comes out looking like his site. If it does not, it says
-so plainly in the approval rather than shipping a page that looks foreign.
+IT DOES NOT MATCH HIS TEMPLATE BY GUESSING. It reads one of his own pages and
+puts the new content in that page's frame, so it comes out looking like his
+site. If no page of his can be read, it says so plainly in the approval rather
+than shipping a page that looks foreign.
+
+A BLOG POST IS NOT A PAGE. His posts live in his own blog backend and show
+through blog-details.php in his theme; a post goes to the Posts room ready to
+paste in there, never onto his site as a file of its own.
 """
 import argparse
 import json
@@ -444,39 +449,88 @@ def _place_images(body, images):
     return body
 
 
-def _shell(page, brief, facts, include="", images=()):
-    """
-    The body, wrapped so it comes out looking like his website.
-
-    Two honest routes and no guessing between them. If his site has a header
-    include the agency can read, the page is a .php that pulls it in, and it
-    inherits his navigation, his styles and his footer. If it does not, the
-    page is standalone and the approval says so — a page that quietly looks
-    nothing like the rest of his site is worse than one he was warned about.
-    """
-    title = str(page.get("title") or brief.get("title") or "").strip()[:70]
-    meta = str(page.get("meta") or "").strip()[:160]
+def _body(page, images=()):
     body = _place_images(str(page.get("html") or "").strip(), images)
     # The marker for his own photographs stays only when none of his own are
     # in the piece — then it is still unfinished without them.
     if PHOTO_SLOT not in body and not any(i.get("own") for i in images or ()):
         body = body + "\n\n" + PHOTO_SLOT
-    if include:
-        foot = include.replace("header", "footer").replace("head", "foot") \
-            if "header" in include or "head" in include else ""
-        out = [f"<?php include __DIR__ . '/{include}'; ?>",
-               "<main>", body, "</main>"]
-        if foot and foot != include:
-            out.append(f"<?php @include __DIR__ . '/{foot}'; ?>")
-        return "\n".join(out), "php-include"
-    return ("\n".join([
+    return body
+
+
+def _standalone(page, brief, images=()):
+    """The article on its own — what the Auditor reads, and the last resort."""
+    title = str(page.get("title") or brief.get("title") or "").strip()[:70]
+    meta = str(page.get("meta") or "").strip()[:160]
+    return "\n".join([
         "<!doctype html>",
         '<html lang="en"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         f"<title>{_esc(title)}</title>",
         f'<meta name="description" content="{_esc(meta)}">',
-        "</head><body>", "<main>", body, "</main>", "</body></html>",
-    ]), "standalone")
+        "</head><body>", "<main>", _body(page, images), "</main>", "</body></html>",
+    ])
+
+
+def _shell(page, brief, facts, theme=None, images=()):
+    """
+    The body, wrapped so it comes out looking like his website.
+
+    "this link that program post it is plain no any layout no any design"
+
+    Two honest routes and no guessing between them. With the frame of one of
+    his own pages (site_api.theme_of_his_site) the new page is that page with
+    its content swapped for this one: his menu, his styles, his footer, and a
+    .php like the rest of his site. Without one, the page is standalone and
+    the approval says so — a page that quietly looks nothing like the rest of
+    his site is worse than one he was warned about.
+    """
+    theme = theme or {}
+    if theme.get("top") and theme.get("bottom"):
+        title = str(page.get("title") or brief.get("title") or "").strip()[:70]
+        meta = str(page.get("meta") or "").strip()[:160]
+        return ("\n".join([
+            _retitle(theme["top"], title, meta),
+            '<main class="agency-page" style="max-width:920px;margin:40px auto;'
+            'padding:0 16px;line-height:1.7">',
+            _body(page, images), "</main>", theme["bottom"]]), "his-theme")
+    return _standalone(page, brief, images), "standalone"
+
+
+def _php_str(s):
+    return "'" + str(s or "").replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _retitle(top, title, meta):
+    """His page's top half, saying this page's title and description, not its own."""
+    said = [False]
+
+    def swap_title(m):
+        said[0] = True
+        return f"<title>{_esc(title)}</title>"
+    top = re.sub(r"<title\b[^>]*>.*?</title\s*>", swap_title, top, count=1, flags=re.I | re.S)
+    top, n = re.subn(r'(<meta\s+name=["\']description["\']\s+content=)(["\']).*?\2',
+                     lambda m: f'{m.group(1)}"{_esc(meta)}"', top, count=1, flags=re.I | re.S)
+    if not n and meta and re.search(r"</head\s*>", top, re.I):
+        top = re.sub(r"</head\s*>", f'<meta name="description" content="{_esc(meta)}">\n</head>',
+                     top, count=1, flags=re.I)
+    for prop, val in (("og:title", title), ("og:description", meta)):
+        top = re.sub(r'(<meta\s+property=["\']%s["\']\s+content=)(["\']).*?\2' % prop,
+                     lambda m, v=val: f'{m.group(1)}"{_esc(v)}"', top, flags=re.I | re.S)
+    # The page it was copied from has its own address; this one must not claim it.
+    top = re.sub(r'<link\b[^>]*rel=["\']canonical["\'][^>]*>\s*', "", top, flags=re.I)
+    top = re.sub(r'<meta\b[^>]*property=["\']og:url["\'][^>]*>\s*', "", top, flags=re.I)
+    # A title kept in a PHP variable, the way many PHP sites pass it to the header.
+    for names, val in ((r"page_?title|title|pageTitle|meta_?title", title),
+                       (r"meta_?description|page_?description|description|metaDesc", meta)):
+        top, k = re.subn(r"\$(%s)\s*=\s*(['\"])(?:(?!\2).)*\2\s*;" % names,
+                         lambda m, v=val: f"${m.group(1)} = {_php_str(v)};", top, flags=re.S)
+        said[0] = said[0] or (k > 0 and val == title)
+    if not said[0]:
+        # The title comes from an include; give it the usual names to read.
+        top = (f"<?php $page_title = {_php_str(title)}; $title = $page_title; "
+               f"$meta_description = {_php_str(meta)}; ?>\n" + top)
+    return top
 
 
 def _esc(s):
@@ -484,23 +538,158 @@ def _esc(s):
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
-def _include_of_his_site():
-    """The header include his pages already use, if the agency can read one."""
+def _theme_of_his_site():
+    """The frame of one of his own pages, if the agency can read one. {} if not."""
     try:
-        # READING, not writing. why_not_ready would refuse in read-only mode,
-        # which is a decision about changing his site and says nothing about
-        # looking at it — see site_api.why_cannot_read.
-        if site_api.why_cannot_read():
-            return ""
-        for name in site_api.LIKELY_INCLUDES:
-            if "header" not in name and "top" not in name:
-                continue
-            got = site_api.read_page(name)
-            if got.get("ok") and (got.get("html") or "").strip():
-                return name
+        got = site_api.theme_of_his_site()
+        return got if got.get("ok") else {}
     except Exception:
-        pass
-    return ""
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# A BLOG POST GOES INTO HIS BLOG, NOT ONTO A PAGE OF ITS OWN
+# ---------------------------------------------------------------------------
+#
+# "i had build the BAckend from where the blogs get uploaded and the blog is
+#  blog.php ... https://worlddealtechnicalservices.com/blog-details.php?slug=
+#  custom-wooden-interior-design-dubai and this have a complete layout theme"
+#
+# His posts live in his own backend, which stores them in his database and
+# shows them through blog.php and blog-details.php in his theme. A post put up
+# as a file of its own sits outside all of that: no layout, not in his blog
+# list, not at his blog's address. The agency may not touch his admin area or
+# his database, so a written post is made ready for him to paste in — title,
+# link name, short description, the article and its pictures, each on its own
+# with a Copy button in the Posts room — and he says when it is up.
+
+BLOG_POST_URL = "{site}/blog-details.php?slug={slug}"
+
+
+def blog_slug(title) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")[:70].strip("-")
+
+
+def _absolute(src, site):
+    src = str(src or "")
+    if re.match(r"https?://", src, re.I) or not site:
+        return src
+    return site.rstrip("/") + "/" + src.lstrip("/")
+
+
+def _as_text(html) -> str:
+    """The article as plain text, for a backend with a plain box."""
+    t = str(html or "")
+    t = re.sub(r"<!--.*?-->", "", t, flags=re.S)
+    t = re.sub(r"<figure\b.*?</figure>", "", t, flags=re.I | re.S)
+    t = re.sub(r"<li\b[^>]*>", "\n- ", t, flags=re.I)
+    t = re.sub(r"</(p|h[1-6]|ul|ol|div|blockquote)>", "\n\n", t, flags=re.I)
+    t = re.sub(r"<br\s*/?>", "\n", t, flags=re.I)
+    t = re.sub(r"<[^>]+>", "", t)
+    for a, b in (("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'),
+                 ("&#39;", "'"), ("&nbsp;", " ")):
+        t = t.replace(a, b)
+    t = re.sub(r"[ \t]+", " ", t)
+    return re.sub(r"\n\s*\n\s*\n+", "\n\n", t).strip()
+
+
+def for_his_blog(page, brief, images=(), site="") -> dict:
+    """Everything he pastes into his blog backend, each piece on its own."""
+    title = str(page.get("title") or brief.get("title") or "").strip()
+    slug = blog_slug(title) or blog_slug(brief.get("primary_keyword")) or "post"
+    imgs = [{**i, "src": _absolute(i.get("src"), site)} for i in images or []]
+    body = _place_images(str(page.get("html") or "").strip(), imgs)
+    body = body.replace(PHOTO_SLOT, "").strip()
+    # Pasted into his backend, a picture's path must still find his server.
+    if site:
+        body = re.sub(r'(<img\b[^>]*\bsrc=["\'])(/?[^"\':]+)(["\'])',
+                      lambda m: m.group(1) + _absolute(m.group(2), site) + m.group(3),
+                      body, flags=re.I)
+        if not imgs:
+            host = re.sub(r"^https?://(www\.)?", "", site).split("/")[0].lower()
+            for tag in re.findall(r"<img\b[^>]*>", body, flags=re.I):
+                src = re.search(r'\bsrc=["\']([^"\']+)["\']', tag, re.I)
+                alt = re.search(r'\balt=["\']([^"\']*)["\']', tag, re.I)
+                if src:
+                    imgs.append({"src": src.group(1), "alt": alt.group(1) if alt else "",
+                                 "own": bool(host) and host in src.group(1).lower()})
+    # His post page prints the title itself; a second one in the article is a
+    # page with two headlines.
+    body = re.sub(r"^\s*<h1\b[^>]*>.*?</h1>\s*", "", body, count=1, flags=re.I | re.S)
+    words = [brief.get("primary_keyword")] + list(brief.get("secondary_keywords") or [])[:5]
+    return {"title": title[:120], "slug": slug,
+            "meta": str(page.get("meta") or "").strip()[:160],
+            "keywords": ", ".join(w for w in words if w),
+            "html": body, "text": _as_text(body),
+            "images": [{"src": i["src"], "alt": i.get("alt") or "",
+                        "own": bool(i.get("own")), "credit": i.get("credit") or ""}
+                       for i in imgs],
+            "url": BLOG_POST_URL.format(site=(site or "").rstrip("/"), slug=slug)}
+
+
+def blogs_off_the_site_queue(c, site="") -> int:
+    """
+    Posts written before this change were queued as pages of their own. Those
+    still waiting are moved to his blog; one already put up stays listed with
+    its plain copy, so he can take that down once the post is in his blog.
+    Once for each post. Returns how many moved.
+    """
+    moved = 0
+    rows = c.execute("SELECT id, status, detail FROM site_queue WHERE kind='new_page'"
+                     " AND status IN ('pending','approved','applied')").fetchall()
+    for sq_id, status, detail in rows:
+        try:
+            d = json.loads(detail or "{}")
+        except ValueError:
+            continue
+        ch = d.get("change") or {}
+        name, cid = str(ch.get("page") or ""), ch.get("content_id")
+        if not (re.match(r"blog-[a-z0-9-]+\.(html?|php)$", name) and cid):
+            continue
+        got = c.execute("SELECT draft, brief, status FROM content_queue WHERE id=?",
+                        (int(cid),)).fetchone()
+        if not got:
+            continue
+        try:
+            draft = json.loads(got[0] or "{}")
+            brief = json.loads(got[1] or "{}")
+        except ValueError:
+            continue
+        if draft.get("_for_blog"):
+            continue
+        html = str(ch.get("html") or draft.get("_page_html") or draft.get("html") or "")
+        m = re.search(r"<main\b[^>]*>(.*)</main>", html, re.I | re.S)
+        inner = m.group(1) if m else re.sub(r"<\?php.*?\?>", "", html, flags=re.S)
+        blog = for_his_blog({"title": draft.get("title") or d.get("title"),
+                             "meta": draft.get("meta"), "html": inner}, brief, (), site)
+        if status == "applied":
+            blog["plain_page"] = {"page": name, "site_queue": sq_id}
+        else:
+            c.execute("UPDATE site_queue SET status='rejected', decided_at=?, note=?"
+                      " WHERE id=?",
+                      (int(time.time()), "moved to Ready for your blog — a blog post goes "
+                       "into your own blog backend, not onto a page of its own", sq_id))
+        draft["_for_blog"] = blog
+        c.execute("UPDATE content_queue SET draft=?, status='for_blog', type='blog'"
+                  " WHERE id=?", (json.dumps(draft, indent=2), int(cid)))
+        moved += 1
+    return moved
+
+
+def take_down_page(name, go_to) -> str:
+    """What a plain copy is replaced with: a pointer to the real post, kept out of Google."""
+    go = _esc(go_to)
+    return "\n".join([
+        "<!doctype html>",
+        '<html lang="en"><head><meta charset="utf-8">',
+        "<title>This article has moved to our blog</title>",
+        '<meta name="robots" content="noindex, follow">',
+        f'<link rel="canonical" href="{go}">',
+        f'<meta http-equiv="refresh" content="0; url={go}">',
+        "</head><body>",
+        "<p>This article has moved to our blog, with the rest of our guides and "
+        f'finished projects. If you are not taken there, <a href="{go}">open it here</a>.</p>',
+        "</body></html>"])
 
 
 def _slug_path(brief, kind="service_page"):
@@ -598,7 +787,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
                                 "rather than earn. Once Claude is signed in on "
                                 "this machine it writes on the next run.")}
 
-        include = _include_of_his_site()
+        theme = None                      # read once, and only if a page needs it
         pages, held = [], []
         # STOP BEFORE THE STEP IS KILLED, AND KEEP WHAT IS FINISHED.
         #
@@ -666,23 +855,41 @@ def _write(agent, dry_run, only_id, limit, job=None):
                 _store(con, row["id"], page, "in_review", reasons, dry_run)
                 continue
 
-            html, how = _shell(page, brief, facts, include, images=images)
+            # The Auditor reads what the agency WROTE — the article on its own.
+            # His theme is his own code (menus, scripts) and is not the
+            # writer's to answer for; it goes round the article afterwards.
+            article = _standalone(page, brief, images)
             host = re.sub(r"^https?://(www\.)?", "", facts.get("site") or "").split("/")[0]
-            verdict = auditor.check_page(html, brief, site_host=host)
+            verdict = auditor.check_page(article, brief, site_host=host)
             if not verdict["pass"]:
                 held.append({"id": row["id"], "title": row["title"],
                              "why": "the Auditor held it: " + verdict["blocking"][0]})
                 _store(con, row["id"], page, "in_review", verdict["blocking"], dry_run,
-                       html=html)
+                       html=article)
                 continue
 
-            path = _slug_path(brief, kind)
             if kind == "blog":
-                # Its own address, flat beside his pages so the header include
-                # path still works, named from the article's own title.
-                path = "blog-" + (re.sub(r"[^a-z0-9]+", "-", str(page.get("title") or path)
-                                         .lower()).strip("-")[:60] or path)
-            page_file = path.lstrip("/") + (".php" if how == "php-include" else ".html")
+                blog = for_his_blog(page, brief, images, facts.get("site") or "")
+                if not dry_run:
+                    _store(con, row["id"], page, "for_blog", verdict["warnings"], False,
+                           html=article, blog=blog)
+                    if kind != (row.get("type") or ""):
+                        con.execute("UPDATE content_queue SET type=? WHERE id=?",
+                                    (kind, row["id"]))
+                        con.commit()
+                pages.append({"id": row["id"], "title": blog["title"], "kind": kind,
+                              "images": len(images or []), "page": blog["url"],
+                              "how": "for-your-blog", "words": verdict["words"],
+                              "queued": None, "for_blog": True,
+                              "warnings": verdict["warnings"], "brain": got.get("brain")})
+                continue
+
+            if theme is None:
+                theme = _theme_of_his_site()
+            html, how = _shell(page, brief, facts, theme, images=images)
+            path = _slug_path(brief, kind)
+            page_file = path.lstrip("/") + (".php" if how == "his-theme" and theme.get("php")
+                                            else ".html")
             queued = None
             if not dry_run:
                 _store(con, row["id"], page, "drafted", verdict["warnings"], False,
@@ -698,11 +905,12 @@ def _write(agent, dry_run, only_id, limit, job=None):
                     "bytes": len(html),
                     "title": page.get("title") or row["title"],
                     "why": (f"A new page for {brief.get('primary_keyword') or row['title']!r}. "
-                            + (f"It uses your own {include}, so it will look like the "
-                               "rest of your site."
-                               if how == "php-include" else
-                               "The agency could not find a header include on your "
-                               "site, so this page is standalone — it will NOT match "
+                            + (f"It is built in the frame of your own {theme.get('page')} "
+                               "— your menu, styles and footer — so it will look like "
+                               "the rest of your site."
+                               if how == "his-theme" else
+                               "The agency could not read the layout of any of your "
+                               "pages, so this page is standalone — it will NOT match "
                                "your template until somebody wraps it.")
                             + " It has a marked gap where your photographs go; it is "
                               "not finished until they are in."),
@@ -717,36 +925,48 @@ def _write(agent, dry_run, only_id, limit, job=None):
                           "queued": queued, "warnings": verdict["warnings"],
                           "brain": got.get("brain")})
 
+        posts = [p for p in pages if p.get("for_blog")]
         if pages and not dry_run:
             board.log_decision(
                 "content-write",
-                reasoning=(f"Wrote {len(pages)} page(s) from briefs SEO's gap list "
-                           f"produced. Each passed the Auditor and is queued for his "
-                           f"approval; none is on the site."),
-                expectation=("A service+area page he approves goes live and starts "
-                             "taking enquiries for a phrase his site does not "
-                             "currently answer."),
+                reasoning=(f"Wrote {len(pages)} piece(s) from briefs SEO's gap list "
+                           f"produced. Each passed the Auditor. "
+                           + (f"{len(pages) - len(posts)} page(s) are queued for his "
+                              "approval; " if len(pages) > len(posts) else "")
+                           + (f"{len(posts)} post(s) are ready for him to add in his "
+                              "own blog backend; " if posts else "")
+                           + "none is on the site yet."),
+                expectation=("A service+area page he approves, or a post he adds to "
+                             "his blog, starts taking enquiries for a phrase his site "
+                             "does not currently answer."),
                 confidence=0.6,
                 evidence={"content_queue_ids": [p["id"] for p in pages],
                           "site_queue_ids": [p["queued"] for p in pages if p["queued"]]})
 
         con.commit()
-        summary = (f"{len(pages)} page(s) written and waiting for your yes"
-                   if pages else
-                   f"nothing written — {len(held)} held")
+        bits = []
+        if len(pages) > len(posts):
+            bits.append(f"{len(pages) - len(posts)} page(s) written and waiting for your yes")
+        if posts:
+            bits.append(f"{len(posts)} post(s) ready for your blog — copy them in from "
+                        "the Posts room")
+        summary = "; ".join(bits) if bits else f"nothing written — {len(held)} held"
         return {"ok": True, "agent": agent, "pages": pages, "held": held,
-                "shell": ("your own header include" if include else "standalone"),
+                "shell": (f"the frame of your own {theme.get('page')}" if theme
+                          else "standalone" if theme is not None else "not needed"),
                 "dry_run": bool(dry_run), "summary": summary}
     finally:
         con.close()
 
 
-def _store(con, qid, page, status, notes, dry_run, html=""):
+def _store(con, qid, page, status, notes, dry_run, html="", blog=None):
     if dry_run:
         return
     body = dict(page)
     if html:
         body["_page_html"] = html
+    if blog:
+        body["_for_blog"] = blog
     if notes:
         body["_held_because"] = list(notes)[:8]
     con.execute("UPDATE content_queue SET draft=?, status=? WHERE id=?",
@@ -764,7 +984,8 @@ def as_text(r) -> str:
     L = [f"CONTENT WRITER — {r['summary']} ({r['shell']})"]
     for p in r.get("pages") or []:
         L.append(f"   wrote   {p['page']}  ({p['words']} words)"
-                 + (f"  queued #{p['queued']}" if p.get("queued") else "  [dry run]"))
+                 + (f"  queued #{p['queued']}" if p.get("queued") else
+                    "  ready for your blog" if p.get("for_blog") else "  [dry run]"))
         for w in p.get("warnings") or []:
             L.append(f"      note {w}")
     for h in r.get("held") or []:

@@ -425,6 +425,38 @@ def test_a_fault_that_fixes_itself_closes_what_it_opened():
               "done")
 
 
+def test_one_old_crash_is_not_a_desk_crashing_all_day():
+    """
+    "look at them the seo is crashing again and again why?" — one crash at
+    12:59, then clean runs all afternoon, and every Overseer pass re-filed that
+    one crash because any error in the last day counted.
+    """
+    print("\nA crash followed by clean runs is over, not happening again and again:")
+    with _Cabinet() as cab:
+        t = int(time.time()) - 4 * 3600
+        cab.write("INSERT INTO agent_runs(agent, started_at, ended_at, status, note)"
+                  " VALUES('seo-strategist',?,?, 'error', 'Google login dropped')", (t - 30, t))
+        check("the crash is a fault while nothing has run since",
+              [f["kind"] for f in F.detect()], ["crash"])
+        F.scan()
+        _recovered(cab)
+        check("once the desk has run cleanly it is not found again",
+              [f["kind"] for f in F.detect()], [])
+        out = F.scan()
+        check("and the fault it opened is closed", out["resolved"], 1)
+        check("so the next pass files nothing", F.scan()["filed"], 0)
+
+    print("\n...but a desk that keeps crashing is still reported:")
+    with _Cabinet() as cab:
+        now = int(time.time())
+        cab.write("INSERT INTO agent_runs(agent, started_at, ended_at, status)"
+                  " VALUES('seo-strategist',?,?, 'ok')", (now - 3000, now - 2900))
+        cab.write("INSERT INTO agent_runs(agent, started_at, ended_at, status, note)"
+                  " VALUES('seo-strategist',?,?, 'error', 'fell over')", (now - 600, now - 500))
+        check("a crash after the last clean run counts",
+              [f["kind"] for f in F.detect()], ["crash"])
+
+
 def test_a_claimed_ticket_is_never_yanked():
     print("\nOnce IT has claimed it, the work is IT's:")
     with _Cabinet() as cab:
@@ -742,6 +774,7 @@ def main():
               test_closing_the_program_stops_the_agency_believing_it_is_working,
               test_a_sector_falling_apart_is_raised_once,
               test_a_fault_that_fixes_itself_closes_what_it_opened,
+              test_one_old_crash_is_not_a_desk_crashing_all_day,
               test_a_claimed_ticket_is_never_yanked,
               test_a_fault_that_comes_back_is_reported_again,
               test_an_abandoned_task_goes_to_its_own_sector_not_it,

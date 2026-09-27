@@ -1415,6 +1415,129 @@ def _from_the_listing(candidates, s=None) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# HIS THEME, READ OFF ONE OF HIS OWN PAGES
+# ---------------------------------------------------------------------------
+#
+# "this link that program post it is plain no any layout no any design no any
+#  setting ... the website pages are .php not .html that home.html page is not
+#  live the home.php page is live"
+#
+# A new page used to look for a header file by guessing its name. His site did
+# not match any guess, so the page went up as bare HTML: no menu, no styles, no
+# footer. Guessing was the wrong question. His own pages already know how to
+# put his header and footer round their content — so read one of them, keep
+# everything above its content and everything below, and put the new content
+# in between. Whatever the site is built from (include lines, inline markup, a
+# PHP variable for the title) comes along as written, because it IS his page.
+#
+# Only a page his site actually links to, and only a .php one. home.html and
+# default.php are on his server and not on his site; copying their frame would
+# copy a page nobody visits.
+
+_THEME_SKIP = ("default", "test", "old", "backup", "copy", "blog-", "agency", "404",
+               "thank", "admin", "login")
+_THEME_LIKE = ("glass", "alumin", "door", "pergola", "partition", "shower", "window",
+               "railing", "facade", "cladding", "service", "work")
+_THEME_THEN = ("about", "contact", "services", "gallery", "projects")
+_INCLUDE_BLOCK = re.compile(r"<\?php(?:(?!\?>).)*?\b(?:include|require)(?:_once)?\b(?:(?!\?>).)*\?>",
+                            re.S | re.I)
+
+
+def _frame_of(src) -> dict:
+    """
+    {top, bottom} of one of his pages — everything above its content and
+    everything below — or {} when the page does not show where they are.
+    """
+    src = src or ""
+    if len(src) < 200:
+        return {}
+    incs = [(m.start(), m.end(), m.group(0)) for m in _INCLUDE_BLOCK.finditer(src)]
+    first = re.search(r"<(?:main|section|article|h1)\b", src, re.I)
+    last = None
+    for m in re.finditer(r"</(?:main|section|article)\s*>", src, re.I):
+        last = m
+    head_end = re.search(r"</header\s*>", src, re.I)
+    feet = [m.start() for m in re.finditer(r"<footer\b", src, re.I)]
+
+    if first:
+        tops = [e for s_, e, _t in incs if s_ < first.start()]
+        if head_end and head_end.end() <= first.start():
+            tops.append(head_end.end())
+        top_end = max(tops) if tops else first.start()
+    else:
+        tops = [e for s_, e, t in incs if re.search(r"head|nav|menu|top", t, re.I)]
+        if head_end:
+            tops.append(head_end.end())
+        top_end = max(tops) if tops else None
+    if last:
+        bottoms = [s_ for s_, _e, _t in incs if s_ >= last.end()]
+        bottoms += [f for f in feet if f >= last.end()]
+        bottom_start = min(bottoms) if bottoms else last.end()
+    else:
+        bottoms = [s_ for s_, _e, t in incs if re.search(r"foot|bottom", t, re.I)]
+        bottoms += feet[-1:]
+        bottom_start = min(bottoms) if bottoms else None
+    if top_end is None or bottom_start is None or top_end > bottom_start:
+        return {}
+    top, bottom = src[:top_end], src[bottom_start:]
+    # The frame must actually bring his look with it: a <head> or an include
+    # above, and a footer, an include or the end of the document below.
+    if not (re.search(r"<head\b", top, re.I) or _INCLUDE_BLOCK.search(top)):
+        return {}
+    if not (re.search(r"<footer\b|</html", bottom, re.I) or _INCLUDE_BLOCK.search(bottom)):
+        return {}
+    return {"top": top, "bottom": bottom}
+
+
+def _theme_candidates(names) -> list:
+    """His .php pages, best frame first: a service page, then an inner page, then home."""
+    ok = []
+    for n in names:
+        low = str(n or "").lower().lstrip("/")
+        if not low.endswith(".php") or "/" in low or any(w in low for w in _THEME_SKIP):
+            continue
+        if not_ours(low):
+            continue
+        ok.append(low)
+    like = [n for n in ok if any(w in n for w in _THEME_LIKE)]
+    then = [n for n in ok if n not in like and any(n.startswith(w) for w in _THEME_THEN)]
+    home = [n for n in ("index.php", "home.php") if n in ok]
+    return list(dict.fromkeys(like + then + home))
+
+
+def theme_of_his_site(s=None, most=3) -> dict:
+    """
+    {ok, page, top, bottom, php} — the frame of one of his own pages, to put a
+    new page's content inside. {ok: False, why} when none could be read.
+    Reads only; a handful of requests at most.
+    """
+    s = s or settings()
+    why = why_cannot_read(s)
+    if why:
+        return {"ok": False, "why": why}
+    names = live_pages(s)
+    if not names:
+        p = pages(s=s)
+        if not p.get("ok"):
+            return {"ok": False, "why": p.get("error") or "could not list your pages",
+                    "unreachable": p.get("unreachable")}
+        names = [x.get("page") if isinstance(x, dict) else x for x in p.get("pages") or []]
+    tried = []
+    for name in _theme_candidates(names)[:most]:
+        got = read_page(name, s=s)
+        if got.get("unreachable"):
+            return {"ok": False, "why": got.get("error") or "your site stopped answering",
+                    "unreachable": True}
+        tried.append(name)
+        frame = _frame_of(got.get("html") or "") if got.get("ok") else {}
+        if frame:
+            return {"ok": True, "page": name, "php": True, **frame}
+    return {"ok": False, "why": ("none of your pages showed where its content starts "
+                                 "and ends" + (f" (read {', '.join(tried)})" if tried else
+                                               " — no .php page your site links to was found"))}
+
+
 def _has_own_head(page, s=None) -> bool:
     """Can this page take a block directly, without an include?"""
     got = read_page(page, s=s)
