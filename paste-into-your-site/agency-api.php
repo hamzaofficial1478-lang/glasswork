@@ -362,7 +362,7 @@ if ($route === '/health' && $method === 'GET') {
            'site_root' => SITE_ROOT, 'php' => PHP_VERSION,
            'writable' => is_writable(SITE_ROOT),
            'mode' => 'full-access', 'warnings' => $warn,
-           'connector' => 4, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove']]);
+           'connector' => 5, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove']]);
 }
 
 // --- what pages are there --------------------------------------------------
@@ -870,13 +870,42 @@ function blog_display(): array {
             if ($col !== '' && !isset($prefix[$col])) { $prefix[$col] = $hit[1]; }
         }
     }
-    $escaped = [];
-    if (preg_match_all('/(?:htmlspecialchars|htmlentities|strip_tags)\s*\(\s*' . $var . '/i', $src, $m, PREG_SET_ORDER)) {
+    // A folder put in front of the picture through a variable or a constant:
+    //   $img = 'admin/uploads/' . $blog['image'];   define('UPLOADS', 'uploads/');
+    if (preg_match_all('/=\s*["\']([^"\'<>]*\/)["\']\s*\.\s*' . $var . '/i', $src . $list, $m, PREG_SET_ORDER)) {
+        foreach ($m as $hit) {
+            $col = ($hit[2] ?? '') !== '' ? $hit[2] : ($hit[3] ?? '');
+            if ($col !== '' && !isset($prefix[$col])) { $prefix[$col] = $hit[1]; }
+        }
+    }
+    if (preg_match_all('/define\s*\(\s*["\'](\w+)["\']\s*,\s*["\']([^"\']*)["\']/i', $src . $list, $dm, PREG_SET_ORDER)) {
+        foreach ($dm as $d) {
+            if (preg_match_all('/\b' . preg_quote($d[1], '/') . '\s*\.\s*' . $var . '/i', $src . $list, $m, PREG_SET_ORDER)) {
+                foreach ($m as $hit) {
+                    $col = ($hit[1] ?? '') !== '' ? $hit[1] : ($hit[2] ?? '');
+                    if ($col !== '' && !isset($prefix[$col])) { $prefix[$col] = $d[2]; }
+                }
+            }
+        }
+    }
+    // HOW THE ARTICLE IS SHOWN — in the body only. Nearly every post page also
+    // prints the article, stripped of its tags, into the <head> for Google;
+    // reading that as "this page shows the article as plain text" sent posts
+    // in as text with no headings. The <head> and tag attributes are left out.
+    $body = preg_replace('/<head\b.*?<\/head>/is', '', $src);
+    $body = preg_replace('/\b(?:content|alt|title|value)\s*=\s*"[^"]*"/i', '', (string)$body);
+    $escaped = $raw = [];
+    if (preg_match_all('/(?:htmlspecialchars|htmlentities|strip_tags)\s*\(\s*' . $var . '/i', (string)$body, $m, PREG_SET_ORDER)) {
         foreach ($m as $hit) { $escaped[] = ($hit[1] ?? '') !== '' ? $hit[1] : ($hit[2] ?? ''); }
+    }
+    if (preg_match_all('/(?:echo|print|<\?=)\s*(?:(?:html_entity_decode|htmlspecialchars_decode|nl2br|stripslashes|trim)\s*\(\s*)*' . $var . '/i',
+                       (string)$body, $m, PREG_SET_ORDER)) {
+        foreach ($m as $hit) { $raw[] = ($hit[1] ?? '') !== '' ? $hit[1] : ($hit[2] ?? ''); }
     }
     $param = preg_match('/\$_GET\s*\[\s*["\'](\w+)["\']\s*\]/', $src, $pm) ? $pm[1] : 'slug';
     return ['page' => $page, 'param' => $param, 'prefix' => $prefix,
-            'escaped' => array_values(array_unique(array_filter($escaped)))];
+            'escaped' => array_values(array_unique(array_filter($escaped))),
+            'raw' => array_values(array_unique(array_filter($raw)))];
 }
 
 function blog_record(): array {
@@ -921,6 +950,11 @@ function save_picture(array $img): string {
         if ($part !== '' && in_array($part, IMAGE_NEVER_DIRS, true)) {
             fail(403, "the agency never saves anything into $dir");
         }
+    }
+    // His blog's pictures may live under admin/, which is never written to.
+    // Then a post's picture goes in a folder of its own, made once.
+    if ($dir === 'agency-pictures' && !is_dir(SITE_ROOT . '/agency-pictures')) {
+        @mkdir(SITE_ROOT . '/agency-pictures', 0755);
     }
     $real = realpath(SITE_ROOT . ($dir === '' ? '' : '/' . $dir));
     if ($real === false || strpos($real, SITE_ROOT) !== 0 || !is_dir($real)) {
@@ -1023,7 +1057,36 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
                     $recent[] = array_map(fn($v) => is_string($v) ? substr($v, 0, 160) : $v, $r);
                 }
             }
-            reply(['ok' => true, 'table' => $table, 'columns' => $cols, 'key' => $pk, 'slug_column' => $slugc,
+            // WHERE HIS POSTS' PICTURES ACTUALLY ARE. The latest post's picture
+            // file is looked for in the usual places — one named file, checked
+            // for, never a folder listed — so a new post's picture goes where
+            // his blog looks for it.
+            $imgc = '';
+            foreach ($cols as $c) {
+                if (preg_match('/image|img|photo|picture|thumb|banner|cover/i', $c['name'])
+                    && !preg_match('/alt|caption|title|count/i', $c['name'])) { $imgc = $c['name']; break; }
+            }
+            $home = null;
+            $v = $imgc !== '' ? (string)($latest[0][$imgc] ?? '') : '';
+            if ($v !== '' && !preg_match('#^https?://#i', $v) && strpos($v, '..') === false) {
+                $disp = blog_display();
+                $cands = array_unique(array_filter([clean_rel((string)($disp['prefix'][$imgc] ?? ''))], 'strlen'));
+                $cands = array_merge($cands, ['', 'uploads/', 'uploads/blog/', 'uploads/blogs/', 'uploads/images/',
+                    'upload/', 'upload/blog/', 'images/', 'images/blog/', 'images/blogs/', 'img/', 'img/blog/',
+                    'assets/uploads/', 'assets/images/', 'assets/images/blog/', 'assets/img/blog/',
+                    'admin/uploads/', 'admin/uploads/blog/', 'admin/uploads/blogs/', 'admin/upload/',
+                    'admin/images/', 'admin/assets/uploads/', 'admin/assets/images/']);
+                foreach ($cands as $cand) {
+                    $cand = $cand === '' ? '' : rtrim($cand, '/') . '/';
+                    if (strpos($cand, '..') === false && is_file(SITE_ROOT . '/' . $cand . ltrim($v, '/'))) {
+                        $home = ['column' => $imgc, 'value' => $v, 'prefix' => $cand,
+                                 'folder' => rtrim(dirname($cand . ltrim($v, '/')), '/.')];
+                        break;
+                    }
+                }
+            }
+            reply(['ok' => true, 'connector' => 5, 'image_home' => $home,
+                   'table' => $table, 'columns' => $cols, 'key' => $pk, 'slug_column' => $slugc,
                    'category_column' => $catc, 'categories' => $cats, 'title_column' => $titlec,
                    'recent' => $recent,
                    'latest' => $shown, 'count' => (int)($n[0]['n'] ?? 0), 'via' => $db->via,
@@ -1065,6 +1128,10 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
                 $drop = clean_rel((string)($img['drop'] ?? ''));
                 $value = ($drop !== '' && str_starts_with($picture, $drop)) ? substr($picture, strlen($drop)) : $picture;
                 if (!empty($img['url_base'])) { $value = rtrim((string)$img['url_base'], '/') . '/' . $picture; }
+                // Climbing out of the folder his page puts in front of the name,
+                // so admin/uploads/ + ../../agency-pictures/x.jpg finds the file.
+                $climb = (string)($img['climb'] ?? '');
+                if ($climb !== '' && preg_match('#^(\.\./){1,6}$#', $climb)) { $value = $climb . $value; }
                 $row[(string)$img['column']] = $value;
             }
             $keys = array_keys($row);

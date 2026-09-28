@@ -135,12 +135,35 @@ def test_the_row_is_built_from_his_own_table():
           plan["url"], "https://www.example.ae/blog-details.php?slug="
                        "glass-railing-in-the-uae-cost-and-fixing-types")
 
-    print("\n...the article as text when his page escapes it:")
+    print("\n...the article as text only when his page's BODY escapes it:")
     s = _schema(display={"page": "blog-details.php", "param": "slug", "prefix": {"image": "uploads/"},
-                         "escaped": ["content"]})
+                         "escaped": ["content"], "raw": []})
     post = BB.plan_row(s, _blog(), "https://www.example.ae")["post"]
     check("no tags to show up as words", ("<p>" in post["content"], "Which fixing suits you"
                                          in post["content"]), (False, True))
+    s = _schema(display={"page": "blog-details.php", "param": "slug", "prefix": {"image": "uploads/"},
+                         "escaped": ["content"]})
+    b = {**_blog(), "keywords": "glass railing, base channel"}
+    post = BB.plan_row(s, b, "https://www.example.ae")["post"]
+    check("an older connector that read the <head> too cannot make it plain — HTML, with headings",
+          ("<h2>" in post["content"]), True)
+    check("and the key words are bold the first time",
+          ("<strong>glass railing</strong>" in post["content"],
+           "<strong>Base channel</strong>" in post["content"]), (True, True))
+
+    print("\n...the cover goes where his posts' pictures really are:")
+    home = {"column": "image", "value": "wood.jpg", "prefix": "uploads/blog/", "folder": "uploads/blog"}
+    img = BB.plan_row(_schema(image_home=home, connector=5), _blog(), "https://www.example.ae")["image"]
+    check("beside his latest post's picture, named the way his are",
+          (img["dir"], img["drop"]), ("uploads/blog", "uploads/blog/"))
+    home = {"column": "image", "value": "wood.jpg", "prefix": "admin/uploads/", "folder": "admin/uploads"}
+    plan = BB.plan_row(_schema(image_home=home, connector=5), _blog(), "https://www.example.ae")
+    check("his pictures under admin/: saved in a folder of its own and linked out of admin/",
+          (plan["image"]["dir"], plan["image"]["climb"]), ("agency-pictures", "../../"))
+    check("and he is told", any("agency-pictures" in n for n in plan["notes"]), True)
+    plan = BB.plan_row(_schema(image_home=home, connector=4), _blog(), "https://www.example.ae")
+    check("an older connector says to upload the new one, rather than a broken picture",
+          (plan["image"], any("new connector" in n for n in plan["notes"])), (None, True))
 
     print("\n...never into his admin folder:")
     s = _schema(display={"page": "blog-details.php", "param": "slug",
@@ -162,6 +185,17 @@ def test_the_row_is_built_from_his_own_table():
                                     "key": "UNI", "default": None, "auto": False}]
     check("a unique column it knows nothing about",
           any("sku" in p for p in BB.plan_row(_schema(columns=cols), _blog(), "")["problems"]), True)
+
+
+def test_the_key_words_are_bold():
+    print("\nThe words that matter are bold, the first time, in running text only:")
+    html = ("<h2>Glass railing cost</h2><p>A glass railing costs what the glass costs. "
+            "Frameless glass railing needs <a href='/x'>glass railing parts</a>.</p>"
+            "<p>Glass railing again.</p>")
+    out = BB.bold_keywords(html, ["glass railing", "frameless glass railing"])
+    check("once for each keyword", out.count("<strong>"), 2)
+    check("never inside a heading", "<h2>Glass railing cost</h2>" in out, True)
+    check("never inside a link", "<a href='/x'>glass railing parts</a>" in out, True)
 
 
 def test_the_post_is_filed_where_it_belongs():
@@ -258,7 +292,8 @@ include 'includes/db.php';
 $stmt = $pdo->prepare("SELECT * FROM blogs WHERE slug = ?");
 $stmt->execute([$_GET['slug'] ?? '']);
 $blog = $stmt->fetch(PDO::FETCH_ASSOC);
-?><!doctype html><html><head><title><?php echo htmlspecialchars($blog['title']); ?></title></head>
+?><!doctype html><html><head><title><?php echo htmlspecialchars($blog['title']); ?></title>
+<meta name="description" content="<?php echo htmlspecialchars(substr(strip_tags($blog['content']), 0, 150)); ?>"></head>
 <body><img src="uploads/<?php echo $blog['image']; ?>" alt="">
 <h1><?php echo htmlspecialchars($blog['title']); ?></h1>
 <div class="post"><?php echo $blog['content']; ?></div></body></html>
@@ -356,6 +391,11 @@ def test_the_real_connector_adds_a_post_and_takes_it_away():
             check("and reads how his page shows the picture",
                   sch["display"]["prefix"].get("image"), "uploads/")
             check("a password is never in what comes back", "secret-hash" in json.dumps(sch), False)
+            check("the article printed stripped in the <head> for Google does not make it plain text",
+                  ("content" in sch["display"]["raw"], "content" in sch["display"]["escaped"]),
+                  (True, False))
+            check("and it finds where his posts' pictures really are",
+                  (sch["image_home"] or {}).get("folder"), "uploads/blog")
 
             blog = _blog(site=s["site"], images=[{"src": s["site"] + "/assets/img/pergola.png",
                                                   "alt": "A railing we fitted", "own": True}])
@@ -406,6 +446,38 @@ def test_the_real_connector_adds_a_post_and_takes_it_away():
                 st = c.execute("SELECT status FROM content_queue WHERE id=9").fetchone()[0]
             check("the post is back under Ready for your blog", st, "for_blog")
 
+            print("\n...when his pictures live under admin/, the cover goes in a folder of its own:")
+            post = {"title": "Cover test", "slug": "cover-test", "content": "<p>x</p>",
+                    "category_id": 1, "created_at": "__NOW__"}
+            r = site_api.add_blog_post(post, {"column": "image", "from": "assets/img/pergola.png",
+                                              "dir": "agency-pictures", "drop": "", "climb": "../../",
+                                              "name": "cover-test"}, s=s)
+            blogdb = sqlite3.connect(root / "data" / "blog.sqlite")
+            val = (blogdb.execute("SELECT image FROM blogs WHERE slug='cover-test'").fetchone() or [""])[0]
+            blogdb.close()
+            import posixpath
+            check("saved there, and linked out of admin/uploads/ so his page finds it",
+                  (r["ok"], val.startswith("../../agency-pictures/cover-test-"),
+                   (root / posixpath.normpath("admin/uploads/" + val)).is_file()), (True, True, True))
+            site_api.remove_blog_post(r.get("id"), s=s)
+
+            print("\n...Put it up again replaces it in one step:")
+            review.act("blog_publish", [9])
+            IR.run(skip_tests=True)
+            r = review.act("blog_repost", [9])
+            out = IR.run(skip_tests=True)
+            blogdb = sqlite3.connect(root / "data" / "blog.sqlite")
+            slugs = [x[0] for x in blogdb.execute("SELECT slug FROM blogs")]
+            content = blogdb.execute("SELECT content FROM blogs WHERE slug=?",
+                                     ("glass-railing-in-the-uae-cost-and-fixing-types",)).fetchone()
+            blogdb.close()
+            check("one step for IT, and the post is back — once",
+                  (r["ok"], out.get("applied"),
+                   slugs.count("glass-railing-in-the-uae-cost-and-fixing-types")), (True, 1, 1))
+            check("with its headings", bool(content and "<h2>" in content[0]), True)
+            review.act("blog_unpublish", [9])
+            IR.run(skip_tests=True)
+
             print("\n...and a page put up as a post of its own is deleted, with a copy kept:")
             r = site_api.remove_page("aluminium-cladding.php", s=s)
             check("deleted", (r["ok"], (root / "aluminium-cladding.php").exists()), (True, False))
@@ -440,6 +512,7 @@ def main():
     try:
         for t in (test_the_row_is_built_from_his_own_table,
                   test_the_post_is_filed_where_it_belongs,
+                  test_the_key_words_are_bold,
                   test_his_press_goes_through_it,
                   test_an_old_connector_says_what_to_upload,
                   test_the_real_connector_adds_a_post_and_takes_it_away):

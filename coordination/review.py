@@ -324,12 +324,13 @@ def _pages(c):
         # A press of "Put it on my blog" (or "Take it off") that IT has not
         # finished: where it stands, straight off the change's own row.
         moving = None
-        cid = blog.get("posting") or blog.get("removing")
+        cid = blog.get("posting") or blog.get("removing") or blog.get("reposting")
         if cid:
             sq = c.execute("SELECT status, note FROM site_queue WHERE id=?", (cid,)).fetchone()
             if sq and sq["status"] in ("approved", "failed"):
                 moving = {"change": cid, "status": sq["status"], "note": sq["note"] or "",
-                          "what": "posting" if blog.get("posting") else "removing"}
+                          "what": ("posting" if blog.get("posting") else
+                                   "reposting" if blog.get("reposting") else "removing")}
         back = blog.get("backend") or {}
         row = {"id": r["id"], "title": blog.get("title") or r.get("title") or "",
                "keyword": b.get("primary_keyword") or "",
@@ -558,7 +559,7 @@ def _campaign_act(do, ids, data) -> dict:
 SENT_ACTS = ("sent_delete", "sent_delete_all")
 
 BLOG_ACTS = ("blog_posted", "blog_drop", "blog_rewrite", "take_down",
-             "blog_publish", "blog_unpublish", "blog_check")
+             "blog_publish", "blog_unpublish", "blog_check", "blog_repost")
 
 
 def _blog_draft(c, cid):
@@ -580,6 +581,8 @@ def _blog_act(do, ids, data) -> dict:
     cid = ids[0]
     if do in ("blog_publish", "blog_unpublish"):
         return _to_his_blog(do, cid)
+    if do == "blog_repost":
+        return _repost(cid)
     with board._conn() as c:
         board._migrate(c)
         draft, status = _blog_draft(c, cid)
@@ -687,6 +690,37 @@ def _to_his_blog(do, cid) -> dict:
     return {"ok": True, "change": change,
             "head": (f"“{title}” is going on your blog (change #{change}). " if posting
                      else f"Taking “{title}” off your blog (change #{change}). ") + when}
+
+
+def _repost(cid) -> dict:
+    """
+    "Put it up again": the post on his blog is taken off and put back as it
+    would go now — with its headings, bold key words and cover picture — in one
+    pass of IT, tests first. Only a post the agency added.
+    """
+    with board._conn() as c:
+        board._migrate(c)
+        draft, status = _blog_draft(c, cid)
+    blog = (draft or {}).get("_for_blog") or {}
+    if status != "published" or not (blog.get("backend") or {}).get("id"):
+        return {"ok": False, "error": "Only a post the agency put on your blog can be put up again."}
+    title = blog.get("title") or "the post"
+    # ONE change, carried out as one step: taken off and put back together, so
+    # a dropped line between the two can never leave the post off his blog.
+    on = board.queue_site_change("it-releaser", "blog_repost", {
+        "change": {"blog_repost": cid}, "title": f"Put “{title[:70]}” up again on your blog",
+        "why": "The owner pressed Put it up again."})
+    board.decide_site_change(on, "approved")
+    with board._conn() as c:
+        draft, _st = _blog_draft(c, cid)
+        draft["_for_blog"]["reposting"] = on
+        c.execute("UPDATE content_queue SET draft=? WHERE id=?", (json.dumps(draft, indent=2), cid))
+    from coordination import chat_actions
+    started = chat_actions.start_release()
+    return {"ok": True, "change": on, "head": (
+        f"Putting “{title}” up again (change #{on}). "
+        + ("IT runs the tests, then replaces it on your blog — a few minutes."
+           if started else "IT does it after the tests — press 'Put it live now' to start it."))}
 
 
 def act(do, ids, data=None) -> dict:

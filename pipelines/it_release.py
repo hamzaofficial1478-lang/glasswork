@@ -298,8 +298,9 @@ def plan_of(row) -> dict:
                 "content_id": change.get("content_id"), "issue_id": issue,
                 "why": d.get("why") or "", "row": row}
 
-    if isinstance(change, dict) and (change.get("blog_post") or change.get("blog_remove")):
-        which = "blog_post" if change.get("blog_post") else "blog_remove"
+    if isinstance(change, dict) and (change.get("blog_post") or change.get("blog_remove")
+                                     or change.get("blog_repost")):
+        which = next(k for k in ("blog_post", "blog_remove", "blog_repost") if change.get(k))
         return {"do": which, "content_id": change.get(which), "page": "blog",
                 "issue_id": issue, "why": d.get("why") or "", "row": row}
 
@@ -580,7 +581,7 @@ def _work(agent, limit, dry_run, skip_tests):
     plans = [plan_of(r) for r in waiting]
     doable = [p for p in plans
               if p["do"] in ("head_block", "call", "replace", "new_page", "page",
-                             "blog_post", "blog_remove", "remove_page")]
+                             "blog_post", "blog_remove", "blog_repost", "remove_page")]
     noted = [p for p in plans if p["do"] == "noted"]
     refused = [p for p in plans if p["do"] == "refuse"]
 
@@ -737,9 +738,10 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 
-        if plan["do"] in ("blog_post", "blog_remove"):
+        if plan["do"] in ("blog_post", "blog_remove", "blog_repost"):
             from . import blog_backend
-            fn = blog_backend.publish if plan["do"] == "blog_post" else blog_backend.remove
+            fn = {"blog_post": blog_backend.publish, "blog_remove": blog_backend.remove,
+                  "blog_repost": blog_backend.repost}[plan["do"]]
             r = fn(plan.get("content_id"), agent=agent)
             if not r.get("ok"):
                 return _fail_or_wait(plan, r, "your blog did not take it")

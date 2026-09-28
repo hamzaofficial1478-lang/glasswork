@@ -104,8 +104,56 @@ def post_url(schema, slug, site):
     return f"{(site or '').rstrip('/')}/{page}?{param}={urllib.parse.quote(slug)}"
 
 
+def bold_keywords(html, keywords, most=8):
+    """
+    "the post is too plain with out any headings or main focus words bolding"
+    — the first time each keyword appears in the text, it is put in <strong>.
+    Only in running text: never inside a heading, a link or something already
+    bold, and never more than once a keyword.
+    """
+    words = [k.strip() for k in keywords if k and len(k.strip()) > 3][:most]
+    if not words or not html:
+        return html
+    done, depth, out = set(), 0, []
+    for part in re.split(r"(<[^>]+>)", html):
+        if part.startswith("<"):
+            tag = re.match(r"</?\s*([a-z0-9]+)", part, re.I)
+            if tag and tag.group(1).lower() in ("h1", "h2", "h3", "h4", "a", "strong", "b",
+                                                 "th", "figcaption", "title"):
+                depth += -1 if part.startswith("</") else (0 if part.endswith("/>") else 1)
+                depth = max(0, depth)
+            out.append(part)
+            continue
+        if depth == 0:
+            for w in words:
+                if w.lower() in done:
+                    continue
+                m = re.search(r"(?<![\w-])(" + re.escape(w) + r")(?![\w-])", part, re.I)
+                if m:
+                    part = part[:m.start()] + f"<strong>{m.group(1)}</strong>" + part[m.end():]
+                    done.add(w.lower())
+        out.append(part)
+    return "".join(out)
+
+
+def _depth(prefix):
+    """How many folders deep a prefix like "admin/uploads/" reaches."""
+    path = urllib.parse.urlsplit(prefix).path if re.match(r"https?://", prefix, re.I) else prefix
+    return len([x for x in _norm(path).split("/") if x])
+
+
 def _picture(schema, col, blog, site, notes):
-    """The image instruction for the connector, or None with a note saying why."""
+    """
+    The cover picture instruction for the connector, or None with a note saying why.
+
+    "the program had not added the image into the post ... the other post is
+     showing the image" — the cover went up empty whenever the agency could
+    not tell where his blog keeps its pictures. The connector now finds his
+    latest post's picture file on the server (image_home), and the new one goes
+    beside it, named the same way. When that folder is inside admin/ — never
+    written to — it goes in a folder of its own and is linked so his page
+    finds it anyway.
+    """
     imgs = blog.get("images") or []
     if not imgs:
         notes.append("the post has no picture, so its cover is empty — add one in your "
@@ -113,37 +161,45 @@ def _picture(schema, col, blog, site, notes):
         return None
     img = next((i for i in imgs if i.get("own")), imgs[0])
     latest = str((schema.get("latest") or {}).get(col["name"]) or "").strip()
-    prefix = _norm(((schema.get("display") or {}).get("prefix") or {}).get(col["name"]) or "")
-    url_base = ""
-    if re.match(r"https?://", latest, re.I):
-        folder = _norm(urllib.parse.urlsplit(latest).path).rsplit("/", 1)[0] \
-            if "/" in _norm(urllib.parse.urlsplit(latest).path) else ""
-        url_base, drop = (site or "").rstrip("/"), ""
-    elif latest or prefix:
-        folder = "/".join(x for x in (prefix.rstrip("/"),
-                                      latest.rsplit("/", 1)[0] if "/" in latest else "") if x)
-        drop = prefix if prefix.endswith("/") or not prefix else prefix + "/"
-    else:
-        folder = ""
-    if not folder and not url_base:
-        # A bare file name and no folder in front of it on his post page: the
-        # folder is set somewhere the agency cannot see, so do not guess it.
-        notes.append("the agency could not tell which folder your blog keeps its pictures "
-                     "in, so this post went up without a cover — add it in your backend. "
-                     "The pictures inside the article are there already")
-        return None
+    home = schema.get("image_home") or {}
     never = [d.lower() for d in schema.get("never_dirs") or ("admin", "config", "private")]
-    if any(part.lower() in never for part in folder.split("/") if part):
-        notes.append(f"your blog keeps its pictures in {folder}/, which the agency never "
-                     "writes to, so the post went up without its cover picture — add it in "
-                     "your backend (the pictures are listed in the Posts room). The "
-                     "pictures inside the article are there already")
-        return None
     src = str(img.get("src") or "")
     if site and _host(src) and _host(src) == _host(site):
         src = _norm(urllib.parse.urlsplit(src).path)     # already on his server: copied, not fetched
-    return {"column": col["name"], "from": src, "dir": folder, "drop": drop,
-            "name": blog.get("slug") or "post", "url_base": url_base}
+    base = {"column": col["name"], "from": src, "name": blog.get("slug") or "post"}
+
+    if re.match(r"https?://", latest, re.I):
+        path = _norm(urllib.parse.urlsplit(latest).path)
+        folder = path.rsplit("/", 1)[0] if "/" in path else ""
+        if any(part.lower() in never for part in folder.split("/") if part):
+            folder = "agency-pictures"
+        return {**base, "dir": folder, "drop": "", "url_base": (site or "").rstrip("/")}
+
+    if home.get("column") == col["name"] and home.get("folder") is not None:
+        folder, prefix = _norm(home.get("folder") or ""), _norm(home.get("prefix") or "")
+    else:
+        prefix = _norm(((schema.get("display") or {}).get("prefix") or {}).get(col["name"]) or "")
+        folder = "/".join(x for x in (prefix.rstrip("/"),
+                                      latest.rsplit("/", 1)[0] if "/" in latest else "") if x)
+        if not folder and not prefix:
+            notes.append("the agency could not tell which folder your blog keeps its pictures "
+                         "in, so this post went up without a cover — add it in your backend. "
+                         "The pictures inside the article are there already")
+            return None
+    drop = prefix if prefix.endswith("/") or not prefix else prefix + "/"
+    if not any(part.lower() in never for part in folder.split("/") if part):
+        return {**base, "dir": folder, "drop": drop, "url_base": ""}
+    # His pictures live under admin/. The new one goes in agency-pictures/ at the
+    # site's top, and the value climbs out of the folder his page puts in front.
+    if int(schema.get("connector") or 0) < 5:
+        notes.append(f"your blog keeps its pictures in {folder}/, which the agency never "
+                     "writes to — upload the new connector file and the cover goes up with "
+                     "the post. For now, add it in your backend")
+        return None
+    notes.append(f"your blog keeps its pictures in {folder}/, which the agency never writes "
+                 "to, so the cover is saved in agency-pictures/ and linked from there")
+    return {**base, "dir": "agency-pictures", "drop": "", "url_base": "",
+            "climb": "../" * _depth(prefix)}
 
 
 # "Aluminium" in a post and "Aluminum Work" in his categories are the same word.
@@ -196,7 +252,14 @@ def plan_row(schema, blog, site="") -> dict:
     notes, problems = [], []
     taken, post = set(), {}
     latest = schema.get("latest") or {}
-    shown_escaped = set((schema.get("display") or {}).get("escaped") or [])
+    # The article goes in as HTML — headings, bold, lists, tables, pictures —
+    # unless the connector has read his post page's BODY and seen it print the
+    # article escaped. An older connector read the <head> too, where nearly
+    # every page prints the article stripped for Google, and posts went in as
+    # plain text with no headings at all.
+    disp = schema.get("display") or {}
+    shown_escaped = (set(disp.get("escaped") or []) - set(disp.get("raw") or [])
+                     if "raw" in disp else set())
 
     def put(col, value):
         if col is None or value in (None, ""):
@@ -229,7 +292,8 @@ def plan_row(schema, blog, site="") -> dict:
                          "as plain text")
             put(content, blog.get("text"))
         else:
-            put(content, blog.get("html"))
+            keys = [k for k in re.split(r"\s*,\s*", blog.get("keywords") or "") if k]
+            put(content, bold_keywords(blog.get("html") or "", keys))
     # With the article in "content", a "description" column is the short one.
     put(_pick(cols, EXCERPT, taken) or _pick(cols, ("description",), taken), blog.get("meta"))
     put(_pick(cols, META_TITLE, taken), (blog.get("title") or "")[:60])
@@ -241,7 +305,10 @@ def plan_row(schema, blog, site="") -> dict:
         taken.add(cat_col)
         notes.append(f"filed under “{cat['name']}”")
     alt = _pick(cols, IMAGE_ALT, taken)
-    image_col = _pick(cols, IMAGE, taken)
+    image_col = _pick(cols, IMAGE, taken) or next(
+        (c for c in cols if c["name"] not in taken and not c.get("auto")
+         and re.search(r"image|img|photo|picture|thumb|banner|cover", c["name"], re.I)
+         and not re.search(r"alt|caption|title|count", c["name"], re.I)), None)
     image = None
     if image_col:
         image = _picture(schema, image_col, blog, site, notes)
@@ -426,6 +493,7 @@ def publish(content_id, agent=site_api.AGENT, s=None) -> dict:
                 backend={"table": r.get("table") or sch.get("table"), "id": str(r.get("id") or ""),
                          "picture": r.get("picture") or "", "notes": plan["notes"][:8]})
     blog.pop("posting", None)
+    blog.pop("reposting", None)
     draft["_for_blog"] = blog
     _store(content_id, draft, "published")
     checked = bool(seen.get("found"))
@@ -453,6 +521,19 @@ def remove(content_id, agent=site_api.AGENT, s=None) -> dict:
     _store(content_id, draft, "for_blog")
     return {"ok": True, "head": f"“{blog.get('title')}” is off your blog. It is back under "
                                 "Ready for your blog."}
+
+
+def repost(content_id, agent=site_api.AGENT, s=None) -> dict:
+    """Taken off his blog and put straight back as it would go now. One step."""
+    off = remove(content_id, agent=agent, s=s)
+    if not off.get("ok"):
+        return off
+    on = publish(content_id, agent=agent, s=s)
+    if not on.get("ok"):
+        return {**on, "error": ("it was taken off your blog but not put back: "
+                                + str(on.get("error") or "no reason given")
+                                + " — it is under Ready for your blog; press Put it on my blog")}
+    return {**on, "head": "put up again — " + (on.get("head") or "")}
 
 
 # ---------------------------------------------------------------------------

@@ -1125,10 +1125,13 @@ function moveNote(x){
   const m = x.moving;
   if(!m) return '';
   if(m.status === 'approved') return `<div class="moving"><span class="busy">${m.what === 'posting'
-      ? 'IT is putting it on your blog — tests first, then the post.' : 'IT is taking it off your blog.'}</span></div>`;
-  return `<div class="moving bad"><p>${m.what === 'posting' ? 'It did not go on your blog' : 'It was not taken off'}:
+      ? 'IT is putting it on your blog — tests first, then the post.'
+      : m.what === 'reposting' ? 'IT is putting it up again — tests first.' : 'IT is taking it off your blog.'}</span></div>`;
+  const again = m.what === 'removing' ? 'blog_unpublish' : m.what === 'reposting' && x.on_backend ? 'blog_repost' : 'blog_publish';
+  return `<div class="moving bad"><p>${m.what === 'posting' ? 'It did not go on your blog'
+      : m.what === 'reposting' ? 'It was not put up again' : 'It was not taken off'}:
       ${esc(m.note || 'no reason was given')}</p>
-      <button class="btn" onclick="toBlog('${m.what === 'posting' ? 'blog_publish' : 'blog_unpublish'}', ${x.id}, this)">Try again</button></div>`;
+      <button class="btn" onclick="toBlog('${again}', ${x.id}, this)">Try again</button></div>`;
 }
 
 function drawBlog(p){
@@ -1196,7 +1199,9 @@ function drawBlog(p){
   $('#blogDone').innerHTML = done.length ? `<div class="logwrap" style="margin-bottom:6px"><table class="log">
     <tr><th>On your blog</th><th>Address</th></tr>
     ${done.map(x=>`<tr><td>${esc(x.title)}${(x.backend_notes||[]).length ? `<ul class="bnotes">${x.backend_notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>` : ''}
-        ${moveNote(x)}${x.on_backend && !x.moving ? `<div style="margin-top:6px"><button class="btn copy stop" onclick="toBlog('blog_unpublish', ${x.id}, this)">Take it off my blog</button></div>` : ''}${x.plain_page && !x.plain_page.down
+        ${moveNote(x)}${x.on_backend && !x.moving ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn copy" onclick="toBlog('blog_repost', ${x.id}, this)">Put it up again</button>
+          <button class="btn copy stop" onclick="toBlog('blog_unpublish', ${x.id}, this)">Take it off my blog</button></div>` : ''}${x.plain_page && !x.plain_page.down
         ? `<br><span style="color:var(--amber)">the plain copy is still at /${esc(x.plain_page.page)}</span>
            <button class="btn copy stop" onclick="blogAct('take_down', ${x.id}, this)">Take it down</button>`
         : (x.plain_page ? `<br><span style="color:var(--muted)">plain copy: ${esc(x.plain_page.down)}</span>` : '')}</td>
@@ -1223,7 +1228,8 @@ function copyOpen(id, open){
 
 async function toBlog(what, id, btn){
   const words = {blog_publish:'Put this post on your blog? IT runs the tests first, then adds it to your blog backend.',
-                 blog_unpublish:'Take this post off your blog? Only a post the agency added can be taken off.'}[what];
+                 blog_unpublish:'Take this post off your blog? Only a post the agency added can be taken off.',
+                 blog_repost:'Put this post up again? It is taken off your blog and put back as it would go now — with headings, bold key words and its cover picture. IT runs the tests first.'}[what];
   if(!confirm(words)) return;
   btn.disabled = true;
   const j = await campAct(what, {}, [id]);

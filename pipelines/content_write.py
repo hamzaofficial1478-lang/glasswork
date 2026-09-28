@@ -190,7 +190,13 @@ illustrates. Do not write <img> yourself. If no pictures are listed, use none.
 
 WHAT IT MUST HAVE
   - One <h1> saying what it is.
-  - Subheadings a reader can scan (<h2>, and <h3> under them where natural).
+  - Subheadings a reader can scan: an <h2> every few paragraphs, and <h3> under \
+    them where natural. Never more than three paragraphs in a row without one.
+  - The words that matter in <strong>: the main keyword the first time it \
+    appears, and two or three key terms in each section — a material, a \
+    thickness, a step, the thing to check. Words and short phrases, never \
+    whole sentences.
+  - Short paragraphs — two to four sentences.
   - The enquiry route high up and again at the end: the phone number and the \
     WhatsApp link you are given, as real links.
   - The area named, if you were given one.
@@ -425,6 +431,14 @@ def voice_problems(page, kind="service_page") -> list:
     if tells:
         out.append("these phrases make it read as machine-written; say it plainly "
                    "instead: " + ", ".join(f"'{t}'" for t in tells[:10]))
+    body = str((page or {}).get("html") or "")
+    heads = len(re.findall(r"<h[23]\b", body, re.I))
+    if n >= 300 and heads < max(3, n // 250):
+        out.append(f"it has {heads} subheading(s) for {n} words; give it an <h2> every few "
+                   "paragraphs, with <h3> under them where natural, so a reader can scan it")
+    if n >= 300 and len(re.findall(r"<strong\b", body, re.I)) < 3:
+        out.append("put the words that matter in <strong> — the main keyword the first time, "
+                   "and two or three key terms in each section")
     if text.count("—") > max(6, n // 120):
         out.append("too many dashes — use full stops and commas the way a person "
                    "writing quickly would")
