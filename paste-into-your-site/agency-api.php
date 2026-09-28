@@ -30,7 +30,9 @@
  * only: token.txt on your server, and the agency's settings file on your PC.
  *
  * What it CANNOT do, no matter who holds the token:
- *   - delete a page or any file you made, ever
+ *   - remove a page without keeping a copy first — /pages-remove backs the
+ *     page up before taking it away, and /rollback puts it straight back;
+ *     your home page can never be removed at all
  *   - touch any file outside your website folder
  *   - touch anything that is not a .php or .html page — except that it may
  *     save a blog post's picture into the folder your blog's pictures are in
@@ -360,7 +362,7 @@ if ($route === '/health' && $method === 'GET') {
            'site_root' => SITE_ROOT, 'php' => PHP_VERSION,
            'writable' => is_writable(SITE_ROOT),
            'mode' => 'full-access', 'warnings' => $warn,
-           'connector' => 3, 'can' => ['pages', 'head', 'rollback', 'blog']]);
+           'connector' => 4, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove']]);
 }
 
 // --- what pages are there --------------------------------------------------
@@ -416,6 +418,32 @@ if ($route === '/pages' && $method === 'GET') {
     $out = list_pages(SITE_ROOT);
     reply(['ok' => true, 'pages' => $out, 'counted' => count($out),
            'capped' => count($out) >= MAX_PAGES]);
+}
+
+// --- take a page away (a copy is always kept first) ---------------------------
+//
+// "add a delete button that will delete the posts from the website" — pages the
+// agency put up as posts of their own, before posts went into your blog. The
+// page is copied to backups/ first, exactly as an edit is, so /rollback brings
+// it back. Your home page is never removed.
+if ($route === '/pages-remove' && $method === 'POST') {
+    $name = (string)($body['page'] ?? '');
+    if ($name === '') { fail(400, 'which page?'); }
+    $full = resolve_page($name);
+    $rel = relative_to_site($full);
+    if (in_array(strtolower($rel), ['index.php', 'home.php', 'index.html', 'index.htm', 'default.php'], true)) {
+        fail(403, 'your home page is never removed');
+    }
+    if (!is_file($full)) {
+        reply(['ok' => true, 'page' => $rel, 'action' => 'already gone', 'backup' => '']);
+    }
+    $backup = back_up($full);
+    if ($backup === '' || !is_file(BACKUP_DIR . '/' . $backup)) {
+        fail(500, 'could not keep a copy first, so the page was left where it is');
+    }
+    if (!@unlink($full)) { fail(500, 'could not remove the file — check the folder permissions'); }
+    reply(['ok' => true, 'page' => $rel, 'action' => 'removed', 'backup' => $backup,
+           'note' => 'a copy is kept — /rollback puts it back']);
 }
 
 // --- read one page ---------------------------------------------------------
@@ -947,7 +975,57 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
                                                                           : substr($v, 0, 300)) : $v);
             }
             $n = $db->rows('SELECT COUNT(*) AS n FROM ' . q_name($db, $table));
+            // WHERE EACH POST IS FILED. A new post copied the category of the
+            // latest one, so a post on aluminium cladding would have gone under
+            // "Wooden Work". The categories your blog has, and how recent posts
+            // are filed, so the agency can pick the right one.
+            $catc = '';
+            foreach ($cols as $c) {
+                if (preg_match('/^(cat|cat_id|category|category_id|categories|blog_category|category_name)$/i', $c['name'])) {
+                    $catc = $c['name'];
+                    break;
+                }
+            }
+            $cats = [];
+            if ($catc !== '') {
+                foreach (all_tables($db) as $t) {
+                    if ($t === $table || !preg_match('/categor/i', $t)) { continue; }
+                    $tc = array_column(columns_of($db, $t), 'name');
+                    $idc = in_array('id', $tc, true) ? 'id' : (pk_of(columns_of($db, $t)) ?: '');
+                    $namec = '';
+                    foreach (['name', 'title', 'category_name', 'category', 'cat_name'] as $w) {
+                        if (in_array($w, $tc, true)) { $namec = $w; break; }
+                    }
+                    if ($idc && $namec) {
+                        foreach ($db->rows('SELECT ' . q_name($db, $idc) . ' AS id, ' . q_name($db, $namec)
+                                           . ' AS name FROM ' . q_name($db, $t) . ' LIMIT 100') as $r) {
+                            $cats[] = ['id' => (string)$r['id'], 'name' => (string)$r['name']];
+                        }
+                        break;
+                    }
+                }
+                if (!$cats) {
+                    foreach ($db->rows('SELECT DISTINCT ' . q_name($db, $catc) . ' AS v FROM ' . q_name($db, $table)
+                                       . ' LIMIT 100') as $r) {
+                        if ((string)$r['v'] !== '') { $cats[] = ['id' => (string)$r['v'], 'name' => (string)$r['v']]; }
+                    }
+                }
+            }
+            $titlec = '';
+            foreach ($cols as $c) {
+                if (preg_match('/^(title|post_title|blog_title|heading|name)$/i', $c['name'])) { $titlec = $c['name']; break; }
+            }
+            $recent = [];
+            if ($titlec !== '') {
+                $pick = array_filter([$pk, $titlec, $slugc, $catc]);
+                foreach ($db->rows('SELECT ' . implode(', ', array_map(fn($c) => q_name($db, $c), array_unique($pick)))
+                                   . ' FROM ' . q_name($db, $table) . $order . ' LIMIT 30') as $r) {
+                    $recent[] = array_map(fn($v) => is_string($v) ? substr($v, 0, 160) : $v, $r);
+                }
+            }
             reply(['ok' => true, 'table' => $table, 'columns' => $cols, 'key' => $pk, 'slug_column' => $slugc,
+                   'category_column' => $catc, 'categories' => $cats, 'title_column' => $titlec,
+                   'recent' => $recent,
                    'latest' => $shown, 'count' => (int)($n[0]['n'] ?? 0), 'via' => $db->via,
                    'driver' => $db->driver(), 'display' => blog_display(),
                    'never_dirs' => IMAGE_NEVER_DIRS,

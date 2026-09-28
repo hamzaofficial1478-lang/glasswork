@@ -273,6 +273,13 @@ def _pages(c):
         briefs[r["id"]] = _json(r.get("brief"), {}) or {}
         seo_of[r["id"]] = (_json(r.get("draft"), {}) or {}).get("_seo") or {}
     waiting, approved, recent = [], [], []
+    # A page he pressed Delete on that IT has not finished with.
+    removing = {}
+    for r in _rows(c, "SELECT detail, status, note FROM site_queue WHERE kind='remove_page'"
+                      " AND status IN ('approved','failed') ORDER BY id"):
+        was = (_page_of(r.get("detail"))[1] or {}).get("was")
+        if was:
+            removing[int(was)] = {"status": r["status"], "note": r.get("note") or ""}
     for s in _rows(c, "SELECT * FROM site_queue WHERE kind='new_page'"
                       " ORDER BY queued_at DESC, id DESC LIMIT 60"):
         d, ch = _page_of(s.get("detail"))
@@ -283,7 +290,7 @@ def _pages(c):
                "warnings": d.get("auditor") or [], "content_id": cid,
                "keyword": b.get("primary_keyword") or "",
                "queued_at": s.get("queued_at") or 0, "status": s.get("status"),
-               "note": s.get("note") or ""}
+               "note": s.get("note") or "", "removing": removing.get(s["id"])}
         if s.get("status") == "pending":
             waiting.append({**row, "html": ch.get("html") or "", "seo": seo_of.get(cid) or {}})
         elif s.get("status") == "approved":
@@ -396,29 +403,41 @@ def _blog_home() -> str:
 
 
 def _move_old_blog_pages():
-    """Blog posts queued as pages before — moved to his blog. Writes only when there are some."""
+    """Posts put up or queued as pages of their own — moved to his blog. Writes only when there are some."""
+    from pipelines import content_write
     c = _conn()
-    found = False
     try:
-        for r in _rows(c, "SELECT detail FROM site_queue WHERE kind='new_page'"
-                          " AND status IN ('pending','approved','applied')"
-                          " AND detail LIKE '%\"blog-%' LIMIT 40"):
-            cid = (_page_of(r.get("detail"))[1] or {}).get("content_id")
-            q = c.execute("SELECT draft FROM content_queue WHERE id=?",
-                          (int(cid),)).fetchone() if cid else None
-            if q and "_for_blog" not in (q[0] or ""):
-                found = True
-                break
+        found = content_write.pages_to_his_blog(c, _site(), dry=True)
     except (sqlite3.Error, ValueError, TypeError):
-        found = False
+        found = 0
     finally:
         c.close()
     if not found:
         return 0
-    from pipelines import content_write
     with board._conn() as w:
         board._migrate(w)
-        return content_write.blogs_off_the_site_queue(w, _site())
+        return content_write.pages_to_his_blog(w, _site())
+
+
+def _queue_removal(page, was=None, content_id=None, title="", go_to="") -> dict:
+    """
+    "add a delete button that will delete the posts from the website" — the page
+    goes, through IT and the tests like every change to his site. His press is
+    his yes. The connector keeps a copy first.
+    """
+    change = board.queue_site_change("it-releaser", "remove_page", {
+        "change": {"remove_page": page, "was": was, "content_id": content_id,
+                   "go_to": go_to or _blog_home() or "/"},
+        "title": f"Delete /{page} from your website",
+        "why": (f"The owner pressed Delete. /{page} was put up as a page of its own, "
+                "outside his blog. The connector keeps a copy before it goes.")})
+    board.decide_site_change(change, "approved")
+    from coordination import chat_actions
+    started = chat_actions.start_release()
+    return {"ok": True, "change": change, "head": (
+        f"Deleting /{page} from your website (change #{change}). "
+        + ("IT runs the tests first — a few minutes." if started else
+           "IT does it after the tests, on its next run or when you press 'Put it live now'."))}
 
 
 def _site_resting() -> dict:
@@ -598,27 +617,14 @@ def _blog_act(do, ids, data) -> dict:
         if plain.get("down"):
             return {"ok": True, "head": "Already being taken down — see Already decided."}
         go_to = blog.get("posted_url") or _blog_home() or "/"
-    from pipelines import content_write
-    change = board.queue_site_change("it-releaser", "page", {
-        "change": {"page": plain["page"], "whole_page": True,
-                   "html": content_write.take_down_page(plain["page"], go_to)},
-        "title": f"Take down the plain copy of “{blog.get('title', '')[:60]}”",
-        "why": (f"The owner pressed Take it down. /{plain['page']} was put up as a page of "
-                "its own, outside his blog and his theme. It now sends visitors to "
-                f"{go_to} and tells Google to drop it.")})
-    board.decide_site_change(change, "approved")
+    r = _queue_removal(plain["page"], was=plain.get("site_queue"), content_id=cid,
+                       title=blog.get("title", ""), go_to=go_to)
     with board._conn() as c:
         draft, _st = _blog_draft(c, cid)
-        draft["_for_blog"]["plain_page"]["down"] = f"change #{change}"
+        draft["_for_blog"]["plain_page"]["down"] = f"being deleted (change #{r['change']})"
         c.execute("UPDATE content_queue SET draft=? WHERE id=?",
                   (json.dumps(draft, indent=2), cid))
-    from coordination import chat_actions
-    started = chat_actions.start_release()
-    return {"ok": True, "change": change, "head": (
-        f"Taking /{plain['page']} down (change #{change}). "
-        + ("IT runs the tests, then points it at your blog — a minute or two."
-           if started else "IT does it after the tests, on its next run or when you press "
-                           "'Put it live now'."))}
+    return r
 
 
 def _to_his_blog(do, cid) -> dict:
@@ -744,6 +750,20 @@ def act(do, ids, data=None) -> dict:
         else:
             head = f"Turned down {len(done)} page(s). They will not be published."
         return {"ok": bool(done), "decided": done, "head": head}
+
+    if do == "remove_page":
+        # A page put up on his website, straight from Already decided.
+        with board._conn() as c:
+            board._migrate(c)
+            r = c.execute("SELECT kind, status, detail FROM site_queue WHERE id=?",
+                          (ids[0],)).fetchone()
+        if not r or r["kind"] != "new_page" or r["status"] != "applied":
+            return {"ok": False, "error": "That page is not on your website."}
+        _d, ch = _page_of(r["detail"])
+        if not ch.get("page"):
+            return {"ok": False, "error": "That change does not say which page it put up."}
+        return _queue_removal(ch["page"], was=ids[0], content_id=ch.get("content_id"),
+                              title=_d.get("title") or "")
 
     if do in ("retry_page", "drop_page"):
         # "if the post was unable to get post and gave the error now how can we

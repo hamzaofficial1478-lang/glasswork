@@ -395,6 +395,16 @@ def note_page(page, html=None, bytes_=None, changed="") -> None:
         pass
 
 
+def forget_page(page) -> None:
+    """A page the agency took away on purpose: not "vanished" on the next sweep."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            board.ensure_schema(c)
+            c.execute("DELETE FROM site_fingerprints WHERE page=?", (page,))
+    except Exception:
+        pass
+
+
 def fingerprints() -> dict:
     try:
         with sqlite3.connect(board.DB, timeout=30) as c:

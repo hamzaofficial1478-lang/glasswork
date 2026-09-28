@@ -373,13 +373,13 @@ details.old[open]>summary{color:var(--text)}
     <div id="blogConn"></div>
     <div id="blogList"></div>
     <div id="blogDone"></div>
+    <div id="pagesBlock">
     <h2>Pages ready for your yes <small id="pageHead"></small></h2>
-    <p class="lede">Service pages, written and passed the writer's and the Auditor's checks. Each
-      is built inside the layout of one of your own pages, so it has your menu and footer.
-      Approving it hands it to IT, which runs the tests and then puts it on your website &mdash;
-      nothing goes live before that.</p>
+    <p class="lede">Pages of their own are no longer made &mdash; every post goes into your blog.
+      Anything still listed here is from before that.</p>
     <div id="pageList"></div>
     <div id="pageApproved"></div>
+    </div>
     <h2>Held back by the checks <small id="heldHead"></small></h2>
     <p class="lede">These were written but did not pass, so they cannot go on the site as they
       are. Send one back to be written again, or drop it.</p>
@@ -1101,10 +1101,10 @@ function plainCopy(x, site){
   const pp = x.plain_page;
   if(pp.down) return `<div class="plain"><p>The plain copy at <span class="mono">/${esc(pp.page)}</span> is being
     taken down (${esc(pp.down)}). Once IT has done it, that address sends visitors to your blog.</p></div>`;
-  return `<div class="plain"><p>An earlier plain copy of this post is live at
-    <a href="${escA(site + '/' + pp.page)}" target="_blank" rel="noopener">/${esc(pp.page)}</a> &mdash; outside your blog,
-    with none of your layout. Take it down once the post is in your blog.</p>
-    <button class="btn stop" onclick="blogAct('take_down', ${x.id}, this)">Take it down</button></div>`;
+  return `<div class="plain"><p>This post was put up earlier as a page of its own at
+    <a href="${escA(site + '/' + pp.page)}" target="_blank" rel="noopener">/${esc(pp.page)}</a> &mdash; outside your blog
+    and not in your blog list. Put it on your blog, then delete that page.</p>
+    <button class="btn stop" onclick="blogAct('take_down', ${x.id}, this)">Delete that page</button></div>`;
 }
 
 function drawConn(bk){
@@ -1207,8 +1207,7 @@ function drawBlog(p){
 async function blogAct(what, id, btn){
   const words = {blog_drop:'Drop this post? It will not be offered again.',
                  blog_rewrite:'Send this post back to be written again?',
-                 take_down:'Take the plain copy off your website? IT runs the tests first. Then that address '
-                          + 'sends visitors to your blog, and Google is told to drop it.'}[what];
+                 take_down:'Delete that page from your website? A copy is kept on your server. IT runs the tests first.'}[what];
   if(words && !confirm(words)) return;
   btn.disabled = true;
   const j = await campAct(what, {}, [id]);
@@ -1327,13 +1326,26 @@ function drawPages(p){
     </article>`).join('')
     : `<div class="empty">Nothing is held back.</div>`;
 
+  // Pages of their own are not made any more; the section shows only leftovers.
+  $('#pagesBlock').style.display = (p.waiting.length || p.approved.length) ? '' : 'none';
   const label = (s, note) => /Ready for your blog/.test(note||'') ? '<span class="pill">moved to your blog</span>'
-    : ({applied:'<span class="pill ok">on the site</span>', failed:'<span class="pill bad">could not publish</span>',
+    : ({applied:'<span class="pill amber">a page on your site</span>', failed:'<span class="pill bad">could not publish</span>',
+        removed:'<span class="pill ok">deleted from your site</span>',
         rejected:'<span class="pill">turned down</span>'}[s] || `<span class="pill">${esc(s)}</span>`);
+  const delRow = x => {
+    if(x.status !== 'applied') return '';
+    const m = x.removing;
+    if(m && m.status === 'approved') return `<div style="margin-top:8px"><span class="busy">IT is deleting it — tests first.</span></div>`;
+    return `${m && m.status === 'failed' ? `<div style="margin-top:6px;color:var(--danger)">It was not deleted: ${esc(m.note)}</div>` : ''}
+      <div style="margin-top:6px;color:var(--muted)">A page of its own, outside your blog. Put the post in your blog from
+        Ready for your blog, then delete this page.</div>
+      <div class="row" style="margin-top:8px"><button class="btn stop" onclick="decidePage('remove_page', ${x.id}, this)">Delete from website</button></div>`;
+  };
   $('#pageRecent').innerHTML = p.recent.length ? `<div class="logwrap"><table class="log">
     <tr><th>Page</th><th>What happened</th></tr>
     ${p.recent.map(x=>`<tr><td>${esc(x.title)}${x.file?'<br><span class="addr">/'+esc(x.file)+'</span>':''}</td>
       <td>${label(x.status, x.note)}${x.note?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}
+        ${delRow(x)}
         ${x.status === 'failed' ? `<div class="row" style="margin-top:8px">
           <button class="btn go" onclick="decidePage('retry_page', ${x.id}, this)">Try again</button>
           <button class="btn stop" onclick="decidePage('drop_page', ${x.id}, this)">Drop it</button></div>` : ''}</td></tr>`).join('')}
@@ -1346,6 +1358,7 @@ async function decidePage(what, id, btn){
                  rewrite:'Send this page back to be written again?',
                  retry_page:'Try putting this page on your website again? IT runs the tests first.',
                  drop_page:'Drop this page? It will not be published.',
+                 remove_page:'Delete this page from your website? A copy is kept on your server, so it can be put back. IT runs the tests first.',
                  discard_page:'Drop this held page?'}[what];
   if(!confirm(words)) return;
   btn.disabled = true;

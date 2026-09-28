@@ -446,6 +446,8 @@ def _plain(action, page, block_id, ok, r):
         return f"took the {block_id} block back out of {page}"
     if action == "restore":
         return f"put {page} back to how it was before"
+    if action == "remove_page":
+        return f"took {page} off your website (a copy is kept)"
     if action == "new_page":
         # A page that did not exist before is not a rewrite, and calling it one
         # on his change screen would hide the single most significant thing the
@@ -1581,6 +1583,46 @@ def add_blog_post(post, image=None, agent=AGENT, s=None, title="", undo_cmd="") 
         return r                          # not a change, and not a failure to log
     return _log_blog("blog_post", slug, agent, r,
                      f"added the post “{title or slug}” to your blog", undo_cmd=undo_cmd)
+
+
+def remove_page(page, go_to="", agent=AGENT, s=None) -> dict:
+    """
+    Take a page off his website — one the agency put up as a post of its own.
+    The connector keeps a copy first (/rollback restores it). An older connector
+    that cannot remove files gets the page replaced by a pointer to his blog,
+    kept out of Google, and says so.
+    """
+    why = not_ours(page)
+    if why:
+        return {"ok": False, "error": why}
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    r = call("/pages-remove", "POST", {"page": page}, s=s)
+    if r.get("old_connector"):
+        from . import content_write
+        was = read_page(page, s=s)
+        r = put_page(page, content_write.take_down_page(page, go_to or "/"), agent=agent, s=s,
+                     _action="take_down",
+                     before=(was.get("html") if was.get("ok") else None),
+                     summary=f"replaced {page} with a pointer to your blog")
+        if r.get("ok"):
+            r["stubbed"] = True
+            r["head"] = (f"{page} now sends visitors to your blog and tells Google to drop it. "
+                         "Your connector file is the older one, which cannot remove files — "
+                         "upload the new agency-api.php and it removes pages outright.")
+        return r
+    if r.get("ok"):
+        r["head"] = (f"{page} is off your website" if r.get("action") != "already gone"
+                     else f"{page} was already gone from your website")
+        try:
+            from coordination import changelog
+            changelog.forget_page(page)
+        except Exception:
+            pass
+    return _log_write("remove_page", page, agent, r,
+                      summary=f"took {page} off your website (a copy is kept)",
+                      undo_cmd=f"python -m pipelines.site_api --undo {page}")
 
 
 def remove_blog_post(post_id, slug="", agent=AGENT, s=None, title="") -> dict:

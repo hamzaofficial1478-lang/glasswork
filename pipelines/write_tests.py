@@ -712,7 +712,7 @@ def test_old_blog_pages_move_to_his_blog_and_the_plain_copy_comes_down():
               "https://www.example.ae/assets/img/railing.jpg" in live["html"], True)
         check("moved once, not on every look", review._move_old_blog_pages(), 0)
 
-        print("\n...Take it down points the plain copy at his blog, through IT:")
+        print("\n...Delete that page takes the page off his website, through IT:")
         r = review.act("take_down", [1])
         check("done", r["ok"], True)
         with sqlite3.connect(db) as c:
@@ -721,10 +721,9 @@ def test_old_blog_pages_move_to_his_blog_and_the_plain_copy_comes_down():
         plan = IR.plan_of(row)
         check("an approved change for the Releaser — his press is his yes",
               (row["status"], plan["do"], plan["page"]),
-              ("approved", "page", "blog-glass-railing-1.html"))
-        check("that sends visitors to his blog and tells Google to drop it",
-              ("https://www.example.ae/blog.php" in plan["html"], "noindex" in plan["html"]),
-              (True, True))
+              ("approved", "remove_page", "blog-glass-railing-1.html"))
+        check("pointing at his blog, if the connector can only replace it",
+              plan["go_to"], "https://www.example.ae/blog.php")
         check("pressed twice is still one change",
               review.act("take_down", [1]).get("change"), None)
 
@@ -740,9 +739,78 @@ def test_old_blog_pages_move_to_his_blog_and_the_plain_copy_comes_down():
               review.act("blog_posted", [1], {"url": "my blog"})["ok"], False)
 
 
+def test_every_piece_is_a_post_by_default():
+    """
+    "the program is making a new page everytime for each post while the main
+     thing is the new blog post ... the blogs are stored in DB and called from
+     there not a new page"
+    """
+    print("\nBy default a service brief becomes a post for his blog — never a page:")
+    db = _fresh_db()
+    _queue_a_brief(db)
+    was = CW.EVERYTHING_IS_A_POST
+    CW.EVERYTHING_IS_A_POST = True
+    try:
+        long_body = GOOD_BODY + "<h2>What to ask before you buy</h2><p>" + FILLER * 40 + "</p>"
+        out = _write(body=long_body)
+    finally:
+        CW.EVERYTHING_IS_A_POST = was
+    with sqlite3.connect(db) as c:
+        n_pages = c.execute("SELECT count(*) FROM site_queue").fetchone()[0]
+        status = c.execute("SELECT status FROM content_queue").fetchone()[0]
+    check("no page of its own is queued for his website", n_pages, 0)
+    check("it waits under Ready for your blog", (status, out["pages"][0].get("for_blog")),
+          ("for_blog", True))
+
+
+def test_pages_already_put_up_move_to_his_blog():
+    print("\nA post that went up as a page of its own moves to his blog, and the page can be deleted:")
+    from coordination import review
+    db = _fresh_db()
+    _queue_a_brief(db)
+    CW.EVERYTHING_IS_A_POST = False
+    _write(theme=_theme())
+    with sqlite3.connect(db) as c:
+        qid = c.execute("SELECT id FROM site_queue").fetchone()[0]
+        c.execute("UPDATE site_queue SET status='applied' WHERE id=?", (qid,))
+        c.execute("UPDATE content_queue SET status='published'")
+    with mock.patch.object(review, "_site", lambda: "https://www.example.ae"):
+        pages = review.build()["pages"]
+        post = pages["for_blog"][0] if pages["for_blog"] else {}
+        check("the post is ready for his blog", bool(post), True)
+        check("with the page it was put up as", (post.get("plain_page") or {}).get("page"),
+              "aluminium-pergolas-sharjah.php")
+        check("only the post's own words, not his page around it",
+              ("What the job involves" in post.get("html", ""), "includes/header.php" in post.get("html", "")),
+              (True, False))
+        check("moved once", review._move_old_blog_pages(), 0)
+        r = review.act("remove_page", [qid])
+        with sqlite3.connect(db) as c:
+            c.row_factory = sqlite3.Row
+            row = dict(c.execute("SELECT * FROM site_queue WHERE id=?", (r["change"],)).fetchone())
+        plan = IR.plan_of(row)
+        check("Delete from website is an approved change for IT",
+              (row["status"], plan["do"], plan["page"], plan["was"]),
+              ("approved", "remove_page", "aluminium-pergolas-sharjah.php", qid))
+        removed = []
+        with mock.patch.object(IR.site_api, "why_not_ready", lambda s=None: ""), \
+             mock.patch.object(IR.site_api, "remove_page",
+                               lambda page, go_to="", agent="", s=None: removed.append(page)
+                               or {"ok": True, "head": f"{page} is off your website"}):
+            out = IR.run(skip_tests=True)
+        with sqlite3.connect(db) as c:
+            st = c.execute("SELECT status FROM site_queue WHERE id=?", (qid,)).fetchone()[0]
+        check("IT deletes it", (out["applied"], removed), (1, ["aluminium-pergolas-sharjah.php"]))
+        check("and the page is marked as deleted, not 'on the site'", st, "removed")
+
+
 def main():
     real = board.DB
     _fresh_db()
+    # The page route is switched off by default; the tests of how a page is
+    # built and put up switch it on for themselves.
+    was = CW.EVERYTHING_IS_A_POST
+    CW.EVERYTHING_IS_A_POST = False
     try:
         test_no_brain_means_no_page()
         test_a_written_page_is_queued_and_not_published()
@@ -762,7 +830,10 @@ def main():
         test_a_post_is_full_specific_and_has_pictures()
         test_his_theme_is_read_off_a_page_his_site_links_to()
         test_old_blog_pages_move_to_his_blog_and_the_plain_copy_comes_down()
+        test_every_piece_is_a_post_by_default()
+        test_pages_already_put_up_move_to_his_blog()
     finally:
+        CW.EVERYTHING_IS_A_POST = was
         board.DB = real
 
     print()

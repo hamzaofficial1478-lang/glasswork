@@ -146,6 +146,47 @@ def _picture(schema, col, blog, site, notes):
             "name": blog.get("slug") or "post", "url_base": url_base}
 
 
+# "Aluminium" in a post and "Aluminum Work" in his categories are the same word.
+_SAME = {"aluminium": "aluminum", "wooden": "wood", "signage": "sign", "glazing": "glass"}
+_NOT_A_SUBJECT = {"work", "works", "service", "services", "dubai", "uae", "the", "and",
+                  "for", "with", "your", "our", "how", "what", "best", "guide", "cost", "price"}
+
+
+def _stems(text):
+    out = set()
+    for w in re.findall(r"[a-z]{3,}", str(text or "").lower()):
+        w = _SAME.get(w, w)
+        if len(w) > 4 and w.endswith("s"):
+            w = w[:-1]
+        if w not in _NOT_A_SUBJECT:
+            out.add(w)
+    return out
+
+
+def choose_category(schema, blog):
+    """
+    (column, {id, name}) — the category of HIS that this post is about, or
+    (None, None). A post on aluminium cladding used to be filed under whatever
+    his latest post was filed under ("Wooden Work"); now it goes where it
+    belongs, and to his general one ("Tips & Guides") when nothing matches.
+    """
+    col, cats = schema.get("category_column"), schema.get("categories") or []
+    if not col or not cats:
+        return None, None
+    mine = _stems(" ".join([blog.get("title") or "", blog.get("keywords") or "",
+                            (blog.get("slug") or "").replace("-", " ")]))
+    best, score = None, 0
+    for c in cats:
+        n = len(_stems(c.get("name")) & mine)
+        if n > score:
+            best, score = c, n
+    if best:
+        return col, best
+    general = next((c for c in cats if re.search(r"tip|guide|general|news|blog|advice|article",
+                                                 str(c.get("name") or ""), re.I)), None)
+    return (col, general) if general else (None, None)
+
+
 def plan_row(schema, blog, site="") -> dict:
     """
     The row for one post: {post, image, notes, problems, slug_column, url}.
@@ -194,6 +235,11 @@ def plan_row(schema, blog, site="") -> dict:
     put(_pick(cols, META_TITLE, taken), (blog.get("title") or "")[:60])
     put(_pick(cols, META_DESC, taken), blog.get("meta"))
     put(_pick(cols, KEYWORDS, taken), blog.get("keywords"))
+    cat_col, cat = choose_category(schema, blog)
+    if cat_col and cat and any(c["name"] == cat_col for c in cols):
+        post[cat_col] = cat["id"]
+        taken.add(cat_col)
+        notes.append(f"filed under “{cat['name']}”")
     alt = _pick(cols, IMAGE_ALT, taken)
     image_col = _pick(cols, IMAGE, taken)
     image = None

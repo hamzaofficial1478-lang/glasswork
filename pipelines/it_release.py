@@ -290,6 +290,14 @@ def plan_of(row) -> dict:
     # A POST FOR HIS BLOG goes into his own blog backend through the connector's
     # blog section (pipelines/blog_backend) — a row in the table his blog page
     # reads, not a file. And taken back out the same way.
+    # A PAGE TAKEN OFF HIS WEBSITE — one the agency put up as a post of its own
+    # before posts went into his blog. The connector keeps a copy first.
+    if isinstance(change, dict) and change.get("remove_page"):
+        return {"do": "remove_page", "page": str(change["remove_page"]),
+                "was": change.get("was"), "go_to": change.get("go_to") or "",
+                "content_id": change.get("content_id"), "issue_id": issue,
+                "why": d.get("why") or "", "row": row}
+
     if isinstance(change, dict) and (change.get("blog_post") or change.get("blog_remove")):
         which = "blog_post" if change.get("blog_post") else "blog_remove"
         return {"do": which, "content_id": change.get(which), "page": "blog",
@@ -572,7 +580,7 @@ def _work(agent, limit, dry_run, skip_tests):
     plans = [plan_of(r) for r in waiting]
     doable = [p for p in plans
               if p["do"] in ("head_block", "call", "replace", "new_page", "page",
-                             "blog_post", "blog_remove")]
+                             "blog_post", "blog_remove", "remove_page")]
     noted = [p for p in plans if p["do"] == "noted"]
     refused = [p for p in plans if p["do"] == "refuse"]
 
@@ -718,6 +726,17 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 
+        if plan["do"] == "remove_page":
+            r = site_api.remove_page(plan["page"], go_to=plan.get("go_to"), agent=agent)
+            if not r.get("ok"):
+                return _fail_or_wait(plan, r, "the page could not be taken off")
+            _page_taken_off(plan, r)
+            board.mark_site_change(
+                row["id"], "applied",
+                (r.get("head") or f"{plan['page']} is off your website")
+                + (" (tests were skipped at your request)" if skipped_tests else ""))
+            return True
+
         if plan["do"] in ("blog_post", "blog_remove"):
             from . import blog_backend
             fn = blog_backend.publish if plan["do"] == "blog_post" else blog_backend.remove
@@ -851,6 +870,28 @@ def _needle(html, want=60) -> str:
         if len(line) >= want and "agency:" not in line:
             return line[:want]
     return (html or "").strip()[:want]
+
+
+def _page_taken_off(plan, r):
+    """The page that was put up is marked as taken off, and the post knows it."""
+    note = ("taken off your website — a copy is kept" if not r.get("stubbed") else
+            "now points to your blog; upload the new connector to remove it outright")
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            if plan.get("was"):
+                c.execute("UPDATE site_queue SET status='removed', note=? WHERE id=?",
+                          (note, int(plan["was"])))
+            if plan.get("content_id"):
+                got = c.execute("SELECT draft FROM content_queue WHERE id=?",
+                                (int(plan["content_id"]),)).fetchone()
+                draft = json.loads((got[0] if got else "") or "{}")
+                pp = (draft.get("_for_blog") or {}).get("plain_page")
+                if pp:
+                    pp["down"] = note
+                    c.execute("UPDATE content_queue SET draft=? WHERE id=?",
+                              (json.dumps(draft, indent=2), int(plan["content_id"])))
+    except Exception:
+        pass
 
 
 def _mark_published(content_id, page):

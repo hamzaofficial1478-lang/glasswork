@@ -159,14 +159,19 @@ def test_send_refuses_without_his_email():
 
 
 def test_a_written_page_is_there_with_the_page_itself():
-    print("\nA written page is on the page with the page itself:")
+    # "the program is making a new page everytime for each post while the main
+    #  thing is the new blog post" — a page still waiting goes to his blog.
+    print("\nA page still waiting to go up becomes a post for his blog instead:")
     with _Cabinet() as cab:
-        _cid, sid = _written_page(cab)
+        cid, sid = _written_page(cab, html="<h1>Pergolas</h1><p>How we fit them.</p>")
         p = review.build()["pages"]
-        check("one ready for his yes", [x["id"] for x in p["waiting"]], [sid])
-        check("with its html to read", p["waiting"][0]["html"], "<h1>Pergolas</h1>")
-        check("and the phrase it was written for",
-              p["waiting"][0]["keyword"], "pergola dubai marina")
+        check("no page waits for his yes", p["waiting"], [])
+        check("it is ready for his blog", [x["id"] for x in p["for_blog"]], [cid])
+        check("with its words to read", "How we fit them" in p["for_blog"][0]["html"], True)
+        check("and the phrase it was written for", p["for_blog"][0]["keyword"],
+              "pergola dubai marina")
+        check("the page is not put up",
+              cab.sql("SELECT status FROM site_queue WHERE id=?", (sid,))[0]["status"], "rejected")
 
 
 def test_the_held_page_he_could_not_find_is_there():

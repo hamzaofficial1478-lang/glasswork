@@ -164,6 +164,22 @@ def test_the_row_is_built_from_his_own_table():
           any("sku" in p for p in BB.plan_row(_schema(columns=cols), _blog(), "")["problems"]), True)
 
 
+def test_the_post_is_filed_where_it_belongs():
+    print("\nA post is filed under the category it is about:")
+    cats = [{"id": "1", "name": "Wooden Work"}, {"id": "2", "name": "Glass Work"},
+            {"id": "3", "name": "Aluminum Work"}, {"id": "4", "name": "Tips & Guides"}]
+    s = _schema(category_column="category_id", categories=cats)
+    alu = CW.for_his_blog({"title": "Aluminium Cladding Sheet for Duct, Fitted Across the UAE",
+                           "meta": "m", "html": BODY}, {"primary_keyword": "aluminium cladding sheet"})
+    plan = BB.plan_row(s, alu, "https://www.example.ae")
+    check("aluminium goes under Aluminum Work, not his latest post's Wooden Work",
+          (plan["post"]["category_id"], any("Aluminum Work" in n for n in plan["notes"])), ("3", True))
+    other = CW.for_his_blog({"title": "Keeping balconies safe in summer", "meta": "m", "html": BODY},
+                            {"primary_keyword": "balcony safety"})
+    check("and a post that matches none goes under his general one",
+          BB.plan_row(s, other, "")["post"]["category_id"], "4")
+
+
 def test_his_press_goes_through_it():
     print("\nHis press queues an approved change; the Releaser carries it:")
     from coordination import review
@@ -284,8 +300,13 @@ def _site():
         created_at TEXT NOT NULL);
       INSERT INTO blogs(title,slug,content,short_description,image,status,category_id,created_at)
         VALUES ('Custom wooden interior design','custom-wooden-interior-design-dubai',
-                '<p>Wood.</p>','Wood.','blog/wood.png',1,2,'2026-09-01 10:00:00');
+                '<p>Wood.</p>','Wood.','blog/wood.png',1,1,'2026-09-01 10:00:00');
+      CREATE TABLE blog_categories (id INTEGER PRIMARY KEY, name TEXT);
+      INSERT INTO blog_categories VALUES (1,'Wooden Work'),(2,'Glass Work'),(3,'Aluminum Work'),
+                                         (4,'Tips & Guides');
     """)
+    (root / "aluminium-cladding.php").write_text("<h1>A page of its own</h1>", encoding="utf-8")
+    (root / "index.php").write_text("<h1>Home</h1>", encoding="utf-8")
     con.commit()
     con.close()
     return root
@@ -354,7 +375,7 @@ def test_the_real_connector_adds_a_post_and_takes_it_away():
             check("his blog table has the post", row and row[1],
                   "glass-railing-in-the-uae-cost-and-fixing-types")
             check("with the article in it", row and "Which fixing suits you" in row[2], True)
-            check("showing like his other posts, filed where his latest is",
+            check("showing like his other posts, and filed under Glass Work — not his latest post's",
                   row and (row[4], row[5]), (1, 2))
             check("dated", bool(row and row[6].startswith("20")), True)
             check("its picture saved in his blog's picture folder, stored his way",
@@ -384,6 +405,28 @@ def test_the_real_connector_adds_a_post_and_takes_it_away():
             with sqlite3.connect(db) as c:
                 st = c.execute("SELECT status FROM content_queue WHERE id=9").fetchone()[0]
             check("the post is back under Ready for your blog", st, "for_blog")
+
+            print("\n...and a page put up as a post of its own is deleted, with a copy kept:")
+            r = site_api.remove_page("aluminium-cladding.php", s=s)
+            check("deleted", (r["ok"], (root / "aluminium-cladding.php").exists()), (True, False))
+            check("a copy is kept first",
+                  any(b.name.startswith("aluminium-cladding.php.")
+                      for b in (root / "agency-api" / "backups").iterdir()), True)
+            check("his home page can never be removed",
+                  site_api.remove_page("index.php", s=s)["ok"], False)
+            real_call = site_api.call
+
+            def old_door(path, method="GET", body=None, timeout=25, s=None):
+                if path == "/pages-remove":
+                    return {"ok": False, "old_connector": True, "error": site_api.OLD_CONNECTOR}
+                return real_call(path, method, body, timeout, s)
+            (root / "old-page.php").write_text("<h1>Another</h1>", encoding="utf-8")
+            with mock.patch.object(site_api, "call", old_door):
+                r = site_api.remove_page("old-page.php", go_to=s["site"] + "/blog.php", s=s)
+            left = (root / "old-page.php").read_text(encoding="utf-8")
+            check("an older connector replaces it with a pointer to his blog, and says so",
+                  (r["ok"], r.get("stubbed"), "blog.php" in left and "noindex" in left),
+                  (True, True, True))
     finally:
         srv.terminate()
         try:
@@ -396,6 +439,7 @@ def main():
     real = board.DB
     try:
         for t in (test_the_row_is_built_from_his_own_table,
+                  test_the_post_is_filed_where_it_belongs,
                   test_his_press_goes_through_it,
                   test_an_old_connector_says_what_to_upload,
                   test_the_real_connector_adds_a_post_and_takes_it_away):

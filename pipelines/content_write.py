@@ -132,6 +132,10 @@ AI_TELLS = (
 
 BRAIN = "content"
 
+# Every piece the writer produces goes into his blog, never onto a page of its
+# own. The page route is kept, off, for the day he asks for service pages.
+EVERYTHING_IS_A_POST = True
+
 # Where his own photographs go. A marker rather than an <img> pointing at
 # nothing: the Auditor can see it, the office can list it, and a page that goes
 # live with the marker still in it is obviously unfinished rather than subtly
@@ -654,12 +658,15 @@ def for_his_blog(page, brief, images=(), site="", pack=None) -> dict:
             "url": BLOG_POST_URL.format(site=(site or "").rstrip("/"), slug=slug)}
 
 
-def blogs_off_the_site_queue(c, site="") -> int:
+def pages_to_his_blog(c, site="", dry=False) -> int:
     """
-    Posts written before this change were queued as pages of their own. Those
-    still waiting are moved to his blog; one already put up stays listed with
-    its plain copy, so he can take that down once the post is in his blog.
-    Once for each post. Returns how many moved.
+    "the program is making a new page everytime for each post while the main
+     thing is the new blog post ... not a new page"
+
+    Every page the agency queued or put up as a post of its own becomes a post
+    for his blog. One still waiting is moved; one already up stays listed with
+    its page, so the page can be deleted once the post is in his blog. A post
+    he dropped stays dropped. Once each; `dry` only counts. Returns how many.
     """
     moved = 0
     rows = c.execute("SELECT id, status, detail FROM site_queue WHERE kind='new_page'"
@@ -671,7 +678,7 @@ def blogs_off_the_site_queue(c, site="") -> int:
             continue
         ch = d.get("change") or {}
         name, cid = str(ch.get("page") or ""), ch.get("content_id")
-        if not (re.match(r"blog-[a-z0-9-]+\.(html?|php)$", name) and cid):
+        if not (name and cid):
             continue
         got = c.execute("SELECT draft, brief, status FROM content_queue WHERE id=?",
                         (int(cid),)).fetchone()
@@ -682,25 +689,47 @@ def blogs_off_the_site_queue(c, site="") -> int:
             brief = json.loads(got[1] or "{}")
         except ValueError:
             continue
-        if draft.get("_for_blog"):
+        was_status = got[2] or ""
+        if was_status == "rejected":
             continue
-        html = str(ch.get("html") or draft.get("_page_html") or draft.get("html") or "")
-        m = re.search(r"<main\b[^>]*>(.*)</main>", html, re.I | re.S)
-        inner = m.group(1) if m else re.sub(r"<\?php.*?\?>", "", html, flags=re.S)
-        blog = for_his_blog({"title": draft.get("title") or d.get("title"),
-                             "meta": draft.get("meta"), "html": inner}, brief, (), site)
-        if status == "applied":
+        blog = draft.get("_for_blog") or {}
+        changed = False
+        if not blog:
+            html = str(ch.get("html") or draft.get("_page_html") or draft.get("html") or "")
+            m = (re.search(r'<main class="agency-page"[^>]*>(.*?)</main>', html, re.I | re.S)
+                 or re.search(r"<main\b[^>]*>(.*)</main>", html, re.I | re.S))
+            inner = m.group(1) if m else re.sub(r"<\?php.*?\?>", "", html, flags=re.S)
+            # "Aluminium Cladding Sheet for Duct | UAE Wide" is a browser title;
+            # a post in his blog list is headed by the part before the bar.
+            title = str(draft.get("title") or d.get("title") or "").split(" | ")[0].strip()
+            blog = for_his_blog({"title": title, "meta": draft.get("meta"), "html": inner},
+                                brief, (), site, pack=brief.get("seo_pack"))
+            changed = True
+        if status == "applied" and (blog.get("plain_page") or {}).get("page") != name:
             blog["plain_page"] = {"page": name, "site_queue": sq_id}
-        else:
-            c.execute("UPDATE site_queue SET status='rejected', decided_at=?, note=?"
-                      " WHERE id=?",
-                      (int(time.time()), "moved to Ready for your blog — a blog post goes "
-                       "into your own blog backend, not onto a page of its own", sq_id))
-        draft["_for_blog"] = blog
-        c.execute("UPDATE content_queue SET draft=?, status='for_blog', type='blog'"
-                  " WHERE id=?", (json.dumps(draft, indent=2), int(cid)))
+            changed = True
+        on_blog = was_status == "published" and (blog.get("backend") or {}).get("id")
+        new_status = "published" if on_blog else "for_blog"
+        if status in ("pending", "approved"):
+            changed = True
+            if not dry:
+                c.execute("UPDATE site_queue SET status='rejected', decided_at=?, note=?"
+                          " WHERE id=?",
+                          (int(time.time()), "moved to Ready for your blog — a post goes into "
+                           "your own blog, not onto a page of its own", sq_id))
+        if not changed and new_status == was_status:
+            continue
         moved += 1
+        if dry:
+            continue
+        draft["_for_blog"] = blog
+        c.execute("UPDATE content_queue SET draft=?, status=?, type='blog' WHERE id=?",
+                  (json.dumps(draft, indent=2), new_status, int(cid)))
     return moved
+
+
+# The old name, for anything still calling it.
+blogs_off_the_site_queue = pages_to_his_blog
 
 
 def take_down_page(name, go_to) -> str:
@@ -844,8 +873,12 @@ def _write(agent, dry_run, only_id, limit, job=None):
             # A BLOG POST when that is what he asked for. "i ask for blog
             # posts" — his order reaches this desk as the job, and the brief
             # underneath it is the subject.
-            kind = ("blog" if (row.get("type") == "blog" or (job and job.wants(
-                "blog", "post", "posts", "article", "articles"))) else "service_page")
+            # EVERYTHING IS A POST. "the program is making a new page everytime
+            # for each post while ... the blogs are stored in DB and called from
+            # there". A service brief is written as a post for his blog too; a
+            # page of its own is only ever made if EVERYTHING_IS_A_POST is off.
+            kind = ("blog" if EVERYTHING_IS_A_POST or row.get("type") == "blog" or (job and job.wants(
+                "blog", "post", "posts", "article", "articles")) else "service_page")
             try:
                 from . import post_images
                 images = post_images.for_post(brief, facts.get("site") or "")
