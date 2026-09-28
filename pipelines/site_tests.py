@@ -333,10 +333,23 @@ def test_the_owners_own_site_is_read_for_free():
         search.fetcher.fetch = real_fetch
 
 
+def _read_body(handler):
+    """
+    Read what was sent before answering. A stand-in server that replies and
+    hangs up with the request still unread makes WINDOWS reset the connection
+    (WinError 10053/10054) — sometimes, depending on timing — so the client sees
+    "could not connect" and a test that is green on Linux goes red on his PC.
+    """
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n:
+        handler.rfile.read(n)
+
+
 def _make401():
     import http.server, socketserver
     class Q(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
+            _read_body(self)
             self.send_response(401)
             self.send_header("Content-Type", "application/json")
             body = b'{"title":"Authentication Info Invalid"}'
@@ -537,6 +550,7 @@ def test_the_fetcher_pays_only_when_it_has_to():
             self.send_response(405); self.end_headers()
         def do_POST(self):
             got["auth"] = self.headers.get("Authorization")
+            _read_body(self)
             self.send_response(200); self.send_header("Content-Type", "application/json")
             out = _j.dumps({"httpResponseBody": _b.b64encode(b"<html>ok</html>").decode()}).encode()
             self.send_header("Content-Length", str(len(out))); self.end_headers()
@@ -551,7 +565,8 @@ def test_the_fetcher_pays_only_when_it_has_to():
         r = _client.probe_tool({"name": "Zyte API", "shelf": "crawler",
                                 "base_url": ep, "api_key": "GOODKEY",
                                 "auth_style": "bearer"}, timeout=10)
-        check("it passes even though the tool was saved as bearer", r["ok"], True)
+        # On a failure this shows WHY (the probe's own words), not just "False".
+        check("it passes even though the tool was saved as bearer", r["ok"] or r.get("cause"), True)
         check("because it used POST, not a GET", got.get("GET"), None)
         check("and HTTP Basic, not Bearer", got["auth"].startswith("Basic "), True)
         check("with the key as the Basic username",
