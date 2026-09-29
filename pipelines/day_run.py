@@ -261,6 +261,84 @@ LONGER = {
 }
 
 
+# ---------------------------------------------------------------------------
+# KEEP GOING — THE DAY IS NOT OVER WHILE HIS ORDERS ARE STILL OPEN
+# ---------------------------------------------------------------------------
+#
+# "with out completing the tasks the program finish the daily run ... when the
+#  any sector or any agent is running the program should not stop and says run
+#  the day" / "i ask for 20 leads it just give 8 leads and that was it and
+#  program stops"
+#
+# He was right, and it was the shape of the day rather than a crash. The day
+# was ONE PASS: every step once, and every desk takes ONE job off its board per
+# pass (coordination/deskwork). So an IT board holding three of his orders got
+# one of them looked at and the day closed on the other two, and a Leads pass
+# that stored 8 of 20 closed its job with nobody ever asking for the other 12.
+#
+# So after the main pass, and BEFORE the Overseer's closing check and Report
+# (they are about the whole day, extra rounds included), the day looks at what
+# is still unfinished and goes round again for the sectors that have some:
+#
+#   jobs still open on a sector's board     the desks those jobs are for run
+#                                           again, and each takes its next one
+#   a counted target still short            the MD tops the job up with what is
+#     (his "20 leads")                      still to go, and the collectors go
+#                                           again; Security screens what came
+#                                           in, and only then is anyone written to
+#   changes he approved, not yet on         the Releaser goes again
+#     his site
+#
+# It stops, and says why, when nothing is left (the good ending); when a
+# sector's round moved nothing — it has said all it can today (no recipe, no
+# key, the map worked out), and running it again would spend tokens to say the
+# same thing; after FOLLOW_UP_ROUNDS rounds or FOLLOW_UP_BUDGET seconds, so a
+# bug can never keep the day going for ever; or the moment he presses Stop.
+#
+# Whatever is still open at the end is written on the run, each thing with its
+# reason, so the day ends on "these two wait for your yes, this one needs a
+# key" rather than on a Run button and silence.
+
+FOLLOW_UP_ROUNDS = 4
+FOLLOW_UP_BUDGET = 2 * 3600
+# Extra steps are numbered from here, well clear of STEPS, so nothing that
+# reads a step by its place in STEPS (resume, the preflight) ever mistakes one.
+FOLLOW_UP_SEQ = 1000
+# The lane that waits for the extra rounds: everything about the whole day.
+FOLLOW_UP_BEFORE = "close"
+FOLLOW_UP_LANE = "more"
+
+# Which steps work each desk's jobs, in the order they run.
+DESK_STEPS = {
+    "it-watcher": ("pipelines.it_health",),
+    "it-fixer": ("pipelines.it_fix",),
+    "it-releaser": ("pipelines.it_release",),
+    "it-search": ("pipelines.site_search",),
+    "seo-strategist": ("pipelines.seo_gap",),
+    "seo-answers": ("pipelines.seo_answers",),
+    "seo-rival": ("pipelines.competitors",),
+    "seo-backlinks": ("pipelines.seo_backlinks",),
+    "content-writer": ("pipelines.content_briefs", "pipelines.content_write"),
+    "leads-mapper": ("pipelines.leads_sources",),
+    "leads-hunter": ("pipelines.leads_hunt", "pipelines.leads_osm"),
+    "leads-outreach": ("pipelines.leads_outreach",),
+    "security-screener": ("pipelines.security_screen",),
+}
+# A job posted to the whole sector, with no desk named on it.
+SECTOR_STEPS = {
+    "IT": ("pipelines.it_fix",),
+    "SEO": ("pipelines.seo_gap",),
+    "Content": ("pipelines.content_briefs", "pipelines.content_write"),
+    "Leads": ("pipelines.leads_hunt", "pipelines.leads_osm"),
+    "Security": ("pipelines.security_screen",),
+}
+# Which chain a sector's extra work runs in. Security rides behind Leads for
+# the same reason as in the main pass: it screens what Leads just collected,
+# and nobody is written to until it has.
+CHAIN_OF = {"IT": "it", "SEO": "seo", "Content": "content",
+            "Leads": "leads", "Security": "leads"}
+
+
 def step_timeout_for(module) -> int:
     """How long this particular step is allowed to take."""
     return int(LONGER.get(module, STEP_TIMEOUT))
@@ -574,6 +652,18 @@ def _close_run(rid, status):
                   (status, _now(), done, rid))
 
 
+def _left_open(rid, more):
+    """What the extra rounds did and what is still open, kept on the run."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE day_runs SET left_open=? WHERE id=?",
+                      (json.dumps({"rounds": more.get("rounds") or 0,
+                                   "why": more.get("why") or "",
+                                   "left": list(more.get("left") or [])[:12]}), rid))
+    except sqlite3.Error:
+        pass
+
+
 def _as_json(text):
     try:
         return json.loads(text)
@@ -746,8 +836,12 @@ def _one_step(rid, seq, stop=None) -> str:
     appears on the chattiest steps, which is the worst way to find one. A file
     cannot fill.
     """
-    label, mod, room, lane = STEPS[seq]
+    label, mod, room, _lane = STEPS[seq]
+    return _work_step(rid, seq, mod, room, stop)
 
+
+def _work_step(rid, seq, mod, room, stop=None, args=()) -> str:
+    """One step, from STEPS or from an extra round: run it and write down how it went."""
     # THE OWNER'S OFF SWITCH. A sector he has stopped does not run, and the run
     # panel says so in as many words — a step that silently vanished would look
     # like the day was shorter than it was, and he would have no way to tell
@@ -767,7 +861,7 @@ def _one_step(rid, seq, stop=None) -> str:
         return "skipped"
 
     _step(rid, seq, status="running", started_at=_now())
-    code, out, cut_short = _run_child(mod, stop)
+    code, out, cut_short = _run_child(mod, stop, args)
     if cut_short:
         _step(rid, seq, status="stopped", ended_at=_now(), code=code,
               summary=(stop.note() if stop else "stopped")
@@ -781,7 +875,7 @@ def _one_step(rid, seq, stop=None) -> str:
     return verdict
 
 
-def _run_child(mod, stop=None):
+def _run_child(mod, stop=None, args=()):
     """Start the step, wait on it in short hops, return (code, output, cut_short)."""
     try:
         # Output to a file, decoded here rather than by the child pipe. encoding
@@ -796,7 +890,7 @@ def _run_child(mod, stop=None):
     try:
         try:
             # Its own process group, and no window: see console.background_flags.
-            p = subprocess.Popen([PY, "-m", mod], cwd=str(ROOT),
+            p = subprocess.Popen([PY, "-m", mod, *args], cwd=str(ROOT),
                                  stdout=sink, stderr=subprocess.STDOUT,
                                  creationflags=console.background_flags())
         except Exception as e:                           # pragma: no cover
@@ -853,7 +947,298 @@ def lanes() -> dict:
     return out
 
 
-def _run_lanes(rid, stop=None):
+def what_is_left() -> dict:
+    """
+    What the day has not finished yet, read from the cabinet. Nothing written,
+    no model.
+
+      jobs          open, green jobs on any board — not his own to-dos, and not
+                    the Overseer's fault tickets, which IT's self-repair settles
+      leads_short   how many leads with an email his leads target still wants
+      approved      changes he said yes to that are not on his site yet
+    """
+    board.ensure_schema()
+    out = {"jobs": [], "leads_short": 0, "leads_asked": 0, "approved": 0}
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.row_factory = sqlite3.Row
+            out["jobs"] = [dict(r) for r in c.execute(
+                "SELECT id, sector, title, desk FROM tasks WHERE status='open'"
+                " AND COALESCE(risk,'green')='green'"
+                " AND COALESCE(about,'') NOT LIKE 'faults:%' ORDER BY created_at")]
+            out["approved"] = c.execute(
+                "SELECT count(*) FROM site_queue WHERE status='approved'").fetchone()[0]
+    except sqlite3.Error:
+        pass
+    try:
+        from coordination import targets
+        for j in targets.status().get("jobs") or []:
+            if j.get("name") == "leads" and j.get("per_day"):
+                out["leads_short"] = int(j.get("remaining") or 0)
+                out["leads_asked"] = int(j.get("per_day") or 0)
+    except Exception:
+        pass
+    return out
+
+
+def _steps_for(job) -> tuple:
+    """The steps that work this job: its desk's, or the sector's if no desk is named.
+    A desk no step works (the reply handler, the reporter) gets none — running
+    the collectors for a job they are not allowed to take would move nothing."""
+    desk = (job.get("desk") or "").strip().lower()
+    if desk:
+        return DESK_STEPS.get(desk, ())
+    return SECTOR_STEPS.get(job.get("sector"), ())
+
+
+def _rooms_in(left) -> set:
+    """The sectors with something an extra round could work on."""
+    rooms = {j["sector"] for j in left.get("jobs") or [] if _steps_for(j)}
+    if left.get("leads_short"):
+        rooms.add("Leads")
+    if left.get("approved"):
+        rooms.add("IT")
+    return rooms
+
+
+def round_plan(left, rooms) -> dict:
+    """{chain: [module, ...]} for one extra round, limited to `rooms`."""
+    want = {}
+
+    def add(chain, mods):
+        lst = want.setdefault(chain, [])
+        lst.extend(m for m in mods if m not in lst)
+
+    for j in left.get("jobs") or []:
+        room = j.get("sector")
+        if room not in rooms:
+            continue
+        mods = _steps_for(j)
+        if mods:
+            add(CHAIN_OF.get(room, str(room).lower()), mods)
+    if "Leads" in rooms and left.get("leads_short"):
+        add("leads", ("pipelines.leads_hunt", "pipelines.leads_osm"))
+    if "IT" in rooms and left.get("approved"):
+        add("it", ("pipelines.it_release",))
+    # New leads are screened before anyone is written to — as in the main pass.
+    if want.get("leads"):
+        add("leads", ("pipelines.security_screen", "pipelines.leads_outreach"))
+    # What the Fixer queues goes on only with his yes; the Releaser carries out
+    # any yes he has already given, in the same round.
+    if "pipelines.it_fix" in want.get("it", []):
+        add("it", ("pipelines.it_release",))
+    order = {mod: i for i, (_l, mod, _r, _ln) in enumerate(STEPS)}
+    order["pipelines.security_screen"] = 900
+    order["pipelines.leads_outreach"] = 901
+    return {k: sorted(v, key=lambda m: order.get(m, 999)) for k, v in want.items() if v}
+
+
+def _got_through(since) -> dict:
+    """
+    {sector: how much it has got through since `since`} — the number a round
+    has to move for its sector to be worth another one.
+
+    Jobs settled count for everyone, blocked ones included: a job closed with
+    its reason is off the board, and the next round works the one behind it.
+    Each sector's own output counts too, because a collector that stores twelve
+    leads has moved even if its job stays open for the rest.
+    """
+    out = {}
+    extra = {
+        "Leads": ["SELECT count(*) FROM leads WHERE found_at>=?"
+                  " AND COALESCE(email,'')!=''",
+                  "SELECT count(*) FROM outreach_log WHERE direction='sent' AND at>=?"],
+        "IT": ["SELECT count(*) FROM site_queue WHERE agent LIKE 'it-%' AND queued_at>=?",
+               "SELECT count(*) FROM site_queue WHERE status='applied' AND applied_at>=?"],
+        "Content": ["SELECT count(*) FROM content_queue WHERE created_at>=?"],
+    }
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            for sector, n in c.execute(
+                    "SELECT sector, count(*) FROM tasks WHERE finished_at>=?"
+                    " AND status IN ('done','blocked','failed') GROUP BY sector",
+                    (since,)):
+                out[sector] = int(n or 0)
+            for sector, qs in extra.items():
+                for q in qs:
+                    try:
+                        out[sector] = out.get(sector, 0) + int(
+                            c.execute(q, (since,)).fetchone()[0] or 0)
+                    except sqlite3.Error:
+                        pass
+    except sqlite3.Error:
+        pass
+    return out
+
+
+def _label_of(mod) -> str:
+    for label, m, _room, _lane in STEPS:
+        if m == mod:
+            return label
+    return mod.rsplit(".", 1)[-1].replace("_", " ")
+
+
+def _room_of(mod) -> str:
+    for _label, m, room, _lane in STEPS:
+        if m == mod:
+            return room
+    return "Director"
+
+
+def _add_rows(rid, rows) -> list:
+    """Write extra steps onto the run, 'waiting'. rows: [(label, module)]. Returns seqs."""
+    seqs = []
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        top = c.execute("SELECT MAX(seq) FROM day_steps WHERE run_id=?", (rid,)).fetchone()[0]
+        nxt = max(FOLLOW_UP_SEQ, int(top or 0) + 1)
+        for label, mod in rows:
+            c.execute("INSERT INTO day_steps(run_id,seq,label,module,status,lane)"
+                      " VALUES(?,?,?,?, 'waiting', ?)",
+                      (rid, nxt, label, mod, FOLLOW_UP_LANE))
+            seqs.append(nxt)
+            nxt += 1
+        c.execute("UPDATE day_runs SET steps_total=steps_total+? WHERE id=?",
+                  (len(rows), rid))
+    return seqs
+
+
+def _hold_the_day(rid):
+    """Keep the day's lock for as long as the day is honestly still going."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE locks SET expires_at=? WHERE resource=? AND holder=?",
+                      (_now() + 3 * 3600, LOCK, LOCK_HOLDER))
+    except sqlite3.Error:
+        pass
+
+
+def _still_open(left, stopped_rooms, only) -> list:
+    """What is left at the end, one plain line each, with the reason where known."""
+    lines = []
+    by_room = {}
+    for j in left.get("jobs") or []:
+        by_room.setdefault(j["sector"], []).append(j["title"])
+    for room, titles in sorted(by_room.items()):
+        why = stopped_rooms.get(room) or ""
+        if only and room not in only:
+            why = "not in this run"
+        elif not board.sector_enabled(room):
+            why = "you have this sector switched off"
+        lines.append(f"{room}: {len(titles)} job(s) still open — "
+                     + "; ".join(t[:70] for t in titles[:3])
+                     + (f" ({why})" if why else ""))
+    if left.get("leads_short"):
+        lines.append(f"Leads: {left['leads_short']} of the {left['leads_asked']} leads "
+                     "with an email you asked for are still to find"
+                     + (f" ({stopped_rooms['Leads']})" if stopped_rooms.get("Leads") else ""))
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            waiting = c.execute("SELECT count(*) FROM site_queue WHERE status='pending'"
+                                ).fetchone()[0]
+    except sqlite3.Error:
+        waiting = 0
+    if waiting:
+        lines.append(f"{waiting} website change(s) wait for your yes under Waiting on "
+                     "you — nothing goes on your site without it")
+    if left.get("approved"):
+        lines.append(f"{left['approved']} change(s) you approved are not on your site yet"
+                     + (f" ({stopped_rooms['IT']})" if stopped_rooms.get("IT") else ""))
+    return lines
+
+
+def _keep_going(rid, stop=None, slots=None) -> dict:
+    """
+    The extra rounds. See KEEP GOING at the top of this file. Returns what they
+    did and what is still open, for the run's closing words.
+    """
+    stopping = (lambda: bool(stop is not None and stop.is_set()))
+    slots = slots or threading.Semaphore(max(1, int(MAX_LANES)))
+    only = _only_for(rid)
+    t0 = time.time()
+    in_play, gave_up, rounds, why = None, {}, 0, ""
+    while True:
+        if stopping():
+            why = "you pressed Stop"
+            break
+        left = what_is_left()
+        workable = {r for r in _rooms_in(left)
+                    if board.sector_enabled(r) and (not only or r in only)}
+        rooms = workable & in_play if in_play is not None else workable
+        if not rooms:
+            why = ("everything you asked for today is done or waiting on you"
+                   if not workable else
+                   "the last round moved nothing more, so running it again would "
+                   "only spend tokens to say the same thing")
+            break
+        if rounds >= FOLLOW_UP_ROUNDS:
+            why = f"{FOLLOW_UP_ROUNDS} extra rounds is the most one day takes"
+            break
+        if time.time() - t0 >= FOLLOW_UP_BUDGET:
+            why = (f"the extra rounds used their {FOLLOW_UP_BUDGET // 60} minutes — "
+                   "the rest carries on tomorrow, or press Resume")
+            break
+        plan = round_plan(left, rooms)
+        if not plan:
+            why = "nothing left that a desk can work on today"
+            break
+        rounds += 1
+        _hold_the_day(rid)
+        since = _now()
+
+        # The MD first, when a counted target is short: the job it posted this
+        # morning was closed with part of the number, and the collectors need
+        # one that says what is still to go. Its own step, so the run panel
+        # shows the MD asking rather than work appearing from nowhere.
+        if "Leads" in rooms and left.get("leads_short"):
+            seq = _add_rows(rid, [(f"Round {rounds + 1} · The MD asks for the "
+                                   f"{left['leads_short']} leads still to find",
+                                   "pipelines.md_cycle")])[0]
+            with slots:
+                _work_step(rid, seq, "pipelines.md_cycle", "Director", stop,
+                           args=("--top-up", "--json"))
+
+        chains = {name: _add_rows(rid, [(f"Round {rounds + 1} · {_label_of(m)}", m)
+                                        for m in mods])
+                  for name, mods in plan.items()}
+        mods_of = {seq: m for name, mods in plan.items()
+                   for seq, m in zip(chains[name], mods)}
+
+        def walk(seqs):
+            for seq in seqs:
+                if stopping():
+                    _step(rid, seq, status="stopped", ended_at=_now(),
+                          summary=(stop.note() if stop else "stopped")
+                                  + " — the run was stopped before this started")
+                    _tick(rid)
+                    continue
+                with slots:
+                    if stopping():
+                        _step(rid, seq, status="stopped", ended_at=_now(),
+                              summary=(stop.note() if stop else "stopped")
+                                      + " — the run was stopped before this started")
+                        _tick(rid)
+                        continue
+                    _work_step(rid, seq, mods_of[seq], _room_of(mods_of[seq]), stop)
+
+        threads = [threading.Thread(target=walk, args=(seqs,), name=f"more-{n}",
+                                    daemon=True) for n, seqs in chains.items()]
+        for t in threads:
+            t.start()
+        for t in threads:
+            while t.is_alive():
+                t.join(timeout=0.5)
+
+        moved = _got_through(since)
+        in_play = {r for r in rooms if moved.get(r, 0) > 0}
+        for r in rooms - in_play:
+            gave_up[r] = (f"round {rounds + 1} moved nothing — see its steps above "
+                          "for what it said")
+    left = what_is_left()
+    return {"rounds": rounds, "why": why, "left": _still_open(left, gave_up, only),
+            "minutes": round((time.time() - t0) / 60, 1)}
+
+
+def _run_lanes(rid, stop=None, keep_going=False, report=None):
     """
     Run the day. Lanes side by side, steps within a lane one after another.
 
@@ -908,6 +1293,16 @@ def _run_lanes(rid, stop=None):
                 while not ev.wait(timeout=0.5):
                     if stopping() or time.time() >= until:
                         break
+            # THE EXTRA ROUNDS, once everything else has had its pass and
+            # before the steps that are about the whole day. See KEEP GOING.
+            if keep_going and name == FOLLOW_UP_BEFORE and not stopping():
+                try:
+                    more = _keep_going(rid, stop, slots)
+                except Exception as e:
+                    more = {"rounds": 0, "left": [],
+                            "why": f"the extra rounds could not run: {e}"}
+                if report is not None:
+                    report["more"] = more
             for seq in plan[name]:
                 if seq in pre:
                     continue              # a resume settled it at the start
@@ -1069,10 +1464,14 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
     rid = _open_run(note, force and not pre["ready"], pre.get("blocking"), only,
                     skip=skip, resume_of=resume_of, tidied=tidied)
     stopped = False
+    report = {}
     try:
         with _StopWatch() as watch:
-            failed, stopped = _run_lanes(rid, watch)
+            failed, stopped = _run_lanes(rid, watch, keep_going=True, report=report)
             stopped_note = watch.note() if stopped else ""
+        more = report.get("more") or {}
+        if more:
+            _left_open(rid, more)
         # A step that fails is not a day that failed. IT going down should not
         # stop Report scoring what Leads did — so every step runs, and the
         # verdict at the end says how many did not. A day he STOPPED is not a
@@ -1112,8 +1511,16 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
     except Exception as e:
         pushed = {"ok": False, "error": str(e)}
 
+    total = (status(rid).get("progress") or [0, len(STEPS)])[1] or len(STEPS)
     why = ("The day ran clean." if not failed
-           else f"The day ran; {failed} of {len(STEPS)} steps failed.")
+           else f"The day ran; {failed} of {total} steps failed.")
+    if more.get("rounds"):
+        why += (f" It went round {more['rounds']} more time(s) for the work still "
+                f"open, and stopped because {more.get('why') or 'it was done'}.")
+    elif more.get("why"):
+        why += f" No extra round was needed: {more['why']}."
+    if more.get("left"):
+        why += " Still open: " + " · ".join(more["left"][:5]) + "."
     if resume_of:
         why = ("Picked up where the last run left off — "
                f"{len(STEPS) - len(skip or {})} step(s) ran, the rest had already "
@@ -1128,7 +1535,7 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
     return {"ok": True, "ran": True, "run_id": rid, "orders": written,
             "rejected_orders": rejected, "failed_steps": failed,
             "notified": pushed.get("sent", 0), "preflight": pre, "why": why,
-            "resumed_from": resume_of, "tidied": tidied}
+            "resumed_from": resume_of, "tidied": tidied, "more": more}
 
 
 # ---------------------------------------------------------------------------
@@ -1224,8 +1631,11 @@ def status(run_id=None) -> dict:
             if not r:
                 return {"ok": True, "run": None, "steps": [],
                         "head": "the agency has never been run from the button"}
+            # The closing Overseer and Report run after any extra rounds, so
+            # they are listed after them too, whatever their numbers say.
             q = ("SELECT seq,label,module,status,started_at,ended_at,code,summary,lane"
-                 " FROM day_steps WHERE run_id=? ORDER BY seq")
+                 " FROM day_steps WHERE run_id=?"
+                 " ORDER BY CASE WHEN lane='close' THEN 1 ELSE 0 END, seq")
             steps = [dict(s) for s in c.execute(q, (r["id"],))]
             if r["status"] == "running" and _reap(c, r, steps):
                 r = c.execute("SELECT * FROM day_runs WHERE id=?", (r["id"],)).fetchone()
@@ -1246,6 +1656,10 @@ def status(run_id=None) -> dict:
         run["tidied"] = json.loads(run.get("tidied") or "null")
     except Exception:
         run["tidied"] = None
+    try:
+        run["left_open"] = json.loads(run.get("left_open") or "null")
+    except Exception:
+        run["left_open"] = None
     # How much Claude this run used, per sector, from Claude's own report of
     # each call — so "running only Content saves tokens" is something he can
     # see rather than take on trust.

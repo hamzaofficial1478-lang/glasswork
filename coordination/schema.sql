@@ -513,6 +513,8 @@ CREATE TABLE IF NOT EXISTS day_runs (
                                    -- was started with Resume
   tidied      TEXT,                -- json: what the clear-up at the start put
                                    -- right (coordination/leftovers.tidy)
+  left_open   TEXT,                -- json: the extra rounds it went for work
+                                   -- still open, and what was left and why
   steps_total INTEGER DEFAULT 0,
   steps_done  INTEGER DEFAULT 0,
   pid         INTEGER,             -- the process running it; see locks.pid

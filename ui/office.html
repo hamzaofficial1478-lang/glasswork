@@ -1808,6 +1808,19 @@ async function lookNow(){
   await openChanges(CHG.view);
 }
 
+async function changeAgain(id, act){
+  CHG.said = act==='retry_change' ? 'Trying it again…' : 'Dropping it…';
+  renderChanges();
+  let j=null;
+  try{
+    const r = await fetch('/api/review/act',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({do:act, ids:[id]})});
+    j = await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
+  CHG.said = (j && (j.head || j.error)) || 'No answer from the server.';
+  await openChanges(CHG.view);
+}
+
 function renderChanges(){
   const B = $('#chgBody'), d = CHG.data;
   $('#chgAllBtn').classList.toggle('on', CHG.view==='all');
@@ -1822,6 +1835,24 @@ function renderChanges(){
   if(!d.ok){
     B.innerHTML = H + `<div class="warnbox"><b>Could not read the log.</b><br>${esc(d.error||'no detail')}</div>`;
     return;
+  }
+  /* WHAT YOU APPROVED THAT DID NOT GO ON. "i asked to change the mail it did
+     not change the dummy mail on webiste" — a failed change was one red line in
+     the log and his yes was spent. Now it waits here with the reason, for a
+     Try again (tests first, as always) or a Drop it. */
+  const nd = d.not_done || [];
+  if(nd.length){
+    H += `<div style="margin-bottom:18px"><div class="gh etch" style="margin-bottom:8px">`
+      + `Approved, but not on your site yet</div>`
+      + nd.map(x=>`<div style="border-left:2px solid var(--danger);padding:2px 0 10px 12px;margin-bottom:10px">
+          <div style="font-size:12.5px;line-height:1.6">${esc(x.what)}</div>
+          <div style="font-size:11.5px;color:var(--danger);margin-top:3px;line-height:1.5">${esc(x.why||'it could not be carried out')}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:7px;align-items:center">
+            <button class="pbtn" style="width:auto;padding:6px 12px;margin:0" onclick="changeAgain(${Number(x.id)},'retry_change')">Try again</button>
+            <button class="pbtn" style="width:auto;padding:6px 12px;margin:0;border-color:var(--line2);background:var(--panel2);color:var(--muted)" onclick="changeAgain(${Number(x.id)},'drop_change')">Drop it</button>
+            <span style="font-size:10.5px;color:var(--faint)">${esc(x.when||'')}</span>
+          </div></div>`).join('')
+      + `</div>`;
   }
   const rows = d.changes || [];
   if(!rows.length){
@@ -2336,6 +2367,19 @@ function runProgress(){
   if(run.tidied && (run.tidied.done||[]).length) H+=`<p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6">
     Cleared up first: ${esc(run.tidied.done.join('; '))}.</p>`;
   H+=stopControl(R);
+  /* THE DAY'S LAST WORD. "the program should complete the task" — after the
+     main pass the day goes round again for what is still open, and when it
+     stops it says what is left and why, rather than leaving him a Run button. */
+  const lo=run.left_open;
+  if(lo && !run.running){
+    H+=`<div style="margin-top:12px;font-size:12px;line-height:1.65;color:var(--muted)">`
+      + (lo.rounds ? `Went round <b>${Number(lo.rounds)}</b> more time${lo.rounds===1?'':'s'} for the work still open. ` : '')
+      + (lo.why ? `Stopped because ${esc(lo.why)}.` : '') + `</div>`;
+    if((lo.left||[]).length){
+      H+=`<div class="warnbox" style="margin-top:10px"><b>Still open</b><ul style="margin:6px 0 0;padding-left:16px;line-height:1.65">`
+        + lo.left.map(l=>`<li>${esc(l)}</li>`).join('') + `</ul></div>`;
+    }
+  }
   H+=`</div><div class="pgroup">`;
   (R.steps||[]).forEach(s=>{
     const st=oneOf(s.status,['waiting','ok','idle','failed','running','skipped','stopped']);

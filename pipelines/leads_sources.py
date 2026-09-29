@@ -636,7 +636,8 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
         if lid is None:
             dupes.append(c.get("company"))
         else:
-            stored.append({"id": lid, "company": c.get("company")})
+            stored.append({"id": lid, "company": c.get("company"),
+                           "email": (c.get("email") or "").strip()})
     return {"stored": stored, "duplicates": dupes, "refused": refused,
             "personal_data_held": personal, "contacted": 0, "address_added": filled,
             "agent": agent, "sector": sector}

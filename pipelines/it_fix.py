@@ -236,7 +236,21 @@ def fix_wrong_domain(issue, ctx):
     right = _host_of(ctx.get("env", {}).get("SITE_URL") or "")
     if not right:
         return None
-    wrong = _wrong_domain_in(text, right)
+    # An instruction from him runs past every recipe, and an ADDRESS is the
+    # email recipe's to answer — reading the domain out of it here as well put
+    # the same request in front of him twice.
+    looked = _EMAIL.sub(" ", text) if issue.get("kind") == "task" else text
+    wrong = _wrong_domain_in(looked, right)
+    # HIS NAME WITH ANOTHER ENDING, OR HIS WORDS FOR IT. "our website domain is
+    # .ae while we have .com" names no domain in full, so the old trigger never
+    # fired and his instruction was closed with no recipe. When the wrong one
+    # is his own name (or he only describes it), the whole site is read and
+    # every mention put right in one change — addresses on the dead domain
+    # becoming the one he reads, not a made-up info@ on the right one.
+    brand = right.split(".")[0].lower()
+    if (wrong and brand and wrong.lower().split(".")[0] == brand) or \
+            (not wrong and issue.get("kind") == "task" and _asks_about_domain(looked)):
+        return _one_domain_plan(right)
     if not wrong:
         return None
     try:
@@ -286,8 +300,18 @@ def fix_dead_email(issue, ctx):
             "working one saved for me to put in its place.",
             ["Save it on /setup (BUSINESS_EMAIL), then run the Fixer again."],
             needs="the address you actually read")
-    wrong = _dead_email_in(text) or _dead_email_in(issue["detail"] or "")
-    if not wrong or wrong.lower() == right.lower():
+    named = [a for a in _EMAIL.findall(issue["detail"] or "")
+             if a.lower() != right.lower()]
+    wrong = named[0] if named else ""
+    # "change the dummy mail on the website" names no dummy — often only his
+    # real address, as what to put in its place. Reading the first address in
+    # the sentence took HIS address for the wrong one and found nothing to do.
+    # Named or not, what he means is every address on his own domains that is
+    # not the one he reads: the whole site, one change.
+    if issue.get("kind") == "task" and _asks_about_email(text) and \
+            (not wrong or _his_domain(wrong, right)):
+        return _one_email_plan(right)
+    if not wrong:
         return None
     try:
         plan = site_api.plan_replace(wrong, right)
@@ -307,6 +331,76 @@ def fix_dead_email(issue, ctx):
                     f"writes to it gets nothing back — the enquiry is simply "
                     f"lost. Yours is {right}."),
             "undo": "python -m pipelines.site_api --undo <page>"}
+
+
+_CHANGE = re.compile(r"\b(change|replace|fix|correct|update|swap|wrong|dummy|fake|"
+                     r"incorrect|old|remove|instead|while we have)\b", re.I)
+
+
+def _asks_about_domain(text):
+    """His words for 'the domain on my site is wrong', with or without a full name."""
+    t = text or ""
+    return bool(re.search(r"(?<![a-z0-9])\.(ae|com)\b|\bdomains?\b", t, re.I)
+                and _CHANGE.search(t))
+
+
+def _asks_about_email(text):
+    t = text or ""
+    return bool(re.search(r"\be-?mails?\b|\bmail\b", t, re.I) and _CHANGE.search(t))
+
+
+def _his_domain(addr, right):
+    """Is this address on one of his own domains, whatever the ending?"""
+    brand = (right.rsplit("@", 1)[-1].split(".")[0] if "@" in right else "").lower()
+    dom = addr.rsplit("@", 1)[-1].lower()
+    return bool(brand) and dom.split(".")[0] == brand
+
+
+def _one_domain_plan(right):
+    """Every mention of his name with another ending, made `right` — one change."""
+    try:
+        plan = site_api.plan_domains()
+    except Exception as e:
+        return _advice(f"Could not read the pages to count it: {e}",
+                       ["Check the Admin API address and token on /setup."])
+    if not plan.get("ok"):
+        return _advice("Could not work out the change: " + str(plan.get("error") or ""),
+                       ["Check the Admin API address and token on /setup."])
+    if not plan["times"]:
+        return {"how": "already_right",
+                "why": f"Your pages already say {right} everywhere I can read."}
+    where = ", ".join(f"{h['page']} ({sum(h['wrong'].values())}×)"
+                      for h in plan["pages"][:6])
+    return {"how": "call", "call": "use_one_domain",
+            "pages": [h["page"] for h in plan["pages"]][:12], "times": plan["times"],
+            "why": (f"{', '.join(sorted(plan['wrong']))} appears {plan['times']} time(s) "
+                    f"across {len(plan['pages'])} file(s) — {where}. That domain has no "
+                    f"DNS record, so every link and address using it points at "
+                    f"nothing. Your site is on {right}; addresses on the old domain "
+                    f"become {site_api.right_email()}."),
+            "undo": "python -m pipelines.site_api --undo --page <page>"}
+
+
+def _one_email_plan(right):
+    """Every address on his own domains that is not `right`, made `right` — one change."""
+    try:
+        plan = site_api.plan_emails()
+    except Exception as e:
+        return _advice(f"Could not read the pages to count it: {e}",
+                       ["Check the Admin API address and token on /setup."])
+    if not plan.get("ok"):
+        return _advice("Could not work out the change: " + str(plan.get("error") or ""),
+                       ["Check the Admin API address and token on /setup."])
+    if not plan["times"]:
+        return {"how": "already_right",
+                "why": f"Every address on your website I can read is already {right}."}
+    return {"how": "call", "call": "use_one_email",
+            "pages": [h["page"] for h in plan["pages"]][:12], "times": plan["times"],
+            "why": (f"{', '.join(sorted(plan['wrong']))} is on {len(plan['pages'])} "
+                    f"page(s), {plan['times']} time(s). Anyone who writes to it may "
+                    f"never reach you. Yours is {right}, so every one of them "
+                    f"becomes that."),
+            "undo": "python -m pipelines.site_api --undo --page <page>"}
 
 
 _HOST = re.compile(r"https?://([A-Za-z0-9.\-]+)")

@@ -912,10 +912,12 @@ def _tally(total: dict, part: dict) -> dict:
 
 def why_it_stopped(why, stored, target, *, area=None, rounds_run=0,
                    untried=0, examined=0, already=0, budget=0,
-                   dry_run=False) -> str:
+                   dry_run=False, with_email=False) -> str:
     """One plain sentence on how far the pass got and which constraint ran out."""
     got = (f"Found {stored} new of the {target} asked for (dry run, nothing stored)."
-           if dry_run else f"Stored {stored} of the {target} asked for.")
+           if dry_run else
+           f"Stored {stored} of the {target} asked for with an email address."
+           if with_email else f"Stored {stored} of the {target} asked for.")
     if why == "target":
         return got
     further = (f" {area} looks worked out on the map — name "
@@ -1012,7 +1014,7 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
                "no_site_found": [], "not_reached_this_pass": 0}
     enriched = {"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
                 "not_reached_this_pass": 0, "spend": 0.0}
-    n = {"rounds": 0, "examined": 0, "already": 0, "stored": 0}
+    n = {"rounds": 0, "examined": 0, "already": 0, "stored": 0, "mailable": 0}
 
     def search(seg, a):
         """One round's new businesses — or "refused" / "clock" if none came back."""
@@ -1055,11 +1057,23 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
         for k in got:
             got[k].extend(res.get(k) or [])
         n["stored"] = len(got["stored"])
+        n["mailable"] = sum(1 for x in got["stored"] if (x.get("email") or "").strip())
+
+    # WHAT COUNTS TOWARDS HIS NUMBER. When the pass reads websites for email
+    # addresses — every real pass — "20 leads" means 20 he can write to: the
+    # Leads room lists only those, and "i ask for 20 leads it just give 8" was
+    # a pass that stopped at 20 stored, 12 of them a phone number only.
+    def have():
+        return n["mailable"] if (read_sites and not dry_run) else n["stored"]
 
     def use_spares():
         """What earlier rounds had over their share, before giving up or going on."""
-        room = target - n["stored"]
-        if room > 0 and spare and time.time() < stop_looking:
+        # Until the number is met or the spares are gone: when only some sites
+        # publish an address, one helping of spares is rarely enough.
+        while spare and time.time() < stop_looking:
+            room = target - have()
+            if room <= 0:
+                break
             batch = spare[:room]
             del spare[:room]
             file(batch)
@@ -1067,7 +1081,7 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     def hunt(rounds, widening=False):
         barren = refusals = 0
         for seg, a in rounds:
-            if n["stored"] >= target:
+            if have() >= target:
                 return "target"
             if time.time() >= stop_looking:
                 return "clock"
@@ -1083,7 +1097,7 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
             refusals = 0
             if not fresh:
                 barren += 1
-                thin = n["stored"] < target / 2
+                thin = have() < target / 2
                 if barren >= (BARREN_LIMIT_THIN if thin else BARREN_LIMIT):
                     return "barren"
                 continue
@@ -1091,28 +1105,29 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
             if widening and a not in widened_to:
                 widened_to.append(a)
             fresh.sort(key=_reach_rank)
-            room = target - n["stored"]
+            room = target - have()
             take = fresh[:min(cap, room)] if cap else fresh[:room]
             spare.extend(fresh[len(take):])
             file(take)
-        return "target" if n["stored"] >= target else "rounds"
+        return "target" if have() >= target else "rounds"
 
     why = hunt(core)
     if why in ("barren", "rounds"):
         use_spares()
-        if n["stored"] >= target:
+        if have() >= target:
             why = "target"
         elif wider and time.time() < widen_by:
             why = hunt(wider, widening=True)
             if why in ("barren", "rounds"):
                 use_spares()
-                if n["stored"] >= target:
+                if have() >= target:
                     why = "target"
     # The wider emirates only count once the pass actually went there — a real
     # run cut off in its second search said "206 still untried", which was
     # true of every search it might conceivably make and useless to him.
     planned = len(core) + (len(wider) if widened_to else 0)
-    stop_line = why_it_stopped(why, n["stored"], target, area=area,
+    stop_line = why_it_stopped(why, have(), target, area=area,
+                               with_email=bool(read_sites and not dry_run),
                                rounds_run=n["rounds"],
                                untried=max(0, planned - n["rounds"]),
                                examined=n["examined"], already=n["already"],
@@ -1179,7 +1194,8 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     return {"ok": True, "agent": agent, "task": task["id"], "head": head,
             "errors": errors, "reach": reach, "enriched": enriched,
             "guessed_sites": guessed, "target": target,
-            "complete": n["stored"] >= target, "rounds": n["rounds"],
+            "complete": have() >= target, "rounds": n["rounds"],
+            "with_email": n["mailable"],
             "examined": n["examined"], "already_on_file": n["already"],
             "widened_to": widened_to, "stopped_because": why,
             "message": stop_line, **got, "contacted": 0, "sector": SECTOR}

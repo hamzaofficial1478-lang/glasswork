@@ -676,7 +676,45 @@ def recent(limit=30, page="", source="") -> dict:
         r["because"] = because(r)
     return {"ok": True, "changes": rows, "total": total,
             "pages_watched": watched, "last_look": last,
+            "not_done": not_done(),
             "head": _head(total, watched, last, rows)}
+
+
+def not_done(days=14) -> list:
+    """
+    Changes he approved that could not be carried out, newest first — each with
+    what it was and why, for a Try again or a Drop it.
+
+    "i asked to change the mail it did not change the dummy mail on webiste".
+    A failed change used to be a red line in this log and nothing more: his yes
+    was spent, and the only way back was to find the thing and ask for it all
+    over again.
+    """
+    since = _now() - days * 86400
+    out = []
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.row_factory = sqlite3.Row
+            rows = c.execute(
+                "SELECT id, kind, detail, note, applied_at, decided_at, queued_at"
+                " FROM site_queue WHERE status='failed'"
+                " AND COALESCE(applied_at, decided_at, queued_at, 0)>=?"
+                " ORDER BY COALESCE(applied_at, decided_at, queued_at) DESC LIMIT 20",
+                (since,)).fetchall()
+    except Exception:
+        return out
+    for r in rows:
+        try:
+            d = json.loads(r["detail"] or "{}")
+        except Exception:
+            d = {}
+        d = d if isinstance(d, dict) else {}
+        what = (d.get("title") or d.get("why") or d.get("found") or r["kind"] or
+                "a change to your website")
+        at = r["applied_at"] or r["decided_at"] or r["queued_at"] or _now()
+        out.append({"id": r["id"], "kind": r["kind"] or "", "what": str(what)[:220],
+                    "why": (r["note"] or "")[:300], "when": _ago(_now() - at)})
+    return out
 
 
 def _head(total, watched, last, rows):

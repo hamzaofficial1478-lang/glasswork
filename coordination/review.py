@@ -835,6 +835,38 @@ def act(do, ids, data=None) -> dict:
             + ("IT runs the tests, then puts it on your website — a few minutes."
                if started else "IT does it after the tests — press 'Put it live now' to start it."))}
 
+    if do in ("retry_change", "drop_change"):
+        # Any change he approved that could not be carried out — the email, the
+        # domain, a head block — tried again on his press, tests first as ever;
+        # or let go of. Pages keep their own buttons above.
+        done = []
+        with board._conn() as c:
+            board._migrate(c)
+            for i in ids:
+                r = c.execute("SELECT status FROM site_queue WHERE id=?", (i,)).fetchone()
+                if not r or r["status"] != "failed":
+                    continue
+                if do == "retry_change":
+                    c.execute("UPDATE site_queue SET status='approved', applied_at=NULL,"
+                              " decided_at=?, note='the owner pressed Try again' WHERE id=?",
+                              (board._now(), i))
+                else:
+                    c.execute("UPDATE site_queue SET status='rejected', decided_at=?,"
+                              " note='dropped by the owner after it could not be carried out'"
+                              " WHERE id=?", (board._now(), i))
+                done.append(i)
+        if not done:
+            return {"ok": False, "error": "That change is not waiting to be tried again."}
+        if do == "drop_change":
+            return {"ok": True, "decided": done, "head": f"Dropped {len(done)} change(s)."}
+        from coordination import chat_actions
+        started = chat_actions.start_release()
+        return {"ok": True, "decided": done, "head": (
+            f"Trying {len(done)} change(s) again. "
+            + ("IT runs the tests, then puts it on your website — a few minutes. "
+               "Website changes will show how it went."
+               if started else "IT does it after the tests, on its next pass."))}
+
     if do in ("rewrite", "discard_page"):
         done = []
         with board._conn() as c:

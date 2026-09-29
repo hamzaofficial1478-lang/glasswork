@@ -995,6 +995,136 @@ def use_one_email(agent=AGENT, s=None, dry_run=False) -> dict:
                                          + str(failed[0]["why"])} if failed else {})}
 
 
+# ---------------------------------------------------------------------------
+# ONE DOMAIN — his .com, wherever an old ending was left behind
+# ---------------------------------------------------------------------------
+#
+# "wrong seo wording like in code our website domain is .ae while we have .com
+#  domain"
+#
+# The site was built for worlddealtechnicalservices.ae and lives on the .com.
+# The .ae has no DNS at all, so every link, canonical, bit of markup and mailto
+# still naming it points at nothing — and tells Google the business lives
+# somewhere that does not exist. Same shape as the email: nobody needs to know
+# where each one is. Any mention of his own name with a different ending is
+# given the ending his site is actually served from (SITE_URL), on every page
+# and the shared header and footer, each read once and written once. An
+# ADDRESS on the dead domain becomes the address he reads, never a made-up
+# info@ on the .com. Other people's domains are never touched.
+
+def _right_host(s=None) -> str:
+    """'worlddealtechnicalservices.com' — where his site is served from, no www."""
+    try:
+        from coordination import site
+        host = site.site_host()
+    except Exception:
+        host = ""
+    host = (host or "").lower().strip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def _domain_re(brand):
+    return re.compile(r"(?<![A-Za-z0-9-])" + re.escape(brand)
+                      + r"\.((?:co|com|net|org)\.[a-z]{2}|[a-z]{2,6})(?![A-Za-z0-9-])",
+                      re.I)
+
+
+def _one_domain(html, brand, right_host, right_mail):
+    """(html with every other ending made his, {wrong domain: times})."""
+    rx = _domain_re(brand)
+    hits = {}
+
+    def count(dom):
+        hits[dom.lower()] = hits.get(dom.lower(), 0) + 1
+
+    def addr(m):
+        a = m.group(0)
+        dom = a.rsplit("@", 1)[1]
+        if rx.fullmatch(dom) and dom.lower() != right_host:
+            count(dom)
+            return right_mail
+        return a
+
+    def host(m):
+        dom = m.group(0)
+        if dom.lower() == right_host:
+            return dom
+        count(dom)
+        return right_host
+
+    new = _EMAIL_RE.sub(addr, html or "")
+    return rx.sub(host, new), hits
+
+
+def plan_domains(s=None) -> dict:
+    """Where his name appears with the wrong ending. Changes nothing."""
+    right, brand = _right_host(s), _brand(s)
+    if not right or not brand:
+        return {"ok": False, "error": "no website is saved, so there is nothing to look at"}
+    found, per_page = {}, []
+    for name, html in _walk(s):
+        if name is None:
+            return {"ok": False, "unreachable": html.get("unreachable"),
+                    "error": html.get("error") or "could not list your pages"}
+        _new, wrong = _one_domain(html, brand, right, right_email())
+        if wrong:
+            per_page.append({"page": name, "wrong": wrong})
+            for d, n in wrong.items():
+                found[d] = found.get(d, 0) + n
+    return {"ok": True, "right": right, "wrong": found, "pages": per_page,
+            "times": sum(found.values())}
+
+
+def use_one_domain(agent=AGENT, s=None, dry_run=False) -> dict:
+    """Every mention of his name with another ending, on every page, made his real one."""
+    right, brand, mail = _right_host(s), _brand(s), right_email()
+    if not right or not brand:
+        return {"ok": False, "error": "no website is saved, so there is nothing to change"}
+    refused = _may_write(agent)
+    if refused and not dry_run:
+        cid = _queue_for_him(agent, "use_one_domain", "site", {
+            "change": {"call": "use_one_domain"},
+            "why": f"{agent} wants every mention of your old domain on your website "
+                   f"to be {right}. Only the IT Releaser writes to your site, so it "
+                   "waits for your yes."})
+        return {"ok": False, "queued": cid, "error": refused}
+    changed, failed, swapped = [], [], {}
+    for name, html in _walk(s):
+        if name is None:
+            return {"ok": False, "unreachable": html.get("unreachable"),
+                    "error": html.get("error") or "could not list your pages",
+                    "changed": changed}
+        new, wrong = _one_domain(html, brand, right, mail)
+        if not wrong or new == html:
+            continue
+        times = sum(wrong.values())
+        if dry_run:
+            changed.append({"page": name, "times": times, "wrong": wrong})
+            continue
+        r = put_page(name, new, agent=agent, s=s, _action="replace", before=html,
+                     summary=(f"changed the domain to {right} ({times} "
+                              f"time{'s' if times != 1 else ''}: "
+                              + ", ".join(sorted(wrong)) + ")"))
+        if r.get("ok"):
+            changed.append({"page": name, "times": times, "backup": r.get("backup")})
+            for d, n in wrong.items():
+                swapped[d] = swapped.get(d, 0) + n
+        elif r.get("unreachable"):
+            return {"ok": False, "unreachable": True, "error": r.get("error"),
+                    "changed": changed}
+        else:
+            failed.append({"page": name, "why": r.get("error")})
+    total = sum(c["times"] for c in changed)
+    head = (f"your website now says {right} everywhere — changed {total} time(s) on "
+            f"{len(changed)} page(s): " + ", ".join(sorted(swapped))
+            if changed and not dry_run else
+            (f"would change {total} mention(s) on {len(changed)} page(s)" if dry_run
+             else f"your website already says {right} everywhere"))
+    return {"ok": not failed, "changed": changed, "failed": failed, "head": head,
+            "right": right, **({"error": f"{len(failed)} page(s) could not be written: "
+                                         + str(failed[0]["why"])} if failed else {})}
+
+
 def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:
     """
     Change this exact text to that, everywhere it appears. Releaser only.

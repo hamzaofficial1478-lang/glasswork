@@ -43,6 +43,7 @@ posted again — the cycle is safe to run on a timer.
 """
 import argparse
 import json
+import re
 import sqlite3
 
 from coordination import board, briefing, proposals as _props, state as _state, targets
@@ -459,6 +460,27 @@ def _who_should_act(item):
 SELF_STARTING = ("leads", "posts", "site_checks")
 
 
+_SITE_NOUN = re.compile(r"\b(web ?site|site|domain|code|page|pages|footer|header)\b"
+                        r"|(?<![a-z0-9])\.(ae|com)\b", re.I)
+_SITE_CHANGE = re.compile(r"\b(change|replace|fix|correct|update|remove|swap|wrong|"
+                          r"dummy|fake|incorrect|old)\b", re.I)
+# Work that happens on the website but is not a change to it — a post goes up
+# through its own road (Auditor, his yes, the Releaser), not the Fixer's.
+_NOT_A_CHANGE = re.compile(r"\b(write|post|posts|blog|article|publish)\b", re.I)
+
+
+def asks_for_site_change(text) -> bool:
+    """Does this order ask for something on his website to be changed?"""
+    t = text or ""
+    if not (_SITE_NOUN.search(t) and _SITE_CHANGE.search(t)):
+        return False
+    # "write a post and fix the old wording on the contact page" still asks for
+    # a change; "write a post for the website" alone does not.
+    return not _NOT_A_CHANGE.search(t) or bool(
+        re.search(r"\b(domain|e-?mail|mail|wording|code|footer|header)\b"
+                  r"|(?<![a-z0-9])\.(ae|com)\b", t, re.I))
+
+
 def _target(facts, name):
     """
     Where a job stands — and, when the owner has set no number, the suggested
@@ -617,6 +639,23 @@ def plan(facts: dict) -> list:
             "title": f"Owner's order: {text[:60]}",
             "detail": text, "desk": desk,
             "evidence": f"the owner set this order for {sector} today"})
+        # A CHANGE TO HIS WEBSITE IS IT'S, WHICHEVER BOX HE TYPED IT IN.
+        #
+        # "i asked to fix the seo gaps and wrong seo wording like in code our
+        #  website domain is .ae while we have .com domain" went in the SEO box.
+        # SEO read it, found gaps, and could not touch the site — nothing else
+        # ever saw the .ae half. The handbook's rule is that any live-site
+        # change goes through IT, so the same words go on IT's board too, for
+        # the Fixer, who turns them into a change he approves.
+        if sector != "IT" and asks_for_site_change(text):
+            out.append({
+                "sector": "IT", "risk": "green", "urgency": 1,
+                "title": f"Owner's order (website): {text[:52]}",
+                "detail": (text + f"\n\nHe typed this for {sector}. The change on the "
+                           "website itself is IT's: only IT touches the live site."),
+                "desk": "it-fixer",
+                "evidence": (f"the owner set this order for {sector} today and it asks "
+                             "for a change on the website")})
 
     crit = site.get("critical", 0)
     if crit:
@@ -815,6 +854,72 @@ def critic_check(candidates: list, facts: dict) -> tuple:
 # DELEGATE — post the surviving plan. The only thing the MD ever writes.
 # ---------------------------------------------------------------------------
 
+def top_up(agent="managing-director", dry_run=False) -> dict:
+    """
+    The MD's word between rounds of the same day: his leads number, when it
+    came back short, asked for again with only what is still to go.
+
+    "i ask for 20 leads it just give 8 leads and that was it". The morning's
+    job was closed by the collector with the 8 it found, and nothing ever asked
+    for the other 12. This is the MD asking — no model, no ranking, no inbox:
+    the day's plan was made and challenged this morning, and this re-asks only
+    for the part of it that came back short, grounded in the same count the
+    target screen shows. A collecting job already open is left alone.
+
+    Leads only, on purpose. A post counts once it is published, which waits on
+    his yes, so asking again would only pile more drafts in front of him; mail
+    is capped and never chased.
+    """
+    facts = {}
+    try:
+        facts["targets"] = targets.status()
+    except Exception as e:
+        return {"ok": False, "agent": agent, "error": f"could not read the targets: {e}"}
+    lead_t = next((j for j in facts["targets"].get("jobs") or []
+                   if j.get("name") == "leads"), {})
+    if not (lead_t.get("per_day") and lead_t.get("remaining")):
+        return {"ok": False, "idle": True, "agent": agent,
+                "error": "no leads number is short today — nothing to ask for"}
+    folded = {}
+    try:
+        for sector, text in (_props.orders() or {}).items():
+            if any(x["name"] == "leads" for x in _targets.from_words(text, apply=False)):
+                folded["leads"] = (sector, text)
+    except Exception:
+        folded = {}
+    job = _counted_job(
+        "Leads", "leads", lead_t, folded,
+        "Collect the rest of today's leads",
+        "Leads with an email address only — they are the ones the Mail room can "
+        "write to. Work the areas and segments not tried yet today; dedup before "
+        "storing; contact nobody.")
+    with sqlite3.connect(board.DB, timeout=30) as c:
+        waiting = c.execute(
+            "SELECT id FROM tasks WHERE sector='Leads' AND status IN ('open','in_progress')"
+            " AND COALESCE(desk,'')='leads-hunter'").fetchone()
+    if waiting:
+        return {"ok": False, "idle": True, "agent": agent, "task": waiting[0],
+                "error": "a collecting job is already on the Leads board"}
+    if dry_run:
+        return {"ok": True, "agent": agent, "dry_run": True, "would_post": job}
+    try:
+        tid = board.post_task("Leads", job["title"],
+                              job["detail"] + f"\n\n[MD evidence] {job['evidence']}",
+                              risk="green", created_by="MD", desk="leads-hunter")
+    except (board.SectorOff, board.BoardFull, board.DeskBusy) as e:
+        return {"ok": False, "agent": agent, "error": str(e)}
+    board.log_decision(
+        "md-top-up",
+        reasoning=(f"The leads target came back short: {lead_t.get('done_today', 0)} of "
+                   f"{lead_t['per_day']} with an email so far, so the collectors are "
+                   f"asked for the {lead_t['remaining']} still to go."),
+        expectation=f"up to {lead_t['remaining']} more leads with an email today",
+        confidence=0.6, evidence={"task_id": tid, "target": lead_t.get("per_day"),
+                                  "done_today": lead_t.get("done_today")})
+    return {"ok": True, "agent": agent, "posted": tid,
+            "head": f"asked Leads for the {lead_t['remaining']} leads still to find"}
+
+
 def run(agent="managing-director", dry_run=False) -> dict:
     with board.agent_run(agent) as run_row:
         out = _cycle(agent, dry_run)
@@ -980,7 +1085,15 @@ def as_text(out) -> str:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="The MD's daily planning cycle.")
     ap.add_argument("--dry-run", action="store_true", help="show the plan, post nothing")
+    ap.add_argument("--top-up", action="store_true",
+                    help="between rounds of one day: ask again for a leads number "
+                         "that came back short, and nothing else")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.top_up:
+        res = top_up(dry_run=a.dry_run)
+        print(json.dumps(res, default=str) if a.json
+              else (res.get("head") or res.get("error") or ""))
+        raise SystemExit(0)
     res = run(dry_run=a.dry_run)
     print(json.dumps(res, indent=2, default=str) if a.json else as_text(res))

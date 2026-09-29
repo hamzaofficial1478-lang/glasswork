@@ -29,6 +29,9 @@ never touches the board itself, and nothing here goes around the red lines:
   use_one_email   "the email on my website is wrong, ours is X". Every address
                   on his own domains made X, by the Releaser's use_one_email.
                   X is saved as his business address if he gave a new one.
+  use_one_domain  "the code says .ae but our domain is .com". Every mention of
+                  his name with another ending made the one his site is on,
+                  by the Releaser's use_one_domain.
 
 Nothing here sends a mail, spends money or offers a price.
 """
@@ -52,12 +55,15 @@ ACTION: {"do": "ticket", "title": "short title", "detail": "what is wrong or wan
 ACTION: {"do": "order", "sector": "IT|Content|SEO|Leads|Security|Report|Director", "title": "short title", "detail": "what to do"}
 ACTION: {"do": "replace", "find": "exact text now on his website", "with": "exact new text he gave"}
 ACTION: {"do": "use_one_email", "to": "the address he says is his"}
+ACTION: {"do": "use_one_domain"}
 
 - ticket: something wrong or to change on his website. It goes to IT's Fixer.
 - order: work for a sector. Use the right sector, not always your own.
 - replace: only when you know the exact text on the site and the exact new text.
 - use_one_email: when he says an email address on his website is wrong or a
   dummy. Every address on his own domains becomes the one he gives.
+- use_one_domain: when he says his website shows the wrong domain (an old .ae
+  where the site is on .com). Every mention becomes the domain his site is on.
 Only record what he actually asked for, once. In your reply say, in one line,
 what you recorded and what happens next. Do not invent ticket numbers — the
 system adds them."""
@@ -186,8 +192,26 @@ def do_use_one_email(a, agent, message):
             "— waiting for your yes under Waiting on you"), None
 
 
+def do_use_one_domain(a, agent, message):
+    from pipelines import site_api
+    right = site_api._right_host()
+    if not right:
+        return None, "no website is saved on Setup, so there is no right domain to use"
+    cid = board.queue_site_change(agent, "use_one_domain", {
+        "change": {"call": "use_one_domain"},
+        "title": f"Make every mention of your domain on your website {right}",
+        "why": f"The owner asked for this in the chat, to {agent}: \"{_clip(message, 200)}\""})
+    if asks_for_domain_fix(message):
+        _approve_and_go(cid)
+        return (f"change #{cid}: every mention of your old domain on your website becomes "
+                f"{right} — approved on your word; IT runs the tests and puts it on your "
+                "site now, and the change log will show each page"), None
+    return (f"change #{cid}: every mention of your old domain on your website becomes "
+            f"{right} — waiting for your yes under Waiting on you"), None
+
+
 DO = {"ticket": do_ticket, "order": do_order, "replace": do_replace,
-      "use_one_email": do_use_one_email}
+      "use_one_email": do_use_one_email, "use_one_domain": do_use_one_domain}
 
 
 # The one instruction he has had to give three times. If he plainly asks for
@@ -202,12 +226,29 @@ def asks_for_email_fix(message) -> bool:
     return all(p.search(message or "") for p in _EMAIL_FIX)
 
 
+# The same for the domain: "our website domain is .ae while we have .com".
+# Both endings, or the word domain with something wrong about it.
+_DOMAIN_FIX = (re.compile(r"(?<![A-Za-z0-9])\.(ae|com)\b|\bdomains?\b", re.I),
+               re.compile(r"\b(web ?site|site|code|page|pages|domain)\b", re.I),
+               re.compile(r"\b(dummy|wrong|fake|incorrect|old|replace|change|fix|update|"
+                          r"correct|while we have|instead of)\b", re.I))
+
+
+def asks_for_domain_fix(message) -> bool:
+    m = message or ""
+    return all(p.search(m) for p in _DOMAIN_FIX) and bool(
+        re.search(r"(?<![A-Za-z0-9])\.(ae|com)\b", m, re.I))
+
+
 def take(reply, agent, message) -> dict:
     """Carry out the ACTION lines in a reply. {reply, done, refused}."""
     text, actions = split(reply)
     if asks_for_email_fix(message) and not any(a.get("do") == "use_one_email"
                                                for a in actions):
         actions.append({"do": "use_one_email"})
+    if asks_for_domain_fix(message) and not any(a.get("do") == "use_one_domain"
+                                                for a in actions):
+        actions.append({"do": "use_one_domain"})
     done, refused = [], []
     for a in actions:
         fn = DO.get(str(a.get("do")))

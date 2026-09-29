@@ -436,7 +436,8 @@ def tests():
             "pipelines.release_tests",
             "pipelines.site_tests", "pipelines.seo_tests", "pipelines.audit_tests",
             "pipelines.answers_tests", "pipelines.intel_tests",
-            "pipelines.report_tests", "pipelines.run_tests"]
+            "pipelines.report_tests", "pipelines.run_tests",
+            "pipelines.keepgoing_tests"]
     # SAY WHAT ACTUALLY FAILED, NOT JUST WHICH FILE.
     #
     # "why program not giving the actaul fatal reason?"

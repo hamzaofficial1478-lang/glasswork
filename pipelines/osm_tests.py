@@ -1089,9 +1089,12 @@ def test_a_business_already_on_file_costs_nothing():
         real_enrich = O.enrich
 
         def fake_enrich(batch, limit=12, timeout=20, allow_paid=True, deadline=None):
-            read.extend(c["company"] for c in batch)
-            return {"sites_read": 0, "emails_found": 0, "no_email_on_site": [],
-                    "not_reached_this_pass": 0, "spend": 0.0}
+            # Each site read finds the address the business published.
+            for c in batch:
+                read.append(c["company"])
+                c["email"] = "info@" + c["company"].lower().replace(" ", "") + ".ae"
+            return {"sites_read": len(batch), "emails_found": len(batch),
+                    "no_email_on_site": [], "not_reached_this_pass": 0, "spend": 0.0}
         O.enrich = fake_enrich
         try:
             r = _hunt(_fake_map([]), read_sites=True)
@@ -1102,6 +1105,30 @@ def test_a_business_already_on_file_costs_nothing():
         check("five new ones stored all the same", len(r["stored"]), 5)
         check("and the headline counts it as on file",
               "1 already on file" in r["head"], True)
+
+    print("\n...and when sites are read, his number means leads with an email:")
+    with _Cabinet():
+        board.post_task("Leads", "Collect 4 signage leads in Dubai", "")
+        real_enrich = O.enrich
+        seen = {"n": 0}
+
+        def half_enrich(batch, limit=12, timeout=20, allow_paid=True, deadline=None):
+            # Every other site publishes an address; the rest are a phone only.
+            for c in batch:
+                seen["n"] += 1
+                if seen["n"] % 2:
+                    c["email"] = "info@" + c["company"].lower().replace(" ", "") + ".ae"
+            return {"sites_read": len(batch), "emails_found": 0,
+                    "no_email_on_site": [], "not_reached_this_pass": 0, "spend": 0.0}
+        O.enrich = half_enrich
+        try:
+            r = _hunt(_fake_map([]), read_sites=True)
+        finally:
+            O.enrich = real_enrich
+        check("four with an email, not four of anything", r["with_email"], 4)
+        check("so it stored more than four to get them", len(r["stored"]) > 4, True)
+        check("and says the number was of leads with an email",
+              "with an email address" in r["head"], True)
 
 
 def test_barren_rounds_end_the_hunt_and_say_so():

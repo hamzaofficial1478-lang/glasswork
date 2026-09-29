@@ -1272,6 +1272,9 @@ _ADDED_COLUMNS = (
     # the clear-up at its start put right. See coordination/leftovers.py.
     ("day_runs",     "resume_of",    "TEXT"),
     ("day_runs",     "tidied",       "TEXT"),
+    # "the program should complete the task" — the extra rounds the day went
+    # for what was still open, and what was left at the end and why.
+    ("day_runs",     "left_open",    "TEXT"),
     # One campaign mail for every lead (pipelines/campaign.py): which campaign
     # a queued mail is, and the designed version that goes with the text.
     ("outreach_queue", "campaign_id", "INTEGER"),
@@ -2528,7 +2531,8 @@ def note_site_change(change_id, note=""):
                   ((note or "")[:500], change_id))
 
 
-def reopen_site_changes(pattern_words, days=7):
+def reopen_site_changes(pattern_words, days=7,
+                        why="waiting — put back after your website did not answer"):
     """
     Put back to 'approved' the changes marked failed only because his site did
     not answer — his yes was never about the site being reachable. Returns ids.
@@ -2543,8 +2547,7 @@ def reopen_site_changes(pattern_words, days=7):
             note = (r["note"] or "").lower()
             if any(w in note for w in pattern_words):
                 c.execute("UPDATE site_queue SET status='approved', applied_at=NULL,"
-                          " note=? WHERE id=?",
-                          ("waiting — put back after your website did not answer", r["id"]))
+                          " note=? WHERE id=?", (why, r["id"]))
                 out.append(r["id"])
     return out
 

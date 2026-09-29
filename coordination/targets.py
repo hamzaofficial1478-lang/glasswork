@@ -41,12 +41,17 @@ DB = Path(__import__("os").environ.get("AGENCY_DB")
 # number stops being ambition and starts being a liability.
 JOBS = {
     "leads": {
-        "label": "New leads collected",
+        # WITH AN EMAIL. "i ask for 20 leads it just give 8 leads" — the Leads
+        # room lists only leads with an email (nobody else can be written to),
+        # so a count that included phone-only finds said 20 while he could see
+        # 8, and the day stopped as if the job were done.
+        "label": "New leads with an email",
         "unit": "leads",
         "ceiling": 200,
         "why_ceiling": "Collecting is cheap; the limit is how many you can actually "
                        "follow up. A pile nobody contacts is not an asset.",
-        "sql": "SELECT count(*) FROM leads WHERE found_at>=?",
+        "sql": ("SELECT count(*) FROM leads WHERE found_at>=?"
+                " AND COALESCE(email,'')!=''"),
         "does_it": "python -m pipelines.leads_hunt",
     },
     "mails": {

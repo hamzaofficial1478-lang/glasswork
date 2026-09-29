@@ -132,6 +132,9 @@ def _now():
 # Setup, fails loudly, and must not bounce back into the queue every pass.
 UNREACHABLE_WORDS = ("could not reach your site:", "siteresting",
                      "stopped answering this computer")
+# And when the only thing wrong was this program's own tests.
+RED_SUITE_WORDS = ("the test suite is red", "the test suite did not finish",
+                   "could not run the tests")
 
 
 def _unreachable(r) -> bool:
@@ -222,6 +225,37 @@ def when_site_answers(attempt=1, sleep=None) -> dict:
         return {"ok": True, "nothing": True}
     _ATTEMPT = attempt
     return run()
+
+
+def _reopen_misread_calls(days=30) -> list:
+    """
+    His "make every email on my website mine", approved from the chat and then
+    refused by an older plan_of that could not read the name it was queued
+    under. The routine is on the allow-list and his yes still stands, so it
+    goes back in the queue once, now that it can be read.
+    """
+    out = []
+    since = int(time.time()) - days * 86400
+    try:
+        with board._conn() as c:
+            for r in c.execute("SELECT id, detail, note FROM site_queue WHERE status='failed'"
+                               " AND COALESCE(applied_at, decided_at, queued_at, 0)>=?",
+                               (since,)).fetchall():
+                if "carries no change" not in (r["note"] or ""):
+                    continue
+                try:
+                    ch = (json.loads(r["detail"] or "{}") or {}).get("change") or {}
+                except Exception:
+                    continue
+                if isinstance(ch, dict) and str(ch.get("call") or "") in ALLOWED_CALLS:
+                    c.execute("UPDATE site_queue SET status='approved', applied_at=NULL,"
+                              " note=? WHERE id=?",
+                              ("waiting — put back: it was misread before, and your "
+                               "yes still stands", r["id"]))
+                    out.append(r["id"])
+    except Exception:
+        return out
+    return out
 
 
 def _could_not(plan, why):
@@ -340,8 +374,12 @@ def plan_of(row) -> dict:
                        "does not say which file — open it from the office and "
                        "paste it, or tell IT which file holds your header."}
 
-    if isinstance(change, dict) and change.get("run"):
-        name = str(change["run"])
+    # 'run' from the Fixer, 'call' from the chat and from site_api's own queue.
+    # Reading only 'run' is why "change the dummy mail on my website" was
+    # approved on his word and then refused here as a change nobody could
+    # carry out — the same routine, under the other name.
+    if isinstance(change, dict) and (change.get("run") or change.get("call")):
+        name = str(change.get("run") or change.get("call"))
         if name not in ALLOWED_CALLS:
             return {"do": "refuse", "issue_id": issue, "row": row,
                     "why": f"'{name}' is not something the Releaser knows how "
@@ -413,6 +451,7 @@ ALLOWED_CALLS = {
     "fix_address": "put the saved address where the placeholder is",
     "apply_schema": "put the business markup on the pages that should carry it",
     "use_one_email": "make every email address on the website the one he reads",
+    "use_one_domain": "make every mention of his old domain the one his site is on",
 }
 
 
@@ -551,6 +590,14 @@ def _work(agent, limit, dry_run, skip_tests):
         board.reopen_site_changes(UNREACHABLE_WORDS)
     except Exception:
         pass
+    _reopen_misread_calls()
+    # And the ones an older version marked failed only because the tests were
+    # red: his yes was never about the tests either.
+    try:
+        board.reopen_site_changes(RED_SUITE_WORDS,
+                                  why="waiting — put back after the tests were red")
+    except Exception:
+        pass
 
     waiting = board.approved_site_changes(limit=limit)
     if not waiting:
@@ -617,10 +664,24 @@ def _work(agent, limit, dry_run, skip_tests):
     if doable and not dry_run and not skip_tests:
         tests = tests_pass()
         if not tests["ok"]:
+            # HIS YES STANDS. A red suite is about this program, not about the
+            # change he approved, and marking every approval 'failed' threw his
+            # decisions away — "i asked to change the mail it did not change"
+            # — so each one would have had to be found and approved again.
+            # They wait, with the reason on them, and go on the first pass
+            # after the suite is green.
             for p in doable:
-                _could_not(p, tests["why"])
+                board.note_site_change(
+                    p["row"]["id"],
+                    "waiting — " + tests["why"].split("\n")[0][:300]
+                    + ". It goes on by itself once the tests pass.")
+            changelog.record(
+                "not_done", page="", agent=AGENT, ok=False,
+                error=tests["why"].split("\n")[0][:300],
+                summary=(f"{len(doable)} change(s) you approved are waiting — the "
+                         "tests must pass before anything goes on your site"))
             return {"ok": False, "agent": agent, "tests": tests,
-                    "error": tests["why"], "blocked": len(doable)}
+                    "error": tests["why"], "blocked": len(doable), "kept": len(doable)}
 
     applied, failed, waited = [], [], []
     if doable and not dry_run:

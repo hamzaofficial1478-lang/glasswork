@@ -262,16 +262,25 @@ def test_a_red_suite_stops_everything():
     check("nothing was written", site.writes, [])
     check("it names the suite that failed", "leads_tests" in r["error"], True)
     row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
-    check("the change is marked failed, not left as approved", row["status"], "failed")
+    # HIS YES STANDS. Marking it failed threw his decision away over a fault
+    # in this program — "i asked to change the mail it did not change" — and
+    # he would have had to find it and approve it all over again.
+    check("his approval is kept, not thrown away", row["status"], "approved")
     check("with the reason he can read", "test suite is red" in row["note"], True)
-    # AND IT HAS TO BE SOMEWHERE HE LOOKS. The approval queue lists 'pending',
-    # so a row going to 'failed' disappears off the screen he was watching — he
-    # pressed Approve, the item vanished, and he would assume it had gone on.
+    check("and when it will go", "once the tests pass" in row["note"], True)
+    # AND IT HAS TO BE SOMEWHERE HE LOOKS.
     log = changelog.recent()["changes"]
-    check("the failure is in the change log, not just the row", len(log), 1)
+    check("the wait is in the change log, not just the row", len(log), 1)
     check("marked as not having happened", log[0]["ok"], 0)
     check("in words he can act on",
-          "could not be carried out" in log[0]["summary"], True)
+          "waiting" in log[0]["summary"] and "tests must pass" in log[0]["summary"], True)
+
+    print("\n...and it goes by itself once the tests are green:")
+    with _Stub() as site:
+        r = R.run()
+    check("it went on this time", r["applied"], 1)
+    check("the change is on", _sql("SELECT status FROM site_queue WHERE id=?",
+                                   (cid,))[0]["status"], "applied")
 
     print("\n...but he is the tie-breaker, and using that is on the record:")
     _fresh_db()
