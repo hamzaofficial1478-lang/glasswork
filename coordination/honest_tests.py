@@ -158,6 +158,24 @@ def test_a_model_that_does_not_answer_is_a_warning_not_a_stop():
     check("and where the sector goes instead", "step down to Opus 4.8" in said, True)
 
 
+def test_phone_alerts_failing_does_not_stop_the_day():
+    """
+    "Not resumed. ntfy and telegram failed — you cannot be asked to approve
+     anything" — he approves in the office; a dead alert route is a warning.
+    """
+    print("\nPhone alerts failing is a warning, not a stop:")
+    real = preflight.integrations.test_all
+    preflight.integrations.test_all = lambda notify=False: [
+        {"integration": "ntfy", "ok": False}, {"integration": "telegram", "ok": False}]
+    try:
+        r, _ = _sweep(_team_status())
+    finally:
+        preflight.integrations.test_all = real
+    check("the day is not stopped over it", any("ntfy" in b for b in r["blocking"]), False)
+    check("and he is told approvals wait in the office",
+          any("Waiting on you" in w for w in r["warnings"]), True)
+
+
 def test_no_account_signed_in_stops_the_day():
     print("\nNobody signed in is the one thing that stops every sector:")
     r, tested = _sweep(_team_status(signed=False))

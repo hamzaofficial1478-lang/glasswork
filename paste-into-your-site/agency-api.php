@@ -362,7 +362,7 @@ if ($route === '/health' && $method === 'GET') {
            'site_root' => SITE_ROOT, 'php' => PHP_VERSION,
            'writable' => is_writable(SITE_ROOT),
            'mode' => 'full-access', 'warnings' => $warn,
-           'connector' => 5, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove']]);
+           'connector' => 6, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove']]);
 }
 
 // --- what pages are there --------------------------------------------------
@@ -941,14 +941,23 @@ function fetch_picture(string $url): string {
     return (string)@file_get_contents($url, false, $ctx, 0, IMAGE_MAX + 1);
 }
 
-/** Save a post's picture into the blog's picture folder. Returns its path from the site root. */
-function save_picture(array $img): string {
+/**
+ * Save a post's picture into the blog's picture folder. Returns [path from the
+ * site root, ''] — or ['', why] when it could not, so the post still goes in.
+ *
+ * "the picture could not be fetched" stopped whole posts: this server was
+ * asked to download the picture itself, and some hosts do not let a website
+ * reach out to the internet. The agency now sends the picture with the post
+ * ('data'), and a picture that still cannot be saved leaves the cover empty
+ * with the reason — it never stops the post.
+ */
+function save_picture(array $img): array {
     $dir = clean_rel((string)($img['dir'] ?? ''));
     $dir = rtrim($dir, '/');
-    if (strpos($dir, '..') !== false || strpos($dir, "\0") !== false) { fail(400, 'bad picture folder'); }
+    if (strpos($dir, '..') !== false || strpos($dir, "\0") !== false) { return ['', 'bad picture folder']; }
     foreach (explode('/', strtolower($dir)) as $part) {
         if ($part !== '' && in_array($part, IMAGE_NEVER_DIRS, true)) {
-            fail(403, "the agency never saves anything into $dir");
+            return ['', "the agency never saves anything into $dir"];
         }
     }
     // His blog's pictures may live under admin/, which is never written to.
@@ -958,28 +967,40 @@ function save_picture(array $img): string {
     }
     $real = realpath(SITE_ROOT . ($dir === '' ? '' : '/' . $dir));
     if ($real === false || strpos($real, SITE_ROOT) !== 0 || !is_dir($real)) {
-        fail(400, "the picture folder $dir is not there");
+        return ['', "the picture folder $dir is not there"];
+    }
+    $data = '';
+    $why = '';
+    if (!empty($img['data'])) {
+        $data = (string)base64_decode((string)$img['data'], true);
+        if ($data === '') { $why = 'the picture sent with the post was damaged'; }
     }
     $from = trim((string)($img['from'] ?? ''));
-    if (preg_match('#^https?://#i', $from)) {
-        $data = fetch_picture($from);
-    } else {
-        $rel = clean_rel($from);
-        $src = realpath(SITE_ROOT . '/' . $rel);
-        $data = ($src !== false && strpos($src, SITE_ROOT) === 0 && strpos($rel, '..') === false
-                 && preg_match('/\.(jpe?g|png|webp|gif)$/i', $rel)) ? (string)file_get_contents($src) : '';
+    if ($data === '' && $from !== '') {
+        if (preg_match('#^https?://#i', $from)) {
+            $data = fetch_picture($from);
+            if ($data === '') { $why = 'this server could not download it from ' . (string)parse_url($from, PHP_URL_HOST); }
+        } else {
+            $rel = clean_rel($from);
+            $src = realpath(SITE_ROOT . '/' . rawurldecode($rel));
+            $data = ($src !== false && strpos($src, SITE_ROOT) === 0 && strpos($rel, '..') === false
+                     && preg_match('/\.(jpe?g|png|webp|gif)$/i', $src) && is_file($src))
+                    ? (string)file_get_contents($src) : '';
+            if ($data === '') { $why = "no picture at $rel on your site"; }
+        }
     }
-    if ($data === '' || strlen($data) > IMAGE_MAX) { fail(422, 'the picture could not be fetched'); }
+    if ($data === '') { return ['', $why ?: 'no picture was given']; }
+    if (strlen($data) > IMAGE_MAX) { return ['', 'the picture is larger than 8 MB']; }
     $info = @getimagesizefromstring($data);
     $ext = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif']
            [$info['mime'] ?? ''] ?? '';
-    if ($ext === '') { fail(422, 'that is not a picture'); }
+    if ($ext === '') { return ['', 'what came back was not a picture']; }
     $base = trim(preg_replace('/[^a-z0-9]+/', '-', strtolower((string)($img['name'] ?? 'post'))), '-');
     $file = substr($base ?: 'post', 0, 60) . '-' . bin2hex(random_bytes(3)) . '.' . $ext;
     if (@file_put_contents($real . '/' . $file, $data) === false) {
-        fail(500, "could not save the picture into $dir — check that folder's permissions");
+        return ['', "could not save the picture into $dir — check that folder's permissions"];
     }
-    return ($dir === '' ? '' : $dir . '/') . $file;
+    return [($dir === '' ? '' : $dir . '/') . $file, ''];
 }
 
 if (in_array($route, ['/blog', '/blog-remove'], true)) {
@@ -1085,7 +1106,7 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
                     }
                 }
             }
-            reply(['ok' => true, 'connector' => 5, 'image_home' => $home,
+            reply(['ok' => true, 'connector' => 6, 'image_home' => $home,
                    'table' => $table, 'columns' => $cols, 'key' => $pk, 'slug_column' => $slugc,
                    'category_column' => $catc, 'categories' => $cats, 'title_column' => $titlec,
                    'recent' => $recent,
@@ -1123,8 +1144,14 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
             }
             $picture = '';
             $img = is_array($body['image'] ?? null) ? $body['image'] : null;
+            $picture_error = '';
             if ($img && in_array((string)($img['column'] ?? ''), $names, true)) {
-                $picture = save_picture($img);
+                [$picture, $picture_error] = save_picture($img);
+            }
+            if ($img && $picture === '' && in_array((string)($img['column'] ?? ''), $names, true)) {
+                // No cover — the post still goes in, and says why.
+                $row[(string)$img['column']] = $row[(string)$img['column']] ?? '';
+            } elseif ($img && in_array((string)($img['column'] ?? ''), $names, true)) {
                 $drop = clean_rel((string)($img['drop'] ?? ''));
                 $value = ($drop !== '' && str_starts_with($picture, $drop)) ? substr($picture, strlen($drop)) : $picture;
                 if (!empty($img['url_base'])) { $value = rtrim((string)$img['url_base'], '/') . '/' . $picture; }
@@ -1152,7 +1179,7 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
             $rec[] = ['id' => $id, 'key' => $pk, 'table' => $table, 'slug' => $slug,
                       'picture' => $picture, 'at' => date('c')];
             save_record($rec);
-            reply(['ok' => true, 'table' => $table, 'id' => $id, 'slug' => $slug, 'picture' => $picture,
+            reply(['ok' => true, 'table' => $table, 'id' => $id, 'slug' => $slug, 'picture' => $picture, 'picture_error' => $picture_error,
                    'display' => blog_display()]);
         }
 

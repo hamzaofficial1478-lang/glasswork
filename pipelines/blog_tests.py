@@ -214,6 +214,36 @@ def test_the_post_is_filed_where_it_belongs():
           BB.plan_row(s, other, "")["post"]["category_id"], "4")
 
 
+def test_an_old_connector_picture_failure_posts_without_the_cover():
+    print("\nAn older connector that stops on the picture: the post goes up without the cover:")
+    db = _fresh_db()
+    blog = _blog()
+    with sqlite3.connect(db) as c:
+        c.execute("INSERT INTO content_queue(id,title,type,brief,draft,status,created_at)"
+                  " VALUES(6,'Railing','blog',?,?,'for_blog',1)",
+                  (json.dumps(BRIEF), json.dumps({"title": blog["title"], "_for_blog": blog})))
+    sent = []
+
+    def call(path, method="GET", body=None, timeout=25, s=None):
+        if path == "/blog" and method == "POST":
+            sent.append(body.get("image"))
+            if body.get("image"):
+                return {"ok": False, "status": 422, "error": "the picture could not be fetched"}
+            return {"ok": True, "id": "12", "table": "blogs", "picture": ""}
+        return {"ok": True, "found": True, "id": "12"}
+    with mock.patch.object(site_api, "blog_schema", lambda slug="", s=None: {
+            "ok": True, **_schema(connector=5)} if not slug else {"ok": True, "found": True, "id": "12"}), \
+         mock.patch.object(site_api, "call", call), \
+         mock.patch.object(site_api, "settings", lambda env=None: {
+             "mode": "full", "base": "https://x/agency-api", "token": TOKEN,
+             "site": "https://www.example.ae"}):
+        r = BB.publish(6)
+    check("it went up", r["ok"], True)
+    check("tried with the picture, then without it", [bool(x) for x in sent], [True, False])
+    check("and he is told why the cover is missing",
+          any("could not be saved" in n for n in r["notes"]), True)
+
+
 def test_his_press_goes_through_it():
     print("\nHis press queues an approved change; the Releaser carries it:")
     from coordination import review
@@ -461,6 +491,24 @@ def test_the_real_connector_adds_a_post_and_takes_it_away():
                    (root / posixpath.normpath("admin/uploads/" + val)).is_file()), (True, True, True))
             site_api.remove_blog_post(r.get("id"), s=s)
 
+            print("\n...a picture that cannot be fetched never stops the post:")
+            import base64
+            r = site_api.add_blog_post({"title": "No cover", "slug": "no-cover", "content": "<p>x</p>",
+                                        "category_id": 1, "created_at": "__NOW__"},
+                                       {"column": "image", "from": "https://no-such-host.invalid/x.jpg",
+                                        "dir": "uploads/blog", "drop": "uploads/", "name": "no-cover"}, s=s)
+            check("the post goes in, and says why it has no cover",
+                  (r["ok"], bool(r.get("picture_error"))), (True, True))
+            site_api.remove_blog_post(r.get("id"), s=s)
+            r = site_api.add_blog_post({"title": "Sent cover", "slug": "sent-cover", "content": "<p>x</p>",
+                                        "category_id": 1, "created_at": "__NOW__"},
+                                       {"column": "image", "from": "https://no-such-host.invalid/x.jpg",
+                                        "data": base64.b64encode(PNG).decode(), "dir": "uploads/blog",
+                                        "drop": "uploads/", "name": "sent-cover"}, s=s)
+            check("a picture sent with the post is saved, without the server fetching anything",
+                  (r["ok"], r.get("picture", "").startswith("uploads/blog/sent-cover-")), (True, True))
+            site_api.remove_blog_post(r.get("id"), s=s)
+
             print("\n...Put it up again replaces it in one step:")
             review.act("blog_publish", [9])
             IR.run(skip_tests=True)
@@ -513,6 +561,7 @@ def main():
         for t in (test_the_row_is_built_from_his_own_table,
                   test_the_post_is_filed_where_it_belongs,
                   test_the_key_words_are_bold,
+                  test_an_old_connector_picture_failure_posts_without_the_cover,
                   test_his_press_goes_through_it,
                   test_an_old_connector_says_what_to_upload,
                   test_the_real_connector_adds_a_post_and_takes_it_away):

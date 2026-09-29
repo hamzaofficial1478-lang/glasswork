@@ -167,12 +167,18 @@ def sweep(quick=False, notify=False) -> dict:
     routes = [c for c in chan if c["integration"] in ("ntfy", "telegram")]
     live = sorted(c["integration"] for c in routes if c["ok"] is True)
     broken = sorted(c["integration"] for c in routes if c["ok"] is False)
+    # A WARNING, NOT A STOP. "Not resumed. ntfy and telegram failed" — the
+    # whole day refused to start or resume because his phone alerts were down,
+    # while every approval also waits for him in the office under "Waiting on
+    # you", where he answers them anyway. A dead alert route means he is not
+    # buzzed; it does not mean nothing can be approved.
     if not live:
-        blocking.append(
-            f"{' and '.join(broken)} failed — you cannot be asked to approve anything"
+        warn.append(
+            f"{' and '.join(broken)} failed — you will not get phone alerts; approvals "
+            "wait for you in the office under Waiting on you"
             if broken else
-            "No notification route is set up — set NTFY_TOPIC or approvals have "
-            "nowhere to go")
+            "No phone alerts are set up — approvals wait for you in the office under "
+            "Waiting on you (set NTFY_TOPIC on Setup to be buzzed as well)")
 
     warn += [f"shelf '{s['shelf']}' has one API and no fallback"
              for s in shelf if s["cover"] == SINGLE]

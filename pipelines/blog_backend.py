@@ -467,8 +467,29 @@ def publish(content_id, agent=site_api.AGENT, s=None) -> dict:
     if plan["problems"]:
         return {"ok": False, "error": "; ".join(plan["problems"])}
     undo = f"python -m pipelines.blog_backend --remove {int(content_id)}"
+    # THE PICTURE TRAVELS WITH THE POST. His server was asked to download it
+    # and could not — "the picture could not be fetched" — so this machine,
+    # which reached it when the post was written, sends the picture itself.
+    if plan["image"] and int(sch.get("connector") or 0) >= 6:
+        data = picture_bytes(plan["image"].get("from"), site)
+        if data:
+            import base64
+            plan["image"]["data"] = base64.b64encode(data).decode("ascii")
     r = site_api.add_blog_post(plan["post"], plan["image"], agent=agent, s=s,
                                title=blog.get("title"), undo_cmd=undo)
+    if not r.get("ok") and plan["image"] and "picture" in str(r.get("error") or "").lower():
+        # An older connector stops the whole post over its picture. The post
+        # matters more than the cover: in it goes, without one, and he is told.
+        why = str(r.get("error") or "")
+        plan["image"] = None
+        plan["notes"].append(f"the cover picture could not be saved ({why}) — the post went up "
+                             "without it; add one in your backend, or upload the new connector "
+                             "file and press Put it up again")
+        r = site_api.add_blog_post(plan["post"], None, agent=agent, s=s,
+                                   title=blog.get("title"), undo_cmd=undo)
+    if r.get("ok") and r.get("picture_error"):
+        plan["notes"].append(f"the cover picture could not be saved: {r['picture_error']} — "
+                             "the post went up without it")
     slug = plan["post"][plan["slug_column"]]
     if r.get("taken"):
         seen = site_api.blog_schema(slug=slug, s=s)
@@ -521,6 +542,27 @@ def remove(content_id, agent=site_api.AGENT, s=None) -> dict:
     _store(content_id, draft, "for_blog")
     return {"ok": True, "head": f"“{blog.get('title')}” is off your blog. It is back under "
                                 "Ready for your blog."}
+
+
+def picture_bytes(src, site="", most=5 * 1024 * 1024):
+    """The picture itself, fetched from this machine; None if it cannot be had."""
+    src = str(src or "").strip()
+    if not src:
+        return None
+    url = src if re.match(r"https?://", src, re.I) else (site or "").rstrip("/") + "/" + src.lstrip("/")
+    if not re.match(r"https?://", url, re.I):
+        return None
+    try:
+        import requests
+        r = requests.get(url, timeout=25, headers={
+            "User-Agent": "Mozilla/5.0 (glasswork-agency; fetching a blog picture)"})
+    except Exception:
+        return None
+    kind = (r.headers.get("Content-Type") or "").lower()
+    if r.status_code != 200 or not kind.startswith("image/") or not r.content \
+            or len(r.content) > most:
+        return None
+    return r.content
 
 
 def repost(content_id, agent=site_api.AGENT, s=None) -> dict:
