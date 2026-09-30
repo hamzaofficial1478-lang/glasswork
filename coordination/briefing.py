@@ -80,7 +80,8 @@ SECTORS = {
 # and what to do about it when it is empty.
 SHELF_MEANING = {
     "maps": ("collect real UAE businesses by area — the Hunter's main source",
-             "add a Google Places key on the 'maps' shelf, or set GOOGLE_PLACES_API_KEY"),
+             "add a TomTom key on Setup → Integrations (free, no Google account), or a "
+             "Google Places key on the 'maps' shelf"),
     "seo_data": ("monthly search volumes and automated rank tracking — the two "
                  "things the free sources genuinely cannot give you",
                  "entirely optional. SEO works without it: seo_intel.py ranks "

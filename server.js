@@ -397,6 +397,7 @@ const API_CAPABILITIES = [
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
+  "test-gsc", "test-tomtom",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {
@@ -476,6 +477,8 @@ const INTEGRATIONS = {
   email: { fields: ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "MAIL_FROM_NAME"], secret: ["SMTP_PASS"] },
   // Google Programmable Search: who ranks for a keyword, before a post is written.
   serp: { fields: ["GOOGLE_CSE_ID", "GOOGLE_CSE_KEY"], secret: ["GOOGLE_CSE_KEY"] },
+  // TomTom: businesses on the map, the alternative to Google Places.
+  maps: { fields: ["TOMTOM_API_KEY"], secret: ["TOMTOM_API_KEY"] },
 };
 
 // read .env into a { KEY: value } map (used only to report what's filled)
@@ -490,7 +493,7 @@ const ENV_KEYS = new Set([
   "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
   "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
-  "GOOGLE_PLACES_API_KEY", "GSC_PROPERTY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
+  "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GSC_PROPERTY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
   "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
   "CRAWLER_ON_OWN_SITE", "LEADS_ALLOW_INDIVIDUALS",
   "SEO_SEEDS", "SEO_AREAS", "SEO_STRIKING_TO", "SEO_W_AREA", "SEO_W_ENQUIRIES",
@@ -800,6 +803,10 @@ function readConnections() {
       on: has("ALGOLIA_APP_ID") && has("ALGOLIA_SEARCH_KEY") },
     { ic: "✉", name: "Email (SMTP)", sub: e.SMTP_HOST || "not set", on: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS") },
     { ic: "⌗", name: "Search Console", sub: gscLine(e).text, on: gscLine(e).ok },
+    { ic: "⌖", name: "Businesses on the map",
+      sub: [has("GOOGLE_PLACES_API_KEY") ? "Google Places" : "", has("TOMTOM_API_KEY") ? "TomTom" : ""]
+        .filter(Boolean).join(" + ") || "OpenStreetMap only (free) — add TomTom on Setup for more",
+      on: has("GOOGLE_PLACES_API_KEY") || has("TOMTOM_API_KEY") },
   ];
 }
 
@@ -930,7 +937,7 @@ app.post("/api/integration", async (req, res) => {
     const vals = b.values || {};
     const one = (v) => String(v == null ? "" : v).replace(/[\r\n]+/g, " ").trim();
 
-    if (group === "email" || group === "serp") {
+    if (group === "email" || group === "serp" || group === "maps") {
       const map = INTEGRATIONS[group];
       const partial = {};
       for (const f of map.fields) {
@@ -967,6 +974,12 @@ app.post("/api/integration", async (req, res) => {
 // keyword pass does, and says what Google answered.
 app.post("/api/integrations/test-gsc", async (_q, res) =>
   res.json(await pyModule("pipelines.seo_intel", ["--check-gsc"], 120000)));
+
+// ---- TomTom: one small real search -----------------------------------------
+// "add tom tom as alternate" — the map the Leads collector uses when Google
+// Places has no key or refuses it. Test asks TomTom for glass firms near Dubai.
+app.post("/api/integrations/test-tomtom", async (_q, res) =>
+  res.json(await pyModule("pipelines.leads_hunt", ["--test-tomtom"], 60000)));
 
 // ---- the Claude team: which Claude model each sector thinks with ----------
 // Every sector's brain is a Claude model (providers/claude_team.py). One row
@@ -1590,6 +1603,7 @@ app.get("/api/settings", async (_q, res) => {
                from: v("MAIL_FROM"), fromName: v("MAIL_FROM_NAME"), passSet: set("SMTP_PASS") },
       gsc: { property: v("GSC_PROPERTY"), serviceAccountSet: fs.existsSync(GSC_SA_PATH) },
       serp: { id: v("GOOGLE_CSE_ID"), keySet: set("GOOGLE_CSE_KEY") },
+      tomtom: { keySet: set("TOMTOM_API_KEY") },
     },
   });
 });

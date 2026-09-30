@@ -959,8 +959,8 @@ def why_it_stopped(why, stored, target, *, area=None, rounds_run=0,
     further = (f" {area} looks worked out on the map — name "
                + " or ".join(NEIGHBOURS.get(area, ())) + " in the order to go further."
                if area and NEIGHBOURS.get(area) else
-               " OpenStreetMap is thinner than Google in the UAE; a Places key is "
-               "what finds more.")
+               " OpenStreetMap is thinner than Google in the UAE; a maps key "
+               "(TomTom, or Google Places, on Setup) is what finds more.")
     if why == "barren":
         return (got + f" I ran out of new businesses: search after search turned up "
                 f"only ones we already hold ({already} already on file this pass)."
@@ -1054,8 +1054,8 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
                     "target": target, "rounds": 0, "stopped_because": "searched_today",
                     "error": (f"Every OpenStreetMap search I have ({len(tried_today)}) "
                               "was already made today, so there is nothing new to find "
-                              "there until tomorrow. A maps key finds more — see "
-                              "Setup → the maps shelf.")}
+                              "there until tomorrow. A maps key finds more — TomTom "
+                              "or Google Places, on Setup.")}
     origin = {}                 # which search each new business came from
 
     # A share per round only when the pass chose the segments. "Twenty signage

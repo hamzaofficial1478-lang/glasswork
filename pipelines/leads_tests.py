@@ -874,6 +874,199 @@ def test_the_address_that_reaches_a_buyer_comes_first():
           ls.contact_kind({"email": "ahmed.khan@x.ae"}), "personal")
 
 
+# ---------------------------------------------------------------------------
+# TOMTOM — the other map
+# ---------------------------------------------------------------------------
+#
+# "the google places api says its unavailable so what is the alternate that we
+#  can use? ... add tom tom as alternate"
+
+TT_RESULT = {
+    "type": "POI", "id": "tt1",
+    "poi": {"name": "Marina View Hotel", "phone": "+971 4 555 1234",
+            "url": "www.marinaviewhotel.ae", "categories": ["hotel"],
+            "classifications": [{"code": "HOTEL_MOTEL",
+                                 "names": [{"nameLocale": "en-US", "name": "hotel"}]}]},
+    "address": {"freeformAddress": "Al Marsa Street, Dubai Marina, Dubai"},
+    "position": {"lat": 25.08, "lon": 55.14},
+}
+
+
+def test_a_tomtom_listing_becomes_a_usable_lead():
+    print("\nA TomTom listing becomes the same lead a Google one does:")
+    c = lh._tomtom_to_candidate(TT_RESULT, "hotel", "Dubai Marina")
+    check("the business name", c["company"], "Marina View Hotel")
+    check("the phone", c["phone"], "+971 4 555 1234")
+    check("a website without http gets it, so it can be read for an email",
+          c["website"], "http://www.marinaviewhotel.ae")
+    check("the address", c["address"], "Al Marsa Street, Dubai Marina, Dubai")
+    check("it says where it came from", c["source"], "tomtom (search api)")
+    check("and what to sell it, same as a Google listing",
+          c["service"], lh._place_to_candidate(PLACE, "hotel", "Dubai Marina")["service"])
+    check("no email is invented — that comes off their own site", c["email"], "")
+
+
+def test_which_map_is_used():
+    print("\nWhich map the Hunter reads:")
+    real = (lh._places_key, lh._tomtom_key)
+    try:
+        lh._places_key = lambda: ("g-key", "GOOGLE_PLACES_API_KEY")
+        lh._tomtom_key = lambda: ("t-key", "TOMTOM_API_KEY")
+        check("both keys: Google first, TomTom behind it",
+              [m["kind"] for m in lh._map_sources()], ["google", "tomtom"])
+        lh._places_key = lambda: (None, None)
+        check("TomTom alone is enough", [m["kind"] for m in lh._map_sources()], ["tomtom"])
+        lh._tomtom_key = lambda: (None, None)
+        check("neither: no map, and OpenStreetMap carries on", lh._map_sources(), [])
+    finally:
+        lh._places_key, lh._tomtom_key = real
+    print("\n...and a TomTom key on the maps shelf is never mistaken for Google's:")
+    with _store.isolated():
+        _store.upsert_tool({"shelf": "maps", "name": "TomTom", "api_key": "tt-shelf",
+                            "base_url": "https://api.tomtom.com", "priority": 10})
+        check("it is TomTom's", lh._tomtom_key()[0], "tt-shelf")
+        check("and not Google's", lh._places_key()[0], None)
+        _store.upsert_tool({"shelf": "maps", "name": "Google Places", "api_key": "g-shelf",
+                            "priority": 20})
+        check("a Google tool beside it is Google's", lh._places_key()[0], "g-shelf")
+
+
+def _hunt_with(google=None, tomtom=None, g_err=None, results=None):
+    """A full hunt with the maps faked. Returns the run's result."""
+    real = (lh.search_places, lh.search_tomtom, lh._places_key, lh._tomtom_key, lh._get,
+            board.DB)
+    board.DB = _fresh_db()
+    calls = []
+    try:
+        lh._places_key = lambda: (google, "test") if google else (None, None)
+        lh._tomtom_key = lambda: (tomtom, "test") if tomtom else (None, None)
+        lh._get = lambda url, timeout=12: ""
+        lh.search_places = lambda q, a, k, limit=20, timeout=25: (
+            calls.append("google") or ([], g_err) if g_err else ([PLACE], None))
+        lh.search_tomtom = lambda q, a, k, limit=50, timeout=25: (
+            calls.append("tomtom") or (results if results is not None else [TT_RESULT], None))
+        r = lh.run(agent="leads-hunter", segment="hotel", area="Dubai Marina",
+                   max_searches=2, enrich_sites=False)
+        r["_calls"] = calls
+        return r
+    finally:
+        (lh.search_places, lh.search_tomtom, lh._places_key, lh._tomtom_key, lh._get,
+         board.DB) = real
+
+
+def test_the_hunter_collects_with_tomtom():
+    print("\nNo Google key, a TomTom key: the Hunter collects with TomTom:")
+    r = _hunt_with(tomtom="t-key")
+    check("it ran", (r["ok"], r.get("critic")), (True, "passed"))
+    check("on TomTom", r["map"], "TomTom")
+    check("Google was never asked", "google" in r["_calls"], False)
+    check("the lead was stored", r["stored"], 1)
+    check("and the summary says which map", "TomTom" in r["summary"], True)
+
+    print("\n...Google refusing its key hands the pass to TomTom, this search included:")
+    r = _hunt_with(google="g-key", tomtom="t-key",
+                   g_err=lh.places_refusal(403, "SERVICE_DISABLED Places API (New) has not "
+                                                "been used"))
+    check("TomTom took over", r["map"], "TomTom")
+    check("Google was asked once, not on every search", r["_calls"].count("google"), 1)
+    check("the hand-over is written down", bool(r["switched"]), True)
+    check("  saying why", "Places API (New)" in r["switched"][0], True)
+    check("and the leads still came in", r["stored"], 1)
+
+    print("\n...a listing nobody can reach is left out, not the whole batch:")
+    silent = {**TT_RESULT, "id": "tt2",
+              "poi": {**TT_RESULT["poi"], "name": "No Phone Trading", "phone": "", "url": ""}}
+    r = _hunt_with(tomtom="t-key", results=[TT_RESULT, silent])
+    check("the reachable one is stored", r["stored"], 1)
+    check("the other is counted as left out", r["unreachable_left_out"], 1)
+
+
+class _TomTomStandIn:
+    """TomTom's two endpoints on this machine, recording what was asked."""
+
+    def __init__(self, status=200):
+        import http.server
+        import json as _json
+        import urllib.parse as _up
+        self.asked, outer = [], self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                u = _up.urlparse(self.path)
+                outer.asked.append((_up.unquote(u.path), dict(_up.parse_qsl(u.query))))
+                if status != 200:
+                    body = b'{"errorText": "Forbidden"}'
+                    self.send_response(status)
+                elif "/geocode/" in u.path:
+                    body = _json.dumps({"results": [{
+                        "position": {"lat": 25.08, "lon": 55.14},
+                        "viewport": {"topLeftPoint": {"lat": 25.10, "lon": 55.12},
+                                     "btmRightPoint": {"lat": 25.06, "lon": 55.16}}}]}).encode()
+                    self.send_response(200)
+                else:
+                    body = _json.dumps({"results": [TT_RESULT, {"type": "Street"}]}).encode()
+                    self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.srv.server_address[1]}/search/2"
+
+    def __enter__(self):
+        self.real = (lh.TOMTOM_BASE, dict(lh._TT_WHERE))
+        lh.TOMTOM_BASE = self.url
+        lh._TT_WHERE.clear()
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *a):
+        self.srv.shutdown()
+        self.srv.server_close()
+        lh.TOMTOM_BASE = self.real[0]
+        lh._TT_WHERE.clear()
+        lh._TT_WHERE.update(self.real[1])
+
+
+def test_the_tomtom_calls_are_the_right_ones():
+    print("\nThe real TomTom calls, against a stand-in on this machine:")
+    with _TomTomStandIn() as tt:
+        found, err = lh.search_tomtom("hotel", "Dubai Marina", "t-key")
+        again, _e = lh.search_tomtom("gym", "Dubai Marina", "t-key")
+    check("no error", err, None)
+    check("businesses only — a street is not a lead", len(found), 1)
+    geo = [a for a in tt.asked if "/geocode/" in a[0]]
+    poi = [a for a in tt.asked if "/poiSearch/" in a[0]]
+    check("the area is placed once, not once per search", len(geo), 1)
+    check("  as a UAE place", geo[0][0].endswith("Dubai Marina, United Arab Emirates.json"), True)
+    check("two business searches", len(poi), 2)
+    check("  for the trade asked for", poi[0][0].endswith("/poiSearch/hotel.json"), True)
+    check("  inside the UAE", poi[0][1].get("countrySet"), "AE")
+    check("  around the area, not the whole country",
+          all(k in poi[0][1] for k in ("lat", "lon", "radius")), True)
+    check("  a district-sized circle", 3000 <= int(poi[0][1]["radius"]) <= 6000, True)
+    check("  with his key", poi[0][1].get("key"), "t-key")
+
+    print("\n...and a refusal says what to do about it:")
+    with _TomTomStandIn(status=403):
+        found, err = lh.search_tomtom("hotel", "Dubai", "bad-key")
+    check("nothing found", found, [])
+    check("it names where to check the key", "developer.tomtom.com" in (err or ""), True)
+    check("an allowance used up says it carries on tomorrow",
+          "tomorrow" in lh.tomtom_refusal(429, "Over the limit"), True)
+    real = lh._tomtom_key
+    lh._tomtom_key = lambda: (None, None)
+    try:
+        check("Test with no key says to save one first",
+              "Save" in lh.tomtom_check()["why"], True)
+    finally:
+        lh._tomtom_key = real
+
+
 def _main():
     test_the_address_that_reaches_a_buyer_comes_first()
     test_the_target_list_is_the_whole_market()
@@ -891,6 +1084,10 @@ def _main():
     test_hunt_without_a_key_explains_itself()
     test_the_collection_task_reaches_the_collector_that_can_do_it()
     test_hunt_stores_screens_and_dedupes()
+    test_a_tomtom_listing_becomes_a_usable_lead()
+    test_which_map_is_used()
+    test_the_hunter_collects_with_tomtom()
+    test_the_tomtom_calls_are_the_right_ones()
     test_never_collected_twice()
     test_the_mail_is_about_one_service()
     test_the_rendered_mail_is_readable()

@@ -272,6 +272,11 @@ def sector(key, task, env=None, shelf=None) -> dict:
     # ---- the shelves it borrows ----------------------------------------
     for name, required in SHELVES.get(key, {}).items():
         s = shelf.get(name, {"items": 0, "working": 0})
+        # A maps key saved in Settings (TomTom, or Google Places) is the maps
+        # shelf filled, whichever screen he saved it on.
+        if name == "maps" and s["items"] == 0 and any(
+                (env.get(k) or "").strip() for k in ("TOMTOM_API_KEY", "GOOGLE_PLACES_API_KEY")):
+            continue
         if s["items"] == 0:
             if required:
                 state = BLOCKED

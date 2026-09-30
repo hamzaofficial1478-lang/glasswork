@@ -214,6 +214,21 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="btnrow"><button class="pbtn" id="saveCse">Save Google search</button><span class="inl dim" id="cseMsg"></span></div>
       </div>
 
+      <div class="cred">
+        <div class="cred-h"><b>TomTom — businesses on the map</b></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Where Leads finds UAE businesses by area: name, trade,
+          address, phone and website — then reads each website for its email. The alternative to Google Places, with
+          no Google account needed. Free up to a daily allowance, which covers this business's searching. If you also
+          have a Google Places key, Google is tried first and TomTom takes over whenever Google refuses.</p>
+        <ol class="hint" style="margin:0 0 10px;padding-left:18px;line-height:1.7">
+          <li>Go to <code>developer.tomtom.com</code> and create a free account.</li>
+          <li>Open <b>Dashboard → Keys</b>. Copy your key (or press <b>Create key</b> and make sure <b>Search API</b> is ticked).</li>
+          <li>Paste it below, press <b>Save</b>, then <b>Test</b>.</li>
+        </ol>
+        <div class="field"><label>TomTom API key</label><input id="tt_key" type="password" placeholder="paste key"></div>
+        <div class="btnrow"><button class="pbtn" id="saveTomtom">Save TomTom</button><button class="mini" id="testTomtom">Test</button><span class="inl dim" id="ttMsg"></span></div>
+      </div>
+
     </div>
   </section>
 
@@ -634,7 +649,7 @@ function fmtDur(s){ s=Math.max(0,s|0); if(s<60)return s+'s'; const m=Math.floor(
    sent the owner hunting for keys he did not need. */
 const SHELF_EMPTY={
   seo_data:'empty, and that is fine \u2014 SEO runs on Search Console, autocomplete and your own enquiries at no cost. A key here adds search volumes and rank tracking on top.',
-  maps:'empty \u2014 the Hunter needs a Google Places key to find UAE businesses by area.',
+  maps:'empty \u2014 fine if TomTom is saved under Integrations. Otherwise Leads finds businesses on OpenStreetMap only; TomTom or a Google Places key finds more.',
   stock_images:'empty \u2014 add Pexels, with Pixabay under it as the fallback, so Content has pictures.',
   crawler:'empty \u2014 Zyte reads rival sites and JavaScript pages. Optional: plain fetches still work without it.',
   email:'no route configured \u2014 set SMTP up under Integrations, or outreach has no way to send.',
@@ -854,6 +869,17 @@ async function testChannel(which, btn, msg, notify){
   else                  inl(msg,'err','✕ '+r.detail);
 }
 $('#testEmail').onclick=()=>testChannel('email',$('#testEmail'),$('#emailMsg'));
+$('#saveTomtom').onclick=()=>saveIntegration('maps',{
+  TOMTOM_API_KEY:$('#tt_key').value.trim()
+},$('#saveTomtom'),$('#ttMsg'),['tt_key']);
+$('#testTomtom').onclick=async ()=>{
+  const btn=$('#testTomtom'), msg=$('#ttMsg');
+  btn.disabled=true; inl(msg,'dim','Asking TomTom…');
+  const j=await api('POST','/api/integrations/test-tomtom',{});
+  btn.disabled=false;
+  if(j && j.ok) inl(msg,'ok','✓ '+(j.why||'working'));
+  else inl(msg,'err','✕ '+((j&&(j.why||j.error))||'no answer'));
+};
 $('#testGsc').onclick=async ()=>{
   const btn=$('#testGsc'), msg=$('#gscMsg');
   btn.disabled=true; inl(msg,'dim','Asking Google…');
@@ -995,6 +1021,7 @@ async function loadSettings(){
   const serp=ig.serp||{};
   $('#cse_id').value=serp.id||'';
   if(serp.keySet) $('#cse_key').placeholder='saved — leave blank to keep';
+  if((ig.tomtom||{}).keySet) $('#tt_key').placeholder='saved — leave blank to keep';
 }
 
 async function loadProviders(){

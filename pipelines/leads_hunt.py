@@ -78,19 +78,68 @@ JUNK_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".css", ".js")
 # 1. the map
 # ---------------------------------------------------------------------------
 
+def _setting(name) -> str:
+    """The environment first, then the saved settings (.env) — as everywhere else."""
+    v = (os.environ.get(name) or "").strip()
+    if v:
+        return v
+    try:
+        from providers import integrations
+        return (integrations.read_env().get(name) or "").strip()
+    except Exception:
+        return ""
+
+
+def _is_tomtom(tool) -> bool:
+    return "tomtom" in f"{tool.get('name', '')} {tool.get('base_url', '')}".lower()
+
+
 def _places_key():
-    """The Places key, from the shelf if it is on there, else the environment."""
+    """The Google Places key, from the shelf if it is on there, else the settings."""
     try:
         from providers import store
         for t in store.tools_on_shelf("maps"):
             k = (t.get("api_key") or "").strip()
-            if k:
+            if k and not _is_tomtom(t):
                 return k, t.get("name", "maps shelf")
     except Exception:
         pass
-    k = (os.environ.get("GOOGLE_PLACES_API_KEY")
-         or os.environ.get("GOOGLE_MAPS_API_KEY") or "").strip()
+    k = _setting("GOOGLE_PLACES_API_KEY") or _setting("GOOGLE_MAPS_API_KEY")
     return (k, "GOOGLE_PLACES_API_KEY") if k else (None, None)
+
+
+def _tomtom_key():
+    """The TomTom key: a TomTom tool on the maps shelf, else TOMTOM_API_KEY."""
+    try:
+        from providers import store
+        for t in store.tools_on_shelf("maps"):
+            k = (t.get("api_key") or "").strip()
+            if k and _is_tomtom(t):
+                return k, t.get("name", "TomTom")
+    except Exception:
+        pass
+    k = _setting("TOMTOM_API_KEY")
+    return (k, "TOMTOM_API_KEY") if k else (None, None)
+
+
+def _map_sources() -> list:
+    """
+    Every map the Hunter can read, in the order it tries them.
+
+    "google places api says its unavailable ... add tom tom as alternate".
+    Google first when it has a key — it carries the most UAE listings — and
+    TomTom behind it: used on its own when there is no Google key, and taken
+    over mid-pass the moment Google refuses, so one broken key never costs the
+    day its leads. With neither, OpenStreetMap (its own step) still runs.
+    """
+    out = []
+    k, where = _places_key()
+    if k:
+        out.append({"kind": "google", "key": k, "from": where, "label": "Google Places"})
+    k, where = _tomtom_key()
+    if k:
+        out.append({"kind": "tomtom", "key": k, "from": where, "label": "TomTom"})
+    return out
 
 
 def search_places(query, area, key, limit=20, timeout=25):
@@ -152,6 +201,150 @@ def places_refusal(code, detail) -> str:
                 "allow the Places API (New) and no website restriction for a key used "
                 f"from this computer. HTTP {code}.")
     return f"HTTP {code} from the Places API — {detail[:300]}"
+
+
+# ---------------------------------------------------------------------------
+# 1b. the other map — TomTom
+# ---------------------------------------------------------------------------
+#
+# TomTom's Search API lists UAE businesses with a name, category, address, phone
+# and often a website — the same four things Places gives, from a different
+# survey, with a free daily allowance and no Google Cloud project behind it.
+# Two calls: where the area is (once per area, kept for the pass), then the
+# businesses of that kind around it.
+
+TOMTOM_BASE = "https://api.tomtom.com/search/2"
+TOMTOM_PAGE = 50          # results per search; TomTom allows up to 100
+_TT_WHERE = {}            # area -> (lat, lon, radius metres), for this process
+
+
+def _tomtom_get(path, params, timeout=25):
+    url = f"{TOMTOM_BASE}/{path}?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": UA,
+                                               "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def tomtom_refusal(code, detail) -> str:
+    """TomTom's refusal, in words he can act on."""
+    d = (detail or "").lower()
+    if code in (401, 403) or "forbidden" in d or "not authorized" in d:
+        return ("TomTom refused the key — check it at developer.tomtom.com → "
+                "Dashboard → Keys (copy it again), and that the Search API is "
+                f"ticked for that key. HTTP {code}.")
+    if code == 429 or "over the limit" in d or "quota" in d:
+        return ("TomTom's free allowance is used up for now (too many searches "
+                "today, or too many at once). It carries on by itself tomorrow; "
+                f"OpenStreetMap keeps collecting meanwhile. HTTP {code}.")
+    return f"HTTP {code} from TomTom — {(detail or '')[:300]}"
+
+
+def _tomtom_where(area, key, timeout=25):
+    """(lat, lon, radius) for an area name, asked once per area. None if unknown."""
+    if area in _TT_WHERE:
+        return _TT_WHERE[area]
+    d = _tomtom_get("geocode/" + urllib.parse.quote(f"{area}, United Arab Emirates",
+                                                    safe="") + ".json",
+                    {"key": key, "countrySet": "AE", "limit": 1}, timeout)
+    res = (d.get("results") or [])
+    if not res or not (res[0].get("position") or {}).get("lat"):
+        _TT_WHERE[area] = None
+        return None
+    pos = res[0]["position"]
+    is_emirate = area.strip().lower() in {e.lower() for e in EMIRATES}
+    radius = 30000 if is_emirate else 6000
+    vp = res[0].get("viewport") or res[0].get("boundingBox") or {}
+    try:
+        tl, br = vp["topLeftPoint"], vp["btmRightPoint"]
+        # half the diagonal of the area's own box, in metres, kept sensible
+        dlat = abs(tl["lat"] - br["lat"]) * 111000
+        dlon = abs(tl["lon"] - br["lon"]) * 101000
+        radius = int(min(40000, max(3000, ((dlat ** 2 + dlon ** 2) ** 0.5) / 2)))
+    except Exception:
+        pass
+    _TT_WHERE[area] = (pos["lat"], pos["lon"], radius)
+    return _TT_WHERE[area]
+
+
+def search_tomtom(query, area, key, limit=TOMTOM_PAGE, timeout=25):
+    """
+    One TomTom search for this kind of business around an area. Returns
+    (results, error), results in TomTom's own shape.
+    """
+    try:
+        where = _tomtom_where(area, key, timeout)
+        params = {"key": key, "countrySet": "AE", "language": "en-GB",
+                  "limit": min(int(limit or TOMTOM_PAGE), 100)}
+        if where:
+            params.update({"lat": where[0], "lon": where[1], "radius": where[2]})
+            q = query
+        else:
+            q = f"{query} {area}"          # an area TomTom could not place
+        d = _tomtom_get("poiSearch/" + urllib.parse.quote(q, safe="") + ".json",
+                        params, timeout)
+        return [r for r in (d.get("results") or []) if r.get("poi")], None
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:600]
+        except Exception:
+            detail = ""
+        return [], tomtom_refusal(e.code, detail)
+    except Exception as e:
+        return [], f"TomTom did not answer: {e}"
+
+
+def _tomtom_to_candidate(r, segment, area):
+    """Flatten one TomTom result into the shape the cabinet stores."""
+    poi = r.get("poi") or {}
+    addr = r.get("address") or {}
+    name = (poi.get("name") or "").strip()
+    site = (poi.get("url") or "").strip()
+    if site and not re.match(r"^https?://", site, re.I):
+        site = "http://" + site
+    cats = [str(c) for c in (poi.get("categories") or []) if c]
+    names = [n.get("name") for cl in (poi.get("classifications") or [])
+             for n in (cl.get("names") or [])
+             if n.get("name") and str(n.get("nameLocale", "")).lower().startswith("en")]
+    cat = cats[0] if cats else (names[0] if names else "")
+    svc, why = services.match_service(name, cat, " ".join(cats + names), segment=segment)
+    return {
+        "company": name,
+        "name": "",
+        "email": "",                     # comes from their own site, below
+        "phone": (poi.get("phone") or "").strip(),
+        "website": site,
+        "address": (addr.get("freeformAddress") or "").strip(),
+        "area": area,
+        "segment": segment,
+        "category": cat,
+        "source": "tomtom (search api)",
+        "service": svc,
+        "service_label": services.label(svc),
+        "service_reason": why,
+        "reviews": 0,
+        "status": "",                    # TomTom lists open businesses only
+    }
+
+
+def tomtom_check() -> dict:
+    """
+    One small real search, for the Test button on Setup: does TomTom answer
+    with this key, and does it know UAE businesses?
+    """
+    key, where = _tomtom_key()
+    if not key:
+        return {"ok": False, "why": "No TomTom key saved yet — paste it in the TomTom "
+                                    "box and press Save first."}
+    found, err = search_tomtom("glass", "Dubai", key, limit=5)
+    if err:
+        return {"ok": False, "why": err}
+    names = [((r.get("poi") or {}).get("name") or "") for r in found][:5]
+    return {"ok": True, "found": len(found), "sample": names,
+            "why": (f"TomTom answered — {len(found)} glass business(es) near Dubai, e.g. "
+                    + ", ".join(n for n in names[:3] if n) if found else
+                    "TomTom answered, but found nothing for 'glass' near Dubai — the "
+                    "key works; try a run and see what it collects.")}
 
 
 def _place_to_candidate(p, segment, area):
@@ -514,12 +707,12 @@ def run(agent="leads-hunter", segment=None, area=None, limit=20, per_segment=1,
         # A desk that cannot do the work without a key does not pick up the
         # work. It says why, as before, and leaves the task on the board for
         # the collector that can.
-        if not dry_run and not _places_key()[0]:
+        if not dry_run and not _map_sources():
             out = _hunt(agent, segment, area, limit, per_segment, max_searches,
                         dry_run, enrich_sites, run_row, service)
             out["idle"] = True
             out["left_for"] = "Leads collects from OpenStreetMap"
-            run_row.note(out.get("error") or "no Places key — left for OpenStreetMap")
+            run_row.note(out.get("error") or "no maps key — left for OpenStreetMap")
             return out
         with deskwork.at_the_desk("Leads", agent, run_row) as job:
             if job:
@@ -639,9 +832,27 @@ def _answer(job, out, area, service):
                     "businesses at all matching them.", stored=0)
 
 
+def _refused(err) -> bool:
+    """A map saying no to the key — not a slow line, which asking again can fix."""
+    t = (err or "").lower()
+    return any(w in t for w in ("refused", "http 401", "http 403", "http 429",
+                                "not valid", "billing", "allowance is used up"))
+
+
+def _search_map(src, t, limit):
+    """One search on one map, as candidates. Returns (candidates, error)."""
+    if src["kind"] == "tomtom":
+        found, err = search_tomtom(t["query"], t["area"], src["key"],
+                                   max(int(limit or 0), TOMTOM_PAGE))
+        return [_tomtom_to_candidate(r, t["segment"], t["area"]) for r in found], err
+    found, err = search_places(t["query"], t["area"], src["key"], limit)
+    return [_place_to_candidate(p, t["segment"], t["area"]) for p in found], err
+
+
 def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
           enrich_sites, run_row, service=None):
-    key, key_from = _places_key()
+    sources = _map_sources()
+    key = sources[0]["key"] if sources else None
     targets = plan_targets(segment, area, per_segment, service)[:max_searches]
     if service and not targets:
         return {"ok": False, "error":
@@ -659,8 +870,8 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
         if not key:
             plan["ok"] = False
             plan["error"] = (
-                "No Google Places key, so THIS pass collected nothing — but you do "
-                "not need one to get leads. The free path is already in the day: "
+                "No maps key (Google Places or TomTom), so THIS pass collected nothing — "
+                "but you do not need one to get leads. The free path is already in the day: "
                 "'Leads collects from OpenStreetMap' (pipelines.leads_osm) finds real "
                 "UAE businesses with no key at all, and it runs right after this step. "
                 "If it also came back empty, the reason is on ITS line, not this one.\n\n"
@@ -670,7 +881,10 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
                 "not. To add it: Setup -> Shelf -> maps, or set GOOGLE_PLACES_API_KEY. "
                 "Get it at console.cloud.google.com — enable 'Places API (New)', create "
                 "a key, restrict it to that API. Google's monthly credit covers far more "
-                "searching than this business will do.")
+                "searching than this business will do.\n\n"
+                "Or TomTom, with no Google account at all: Setup -> Integrations -> "
+                "TomTom. A free key from developer.tomtom.com; its daily allowance "
+                "covers this business's searching.")
         return plan
 
     # only one Hunter goes shopping at a time: two of them running the same
@@ -678,14 +892,24 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
     with board.lock("leads_collection", agent, ttl=900):
         candidates, searched, errors = [], [], []
         seen_here = set()
+        at, switched = 0, []            # which map is in use, and any hand-over
         for t in targets:
-            places, err = search_places(t["query"], t["area"], key, limit)
-            searched.append({**t, "found": len(places), "error": err})
+            found, err = _search_map(sources[at], t, limit)
+            # ONE MAP SAYING NO IS NOT THE DAY SAYING NO. Google refusing the
+            # key (the "unavailable" API, billing off) hands the rest of the
+            # pass to the next map — this search included.
+            while err and _refused(err) and at + 1 < len(sources):
+                switched.append(f"{sources[at]['label']} refused ({err[:120]}), so "
+                                f"{sources[at + 1]['label']} took over")
+                errors.append(err)
+                at += 1
+                found, err = _search_map(sources[at], t, limit)
+            searched.append({**t, "found": len(found), "error": err,
+                             "map": sources[at]["label"]})
             if err:
                 errors.append(err)
                 continue
-            for p in places:
-                c = _place_to_candidate(p, t["segment"], t["area"])
+            for c in found:
                 # Hunting FOR a service beats guessing one back out of the
                 # listing: we already know what job we went looking for, and the
                 # listing only ever hinted at it.
@@ -708,6 +932,14 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
                 if c.get("website"):
                     enrich(c)
 
+        # A listing with no phone and no published email cannot be reached, so
+        # it is not a lead — left out here, and counted, rather than letting one
+        # such row make the Critic throw away the whole batch. TomTom lists more
+        # businesses without a phone than Google does.
+        unreachable = [c for c in candidates if not (c.get("email") or c.get("phone"))]
+        if unreachable:
+            candidates = [c for c in candidates if c.get("email") or c.get("phone")]
+
         ok, reasons = critic_check(candidates, searched, errors)
         if not ok:
             return {"ok": True, "critic": "rejected", "critic_reasons": reasons,
@@ -720,7 +952,8 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
 
         did = board.log_decision(
             "leads-hunt",
-            reasoning=(f"Searched {len(searched)} segment/area combinations via {key_from}; "
+            reasoning=(f"Searched {len(searched)} segment/area combinations via "
+                       f"{sources[at]['label']} ({sources[at]['from']}); "
                        f"{len(candidates)} live businesses found, "
                        f"{len(result['stored'])} new, {len(result['duplicates'])} already "
                        f"in the cabinet, {len(result['refused'])} screened out."),
@@ -734,6 +967,8 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
             by_service[c["service_label"]] = by_service.get(c["service_label"], 0) + 1
 
         return {"ok": True, "agent": agent, "critic": "passed",
+                "map": sources[at]["label"], "switched": switched,
+                "unreachable_left_out": len(unreachable),
                 "searches": searched, "found": len(candidates),
                 "stored": len(result["stored"]), "duplicates": len(result["duplicates"]),
                 "refused": result["refused"],
@@ -743,8 +978,10 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
                 "personal_data_held": result["personal_data_held"],
                 "contacted": 0, "decision_id": did,
                 "summary": (f"{len(result['stored'])} new leads from {len(searched)} "
-                            f"searches ({sum(1 for c in candidates if c.get('email'))} "
-                            f"with a published email)")}
+                            f"{sources[at]['label']} searches "
+                            f"({sum(1 for c in candidates if c.get('email'))} "
+                            f"with a published email)"
+                            + (". " + switched[0] if switched else ""))}
 
 
 def main():
@@ -758,7 +995,12 @@ def main():
     ap.add_argument("--per-segment", type=int, default=1, help="search terms per segment")
     ap.add_argument("--dry-run", action="store_true", help="plan only, collect nothing")
     ap.add_argument("--no-enrich", action="store_true", help="skip reading their websites")
+    ap.add_argument("--test-tomtom", action="store_true",
+                    help="one small real TomTom search, to check the key (Setup's Test)")
     a = ap.parse_args()
+    if a.test_tomtom:
+        print(json.dumps(tomtom_check(), ensure_ascii=False))
+        return
     print(json.dumps(run(segment=a.segment, area=a.area, limit=a.limit,
                          per_segment=a.per_segment, max_searches=a.max_searches,
                          dry_run=a.dry_run, enrich_sites=not a.no_enrich,
