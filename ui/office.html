@@ -1503,7 +1503,7 @@ function renderApprovals(){
       <div class="lvl">${esc(d.lvl||'amber')}</div>
       <h4>${esc(d.text||'(no description)')}</h4>
       <div class="row"><span style="color:${d.yes?'var(--ok)':'var(--muted)'};font-size:12.5px">`
-      + `${d.yes?'✓ approved':'✕ turned down'} — the desk has moved on</span></div>
+      + `${d.yes?'✓ approved':'✕ turned down'} — ${esc((d.why||'').replace(/^(Approved|Turned down)\.\s*/,'')||'the desk has moved on')}</span></div>
     </div>`).join('');
 
   if(!items.length){
@@ -1572,7 +1572,7 @@ async function decide(key, yes){
   // was left looking at a screen that had not visibly reacted to him. Re-read
   // the cabinet, redraw the queue from it, and keep a receipt so a decision he
   // just made does not simply vanish off the screen.
-  DECIDED.set(key, {yes, text:a.text, lvl:a.lvl});
+  DECIDED.set(key, {yes, text:a.text, lvl:a.lvl, why:j.why||''});
   const j2 = await pullLive();
   if(j2){ LIVE=j2; applyLive(j2); renderFloor(); renderPerf(); }
   renderApprovals();

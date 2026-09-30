@@ -114,10 +114,44 @@ def search_places(query, area, key, limit=20, timeout=25):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8", "replace")).get("places", []), None
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:300]
-        return [], f"HTTP {e.code} from the Places API — {detail}"
+        detail = e.read().decode("utf-8", "replace")[:600]
+        return [], places_refusal(e.code, detail)
     except Exception as e:
         return [], str(e)
+
+
+def places_refusal(code, detail) -> str:
+    """
+    Google's refusal, in words he can act on.
+
+    "the google places api says its unavailable". Google closed the OLD
+    "Places API" to new projects, and in the Cloud console it now shows as
+    unavailable — while this program uses the NEW one, "Places API (New)",
+    which is a separate switch in the same library. A refusal that only said
+    "HTTP 403" left him looking at the wrong switch.
+    """
+    d = (detail or "").lower()
+    if "billing" in d:
+        return ("Google refused the Places key: billing is not switched on for its "
+                "Google Cloud project. Google Cloud → Billing → link a billing "
+                "account to the project (Google gives a free monthly allowance). "
+                f"HTTP {code}.")
+    if any(w in d for w in ("service_disabled", "has not been used", "is disabled",
+                            "api_key_service_blocked", "not been enabled")):
+        return ("Google refused the Places key: \"Places API (New)\" is not switched "
+                "on for its project. Google Cloud → APIs & Services → Library → search "
+                "\"Places API (New)\" and press Enable. Not the old \"Places API\" — "
+                "Google closed that one to new projects, which is why it shows as "
+                f"unavailable. HTTP {code}.")
+    if "api key not valid" in d or "api_key_invalid" in d:
+        return ("Google says the Places key is not valid — copy it again from Google "
+                f"Cloud → APIs & Services → Credentials. HTTP {code}.")
+    if "referer" in d or "ip address" in d or "restricted" in d:
+        return ("Google refused the Places key because of a restriction on it (a "
+                "website or IP restriction). Google Cloud → Credentials → the key → "
+                "allow the Places API (New) and no website restriction for a key used "
+                f"from this computer. HTTP {code}.")
+    return f"HTTP {code} from the Places API — {detail[:300]}"
 
 
 def _place_to_candidate(p, segment, area):

@@ -300,6 +300,75 @@ def gsc_ready():
     return True, ""
 
 
+# THE LAST TIME GOOGLE WAS ASKED, AND WHAT IT SAID — so Setup can say
+# "working" or "Google refused: …" instead of "Connected" the moment two fields
+# are filled in. A git-ignored file beside the key, written by every real ask.
+GSC_STATUS = "config/gsc-status.local.json"
+
+
+def _gsc_status_path():
+    from pathlib import Path
+    p = Path(GSC_STATUS)
+    return p if p.is_absolute() else Path(__file__).parents[1] / p
+
+
+def gsc_note(ok, why, rows=0):
+    """Write down what Google said, and settle his to-do either way."""
+    try:
+        from providers import integrations
+        prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
+    except Exception:
+        prop = ""
+    try:
+        p = _gsc_status_path()
+        # The test suite runs with his .env ignored; it must never overwrite
+        # what Setup shows about his real Search Console.
+        if (__import__("os").environ.get("AGENCY_IGNORE_DOTENV") == "1"
+                and GSC_STATUS == "config/gsc-status.local.json"):
+            raise RuntimeError("not during the test run")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"ok": bool(ok), "why": (why or "")[:600], "rows": int(rows or 0),
+                                 "property": prop, "at": int(time.time())}), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        from coordination import inbox
+        if ok:
+            inbox.gsc_done(f"{int(rows or 0)} search(es) came back.")
+        elif prop:
+            # He has set it up and Google said no: his to-do says what Google
+            # said. (Never set up at all is the plain "set it up" one, which
+            # SEO's own hand-off files.)
+            inbox.gsc_todo(why, email=_service_account_email())
+    except Exception:
+        pass
+
+
+def gsc_check() -> dict:
+    """
+    Ask Google now: can the agency read this property? The Test button on Setup.
+
+    The same call the keyword pass makes — log in, ask for the searches that
+    reached the site — so a pass cannot disagree with it. It fixes a property
+    Google knows under another spelling as it goes, and says what to do when
+    Google refuses.
+    """
+    rows, why = gsc_queries(days=28, limit=10)
+    ok = not why
+    gsc_note(ok, why, len(rows))
+    try:
+        from providers import integrations
+        prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
+    except Exception:
+        prop = ""
+    return {"ok": ok, "property": prop, "rows": len(rows),
+            "email": _service_account_email(),
+            "why": why or (f"Search Console is working — Google answered for {prop}"
+                           + (f" with {len(rows)} search(es) that reached your site."
+                              if rows else ", and no searches have reached the site "
+                              "in the last 28 days yet (normal for a new property)."))}
+
+
 def _service_account_email() -> str:
     """The address he has to add as a user in Search Console."""
     try:
@@ -905,6 +974,7 @@ def build(con, seeds=None, deep=False, our_paths=(), budget=None,
           deadline=None) -> dict:
     seeds = list(seeds or seeds_from_catalogue(con))
     gsc, gsc_why = gsc_queries()
+    gsc_note(not gsc_why, gsc_why, len(gsc))
     _lo, _hi = striking_band()
     _minimp = striking_min_impressions()
     rows = {}
@@ -1436,7 +1506,12 @@ def main():
     ap.add_argument("--budget", type=int, default=0,
                     help="seconds to spend gathering (default: 900 by hand, 300 "
                          "inside the daily run, which has a step timeout)")
+    ap.add_argument("--check-gsc", action="store_true",
+                    help="ask Google now whether Search Console works, and say why not")
     a = ap.parse_args()
+    if a.check_gsc:
+        print(json.dumps(gsc_check(), ensure_ascii=False))
+        return
     if a.wins:
         print(as_text(wins_only=True))
         return

@@ -41,8 +41,8 @@ import time
 import types
 from pathlib import Path
 
-from coordination import board, chat_actions, changelog, review, site, targets
-from . import day_run, it_fix, it_release, md_cycle, site_api
+from coordination import board, chat_actions, changelog, dispatch, inbox, review, site, targets
+from . import day_run, it_fix, it_release, leads_hunt, md_cycle, report_daily, seo_intel, site_api
 
 _fail = []
 ROOT = Path(__file__).parents[1]
@@ -239,6 +239,9 @@ def test_the_md_asks_only_for_what_is_still_to_go():
         check("  for the collectors", (t["sector"], t["desk"]), ("Leads", "leads-hunter"))
         check("  saying what is still to go", "12 still to go" in t["detail"], True)
         check("  and that it means leads with an email", "with an email" in t["detail"], True)
+        title = cab.sql("SELECT title FROM tasks WHERE id=?", (r["posted"],))[0]["title"]
+        check("  posted as his order, so the one-job rule never holds it back",
+              title.startswith("Owner's order:"), True)
         r2 = md_cycle.top_up()
         check("never twice at once", (r2["ok"], r2.get("idle")), (False, True))
         check("and it is on the MD's record",
@@ -508,6 +511,157 @@ def test_a_stop_ends_it_at_once():
         check("and it says it was his Stop", more["why"], "you pressed Stop")
 
 
+def test_each_round_is_a_run_of_its_own():
+    print("\nOne job per sector per ROUND — the rule that stopped the last extra round:")
+    with _Cabinet() as cab:
+        rid = day_run._open_run("rounds", False, [])
+        cab.sql("UPDATE day_runs SET started_at=? WHERE id=?", (int(time.time()) - 600, rid))
+        cab.sql("INSERT INTO tasks(id,sector,title,status,created_at,claimed_at,finished_at)"
+                " VALUES('m1','Leads','Collect today''s leads','done',?,?,?)",
+                (int(time.time()) - 500, int(time.time()) - 400, int(time.time()) - 300))
+        check("after the main pass, Leads has had its one job",
+              dispatch._claimed_this_run("Leads", rid), 1)
+        day_run._new_round(rid, int(time.time()))
+        check("an extra round starts the count again",
+              dispatch._claimed_this_run("Leads", rid), 0)
+        cab.sql("INSERT INTO tasks(id,sector,title,status,created_at,claimed_at)"
+                " VALUES('m2','Leads','the rest','in_progress',?,?)",
+                (int(time.time()), int(time.time()) + 1))
+        check("  and still allows only one in it", dispatch._claimed_this_run("Leads", rid), 1)
+        _job(cab, "t1", "IT", "Owner's order: one more", "it-fixer")
+        with _Steps({"pipelines.it_fix": _FINISH_ONE.format(sector="IT")}):
+            day_run._keep_going(rid)
+        check("the extra rounds write down when each began",
+              bool(cab.sql("SELECT round_at FROM day_runs WHERE id=?", (rid,))[0]["round_at"]),
+              True)
+
+
+def test_the_md_answers_its_inbox_between_rounds():
+    print("\nA question waiting for the MD is answered in the extra round:")
+    with _Cabinet() as cab:
+        cab.sql("INSERT INTO requests(id,from_sector,to_sector,subject,status,created_at)"
+                " VALUES('q1','Leads','Director','Which emirate should Leads work first?',"
+                "'open',?)", (int(time.time()) - 60,))
+        check("it is counted as waiting for the MD", day_run.what_is_left()["md_questions"], 1)
+        rid = day_run._open_run("md", False, [])
+        answer = ("c.execute(\"INSERT INTO request_msgs(request_id,author,body,at) VALUES"
+                  "('q1','managing-director','Dubai first',strftime('%s','now'))\"); "
+                  "c.execute(\"UPDATE requests SET status='answered' WHERE id='q1'\")")
+        with _Steps({"pipelines.md_cycle": answer}) as steps:
+            more = day_run._keep_going(rid)
+        check("the MD was asked to read its inbox, and plan nothing new",
+              steps.ran, ["pipelines.md_cycle --inbox --json"])
+        check("one round", more["rounds"], 1)
+        check("nothing left", more["left"], [])
+        check("the step says what it did",
+              cab.sql("SELECT label FROM day_steps WHERE run_id=? AND seq>=?",
+                      (rid, day_run.FOLLOW_UP_SEQ))[0]["label"],
+              "Round 2 · The MD answers the 1 question(s) waiting for it")
+
+
+def test_his_approval_starts_it_now():
+    print("\nHe approves a website change: IT starts on it at once, not tomorrow:")
+    with _Cabinet() as cab:
+        cid = board.queue_site_change("it-fixer", "use_one_domain",
+                                      {"change": {"call": "use_one_domain"}})
+        started = []
+        real = chat_actions.start_release
+        chat_actions.start_release = lambda: started.append(1) or True
+        try:
+            r = board.decide_approval("site_change", cid, "approved")
+            r2 = board.decide_approval("site_change", board.queue_site_change(
+                "it-fixer", "x", {"change": {"call": "use_one_email"}}), "rejected")
+        finally:
+            chat_actions.start_release = real
+        check("approved, and IT started", (r["ok"], r["started"], started), (True, True, [1]))
+        check("  and he is told so", "now" in r["why"], True)
+        check("turning one down starts nothing", (r2["started"], started), (False, [1]))
+
+
+def test_it_is_not_failed_while_the_fix_waits_on_him():
+    print("\nIT's check is not scored a failure while its fix waits for his yes:")
+    with _Cabinet() as cab:
+        cab.sql("INSERT INTO site_issues(id,kind,severity,detail,status,found_by,found_at)"
+                " VALUES(1,'form_dead','critical','dead email','in_review','it-watcher',?)",
+                (int(time.time()) - 5 * 86400,))
+        con = sqlite3.connect(board.DB)
+        try:
+            verdict, why = report_daily._score_it_health(
+                con, int(time.time()) - 5 * 86400, {"site_issue_ids": [1]})
+            con.execute("UPDATE site_issues SET status='open' WHERE id=1")
+            v2, _w2 = report_daily._score_it_health(
+                con, int(time.time()) - 5 * 86400, {"site_issue_ids": [1]})
+        finally:
+            con.close()
+        check("left unscored, not failed", verdict, None)
+        check("  saying it waits on him", "waiting for your yes" in why, True)
+        check("a ticket nobody has touched in days is still a failure", v2, "failed")
+
+
+def test_search_console_says_what_google_said():
+    print("\nSearch Console: one to-do, in Google's words, that closes itself:")
+    check("never set up is the plain one",
+          inbox.gsc_title("no GSC_PROPERTY set. Search Console is free"), inbox.GSC_OLD_TITLE)
+    check("not a user says so",
+          inbox.gsc_title("Google says this service account can see NO properties at all"),
+          "Search Console: add the agency's Google account as a user on your property")
+    check("a different spelling says so",
+          inbox.gsc_title("GSC_PROPERTY is 'https://x.com/', which is not one of the 1"),
+          "Search Console: the property on Setup is not written the way Google has it")
+    with _Cabinet() as cab:
+        board.try_post_task("IT", inbox.GSC_OLD_TITLE, "old", risk="amber",
+                            created_by="IT inbox")
+        tid = inbox.gsc_todo("Google says this service account can see NO properties at "
+                             "all, so this is a permissions problem", email="sa@x.iam")
+        rows = cab.sql("SELECT id, title, detail, status, risk FROM tasks"
+                       " WHERE status IN ('open','in_progress')")
+        check("still one to-do, not two", len(rows), 1)
+        check("  the old one, retitled with what Google said",
+              (rows[0]["id"] == tid, rows[0]["title"].startswith("Search Console: add")),
+              (True, True))
+        check("  naming the account to add", "sa@x.iam" in rows[0]["detail"], True)
+        check("  and his to decide", rows[0]["risk"], "amber")
+        check("a dropped line is not a job for him",
+              inbox.gsc_todo("Google did not answer the Search Console login — the "
+                             "connection was closed"), None)
+        handoff = {"about": "handoff:gsc_down", "subject": "Search Console is not answering",
+                   "_body": "Google's exact words: GSC_PROPERTY is 'https://x.com', which is "
+                            "not one of the 1 property(ies) this service account can see"}
+        con = sqlite3.connect(board.DB)
+        try:
+            reply = inbox.answer_handoff("IT", handoff, "it-fixer", con)
+        finally:
+            con.close()
+        check("SEO's hand-off rewrites it with the new reason",
+              cab.sql("SELECT title FROM tasks WHERE status='open'")[0]["title"],
+              "Search Console: the property on Setup is not written the way Google has it")
+        check("  and says it closes itself", "closes itself" in reply, True)
+        tmp = Path(tempfile.mkdtemp()) / "gsc-status.json"
+        real = seo_intel.GSC_STATUS
+        seo_intel.GSC_STATUS = str(tmp)
+        try:
+            seo_intel.gsc_note(True, "", 12)
+        finally:
+            seo_intel.GSC_STATUS = real
+        check("the day Google answers, the to-do is done",
+              cab.sql("SELECT count(*) n FROM tasks WHERE status='open'")[0]["n"], 0)
+        check("  with when", "Search Console answered on" in
+              cab.sql("SELECT result FROM tasks WHERE id=?", (tid,))[0]["result"], True)
+        check("and Setup can read what Google said",
+              json.loads(tmp.read_text(encoding="utf-8"))["ok"], True)
+
+
+def test_a_places_refusal_names_the_switch():
+    print("\nGoogle refuses the Places key: he is told which switch to press:")
+    msg = leads_hunt.places_refusal(403, '{"error": {"status": "PERMISSION_DENIED", '
+                                    '"reason": "SERVICE_DISABLED", "message": "Places API '
+                                    '(New) has not been used in project 123"}}')
+    check("it names Places API (New)", "Places API (New)" in msg, True)
+    check("  and why the old one shows as unavailable", "unavailable" in msg, True)
+    check("billing is its own answer",
+          "billing" in leads_hunt.places_refusal(403, "BILLING_DISABLED").lower(), True)
+
+
 def main():
     for t in (test_the_day_keeps_going_until_his_jobs_are_done,
               test_it_stops_when_a_round_moves_nothing,
@@ -519,7 +673,13 @@ def main():
               test_his_yes_stands,
               test_he_is_not_ignored_about_the_domain,
               test_the_run_panel_tells_the_whole_story,
-              test_a_stop_ends_it_at_once):
+              test_a_stop_ends_it_at_once,
+              test_each_round_is_a_run_of_its_own,
+              test_the_md_answers_its_inbox_between_rounds,
+              test_his_approval_starts_it_now,
+              test_it_is_not_failed_while_the_fix_waits_on_him,
+              test_search_console_says_what_google_said,
+              test_a_places_refusal_names_the_switch):
         t()
     print()
     if _fail:

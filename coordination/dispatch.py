@@ -341,15 +341,31 @@ def _sector_is_busy(sector, skip=()):
 
 
 def _claimed_this_run(sector, run_id=None, started_at=None):
-    """How many tasks this sector has taken on since the current run began."""
+    """
+    How many tasks this sector has taken on since the current run — or the
+    current ROUND of it — began.
+
+    "the program should complete the task". After its main pass the day goes
+    round again for the work still open (pipelines/day_run, KEEP GOING), and
+    each extra round is a run of its own for this rule. Counting from the start
+    of the whole day is why the MD asked Leads for the rest of his leads and
+    Leads answered "has taken its job for this run": one job per sector per
+    round still holds, one per day was never the rule.
+    """
     if started_at is None:
         if not run_id:
             return 0
         try:
             with _conn() as c:
-                r = c.execute("SELECT started_at FROM day_runs WHERE id=?",
-                              (run_id,)).fetchone()
-            started_at = int(r["started_at"]) if r else None
+                try:
+                    r = c.execute("SELECT started_at, round_at FROM day_runs WHERE id=?",
+                                  (run_id,)).fetchone()
+                    started_at = (max(int(r["started_at"] or 0), int(r["round_at"] or 0))
+                                  if r else None)
+                except sqlite3.OperationalError:     # a cabinet from before rounds
+                    r = c.execute("SELECT started_at FROM day_runs WHERE id=?",
+                                  (run_id,)).fetchone()
+                    started_at = int(r["started_at"]) if r else None
         except Exception:
             return 0
     if not started_at:

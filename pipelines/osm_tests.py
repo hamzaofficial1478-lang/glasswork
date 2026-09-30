@@ -1228,8 +1228,55 @@ def test_a_free_service_refusing_twice_stops_the_hunt():
     check("the list of searches", "every search I have" in line, True)
 
 
+def test_a_second_pass_the_same_day_starts_where_the_first_stopped():
+    """
+    "i ask for 20 leads it just give 8" — and when the day went round again for
+    the rest, the collector made the very same searches and found the very same
+    businesses already on file. Searches finished today are not made again.
+    """
+    print("\nA second pass the same day does not repeat the first one's searches:")
+    with _Cabinet():
+        board.post_task("Leads", "Collect 20 leads across the mapped segments",
+                        "work the source map")
+        first = []
+        _hunt(_fake_map(first, per_round=3))
+        board.post_task("Leads", "Collect 5 more leads across the mapped segments",
+                        "work the source map")
+        second = []
+        r = _hunt(_fake_map(second, per_round=3))
+        check("the first pass searched", len(first) > 0, True)
+        # The one exception is deliberate: the first pass met its number part-way
+        # through its last search, so that search still has businesses nobody
+        # filed, and the second pass goes back for them.
+        check("the second repeated nothing but the search the first left unfinished",
+              (set(first) & set(second)) <= {first[-1]}, True)
+        check("  so most of what it searched is new ground",
+              len(set(second) - set(first)) >= len(second) - 1, True)
+        check("and still found new ones", len(r["stored"]) > 0, True)
+
+    print("\n...and when every search has been made today, it says so rather than repeating:")
+    with _Cabinet():
+        O.remember_searched([(s_, a_) for s_ in O.segments_covered()
+                             for a_ in O.DEFAULT_AREAS + O.WIDER_AREAS])
+        board.post_task("Leads", "Collect 5 leads across the mapped segments", "")
+        calls = []
+        r = _hunt(_fake_map(calls))
+        check("no search was made", calls, [])
+        check("it says why", r["stopped_because"], "searched_today")
+        check("  in words he can read", "already made today" in r["error"], True)
+
+    print("\n...but a search he pins to one trade in one place is always made:")
+    with _Cabinet():
+        O.remember_searched([("signage", "Dubai")])
+        board.post_task("Leads", "Collect 5 signage leads in Dubai", "")
+        calls = []
+        _hunt(_fake_map(calls))
+        check("it searched signage in Dubai again", ("signage", "Dubai") in calls, True)
+
+
 def main():
     for t in (test_it_hunts_until_the_number_he_asked_for,
+              test_a_second_pass_the_same_day_starts_where_the_first_stopped,
               test_each_round_is_stored_as_it_finishes,
               test_a_business_already_on_file_costs_nothing,
               test_barren_rounds_end_the_hunt_and_say_so,

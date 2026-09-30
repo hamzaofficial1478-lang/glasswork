@@ -854,6 +854,29 @@ def critic_check(candidates: list, facts: dict) -> tuple:
 # DELEGATE — post the surviving plan. The only thing the MD ever writes.
 # ---------------------------------------------------------------------------
 
+def inbox_only(agent="managing-director", dry_run=False) -> dict:
+    """
+    The MD's inbox between rounds of the same day, and nothing else: questions
+    other sectors sent it are answered the way they are each morning (see
+    clear_inbox), and the day is not planned again on top of itself. No model.
+
+    "1 question ... still waiting" for the Director was the MD's inbox, read
+    once in the morning and never again however long the day ran.
+    """
+    with board.agent_run(agent) as run_row:
+        facts = sense()
+        box = clear_inbox(facts, dry_run)
+        done = len(box.get("answered") or [])
+        waiting = int(box.get("still_waiting") or 0)
+        head = (f"answered {done} question(s) in its inbox"
+                + (f", {waiting} still waiting" if waiting else ""))
+        run_row.note(head)
+        if not done and not box.get("posted"):
+            return {"ok": False, "idle": True, "agent": agent, "inbox": box,
+                    "error": "nothing in the MD's inbox it could answer now"}
+        return {"ok": True, "agent": agent, "inbox": box, "head": head}
+
+
 def top_up(agent="managing-director", dry_run=False) -> dict:
     """
     The MD's word between rounds of the same day: his leads number, when it
@@ -889,7 +912,8 @@ def top_up(agent="managing-director", dry_run=False) -> dict:
         folded = {}
     job = _counted_job(
         "Leads", "leads", lead_t, folded,
-        "Collect the rest of today's leads",
+        f"Owner's order: find the {lead_t['remaining']} more leads with an email "
+        f"he asked for today",
         "Leads with an email address only — they are the ones the Mail room can "
         "write to. Work the areas and segments not tried yet today; dedup before "
         "storing; contact nobody.")
@@ -1088,8 +1112,16 @@ if __name__ == "__main__":
     ap.add_argument("--top-up", action="store_true",
                     help="between rounds of one day: ask again for a leads number "
                          "that came back short, and nothing else")
+    ap.add_argument("--inbox", action="store_true",
+                    help="between rounds of one day: answer what is in the MD's "
+                         "inbox, and plan nothing new")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.inbox:
+        res = inbox_only(dry_run=a.dry_run)
+        print(json.dumps(res, default=str) if a.json
+              else (res.get("head") or res.get("error") or ""))
+        raise SystemExit(0)
     if a.top_up:
         res = top_up(dry_run=a.dry_run)
         print(json.dumps(res, default=str) if a.json

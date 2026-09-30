@@ -1275,6 +1275,9 @@ _ADDED_COLUMNS = (
     # "the program should complete the task" — the extra rounds the day went
     # for what was still open, and what was left at the end and why.
     ("day_runs",     "left_open",    "TEXT"),
+    # When the extra round now going began — each round is a run of its own
+    # for the one-job-per-sector rule (coordination/dispatch).
+    ("day_runs",     "round_at",     "INTEGER"),
     # One campaign mail for every lead (pipelines/campaign.py): which campaign
     # a queued mail is, and the designed version that goes with the text.
     ("outreach_queue", "campaign_id", "INTEGER"),
@@ -2691,7 +2694,24 @@ def decide_approval(kind, ref, decision):
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(_now()))
     if kind == "site_change":
         decide_site_change(int(ref), decision)
-        return {"ok": True, "kind": kind, "ref": ref, "decision": decision}
+        # HIS YES IS ACTED ON NOW, NOT TOMORROW. "does the program have any
+        # timing for approval?" — it had the opposite problem: an approval sat
+        # until the next run, so a day that had finished looked like it was
+        # waiting on him. The Releaser starts in the background, tests first as
+        # always; one already going is not started twice.
+        started = False
+        if decision == "approved":
+            try:
+                from . import chat_actions
+                started = bool(chat_actions.start_release())
+            except Exception:
+                started = False
+        return {"ok": True, "kind": kind, "ref": ref, "decision": decision,
+                "started": started,
+                "why": ("Approved. IT runs the tests and puts it on your website now "
+                        "— Website changes shows how it went." if started else
+                        "Approved. IT puts it on your website on its next pass."
+                        if decision == "approved" else "Turned down. It will not be made.")}
     if kind == "outreach":
         moved = decide_outreach(int(ref), decision, note=f"owner {decision} {when}")
         return {"ok": bool(moved), "kind": kind, "ref": ref, "decision": decision,

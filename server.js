@@ -453,6 +453,21 @@ app.post("/api/chat", async (req, res) => {
 const ENV_PATH = path.join(__dirname, ".env");
 const DB_PATH = path.join(__dirname, "coordination", "agency.db");
 const GSC_SA_PATH = path.join(__dirname, "config", "gsc-service-account.local.json");
+// What Google said the last time it was actually asked (pipelines/seo_intel
+// gsc_note). "Connected" used to mean only that two fields were filled in.
+const GSC_STATUS_PATH = path.join(__dirname, "config", "gsc-status.local.json");
+function gscStatus() {
+  try { return JSON.parse(fs.readFileSync(GSC_STATUS_PATH, "utf8")); } catch (_) { return null; }
+}
+function gscLine(e) {
+  const saved = !!(e.GSC_PROPERTY && String(e.GSC_PROPERTY).trim()) && fs.existsSync(GSC_SA_PATH);
+  if (!saved) return { ok: false, text: "Not set — no owned-site search data" };
+  const st = gscStatus();
+  if (!st || (st.property && st.property !== String(e.GSC_PROPERTY).trim()))
+    return { ok: true, text: `Saved (${e.GSC_PROPERTY}) — press Test on Setup to check Google accepts it` };
+  if (st.ok) return { ok: true, text: `Working (${e.GSC_PROPERTY}) — Google answered` };
+  return { ok: false, text: `Saved, but Google refused: ${String(st.why || "").slice(0, 220)}` };
+}
 
 // external service integrations stored in .env (secrets flagged for keyless re-save).
 // WhatsApp used to sit here; it was dropped because enquiries come through the
@@ -784,7 +799,7 @@ function readConnections() {
       sub: has("ALGOLIA_APP_ID") ? (e.ALGOLIA_INDEX || "glasswork_site") : "not set",
       on: has("ALGOLIA_APP_ID") && has("ALGOLIA_SEARCH_KEY") },
     { ic: "✉", name: "Email (SMTP)", sub: e.SMTP_HOST || "not set", on: has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS") },
-    { ic: "⌗", name: "Search Console", sub: e.GSC_PROPERTY || "not set", on: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH) },
+    { ic: "⌗", name: "Search Console", sub: gscLine(e).text, on: gscLine(e).ok },
   ];
 }
 
@@ -945,6 +960,13 @@ app.post("/api/integration", async (req, res) => {
     return res.status(500).json({ ok: false, error: "Could not save: " + e.message });
   }
 });
+
+// ---- Search Console: ask Google now --------------------------------------
+// "i had integrated the Google search console then why i see the same message
+//  again and again" — Setup never asked Google; this does, the same way the
+// keyword pass does, and says what Google answered.
+app.post("/api/integrations/test-gsc", async (_q, res) =>
+  res.json(await pyModule("pipelines.seo_intel", ["--check-gsc"], 120000)));
 
 // ---- the Claude team: which Claude model each sector thinks with ----------
 // Every sector's brain is a Claude model (providers/claude_team.py). One row
@@ -1631,9 +1653,8 @@ app.get("/api/status", async (_q, res) => {
       detail: (has("SMTP_HOST") && has("SMTP_USER") && has("SMTP_PASS"))
         ? `SMTP ready (${e.SMTP_HOST})` : "Not set — outreach and graphical emails can't be sent yet",
       hint: "Your mail SMTP host, username and password, plus a from-address." },
-    { label: "Google Search Console", optional: true, ok: has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH),
-      detail: (has("GSC_PROPERTY") && fs.existsSync(GSC_SA_PATH))
-        ? `Connected (${e.GSC_PROPERTY})` : "Not set — no owned-site search data",
+    { label: "Google Search Console", optional: true, ok: gscLine(e).ok,
+      detail: gscLine(e).text,
       hint: "Property (e.g. sc-domain:yoursite.ae) + a service-account JSON key." },
   ];
 
@@ -1648,7 +1669,10 @@ app.get("/api/status", async (_q, res) => {
     // process. Add the name here when you add a route a screen depends on.
     api: API_CAPABILITIES,
     ok: true, mode,
-    providers: { credentials: (ps && ps.credentials) || 0, models: (ps && ps.models) || 0 },
+    // The old provider shelf is gone (every sector thinks with Claude), and the
+    // variable this read went with it — so this route threw "ps is not
+    // defined" and every screen asking for status got an error instead.
+    providers: { credentials: 0, models: brainsTotal || 0 },
     brains, brainsReady, brainsTotal, checks,
   });
 });

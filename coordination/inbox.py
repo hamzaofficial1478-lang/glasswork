@@ -345,28 +345,111 @@ def answer_handoff(sector, req, agent, con):
                 + (f", {old} already on the list" if old else "")
                 + ". Nothing changes on the site until he says yes.")
     if kind == "gsc_down" and sector == "IT":
-        title = "You need to set up Google Search Console"
+        m = re.search(r"Google's exact words:\s*(.+)", body or "")
+        why = (m.group(1).strip() if m else (body or "")).strip()
         try:
-            exists = con.execute("SELECT 1 FROM tasks WHERE title=? AND status IN"
-                                 " ('open','in_progress')", (title,)).fetchone()
-            if not exists:
-                board.try_post_task(
-                    "IT", title,
-                    "SEO's best free source is Search Console: the searches that "
-                    "already reach the site, and the ones it ranks 5th to 20th for. "
-                    "It needs a Google service account with access to the property, "
-                    "which only you can create. Setup → Integrations → Google "
-                    "Search Console: paste the property and the service-account "
-                    "key.\n\nSEO's own words:\n" + body[:800],
-                    risk="amber", created_by=f"{sector} inbox")
+            gsc_todo(why, by=f"{sector} inbox")
         except Exception:
             pass
         return ("This needs the owner, not IT: Search Console access is a Google "
                 "property and a service-account key that only he can create. It is "
-                "on his list now (Setup → Integrations → Google Search Console). "
-                "There is nothing in the code to change, so this thread is closed; "
-                "SEO carries on with the free sources until it is set up.")
+                "on his list now, with Google's own reason. There is nothing in the "
+                "code to change, so this thread is closed; SEO carries on with the "
+                "free sources until Search Console answers, and the to-do closes "
+                "itself the first time it does.")
     return None
+
+
+# ---------------------------------------------------------------------------
+# SEARCH CONSOLE: ONE TO-DO, IN GOOGLE'S WORDS, THAT CLOSES ITSELF
+# ---------------------------------------------------------------------------
+#
+# "i had integrated the Google search console then why i see the same message
+#  again and again that says setup google search console"
+#
+# Setup marks Search Console as saved the moment the property and the key are
+# pasted — it never asks Google. When Google then refused (the service account
+# not added as a user, or the property written differently), SEO said "not
+# answering", and this file put "You need to set up Google Search Console" on
+# his list: the same title whatever Google had said, and nothing ever took it
+# off again, even on the day Search Console started working.
+#
+# Now the to-do says what Google actually said and what to do about it, there
+# is only ever one, it is rewritten when the reason changes, and it closes
+# itself the first time Search Console answers.
+
+GSC_TODO_ABOUT = "gsc:owner"
+GSC_OLD_TITLE = "You need to set up Google Search Console"
+
+_GSC_TITLES = (
+    (r"no gsc_property|no service account|not set up", GSC_OLD_TITLE),
+    (r"is missing\. upload|key file could not be read",
+     "Search Console: paste the service-account key on Setup again"),
+    (r"not installed", "Search Console: one install is needed on this computer"),
+    (r"invalid_grant|refused the service-account key",
+     "Search Console: Google refused the key — make a new one"),
+    (r"can see no properties|not a user|users and permissions|permissions problem",
+     "Search Console: add the agency's Google account as a user on your property"),
+    (r"not one of the|no property called|trailing slash|written differently|match exactly",
+     "Search Console: the property on Setup is not written the way Google has it"),
+)
+
+# A dropped line is not something for him to do: it is tried again next run.
+_GSC_PASSING = r"did not answer the search console login|connection was closed|timed out"
+
+
+def gsc_title(why) -> str:
+    t = (why or "").lower()
+    for rx, title in _GSC_TITLES:
+        if re.search(rx, t):
+            return title
+    return "Search Console: Google refused — the reason is inside"
+
+
+def _gsc_open(c):
+    return c.execute("SELECT id FROM tasks WHERE status IN ('open','in_progress')"
+                     " AND (about=? OR title=?) ORDER BY created_at",
+                     (GSC_TODO_ABOUT, GSC_OLD_TITLE)).fetchall()
+
+
+def gsc_todo(why, by="seo-strategist", email=""):
+    """His one Search Console to-do, in Google's words. Returns its id, or None."""
+    why = (why or "").strip()
+    if not why or re.search(_GSC_PASSING, why.lower()):
+        return None
+    title = gsc_title(why)
+    detail = ("SEO asked Google for your Search Console data and this is what "
+              "came back:\n\n    " + why[:900] + "\n\n"
+              + (f"The agency's Google account (the service account) is: {email}\n\n"
+                 if email else "")
+              + "Setup → Integrations → Google Search Console holds the property "
+                "and the key; Test there asks Google straight away. This to-do "
+                "closes itself the first time Search Console answers.")
+    with board._conn() as c:
+        rows = _gsc_open(c)
+        if rows:
+            keep = rows[0]["id"]
+            c.execute("UPDATE tasks SET title=?, detail=?, about=? WHERE id=?",
+                      (title, detail, GSC_TODO_ABOUT, keep))
+            # one to-do, not one per pass
+            for r in rows[1:]:
+                c.execute("UPDATE tasks SET status='withdrawn', finished_at=?, result=?"
+                          " WHERE id=?", (board._now(), f"the same as {keep}", r["id"]))
+            return keep
+    return board.try_post_task("IT", title, detail, risk="amber", created_by=by,
+                               about=GSC_TODO_ABOUT)
+
+
+def gsc_done(note="") -> int:
+    """Search Console answered: take the to-do off his list. Returns how many."""
+    when = __import__("time").strftime("%Y-%m-%d %H:%M")
+    with board._conn() as c:
+        rows = _gsc_open(c)
+        for r in rows:
+            c.execute("UPDATE tasks SET status='done', finished_at=?, result=? WHERE id=?",
+                      (board._now(), f"Search Console answered on {when} — it is working, "
+                                     f"nothing more to do. {note}".strip(), r["id"]))
+    return len(rows)
 
 
 # Hand-offs a desk works FROM, rather than ones answered on receipt. The briefs

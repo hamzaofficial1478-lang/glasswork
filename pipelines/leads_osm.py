@@ -40,6 +40,7 @@ in a tight loop.
 import argparse
 import json
 import re
+import sqlite3
 import sys
 import time
 import urllib.error
@@ -910,6 +911,41 @@ def _tally(total: dict, part: dict) -> dict:
     return total
 
 
+def _today() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
+def _searched_table(c):
+    c.execute("CREATE TABLE IF NOT EXISTS osm_searched (day TEXT, segment TEXT,"
+              " area TEXT, at INTEGER, PRIMARY KEY (day, segment, area))")
+
+
+def searched_today() -> set:
+    """{(segment, area)} already searched today, by any pass."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            _searched_table(c)
+            return {(r[0], r[1]) for r in c.execute(
+                "SELECT segment, area FROM osm_searched WHERE day=?", (_today(),))}
+    except sqlite3.Error:
+        return set()
+
+
+def remember_searched(pairs):
+    """Write down searches finished today; yesterday's are let go of."""
+    if not pairs:
+        return
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            _searched_table(c)
+            c.execute("DELETE FROM osm_searched WHERE day<>?", (_today(),))
+            c.executemany("INSERT OR IGNORE INTO osm_searched(day,segment,area,at)"
+                          " VALUES(?,?,?,?)",
+                          [(_today(), s_, a_, int(time.time())) for s_, a_ in pairs])
+    except sqlite3.Error:
+        pass
+
+
 def why_it_stopped(why, stored, target, *, area=None, rounds_run=0,
                    untried=0, examined=0, already=0, budget=0,
                    dry_run=False, with_email=False) -> str:
@@ -999,6 +1035,29 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     else:
         core = [(s, a) for s in segs for a in DEFAULT_AREAS]
         wider = [(s, a) for s in segs for a in WIDER_AREAS]
+    # NOT THE SAME SEARCHES TWICE IN ONE DAY. "i ask for 20 leads it just give
+    # 8" — and when the day went round again for the rest, this started from
+    # the same most-valuable segment in the same three emirates, found the same
+    # businesses already on file, and gave up as barren. A search made today is
+    # skipped for the rest of the day, so the next pass starts where this one
+    # stopped: the next segment, then the wider emirates. A search he pinned
+    # to one trade in one place is always made.
+    tried_today = set() if (dry_run or (segment and area)) else searched_today()
+    if tried_today:
+        core = [p for p in core if p not in tried_today]
+        wider = [p for p in wider if p not in tried_today]
+        if not core and not wider:
+            board.finish_task(task["id"], agent,
+                              {"found": 0, "stopped_because": "searched_today"},
+                              status="done")
+            return {"ok": False, "idle": True, "agent": agent, "task": task["id"],
+                    "target": target, "rounds": 0, "stopped_because": "searched_today",
+                    "error": (f"Every OpenStreetMap search I have ({len(tried_today)}) "
+                              "was already made today, so there is nothing new to find "
+                              "there until tomorrow. A maps key finds more — see "
+                              "Setup → the maps shelf.")}
+    origin = {}                 # which search each new business came from
+
     # A share per round only when the pass chose the segments. "Twenty signage
     # firms in Dubai" is exactly one search and must not be rationed.
     cap = per_round_cap(target) if not (segment and area) else 0
@@ -1009,6 +1068,7 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     widen_by = started + (budget - WRITE_RESERVE) * WIDEN_BEFORE
 
     seen, collected, spare, errors, widened_to = set(), [], [], [], []
+    searched = []
     got = {"stored": [], "duplicates": [], "refused": [], "personal_data_held": []}
     guessed = {"looked_for": 0, "sites_found": 0, "too_generic_to_guess": [],
                "no_site_found": [], "not_reached_this_pass": 0}
@@ -1038,7 +1098,9 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
                 n["already"] += 1
                 continue
             fresh.append(c)
+            origin[k] = (seg, a)
         n["examined"] += len(fresh)
+        searched.append((seg, a))
         return fresh
 
     def file(batch):
@@ -1136,13 +1198,21 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
         stop_line += (f" {', '.join(DEFAULT_AREAS[:-1])} and {DEFAULT_AREAS[-1]} "
                       f"ran short, so it widened to {', '.join(widened_to)}.")
 
+    # A search with businesses still unfiled in the spares is NOT done — the
+    # next pass makes it again and files the rest (the ones already stored cost
+    # nothing then). Everything else searched is finished for today.
+    if not dry_run:
+        left_over = {origin.get(_pool_key(c)) for c in spare}
+        remember_searched([x for x in searched if x not in left_over])
+
     if not collected and not n["already"]:
         board.finish_task(task["id"], agent, {"found": 0, "stopped_because": why},
                           status="done")
         return {"ok": False, "agent": agent, "task": task["id"], "errors": errors,
                 "target": target, "rounds": n["rounds"], "stopped_because": why,
                 "error": (f"OpenStreetMap returned nothing new in {n['rounds']} "
-                          f"search(es), starting with {core[0][0]} in {core[0][1]}"
+                          f"search(es), starting with {(core or wider)[0][0]} in "
+                          f"{(core or wider)[0][1]}"
                           + (". " + errors[0] if errors else
                              ". That is the data, not a fault — OSM is thinner "
                              "than Google in the UAE."))}

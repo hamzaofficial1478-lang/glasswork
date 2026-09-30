@@ -956,9 +956,11 @@ def what_is_left() -> dict:
                     the Overseer's fault tickets, which IT's self-repair settles
       leads_short   how many leads with an email his leads target still wants
       approved      changes he said yes to that are not on his site yet
+      md_questions  questions waiting in the MD's own inbox
     """
     board.ensure_schema()
-    out = {"jobs": [], "leads_short": 0, "leads_asked": 0, "approved": 0}
+    out = {"jobs": [], "leads_short": 0, "leads_asked": 0, "approved": 0,
+           "md_questions": 0}
     try:
         with sqlite3.connect(board.DB, timeout=30) as c:
             c.row_factory = sqlite3.Row
@@ -976,6 +978,12 @@ def what_is_left() -> dict:
             if j.get("name") == "leads" and j.get("per_day"):
                 out["leads_short"] = int(j.get("remaining") or 0)
                 out["leads_asked"] = int(j.get("per_day") or 0)
+    except Exception:
+        pass
+    try:
+        from coordination import leftovers
+        out["md_questions"] = int(((leftovers.survey().get("by_room") or {})
+                                   .get("Director") or {}).get("questions") or 0)
     except Exception:
         pass
     return out
@@ -998,6 +1006,8 @@ def _rooms_in(left) -> set:
         rooms.add("Leads")
     if left.get("approved"):
         rooms.add("IT")
+    if left.get("md_questions"):
+        rooms.add("Director")
     return rooms
 
 
@@ -1051,6 +1061,8 @@ def _got_through(since) -> dict:
         "IT": ["SELECT count(*) FROM site_queue WHERE agent LIKE 'it-%' AND queued_at>=?",
                "SELECT count(*) FROM site_queue WHERE status='applied' AND applied_at>=?"],
         "Content": ["SELECT count(*) FROM content_queue WHERE created_at>=?"],
+        "Director": ["SELECT count(*) FROM request_msgs WHERE author='managing-director'"
+                     " AND at>=?"],
     }
     try:
         with sqlite3.connect(board.DB, timeout=30) as c:
@@ -1102,6 +1114,15 @@ def _add_rows(rid, rows) -> list:
     return seqs
 
 
+def _new_round(rid, at):
+    """Write down when this round began, for the one-job-per-sector rule."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.execute("UPDATE day_runs SET round_at=? WHERE id=?", (int(at), rid))
+    except sqlite3.Error:
+        pass
+
+
 def _hold_the_day(rid):
     """Keep the day's lock for as long as the day is honestly still going."""
     try:
@@ -1140,6 +1161,10 @@ def _still_open(left, stopped_rooms, only) -> list:
     if waiting:
         lines.append(f"{waiting} website change(s) wait for your yes under Waiting on "
                      "you — nothing goes on your site without it")
+    if left.get("md_questions"):
+        lines.append(f"Director: {left['md_questions']} question(s) still waiting for the MD"
+                     + (f" ({stopped_rooms['Director']})" if stopped_rooms.get("Director")
+                        else ""))
     if left.get("approved"):
         lines.append(f"{left['approved']} change(s) you approved are not on your site yet"
                      + (f" ({stopped_rooms['IT']})" if stopped_rooms.get("IT") else ""))
@@ -1178,12 +1203,27 @@ def _keep_going(rid, stop=None, slots=None) -> dict:
                    "the rest carries on tomorrow, or press Resume")
             break
         plan = round_plan(left, rooms)
-        if not plan:
+        md_inbox = "Director" in rooms and bool(left.get("md_questions"))
+        if not plan and not md_inbox:
             why = "nothing left that a desk can work on today"
             break
         rounds += 1
         _hold_the_day(rid)
         since = _now()
+        # A round is a run of its own for the one-job-per-sector rule — see
+        # dispatch._claimed_this_run. Without this every desk answered "has
+        # taken its job for this run" and the round moved nothing.
+        _new_round(rid, since)
+
+        # Questions in the MD's own inbox: it answers them, as it does each
+        # morning, without planning the day again.
+        if md_inbox:
+            seq = _add_rows(rid, [(f"Round {rounds + 1} · The MD answers the "
+                                   f"{left['md_questions']} question(s) waiting for it",
+                                   "pipelines.md_cycle")])[0]
+            with slots:
+                _work_step(rid, seq, "pipelines.md_cycle", "Director", stop,
+                           args=("--inbox", "--json"))
 
         # The MD first, when a counted target is short: the job it posted this
         # morning was closed with part of the number, and the collectors need
@@ -1499,6 +1539,15 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
                        "Nothing further was started, and what was mid-task has "
                        "been closed off. Press Run when you want it to go again."}
 
+    # CLEAR UP AFTER, TOO. Hand-offs and chases that arrived during the day
+    # are answered now, without a model, so the office does not open tomorrow
+    # on "4 can be cleared up" as though the day had left a mess behind it.
+    tidied_after = {}
+    try:
+        tidied_after = leftovers.tidy() or {}
+    except Exception:
+        tidied_after = {}
+
     # Anything the day turned up that the owner has to answer goes to his phone
     # now, not into a table he has to remember to open. Only things that stop
     # the agency or involve a customer — see coordination/notify.py for the rule
@@ -1527,6 +1576,8 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
                "finished. " + why)
     if tidied.get("done"):
         why += " " + tidied["head"]
+    if tidied_after.get("done"):
+        why += " Cleared up at the end: " + "; ".join(tidied_after["done"][:3]) + "."
     if rejected:
         why += (" Your order for " + ", ".join(rejected)
                 + " went nowhere — " + list(rejected.values())[0])

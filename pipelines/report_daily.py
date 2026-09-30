@@ -194,6 +194,15 @@ def _score_it_health(con, created_at, ev):
     done = [r for r in urgent if r[0] in ("closed", "deployed")]
     if len(done) == len(urgent):
         return "worked", f"all {len(urgent)} urgent ticket(s) from this check are resolved"
+    # WAITING ON HIM IS NOT IT FAILING. "check out why IT stoped working?" —
+    # four red "scored IT's health check: failed" lines for a ticket whose fix
+    # was written days ago and is sitting under Waiting on you. The check found
+    # a real problem and the Fixer wrote the change; the last step is his yes.
+    # Left unscored, with that said, until he answers.
+    waiting = [r for r in urgent if r[0] == "in_review"]
+    if waiting and len(done) + len(waiting) == len(urgent):
+        return None, (f"the fix for {len(waiting)} urgent ticket(s) is written and "
+                      "waiting for your yes under Waiting on you")
     if _expired("it-health", created_at):
         return "failed", (f"{len(urgent) - len(done)} of {len(urgent)} urgent ticket(s) "
                           "from this check still open after 3 days")

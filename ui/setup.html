@@ -196,7 +196,8 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="field"><label>Service-account JSON key</label>
           <textarea id="gsc_json" rows="4" placeholder="leave blank to keep saved" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:12px;font-family:'IBM Plex Mono',monospace"></textarea>
           <div class="hint">Paste the whole JSON file. Kept in a git-ignored file on the server, never shown back.</div></div>
-        <div class="btnrow"><button class="pbtn" id="saveGsc">Save Search Console</button><span class="inl dim" id="gscMsg"></span></div>
+        <div class="btnrow"><button class="pbtn" id="saveGsc">Save Search Console</button><button class="mini" id="testGsc">Test</button><span class="inl dim" id="gscMsg"></span></div>
+        <div class="hint">Test asks Google straight away whether the agency can read your property, and says exactly what to change if not.</div>
       </div>
 
       <div class="cred">
@@ -853,6 +854,14 @@ async function testChannel(which, btn, msg, notify){
   else                  inl(msg,'err','✕ '+r.detail);
 }
 $('#testEmail').onclick=()=>testChannel('email',$('#testEmail'),$('#emailMsg'));
+$('#testGsc').onclick=async ()=>{
+  const btn=$('#testGsc'), msg=$('#gscMsg');
+  btn.disabled=true; inl(msg,'dim','Asking Google…');
+  const j=await api('POST','/api/integrations/test-gsc',{});
+  btn.disabled=false;
+  if(j && j.ok) inl(msg,'ok','✓ '+(j.why||'working'));
+  else inl(msg,'err','✕ '+((j&&(j.why||j.error))||'no answer'));
+};
 $('#testNtfy').onclick =()=>testChannel('ntfy',$('#testNtfy'),$('#optMsg'));
 $('#ntfyPing').onclick =()=>testChannel('ntfy',$('#ntfyPing'),$('#optMsg'),true);
 /* "What will I get?" — the answer to a fair complaint. The owner connected ntfy,
