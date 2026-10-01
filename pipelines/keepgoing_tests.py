@@ -306,6 +306,7 @@ _HIS_SITE = {
                   '<?php include "includes/footer.php"; ?>'),
     "contact.php": ('<p>Write to info@worlddealtechnicalservices.ae or our supplier '
                     'sales@glass-supplier.ae — see www.glass-supplier.ae</p>'
+                    '<a href="https://worlddealtechnicalservices.com/gallery.php">Gallery</a>'
                     '<img src="/assets/img/worlddeal.svg">'),
     "includes/footer.php": ('<a href="mailto:info@worlddealtechnicalservices.ae">'
                             'info@worlddealtechnicalservices.ae</a>'
@@ -317,8 +318,9 @@ def test_one_domain_everywhere():
     print("\nHis name with the old ending becomes the one his site is on, everywhere:")
     with _Cabinet(), _Site(_HIS_SITE) as s:
         plan = site_api.plan_domains()
-        check("the old domain is found, and only his",
-              sorted(plan["wrong"]), ["worlddealtechnicalservices.ae"])
+        check("the old domain and the bare .com are found, and only his",
+              sorted(plan["wrong"]), ["worlddealtechnicalservices.ae",
+                                      "worlddealtechnicalservices.com (without www)"])
         r = site_api.use_one_domain(agent="it-releaser")
     check("it went", r["ok"], True)
     pages = s.pages
@@ -326,8 +328,8 @@ def test_one_domain_everywhere():
           any("worlddealtechnicalservices.ae" in h for h in pages.values()), False)
     check("the canonical keeps its www", 'href="https://www.worlddealtechnicalservices.com/"'
           in pages["index.php"], True)
-    check("the business details for Google say .com",
-          '"url": "https://worlddealtechnicalservices.com"' in pages["index.php"], True)
+    check("the business details for Google say .com — at the www address the site is on",
+          '"url": "https://www.worlddealtechnicalservices.com"' in pages["index.php"], True)
     check("an address on the dead domain becomes the one he reads, not a made-up info@",
           pages["includes/footer.php"].count(HIS), 2)
     check("a supplier's address and site are left alone",
@@ -336,6 +338,9 @@ def test_one_domain_everywhere():
     check("the right links are left as they were",
           "https://www.worlddealtechnicalservices.com/about.php" in pages["includes/footer.php"],
           True)
+    check("a link to the bare .com is given its www — one address, not two copies",
+          "https://www.worlddealtechnicalservices.com/gallery.php" in pages["contact.php"]
+          and "//worlddealtechnicalservices.com" not in pages["contact.php"], True)
     check("each page written once", sorted(s.writes),
           ["contact.php", "includes/footer.php", "index.php"])
     check("the Releaser may carry it out", "use_one_domain" in it_release.ALLOWED_CALLS, True)

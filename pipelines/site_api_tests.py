@@ -635,8 +635,8 @@ def test_the_canonical_is_pointed_back_at_the_real_site():
 
     r = _with_site(site, lambda: S.fix_canonical(agent="it-releaser", s=cfg))
     out = site.pages["about.php"]
-    check("the canonical now points home",
-          'href="https://mysite.com/about.php"' in out, True)
+    check("the canonical now points home — at the exact address, www and all",
+          'href="https://www.mysite.com/about.php"' in out, True)
     check("the stylesheet on another domain is untouched",
           "https://fonts.example.com/x.css" in out, True)
     check("and so is a link to a supplier",
@@ -646,11 +646,18 @@ def test_the_canonical_is_pointed_back_at_the_real_site():
           site.pages["index.php"], PAGE)
     check("it says what it did", "1 canonical" in r["head"], True)
 
-    print("\n...www and the bare domain are the same site, so nothing to do:")
+    print("\n...a canonical already on the exact address is left alone:")
     site = _Site({"a.php": '<link rel="canonical" href="https://www.mysite.com/a">'})
     plan = _with_site(site, lambda: S.canonical_plan(cfg))
     check("no work", plan["jobs"], [])
     check("and it says so", "already points at" in plan["head"], True)
+
+    print("\n...but the bare domain is a second copy of the site to Google, so it is work:")
+    site = _Site({"a.php": '<link rel="canonical" href="https://mysite.com/a">'})
+    plan = _with_site(site, lambda: S.canonical_plan(cfg))
+    check("found", [j["wrong_host"] for j in plan["jobs"]], ["mysite.com"])
+    _with_site(site, lambda: S.fix_canonical(agent="it-releaser", s=cfg))
+    check("given its www", 'href="https://www.mysite.com/a"' in site.pages["a.php"], True)
 
     print("\n...and only the Releaser may write it:")
     site = _Site({"about.php": src})

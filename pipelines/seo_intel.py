@@ -344,6 +344,83 @@ def gsc_note(ok, why, rows=0):
         pass
 
 
+GSC_WRITE_SCOPE = "https://www.googleapis.com/auth/webmasters"
+
+
+def _gsc_session(scope=GSC_SCOPE):
+    """(credentials with a fresh token, property, why_not)."""
+    ok, why = gsc_ready()
+    if not ok:
+        return None, "", why
+    from pathlib import Path
+    import google.auth.transport.requests
+    from google.oauth2 import service_account
+    from providers import integrations
+    prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            str(Path(__file__).parents[1] / GSC_SA), scopes=[scope])
+        creds.refresh(google.auth.transport.requests.Request())
+    except Exception as e:
+        return None, prop, _login_failed(e)
+    return creds, prop, ""
+
+
+def gsc_submit_sitemap(url) -> dict:
+    """
+    Give Search Console the sitemap, the way his Submit button does. Needs the
+    write scope — the agency's account is a Full user on his property.
+    """
+    creds, prop, why = _gsc_session(GSC_WRITE_SCOPE)
+    if not creds:
+        return {"ok": False, "why": why}
+    import requests
+    path = ("/webmasters/v3/sites/" + urllib.parse.quote(prop, safe="")
+            + "/sitemaps/" + urllib.parse.quote(url, safe=""))
+    try:
+        r = requests.put("https://www.googleapis.com" + path, timeout=30,
+                         headers={"Authorization": "Bearer " + creds.token})
+    except Exception as e:
+        return {"ok": False, "why": f"Search Console did not answer ({type(e).__name__})"}
+    if r.status_code in (200, 204):
+        return {"ok": True}
+    off = _api_switched_off(r.text or "")
+    return {"ok": False, "why": off or f"Search Console said {r.status_code}: {(r.text or '')[:160]}"}
+
+
+def gsc_inspect(url, creds=None, prop=""):
+    """
+    What Google itself says about one page: indexed or not, and why. The same
+    answer as the URL Inspection box in Search Console. {ok, verdict, coverage,
+    last_crawl, google_canonical, user_canonical, robots, fetch} or {ok: False, why}.
+    """
+    if creds is None:
+        creds, prop, why = _gsc_session()
+        if not creds:
+            return {"ok": False, "why": why}
+    import requests
+    try:
+        r = requests.post("https://searchconsole.googleapis.com/v1/urlInspection/index:inspect",
+                          timeout=45, headers={"Authorization": "Bearer " + creds.token},
+                          json={"inspectionUrl": url, "siteUrl": prop, "languageCode": "en-GB"})
+    except Exception as e:
+        return {"ok": False, "why": f"Search Console did not answer ({type(e).__name__})"}
+    if r.status_code != 200:
+        off = _api_switched_off(r.text or "")
+        return {"ok": False, "status": r.status_code,
+                "why": off or f"Search Console said {r.status_code}: {(r.text or '')[:200]}"}
+    st = ((r.json().get("inspectionResult") or {}).get("indexStatusResult") or {})
+    return {"ok": True, "verdict": st.get("verdict") or "",
+            "coverage": st.get("coverageState") or "",
+            "indexing": st.get("indexingState") or "",
+            "robots": st.get("robotsTxtState") or "",
+            "fetch": st.get("pageFetchState") or "",
+            "last_crawl": st.get("lastCrawlTime") or "",
+            "google_canonical": st.get("googleCanonical") or "",
+            "user_canonical": st.get("userCanonical") or "",
+            "sitemaps": st.get("sitemap") or []}
+
+
 def gsc_check() -> dict:
     """
     Ask Google now: can the agency read this property? The Test button on Setup.

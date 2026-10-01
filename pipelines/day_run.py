@@ -168,6 +168,12 @@ STEPS = [
     # never takes the sector's one job for the run. What it files goes to IT's
     # queue, and it closes or reopens yesterday's tickets by re-reading them.
     ("SEO audits the site (technical)", "pipelines.seo_audit", "SEO", "seo"),
+    # Second, because it asks GOOGLE rather than reading the pages: which of
+    # them are in its index, and why the others are not. "the program did not
+    # figure that more then 8 pages are still not indexed" — nothing could see
+    # Google's index until Search Console answered. Claims nothing off the
+    # board; what needs changing is queued for his yes.
+    ("SEO asks Google which pages it has indexed", "pipelines.seo_index", "SEO", "seo"),
     ("SEO builds the keyword picture (free sources)", "pipelines.seo_intel", "SEO", "seo"),
     ("SEO finds the gaps", "pipelines.seo_gap", "SEO", "seo"),
     ("SEO watches the rivals", "pipelines.competitors", "SEO", "seo"),

@@ -620,7 +620,55 @@ def fix_seo_finding(issue, ctx):
     steps = [do] if do else ["See the ticket."]
     needs = "your say-so on the wording"
 
+    if code == "broken_internal_link" and re.search(
+            r"/(sharer/sharer\.php|sharing/share-offsite|intent/tweet|pin/create)|/\?text=",
+            text):
+        # A SHARE BUTTON POINTING AT HIS OWN SITE. Each network's share address
+        # has a path nothing else has, so which network it was is not a guess —
+        # see site_api.SHARE_HOMES. A fix, not advice.
+        try:
+            sb = site_api.plan_share_buttons()
+        except Exception as e:
+            sb = {"ok": False, "error": str(e)}
+        if sb.get("ok") and sb.get("times"):
+            return {"how": "call", "call": "repair_share_buttons",
+                    "pages": [p["page"] for p in sb["pages"]][:12], "times": sb["times"],
+                    "why": (f"The share buttons on your posts ({sb['times']} of them) open "
+                            "a page on your own site that does not exist, instead of "
+                            "Facebook, WhatsApp and LinkedIn. This puts each network's "
+                            "address back."),
+                    "undo": "python -m pipelines.site_api --undo --page <page>"}
+        if sb.get("ok"):
+            return {"how": "already_right",
+                    "why": "the share buttons already point at Facebook, WhatsApp and LinkedIn"}
+
     if code == "two_hosts_serve_the_site":
+        # HIS SAVED ADDRESS ALREADY DECIDES IT. "this is your decision" left it
+        # with him for weeks while the canonicals named the copy WITHOUT www,
+        # his site and his Search Console are on www, and Google listed his
+        # pages as not indexed. The address he saved is the one he chose: the
+        # canonicals and links are made to name it — a change he approves —
+        # and only the redirect, which lives in .htaccess, stays his to ask
+        # his host for.
+        try:
+            from urllib.parse import urlparse as _up
+            site_host = _up((ctx.get("env", {}).get("SITE_URL") or "").strip()).netloc.lower()
+        except Exception:
+            site_host = ""
+        if site_host:
+            plan = _one_domain_plan(site_host[4:] if site_host.startswith("www.") else site_host)
+            if plan.get("how") == "call":
+                other = (site_host[4:] if site_host.startswith("www.") else "www." + site_host)
+                plan["why"] = (
+                    f"Your pages answer at two addresses — {site_host} and {other} — and "
+                    f"their canonical tags name {other}, while your saved address and "
+                    f"Search Console are {site_host}. Google treats the pages you are "
+                    f"looking at as a second copy, which is why they show as not indexed. "
+                    f"This makes every canonical and link name {site_host}. "
+                    + plan["why"] + f" Then ask your host (Hostinger support) to redirect "
+                    f"{other} to https://{site_host} permanently (301); that lives in "
+                    ".htaccess, which the agency never touches.")
+                return plan
         # A redirect lives in the server's .htaccess, and .htaccess is on the
         # agency endpoint's never-touch list by design — so this is his to
         # paste, and here is exactly what to paste.

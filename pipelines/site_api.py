@@ -660,6 +660,34 @@ def fix_address(agent=AGENT, s=None) -> dict:
                      "no placeholder address found to replace")}
 
 
+def _stem(host) -> str:
+    """'worlddealtechnicalservices' for any of his hosts, www or not, any ending."""
+    h = (host or "").lower()
+    h = h[4:] if h.startswith("www.") else h
+    return h.split(".")[0]
+
+
+# WHICH LINES ARE THE CANONICAL — and which only mention the word.
+#
+# "Only on lines that mention canonical" was the rule, and on his blog page the
+# share buttons are built from a PHP value called $canonical:
+#     <a href="https://www.facebook.com/sharer/sharer.php?u=<?= urlencode($canonical) ?>">
+# so the fixer rewrote Facebook, WhatsApp and LinkedIn to his own domain and
+# every share button on every post led to a page that does not exist. Now a
+# line counts only when it IS the canonical: the <link rel="canonical"> tag, or
+# the line that sets a canonical value — never a link to anywhere — and only
+# his own name is ever changed on it.
+def _canonical_line(line) -> bool:
+    low = (line or "").lower()
+    if "canonical" not in low:
+        return False
+    if re.search(r"<a\b", low):
+        return False
+    return bool(re.search(r"rel\s*=\s*[\"']?canonical", low)
+                or re.search(r"\$\w*canonical\w*\s*=(?!=)", low)
+                or re.search(r"define\s*\(\s*[\"'][a-z_]*canonical", low))
+
+
 def canonical_plan(s=None) -> dict:
     """
     Which of his source files name the wrong domain in a canonical tag.
@@ -671,8 +699,14 @@ def canonical_plan(s=None) -> dict:
     """
     s = s or settings()
     import urllib.parse
+    # THE EXACT ADDRESS, WWW INCLUDED. This used to strip the www and treat the
+    # two as one site — so when it pointed his eight .ae canonicals home it
+    # wrote https://worlddealtechnicalservices.com/, while the site, his saved
+    # address and his Search Console property are all https://www.… . Google
+    # was told the real pages were a second copy of the site, and the www pages
+    # he was looking at sat in Search Console as not indexed. With www and
+    # without are two addresses to Google; the canonical names the one he saved.
     want = urllib.parse.urlparse(s["site"]).netloc.lower()
-    want = want[4:] if want.startswith("www.") else want
     if not want:
         return {"ok": False, "error": "no website address saved"}
     p = pages(s=s)
@@ -680,16 +714,16 @@ def canonical_plan(s=None) -> dict:
         return {"ok": False, "error": p.get("error")}
     import re
     jobs = []
+    stem = _stem(want)
     for row in p.get("pages") or []:
         got = read_page(row["page"], s=s)
         if not got.get("ok"):
             continue
         for line in (got.get("html") or "").splitlines():
-            if "canonical" not in line.lower():
+            if not _canonical_line(line):
                 continue
             for host in re.findall(r'https?://([A-Za-z0-9.\-]+)', line):
-                bare = host[4:] if host.lower().startswith("www.") else host
-                if bare.lower() != want:
+                if host.lower() != want and _stem(host) == stem:
                     jobs.append({"page": row["page"], "wrong_host": host,
                                  "line": " ".join(line.split())[:120]})
     return {"ok": True, "want": want, "jobs": jobs,
@@ -720,7 +754,9 @@ def fix_canonical(agent=AGENT, s=None, dry_run=False) -> dict:
     if refused:
         return {"ok": False, "error": refused}
     import re
+    import urllib.parse
     want = plan["want"]
+    scheme = urllib.parse.urlparse((s or settings())["site"]).scheme or "https"
     changed, failed = [], []
     for page in sorted({j["page"] for j in plan["jobs"]}):
         got = read_page(page, s=s)
@@ -728,16 +764,16 @@ def fix_canonical(agent=AGENT, s=None, dry_run=False) -> dict:
             failed.append({"page": page, "why": got.get("error")})
             continue
         out, hits = [], 0
+        stem = _stem(want)
         for line in (got.get("html") or "").splitlines():
-            if "canonical" in line.lower():
+            if _canonical_line(line):
                 def swap(m):
                     nonlocal hits
                     host = m.group(2)
-                    bare = host[4:] if host.lower().startswith("www.") else host
-                    if bare.lower() == want:
-                        return m.group(0)
+                    if host.lower() == want or _stem(host) != stem:
+                        return m.group(0)            # right already, or somebody else's
                     hits += 1
-                    return f"{m.group(1)}://{want}"
+                    return f"{scheme}://{want}"
                 line = re.sub(r'(https?)://([A-Za-z0-9.\-]+)', swap, line)
             out.append(line)
         if not hits:
@@ -1029,10 +1065,27 @@ def _domain_re(brand):
                       re.I)
 
 
-def _one_domain(html, brand, right_host, right_mail):
-    """(html with every other ending made his, {wrong domain: times})."""
+def _site_host() -> str:
+    """The host exactly as his site is served — 'www.worlddealtechnicalservices.com'."""
+    try:
+        from coordination import site
+        return (site.site_host() or "").lower().strip(".")
+    except Exception:
+        return ""
+
+
+def _one_domain(html, brand, right_host, right_mail, site_host=None):
+    """(html with every other ending made his, {wrong domain: times}).
+
+    And when his site lives at www, a link to the bare domain — https://
+    worlddealtechnicalservices.com/… — is given the www too. Both answer, so
+    nothing looks broken, but every such link and canonical tells Google there
+    is a second copy of the site; one address is what gets the pages indexed.
+    """
     rx = _domain_re(brand)
     hits = {}
+    site_host = (site_host if site_host is not None else _site_host()) or right_host
+    www = site_host.startswith("www.") and site_host[4:] == right_host
 
     def count(dom):
         hits[dom.lower()] = hits.get(dom.lower(), 0) + 1
@@ -1050,10 +1103,20 @@ def _one_domain(html, brand, right_host, right_mail):
         if dom.lower() == right_host:
             return dom
         count(dom)
-        return right_host
+        # www.<old> keeps its www; a bare <old> becomes the address he uses
+        before = m.string[max(0, m.start() - 4):m.start()].lower()
+        return right_host if before == "www." or not www else site_host
 
     new = _EMAIL_RE.sub(addr, html or "")
-    return rx.sub(host, new), hits
+    new = rx.sub(host, new)
+    if www:
+        bare_rx = re.compile(r"(?<=//)" + re.escape(right_host) + r"(?![A-Za-z0-9.-])", re.I)
+
+        def add_www(m):
+            hits[f"{right_host} (without www)"] = hits.get(f"{right_host} (without www)", 0) + 1
+            return site_host
+        new = bare_rx.sub(add_www, new)
+    return new, hits
 
 
 def plan_domains(s=None) -> dict:
@@ -1066,7 +1129,7 @@ def plan_domains(s=None) -> dict:
         if name is None:
             return {"ok": False, "unreachable": html.get("unreachable"),
                     "error": html.get("error") or "could not list your pages"}
-        _new, wrong = _one_domain(html, brand, right, right_email())
+        _new, wrong = _one_domain(html, brand, right, right_email(), _site_host())
         if wrong:
             per_page.append({"page": name, "wrong": wrong})
             for d, n in wrong.items():
@@ -1078,6 +1141,7 @@ def plan_domains(s=None) -> dict:
 def use_one_domain(agent=AGENT, s=None, dry_run=False) -> dict:
     """Every mention of his name with another ending, on every page, made his real one."""
     right, brand, mail = _right_host(s), _brand(s), right_email()
+    shown = _site_host() or right
     if not right or not brand:
         return {"ok": False, "error": "no website is saved, so there is nothing to change"}
     refused = _may_write(agent)
@@ -1094,7 +1158,7 @@ def use_one_domain(agent=AGENT, s=None, dry_run=False) -> dict:
             return {"ok": False, "unreachable": html.get("unreachable"),
                     "error": html.get("error") or "could not list your pages",
                     "changed": changed}
-        new, wrong = _one_domain(html, brand, right, mail)
+        new, wrong = _one_domain(html, brand, right, mail, _site_host())
         if not wrong or new == html:
             continue
         times = sum(wrong.values())
@@ -1102,7 +1166,7 @@ def use_one_domain(agent=AGENT, s=None, dry_run=False) -> dict:
             changed.append({"page": name, "times": times, "wrong": wrong})
             continue
         r = put_page(name, new, agent=agent, s=s, _action="replace", before=html,
-                     summary=(f"changed the domain to {right} ({times} "
+                     summary=(f"changed the address to {shown} ({times} "
                               f"time{'s' if times != 1 else ''}: "
                               + ", ".join(sorted(wrong)) + ")"))
         if r.get("ok"):
@@ -1115,14 +1179,145 @@ def use_one_domain(agent=AGENT, s=None, dry_run=False) -> dict:
         else:
             failed.append({"page": name, "why": r.get("error")})
     total = sum(c["times"] for c in changed)
-    head = (f"your website now says {right} everywhere — changed {total} time(s) on "
+    head = (f"your website now says {shown} everywhere — changed {total} time(s) on "
             f"{len(changed)} page(s): " + ", ".join(sorted(swapped))
             if changed and not dry_run else
             (f"would change {total} mention(s) on {len(changed)} page(s)" if dry_run
-             else f"your website already says {right} everywhere"))
+             else f"your website already says {shown} everywhere"))
     return {"ok": not failed, "changed": changed, "failed": failed, "head": head,
             "right": right, **({"error": f"{len(failed)} page(s) could not be written: "
                                          + str(failed[0]["why"])} if failed else {})}
+
+
+# ---------------------------------------------------------------------------
+# THE SHARE BUTTONS ON HIS POSTS
+# ---------------------------------------------------------------------------
+#
+# The old canonical fixer (see _canonical_line) turned
+#     https://www.facebook.com/sharer/sharer.php?u=…
+#     https://wa.me/?text=…
+#     https://www.linkedin.com/sharing/share-offsite/?url=…
+# into his own domain, so all three buttons on every post opened a 404 on his
+# site. Each network's share address has a path nothing else has, so the
+# network is known from the path alone and put back.
+SHARE_HOMES = (
+    (r"sharer/sharer\.php", "https://www.facebook.com/sharer/sharer.php"),
+    (r"sharing/share-offsite/?", "https://www.linkedin.com/sharing/share-offsite/"),
+    (r"intent/tweet", "https://twitter.com/intent/tweet"),
+    (r"pin/create/button/?", "https://pinterest.com/pin/create/button/"),
+    (r"send(?=\?text=)", "https://api.whatsapp.com/send"),
+    (r"(?=\?text=)", "https://wa.me/"),
+)
+
+
+def _share_fixed(src, stem):
+    """(src with each broken share address put back, how many)."""
+    n = 0
+    for path, home in SHARE_HOMES:
+        rx = re.compile(r"https?://(?:www\.)?" + re.escape(stem) + r"\.[a-z.]+/" + path, re.I)
+        src, k = rx.subn(home, src)
+        n += k
+    return src, n
+
+
+def plan_share_buttons(s=None) -> dict:
+    """Which files carry share buttons pointing at his own site. Changes nothing."""
+    stem = _stem(_right_host(s))
+    if not stem:
+        return {"ok": False, "error": "no website is saved, so there is nothing to look at"}
+    found = []
+    for name, html in _walk(s):
+        if name is None:
+            return {"ok": False, "unreachable": html.get("unreachable"),
+                    "error": html.get("error") or "could not list your pages"}
+        _new, n = _share_fixed(html, stem)
+        if n:
+            found.append({"page": name, "times": n})
+    return {"ok": True, "pages": found, "times": sum(f["times"] for f in found)}
+
+
+def repair_share_buttons(agent=AGENT, s=None, dry_run=False) -> dict:
+    """Put Facebook, WhatsApp and LinkedIn back in the share buttons. Releaser only."""
+    stem = _stem(_right_host(s))
+    if not stem:
+        return {"ok": False, "error": "no website is saved, so there is nothing to change"}
+    refused = _may_write(agent)
+    if refused and not dry_run:
+        cid = _queue_for_him(agent, "repair_share_buttons", "site", {
+            "change": {"call": "repair_share_buttons"},
+            "why": "The share buttons on your posts open a page on your own site "
+                   "instead of Facebook, WhatsApp and LinkedIn."})
+        return {"ok": False, "queued": cid, "error": refused}
+    changed, failed = [], []
+    for name, html in _walk(s):
+        if name is None:
+            return {"ok": False, "unreachable": html.get("unreachable"),
+                    "error": html.get("error") or "could not list your pages",
+                    "changed": changed}
+        new, n = _share_fixed(html, stem)
+        if not n:
+            continue
+        if dry_run:
+            changed.append({"page": name, "times": n})
+            continue
+        r = put_page(name, new, agent=agent, s=s, _action="replace", before=html,
+                     summary=f"put Facebook, WhatsApp and LinkedIn back in {n} share button(s)")
+        if r.get("ok"):
+            changed.append({"page": name, "times": n, "backup": r.get("backup")})
+        elif r.get("unreachable"):
+            return {"ok": False, "unreachable": True, "error": r.get("error"),
+                    "changed": changed}
+        else:
+            failed.append({"page": name, "why": r.get("error")})
+    total = sum(c["times"] for c in changed)
+    return {"ok": not failed, "changed": changed, "failed": failed,
+            "head": (f"the share buttons go to Facebook, WhatsApp and LinkedIn again — "
+                     f"{total} fixed on {len(changed)} page(s)" if changed else
+                     "no broken share buttons found"),
+            **({"error": f"{len(failed)} page(s) could not be written: "
+                         + str(failed[0]["why"])} if failed else {})}
+
+
+# ---------------------------------------------------------------------------
+# THE SITEMAP — see pipelines/sitemap.py
+# ---------------------------------------------------------------------------
+
+def publish_sitemap(agent=AGENT, s=None, dry_run=False) -> dict:
+    """Put the sitemap on his website and give it to Search Console. Releaser only."""
+    from . import sitemap
+    d = sitemap.discover()
+    if not d.get("ok"):
+        return {"ok": False, "error": "the sitemap could not be made: "
+                                      + str(d.get("error") or "no page could be read")}
+    url = sitemap.live_url()
+    if dry_run:
+        return {"ok": True, "dry_run": True, "pages": d["pages"], "url": url,
+                "head": f"would put {len(d['pages'])} page(s) in {url}"}
+    refused = _may_write(agent)
+    if refused:
+        cid = _queue_for_him(agent, "publish_sitemap", "site", {
+            "change": {"call": "publish_sitemap"},
+            "why": "A sitemap tells Google every page your website has."})
+        return {"ok": False, "queued": cid, "error": refused}
+    was = read_page(sitemap.PAGE, s=s)
+    r = put_page(sitemap.PAGE, sitemap.as_php(d["pages"]), agent=agent, s=s,
+                 _action="new_page" if not was.get("ok") else "replace",
+                 before=(was.get("html") if was.get("ok") else None),
+                 summary=f"put a sitemap of {len(d['pages'])} page(s) on your website")
+    if not r.get("ok"):
+        return {"ok": False, "unreachable": r.get("unreachable"),
+                "error": r.get("error") or "the sitemap could not be written"}
+    try:
+        from . import seo_intel
+        sub = seo_intel.gsc_submit_sitemap(url)
+    except Exception as e:
+        sub = {"ok": False, "why": f"{type(e).__name__}: {e}"}
+    head = (f"your sitemap is on your website at {url}, listing {len(d['pages'])} page(s)"
+            + (", and Search Console has been given it" if sub.get("ok") else
+               f" — Search Console could not be given it automatically ({sub.get('why')}); "
+               f"in Search Console open Sitemaps and add  sitemap.php"))
+    return {"ok": True, "url": url, "pages": d["pages"], "submitted": bool(sub.get("ok")),
+            "head": head}
 
 
 def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:

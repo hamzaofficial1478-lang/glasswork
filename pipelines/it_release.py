@@ -452,6 +452,8 @@ ALLOWED_CALLS = {
     "apply_schema": "put the business markup on the pages that should carry it",
     "use_one_email": "make every email address on the website the one he reads",
     "use_one_domain": "make every mention of his old domain the one his site is on",
+    "repair_share_buttons": "put Facebook, WhatsApp and LinkedIn back in the share buttons",
+    "publish_sitemap": "put the sitemap on his website and give it to Search Console",
 }
 
 
@@ -803,9 +805,25 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
             from . import blog_backend
             fn = {"blog_post": blog_backend.publish, "blog_remove": blog_backend.remove,
                   "blog_repost": blog_backend.repost}[plan["do"]]
+            was_at = ""
+            if plan["do"] in ("blog_remove", "blog_repost"):
+                try:
+                    was_at = (blog_backend._load(plan.get("content_id"))[1] or {}).get(
+                        "posted_url") or ""
+                except Exception:
+                    was_at = ""
             r = fn(plan.get("content_id"), agent=agent)
             if not r.get("ok"):
                 return _fail_or_wait(plan, r, "your blog did not take it")
+            # The sitemap follows the blog the same day: a new post is in it,
+            # a post taken down is out of it. Never a reason to fail the post.
+            try:
+                from . import sitemap
+                sitemap.keep_up(agent,
+                                add=[r.get("url")] if plan["do"] != "blog_remove" else [],
+                                drop=[was_at] if was_at and was_at != r.get("url") else [])
+            except Exception:
+                pass
             _close_ticket(plan.get("issue_id"))
             board.mark_site_change(
                 row["id"], "applied",
