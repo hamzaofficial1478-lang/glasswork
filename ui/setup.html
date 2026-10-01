@@ -201,14 +201,12 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
       </div>
 
       <div class="cred">
-        <div class="cred-h"><b>Google search — who ranks for a keyword</b></div>
-        <p class="hint" style="margin-top:0;margin-bottom:10px">Lets SEO see which websites Google shows for a keyword
-          before a post is written, and read what those pages cover. Free for up to 100 searches a day — the agency uses
-          two or three per post. Without it SEO still researches the keywords, but cannot see who ranks.</p>
-        <ol class="hint" style="margin:0 0 10px;padding-left:18px;line-height:1.7">
-          <li>Go to <code>programmablesearchengine.google.com</code>, press <b>Add</b>, choose <b>Search the entire web</b>, create it and copy its <b>Search engine ID</b>.</li>
-          <li>In <code>console.cloud.google.com</code> (the same project as Search Console is fine) turn on the <b>Custom Search API</b>, then <b>Credentials → Create credentials → API key</b>.</li>
-        </ol>
+        <div class="cred-h"><b>Google search — who ranks for a keyword</b> <small style="color:var(--muted);font-weight:400">optional · closed to new users</small></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px"><b>Google has closed this to new customers</b> (its
+          Custom Search JSON API stopped taking new sign-ups in 2025, and new search engines can no longer search the
+          whole web). If you did not already have one, <b>leave this empty</b> — there is nothing to type in Google's
+          "sites to search" box that makes it work. SEO still researches every keyword, reads your rivals' pages and
+          uses Search Console without it; only the "who is on page one for this keyword" list is missing.</p>
         <div class="field"><label>Search engine ID</label><input id="cse_id" placeholder="e.g. 017576662512468239146:omuauf_lfve"></div>
         <div class="field"><label>API key</label><input id="cse_key" type="password" placeholder="leave blank to keep saved"></div>
         <div class="btnrow"><button class="pbtn" id="saveCse">Save Google search</button><span class="inl dim" id="cseMsg"></span></div>

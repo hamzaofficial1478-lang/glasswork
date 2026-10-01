@@ -662,6 +662,28 @@ def test_a_places_refusal_names_the_switch():
           "billing" in leads_hunt.places_refusal(403, "BILLING_DISABLED").lower(), True)
 
 
+def test_search_console_api_switched_off_is_named():
+    print("\nGoogle refusing even to list properties means the API is off — and it says so:")
+    off_body = json.dumps({"error": {"code": 403, "status": "PERMISSION_DENIED",
+                                     "message": "Google Search Console API has not been used in "
+                                                "project 123 before or it is disabled.",
+                                     "details": [{"reason": "SERVICE_DISABLED"}]}})
+    fake = types.SimpleNamespace(status_code=403, text=off_body,
+                                 json=lambda: json.loads(off_body))
+    creds = types.SimpleNamespace(token="t")
+    why = seo_intel._which_403(creds, "https://x", "https://www.x.com/", get=lambda *a, **k: fake)
+    check("it says the API is switched off", "switched off" in why, True)
+    check("  and where to switch it on",
+          "console.cloud.google.com/apis/library/searchconsole.googleapis.com" in why, True)
+    check("his to-do is titled for that",
+          inbox.gsc_title(why), "Search Console: switch on the Search Console API in Google Cloud")
+    other = json.dumps({"error": {"code": 403, "message": "User does not have sufficient permission"}})
+    fake2 = types.SimpleNamespace(status_code=403, text=other, json=lambda: json.loads(other))
+    why2 = seo_intel._which_403(creds, "https://x", "https://www.x.com/", get=lambda *a, **k: fake2)
+    check("any other refusal carries Google's own words",
+          "User does not have sufficient permission" in why2, True)
+
+
 def main():
     for t in (test_the_day_keeps_going_until_his_jobs_are_done,
               test_it_stops_when_a_round_moves_nothing,
@@ -679,7 +701,8 @@ def main():
               test_his_approval_starts_it_now,
               test_it_is_not_failed_while_the_fix_waits_on_him,
               test_search_console_says_what_google_said,
-              test_a_places_refusal_names_the_switch):
+              test_a_places_refusal_names_the_switch,
+              test_search_console_api_switched_off_is_named):
         t()
     print()
     if _fail:

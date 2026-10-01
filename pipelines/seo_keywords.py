@@ -147,8 +147,19 @@ def google_serp(q, num=10, timeout=15) -> dict:
                 "User-Agent": "glasswork-seo/1.0"}), timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
+        try:
+            said = e.read().decode("utf-8", "replace")[:600].lower()
+        except Exception:
+            said = ""
         why = f"Google search said HTTP {e.code}"
-        if e.code in (400, 403):
+        if e.code == 403 and ("does not have the access" in said or "new customers" in said
+                              or "permission_denied" in said):
+            # Closed to new customers in 2025: a project that never had it
+            # cannot get it, however the key and engine are set up.
+            why = ("Google search is closed to new customers — this key's project "
+                   "cannot use the Custom Search API, so the 'who ranks' list is "
+                   "skipped. Everything else in the keyword pack still runs.")
+        elif e.code in (400, 403):
             why += " — check the key and search engine ID on Setup, and that the Custom " \
                    "Search API is turned on"
         return {"ok": False, "why": why}

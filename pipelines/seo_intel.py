@@ -381,6 +381,45 @@ def _service_account_email() -> str:
         return ""
 
 
+def _project_id() -> str:
+    """The Google Cloud project the service-account key belongs to."""
+    try:
+        from pathlib import Path as _Path
+        p = _Path(__file__).parents[1] / GSC_SA
+        return (json.loads(p.read_text(encoding="utf-8")).get("project_id") or "") \
+            if p.exists() else ""
+    except Exception:
+        return ""
+
+
+def _api_switched_off(text) -> str:
+    """
+    The fix, when Google's 403 means the Search Console API is not switched on
+    in the key's Google Cloud project — or '' when it means something else.
+
+    "Search Console refused (403) ... Could not list what the service account
+    can see (HTTP 403)". Listing what the account can see answers with an empty
+    list when the account has simply not been added anywhere; a 403 THERE means
+    Google will not take the call at all, and the body says why. Reading only
+    the status code sent him to the permissions screen for an API that was off.
+    """
+    t = (text or "").lower()
+    if not any(w in t for w in ("service_disabled", "accessnotconfigured",
+                                "has not been used in project", "it is disabled",
+                                "api has not been used", "searchconsole.googleapis.com")):
+        return ""
+    pid = _project_id()
+    link = ("https://console.cloud.google.com/apis/library/searchconsole.googleapis.com"
+            + (f"?project={pid}" if pid else ""))
+    who = _service_account_email()
+    return ("Google says the Search Console API is switched off in your Google Cloud "
+            f"project{' ' + pid if pid else ''}. Open {link}, press Enable, wait a "
+            "minute, then press Test again."
+            + (f" If it then says the account cannot see your site, add {who} as a "
+               "user in Search Console (Settings → Users and permissions → Add user)."
+               if who else ""))
+
+
 def _which_403(creds, host, prop, get=None) -> str:
     """
     Ask Google which of the two causes it actually is.
@@ -403,7 +442,15 @@ def _which_403(creds, host, prop, get=None) -> str:
         r = get(host + "/webmasters/v3/sites", timeout=30,
                 headers={"Authorization": "Bearer " + creds.token})
         if r.status_code != 200:
-            raise RuntimeError(f"HTTP {r.status_code}")
+            off = _api_switched_off(getattr(r, "text", "") or "")
+            if off:
+                return off
+            said = ""
+            try:
+                said = ((r.json().get("error") or {}).get("message") or "")[:200]
+            except Exception:
+                said = ""
+            raise RuntimeError(f"HTTP {r.status_code}" + (f" — Google said: {said}" if said else ""))
         seen = [s.get("siteUrl") for s in (r.json().get("siteEntry") or [])
                 if s.get("siteUrl")]
     except Exception as e:
@@ -572,6 +619,8 @@ def gsc_queries(days=90, limit=500):
             break
         # 403 and 404 mean different things and the fix is different for each,
         # so neither is reported as a bare status code.
+        if r.status_code == 403 and _api_switched_off(r.text or ""):
+            return [], _api_switched_off(r.text or "")
         if r.status_code == 403:
             # THE SAME SITE, WRITTEN THE WAY GOOGLE KNOWS IT. If the account can
             # see this site under another spelling, use that — and keep it, so

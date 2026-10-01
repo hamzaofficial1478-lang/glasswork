@@ -386,6 +386,8 @@ _GSC_TITLES = (
     (r"is missing\. upload|key file could not be read",
      "Search Console: paste the service-account key on Setup again"),
     (r"not installed", "Search Console: one install is needed on this computer"),
+    (r"search console api is switched off",
+     "Search Console: switch on the Search Console API in Google Cloud"),
     (r"invalid_grant|refused the service-account key",
      "Search Console: Google refused the key — make a new one"),
     (r"can see no properties|not a user|users and permissions|permissions problem",
