@@ -371,6 +371,35 @@ def test_google_is_asked_at_the_address_search_console_knows():
               [("Make your website address on Setup match Search Console", "amber")])
 
 
+def test_he_can_simply_ask_it_for_them():
+    print("\nHe can ask IT by name — the www, the share buttons, the sitemap:")
+    ctx = {"env": {"SITE_URL": "https://www.worlddealtechnicalservices.com"}}
+    order = ("Owner's order: Fix the wrong domain: every page and canonical tag must use "
+             "https://www.worlddealtechnicalservices.com. Repair the share buttons on the "
+             "blog posts. Put the sitemap on the website.")
+    with _Cabinet() as cab:
+        real = (site_api.plan_share_buttons, site_api.plan_domains)
+        site_api.plan_share_buttons = lambda s=None: {"ok": True, "times": 3,
+                                                      "pages": [{"page": "blog-details.php", "times": 3}]}
+        site_api.plan_domains = lambda s=None: {"ok": True, "times": 9, "wrong": {
+            "worlddealtechnicalservices.com (without www)": 9},
+            "pages": [{"page": "index.php", "wrong": {"x": 9}}]}
+        try:
+            got = it_fix.plans_for({"id": 0, "kind": "task", "severity": "high", "url": "",
+                                    "detail": order}, ctx)
+            board.queue_site_change("seo-lead", "publish_sitemap",
+                                    {"change": {"call": "publish_sitemap"}})
+            again = it_fix.plans_for({"id": 0, "kind": "task", "severity": "high", "url": "",
+                                      "detail": "Put the sitemap on the website."}, ctx)
+        finally:
+            site_api.plan_share_buttons, site_api.plan_domains = real
+    check("all three, each a change he approves",
+          sorted(p.get("call") for p in got if p["how"] == "call"),
+          ["publish_sitemap", "repair_share_buttons", "use_one_domain"])
+    check("one already waiting for his yes is not queued twice",
+          [p["how"] for p in again], ["already_right"])
+
+
 def main():
     for t in (test_the_canonical_names_the_one_address_and_nothing_else,
               test_the_share_buttons_go_to_the_networks_again,
@@ -379,7 +408,8 @@ def main():
               test_googles_answer_explained,
               test_the_day_asks_google_and_queues_the_fixes_once,
               test_it_turns_the_audit_findings_into_fixes,
-              test_google_is_asked_at_the_address_search_console_knows):
+              test_google_is_asked_at_the_address_search_console_knows,
+              test_he_can_simply_ask_it_for_them):
         t()
     print()
     if _fail:

@@ -338,10 +338,12 @@ _CHANGE = re.compile(r"\b(change|replace|fix|correct|update|swap|wrong|dummy|fak
 
 
 def _asks_about_domain(text):
-    """His words for 'the domain on my site is wrong', with or without a full name."""
+    """His words for 'the domain on my site is wrong', with or without a full name —
+    or for the www: "every page must use the address with www"."""
     t = text or ""
-    return bool(re.search(r"(?<![a-z0-9])\.(ae|com)\b|\bdomains?\b", t, re.I)
-                and _CHANGE.search(t))
+    return bool(re.search(r"(?<![a-z0-9])\.(ae|com)\b|\bdomains?\b|(?<![./])\bwww\b(?!\.)"
+                          r"|\bone address\b|\bcanonical", t, re.I)
+                and (_CHANGE.search(t) or re.search(r"\b(use|must|should|make)\b", t, re.I)))
 
 
 def _asks_about_email(text):
@@ -706,6 +708,65 @@ def fix_seo_finding(issue, ctx):
     return _advice(why or "The SEO audit found this on your site.", steps, needs=needs)
 
 
+def _waiting(kind) -> bool:
+    """A change of this kind is already waiting for his yes (or approved and queued)."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            return bool(c.execute("SELECT 1 FROM site_queue WHERE kind=? AND status IN"
+                                  " ('pending','approved') LIMIT 1", (kind,)).fetchone())
+    except sqlite3.Error:
+        return False
+
+
+def fix_from_his_words(issue, ctx):
+    """
+    Two things he can now simply ask IT for, by name: the share buttons and the
+    sitemap. Instructions only — a filed ticket has its own recipes. If the same
+    change is already waiting for his yes it is not queued twice.
+    """
+    if issue.get("kind") != "task":
+        return None
+    t = (issue.get("detail") or "").lower()
+    if re.search(r"\bshare\s*buttons?\b|\bsharing buttons?\b", t):
+        if _waiting("repair_share_buttons"):
+            return {"how": "already_right",
+                    "why": "the share-button repair is already waiting for your yes"}
+        try:
+            sb = site_api.plan_share_buttons()
+        except Exception as e:
+            return _advice(f"Could not read the pages: {e}", [])
+        if sb.get("ok") and sb.get("times"):
+            return {"how": "call", "call": "repair_share_buttons",
+                    "pages": [p["page"] for p in sb["pages"]][:12], "times": sb["times"],
+                    "why": (f"{sb['times']} share button(s) on your posts open a page on your "
+                            "own site instead of Facebook, WhatsApp and LinkedIn. This puts "
+                            "each network back."),
+                    "undo": "python -m pipelines.site_api --undo --page <page>"}
+        if sb.get("ok"):
+            return {"how": "already_right",
+                    "why": "the share buttons already go to Facebook, WhatsApp and LinkedIn"}
+    return None
+
+
+def fix_sitemap_asked(issue, ctx):
+    """'Put the sitemap on the website' — its own recipe, so one sentence asking
+    for the share buttons AND the sitemap gets both (a recipe gives one plan)."""
+    if issue.get("kind") != "task":
+        return None
+    t = (issue.get("detail") or "").lower()
+    if re.search(r"\bsite\s*-?\s*map\b", t):
+        if _waiting("publish_sitemap"):
+            return {"how": "already_right",
+                    "why": "the sitemap is already waiting for your yes"}
+        from . import sitemap
+        return {"how": "call", "call": "publish_sitemap", "pages": [sitemap.PAGE],
+                "why": (f"Puts {sitemap.live_url()} on your website listing every page "
+                        "Google should know about, and hands it to Search Console. It is "
+                        "kept up to date as posts go up and come down."),
+                "undo": f"python -m pipelines.site_api --undo --page {sitemap.PAGE}"}
+    return None
+
+
 RECIPES = (
     # Before everything: an audit ticket must never reach a recipe that only
     # matches on its wording. See fix_seo_finding.
@@ -716,6 +777,8 @@ RECIPES = (
     # mailto on the page. He asked for the domain changed, not the tag.
     fix_wrong_domain,
     fix_dead_email,
+    fix_from_his_words,
+    fix_sitemap_asked,
     fix_viewport,
     fix_canonical,
     fix_placeholders,
