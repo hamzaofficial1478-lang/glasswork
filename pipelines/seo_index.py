@@ -106,6 +106,47 @@ def explain(url, r) -> tuple:
     return False, cov, ""
 
 
+def _in_property(url, prop) -> str:
+    """
+    The same page at the address Search Console knows the site by.
+
+    "Search Console said 403: You do not own this site, or the inspected URL is
+    not part of this property." His website address on Setup was saved without
+    www and his Search Console property is the www one, so every page was asked
+    about at an address the property does not cover. A URL-prefix property
+    answers only for its own scheme and host; a domain property for any.
+    """
+    if not prop or prop.startswith("sc-domain:"):
+        return url
+    pp, pu = urllib.parse.urlparse(prop), urllib.parse.urlparse(url)
+    return urllib.parse.urlunparse((pp.scheme, pp.netloc, pu.path or "/", "", pu.query, ""))
+
+
+def address_mismatch(prop) -> str:
+    """
+    The two addresses he has given the agency for one site, when they differ —
+    Setup's website address and his Search Console property — or ''.
+
+    One of them has to be the site's one address. Fixing canonicals, links and
+    the sitemap towards Setup's while Search Console holds the other would only
+    move the problem, so nothing is changed until he makes them agree.
+    """
+    if not prop or prop.startswith("sc-domain:"):
+        return ""
+    from . import sitemap
+    mine = sitemap.site_address()
+    if not mine:
+        return ""
+    a = urllib.parse.urlparse(mine).netloc.lower()
+    b = urllib.parse.urlparse(prop).netloc.lower()
+    if a == b:
+        return ""
+    return (f"Your website address on Setup is {mine} but your Search Console property is "
+            f"{prop.rstrip('/')}. They must be the same address. Open Setup → Website and "
+            f"save {prop.rstrip('/')} (your pages' own links and Search Console already "
+            "use it); the agency then makes every page and the sitemap name it.")
+
+
 def _pages():
     """The pages to ask about: the sitemap if it is up, else a gentle walk of the site."""
     from . import sitemap, site_api
@@ -154,6 +195,10 @@ def _run(most):
     urls, from_sitemap = _pages()
     if not urls:
         return {"ok": False, "error": "no page of the site could be read to ask about"}
+    seen_urls = set()
+    urls = [u for u in (_in_property(u, prop) for u in urls)
+            if not (u in seen_urls or seen_urls.add(u))]
+    mismatch = address_mismatch(prop)
     site_host = urllib.parse.urlparse(urls[0]).netloc.lower()
     now = int(time.time())
     with sqlite3.connect(board.DB, timeout=30) as c:
@@ -193,7 +238,20 @@ def _run(most):
     queued = []
     split = [p for p in st["pages"] if p.get("user_canonical")
              and urllib.parse.urlparse(p["user_canonical"]).netloc.lower() != site_host]
-    if split or any("copy" in (p.get("why") or "") for p in st["pages"]):
+    if mismatch:
+        # Two addresses for one site in his own settings: say so, once, and
+        # change nothing on the site until they agree.
+        try:
+            with sqlite3.connect(board.DB, timeout=30) as c:
+                have = c.execute("SELECT 1 FROM tasks WHERE about='address:owner'"
+                                 " AND status IN ('open','in_progress')").fetchone()
+            if not have:
+                board.try_post_task("SEO", "Make your website address on Setup match "
+                                    "Search Console", mismatch, risk="amber",
+                                    created_by=AGENT, about="address:owner")
+        except Exception:
+            pass
+    elif split or any("copy" in (p.get("why") or "") for p in st["pages"]):
         cid = _queue("use_one_domain",
                      f"Make every page name its real address: {site_host}",
                      f"{len(split) or 'Some'} of your pages tell Google their real "
@@ -204,7 +262,7 @@ def _run(most):
                      f"and link to {site_host}.")
         if cid:
             queued.append(cid)
-    if not from_sitemap and not sitemap.is_published():
+    if not mismatch and not from_sitemap and not sitemap.is_published():
         cid = _queue("publish_sitemap", "Put a sitemap on your website and give it to Google",
                      f"Your website has no sitemap, so Google finds pages only by "
                      f"following links. This puts {sitemap.live_url()} on your site listing "
@@ -229,10 +287,13 @@ def _run(most):
             + (f"; {total - on} are not — reasons and fixes in the office under On Google"
                if total - on else "")
             + (f"; {len(queued)} fix(es) waiting for your yes" if queued else ""))
+    if mismatch:
+        head = mismatch + " " + head
     if errors and not rows:
-        return {"ok": False, "error": "Google would not answer about your pages: " + errors[0]}
+        return {"ok": False, "error": (mismatch + " " if mismatch else "")
+                + "Google would not answer about your pages: " + errors[0]}
     return {"ok": True, "asked": asked, "on_google": on, "pages": total,
-            "queued": queued, "head": head, "errors": errors[:3]}
+            "queued": queued, "head": head, "errors": errors[:3], "mismatch": mismatch}
 
 
 def status() -> dict:
@@ -248,8 +309,13 @@ def status() -> dict:
         return {"ok": False, "error": str(e), "pages": [], "on_google": 0}
     on = sum(1 for p in pages if p["on_google"])
     when = max([p["checked_at"] or 0 for p in pages] or [0])
+    try:
+        from providers import integrations
+        mismatch = address_mismatch((integrations.read_env().get("GSC_PROPERTY") or "").strip())
+    except Exception:
+        mismatch = ""
     return {"ok": True, "pages": pages, "on_google": on,
-            "checked_at": when,
+            "checked_at": when, "mismatch": mismatch,
             "head": (f"{on} of {len(pages)} page(s) on Google" if pages else
                      "not asked yet — it runs in the day once Search Console is working")}
 

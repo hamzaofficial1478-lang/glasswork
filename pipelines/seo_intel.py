@@ -407,6 +407,9 @@ def gsc_inspect(url, creds=None, prop=""):
         return {"ok": False, "why": f"Search Console did not answer ({type(e).__name__})"}
     if r.status_code != 200:
         off = _api_switched_off(r.text or "")
+        if not off and "not part of this property" in (r.text or ""):
+            off = (f"{url} is not inside your Search Console property ({prop}) — "
+                   "Google answers only for addresses the property covers")
         return {"ok": False, "status": r.status_code,
                 "why": off or f"Search Console said {r.status_code}: {(r.text or '')[:200]}"}
     st = ((r.json().get("inspectionResult") or {}).get("indexStatusResult") or {})

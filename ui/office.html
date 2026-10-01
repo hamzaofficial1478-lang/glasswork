@@ -1833,15 +1833,16 @@ function renderIndex(){
   $('#idxHead').textContent = d.head ? '· '+d.head : '';
   if(!d.ok){ B.innerHTML = `<div class="warnbox"><b>Could not read it.</b><br>${esc(d.error||'no detail')}</div>`; return; }
   const ps = d.pages || [];
+  const warn = d.mismatch ? `<div class="warnbox" style="margin-bottom:14px"><b>Two addresses for one site.</b><br>${esc(d.mismatch)}</div>` : '';
   if(!ps.length){
-    B.innerHTML = `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">Google has not been asked yet.
+    B.innerHTML = warn + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">Google has not been asked yet.
       Once Search Console is working (Setup → Test), the day asks Google about every page and lists here which are
       on Google, which are not, why, and what is being done.</p>`;
     return;
   }
   const off = ps.filter(p=>!p.on_google), on = ps.filter(p=>p.on_google);
   const when = d.checked_at ? new Date(d.checked_at*1000).toLocaleString() : '';
-  let H = `<p style="font-size:12px;color:var(--muted);margin:0 0 12px">Asked Google ${esc(when)}. This is Google's own answer — the same as the URL Inspection box in Search Console.</p>`;
+  let H = warn + `<p style="font-size:12px;color:var(--muted);margin:0 0 12px">Asked Google ${esc(when)}. This is Google's own answer — the same as the URL Inspection box in Search Console.</p>`;
   if(off.length){
     H += `<div class="gh etch" style="margin-bottom:8px">Not on Google yet · ${off.length}</div>`
       + off.map(p=>`<div style="border-left:2px solid var(--amber);padding:2px 0 10px 12px;margin-bottom:10px">

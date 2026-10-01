@@ -1066,12 +1066,19 @@ def _domain_re(brand):
 
 
 def _site_host() -> str:
-    """The host exactly as his site is served — 'www.worlddealtechnicalservices.com'."""
+    """
+    The host exactly as he saved it — 'www.worlddealtechnicalservices.com'.
+
+    Not site.site_host(), which is the bare domain FOR SHOWING and takes the
+    www off: built on that, the www half of the one-address fix could never
+    switch on outside the tests.
+    """
     try:
         from coordination import site
-        return (site.site_host() or "").lower().strip(".")
+        u = site.site_url() or ""
     except Exception:
         return ""
+    return u.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0].strip().lower().strip(".")
 
 
 def _one_domain(html, brand, right_host, right_mail, site_host=None):

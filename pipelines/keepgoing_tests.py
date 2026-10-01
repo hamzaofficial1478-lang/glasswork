@@ -273,15 +273,17 @@ class _Site:
         self.pages, self.writes = dict(pages), []
 
     def __enter__(self):
-        self.real = (site_api.call, site_api.settings, site.site_host)
+        self.real = (site_api.call, site_api.settings, site.site_host, site.site_url)
         site_api.call = self._call
         site_api.settings = lambda env=None: {"mode": "full", "base": "https://x/agency-api",
                                               "token": "t" * 40, "site": "https://x"}
-        site.site_host = lambda override="": "www.worlddealtechnicalservices.com"
+        # site_host() is the bare domain for showing; site_url() is what he saved
+        site.site_host = lambda override="": "worlddealtechnicalservices.com"
+        site.site_url = lambda override="": "https://www.worlddealtechnicalservices.com"
         return self
 
     def __exit__(self, *a):
-        site_api.call, site_api.settings, site.site_host = self.real
+        site_api.call, site_api.settings, site.site_host, site.site_url = self.real
 
     def _call(self, path, method="GET", body=None, timeout=25, s=None):
         if path == "/pages" and method == "GET":

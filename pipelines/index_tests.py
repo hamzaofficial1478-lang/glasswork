@@ -80,15 +80,17 @@ class _Site:
         self.pages, self.writes = dict(pages), []
 
     def __enter__(self):
-        self.real = (site_api.call, site_api.settings, site.site_host)
+        self.real = (site_api.call, site_api.settings, site.site_host, site.site_url)
         site_api.call = self._call
         site_api.settings = lambda env=None: {"mode": "full", "base": "https://x/agency-api",
                                               "token": "t" * 40, "site": HOME.rstrip("/")}
-        site.site_host = lambda override="": "www.worlddealtechnicalservices.com"
+        # site_host() is the bare domain for showing; site_url() is what he saved
+        site.site_host = lambda override="": "worlddealtechnicalservices.com"
+        site.site_url = lambda override="": "https://www.worlddealtechnicalservices.com"
         return self
 
     def __exit__(self, *a):
-        site_api.call, site_api.settings, site.site_host = self.real
+        site_api.call, site_api.settings, site.site_host, site.site_url = self.real
 
     def _call(self, path, method="GET", body=None, timeout=25, s=None):
         if path == "/pages" and method == "GET":
@@ -326,6 +328,49 @@ def test_it_turns_the_audit_findings_into_fixes():
           "Hostinger" in hosts[0]["why"], True)
 
 
+def test_google_is_asked_at_the_address_search_console_knows():
+    print("\nSetup says no www, Search Console says www: Google is asked at the www address,")
+    print("and nothing on the site is changed until the two agree:")
+    check("a page is asked about at the property's address",
+          seo_index._in_property("https://worlddealtechnicalservices.com/about.php?x=1", HOME),
+          HOME + "about.php?x=1")
+    check("a domain property covers any address",
+          seo_index._in_property("https://worlddealtechnicalservices.com/a", "sc-domain:x.com"),
+          "https://worlddealtechnicalservices.com/a")
+    with _Cabinet() as cab:
+        real = (seo_intel._gsc_session, seo_intel.gsc_inspect, seo_index._pages,
+                sitemap.is_published, site_api.plan_share_buttons, sitemap.site_address)
+        asked = []
+        seo_intel._gsc_session = lambda scope=None: (types.SimpleNamespace(token="t"), HOME, "")
+        seo_intel.gsc_inspect = lambda u, creds=None, prop="": asked.append(u) or {
+            "ok": True, "verdict": "NEUTRAL", "coverage": "Crawled - currently not indexed",
+            "user_canonical": u.replace("www.", "")}
+        seo_index._pages = lambda: (["https://worlddealtechnicalservices.com/",
+                                     "https://worlddealtechnicalservices.com/about.php"], False)
+        sitemap.is_published = lambda home=None, get=None: False
+        site_api.plan_share_buttons = lambda s=None: {"ok": True, "times": 0, "pages": []}
+        sitemap.site_address = lambda: "https://worlddealtechnicalservices.com"
+        try:
+            check("the two addresses are noticed",
+                  "must be the same address" in seo_index.address_mismatch(HOME), True)
+            r = seo_index._run(40)
+            seo_index._run(40)
+        finally:
+            (seo_intel._gsc_session, seo_intel.gsc_inspect, seo_index._pages,
+             sitemap.is_published, site_api.plan_share_buttons, sitemap.site_address) = real
+        check("every page was asked about at the www address", asked,
+              [HOME, HOME + "about.php"])
+        check("he is told which to save, in the run's own words",
+              "Open Setup → Website and save https://www.worlddealtechnicalservices.com"
+              in r["head"], True)
+        check("no change to his site is queued while the two disagree",
+              cab.sql("SELECT kind FROM site_queue"), [])
+        todo = cab.sql("SELECT title, risk FROM tasks WHERE about='address:owner'")
+        check("one to-do for him, not one a run",
+              [(t["title"], t["risk"]) for t in todo],
+              [("Make your website address on Setup match Search Console", "amber")])
+
+
 def main():
     for t in (test_the_canonical_names_the_one_address_and_nothing_else,
               test_the_share_buttons_go_to_the_networks_again,
@@ -333,7 +378,8 @@ def main():
               test_the_sitemap_goes_up_and_keeps_up,
               test_googles_answer_explained,
               test_the_day_asks_google_and_queues_the_fixes_once,
-              test_it_turns_the_audit_findings_into_fixes):
+              test_it_turns_the_audit_findings_into_fixes,
+              test_google_is_asked_at_the_address_search_console_knows):
         t()
     print()
     if _fail:
