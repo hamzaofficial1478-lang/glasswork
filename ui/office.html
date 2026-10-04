@@ -1952,6 +1952,61 @@ function renderIndex(){
   B.innerHTML = H;
 }
 
+/* ---- FIND AND REPLACE ON YOUR WEBSITE ------------------------------------
+   "the program ... cannot even check into the code that the mail can get
+   changed ... cannot you see footer.php page and scan it?" — this is the
+   agency reading every file of the site in front of him: each file that holds
+   the text, how many times, and the line. Replace goes through IT like every
+   change (tests first, a copy of each file kept), approved on his word because
+   he typed both. ------------------------------------------------------------- */
+let FR = {find:'', to:'', result:null, busy:false, said:''};
+function findReplaceBox(){
+  const r = FR.result;
+  let h = `<div style="border:1px solid var(--line2);border-radius:10px;padding:12px 14px;margin-bottom:18px">
+    <div class="gh etch" style="margin-bottom:8px">Find and replace on your website</div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6">Type any text — an old email, a phone number, a wrong word.
+      The agency reads every file of your website and shows each one it is in. Then replace it everywhere in one press.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="frFind" value="${escA(FR.find)}" placeholder="text to find, e.g. info@worlddealtechnicalservices.ae"
+        style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12.5px">
+      <button class="actbtn" onclick="frFind()">${FR.busy?'Reading your files…':'Find'}</button>
+    </div>`;
+  if(FR.said) h += `<div style="font-size:12px;margin-top:8px;color:var(--amber)">${esc(FR.said)}</div>`;
+  if(r){
+    if(!r.ok) h += `<div class="warnbox" style="margin-top:10px">${esc(r.error||'could not read your files')}</div>`;
+    else{
+      h += `<div style="font-size:12.5px;margin-top:10px">${esc(r.head||'')}</div>`;
+      h += (r.pages||[]).map(p=>`<div style="font-size:12px;margin-top:6px"><b style="font-family:'IBM Plex Mono',monospace">${esc(p.page)}</b> — ${p.times} time${p.times===1?'':'s'}
+        <div style="color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px;overflow-x:auto;white-space:nowrap">${esc(p.sample||'')}</div></div>`).join('');
+      if((r.pages||[]).length) h += `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+          <input id="frTo" value="${escA(FR.to)}" placeholder="replace with, e.g. teamworlddeal@worlddealtechnicalservices.com"
+            style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12.5px">
+          <button class="pbtn" style="width:auto;padding:7px 14px;margin:0" onclick="frReplace()">Replace everywhere</button></div>`;
+    }
+  }
+  return h + `</div>`;
+}
+async function frFind(){
+  FR.find = ($('#frFind')||{}).value || ''; FR.said=''; FR.result=null;
+  if(FR.find.trim().length < 6){ FR.said='Give at least 6 characters to look for.'; renderChanges(); return; }
+  FR.busy = true; renderChanges();
+  try{ FR.result = await (await fetch('/api/site/find?text='+encodeURIComponent(FR.find.trim()),{cache:'no-store'})).json(); }
+  catch(e){ FR.result = {ok:false, error:String(e)}; }
+  FR.busy = false; renderChanges();
+}
+async function frReplace(){
+  FR.to = ($('#frTo')||{}).value || '';
+  if(!FR.to.trim()){ FR.said='Type what it should become.'; renderChanges(); return; }
+  if(!confirm(`Change “${FR.find.trim()}” to “${FR.to.trim()}” in every file it is in?`)) return;
+  let j=null;
+  try{ j = await (await fetch('/api/review/act',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({do:'site_replace', ids:[], data:{find:FR.find.trim(), replace_with:FR.to.trim()}})})).json(); }
+  catch(e){ j={ok:false,error:String(e)}; }
+  FR.said = (j && (j.head||j.error)) || 'No answer from the server.';
+  if(j && j.ok) FR.result = null;
+  renderChanges();
+}
+
 async function changeAgain(id, act){
   CHG.said = act==='retry_change' ? 'Trying it again…' : 'Dropping it…';
   renderChanges();
@@ -1974,7 +2029,7 @@ function renderChanges(){
   if(!d){ B.innerHTML = `<p style="color:var(--muted);font-size:12.5px">Reading the log…</p>`; return; }
   $('#chgHead').textContent = d.ok && d.head ? '· '+d.head : '';
 
-  let H = '';
+  let H = findReplaceBox();
   if(CHG.said) H += `<div class="warnbox" style="margin-bottom:14px">${esc(CHG.said)}</div>`;
   if(!d.ok){
     B.innerHTML = H + `<div class="warnbox"><b>Could not read the log.</b><br>${esc(d.error||'no detail')}</div>`;

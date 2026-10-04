@@ -189,8 +189,152 @@ def test_his_orders_followed_to_the_end():
         check("the day it was given", it["day"], day)
 
 
+class _HisSite:
+    """His files through an OLD connector that lists the top level only."""
+
+    def __init__(self, pages, listed, broken=()):
+        self.pages, self.listed, self.broken, self.writes = dict(pages), list(listed), set(broken), []
+
+    def __enter__(self):
+        from coordination import site
+        from pipelines import site_api
+        self.real = (site_api.call, site_api.settings, site.site_host, site.site_url)
+        site_api.call = self._call
+        site_api.settings = lambda env=None: {"mode": "full", "base": "https://x/agency-api",
+                                              "token": "t" * 40,
+                                              "site": "https://www.worlddealtechnicalservices.com"}
+        site.site_host = lambda override="": "worlddealtechnicalservices.com"
+        site.site_url = lambda override="": "https://www.worlddealtechnicalservices.com"
+        return self
+
+    def __exit__(self, *a):
+        from coordination import site
+        from pipelines import site_api
+        site_api.call, site_api.settings, site.site_host, site.site_url = self.real
+
+    def _call(self, path, method="GET", body=None, timeout=25, s=None):
+        if path == "/pages" and method == "GET":
+            return {"ok": True, "pages": [{"page": p, "bytes": 1, "changed": "t"} for p in self.listed]}
+        if path.startswith("/pages/") and method == "GET":
+            name = path.split("/", 2)[2]
+            if name in self.broken:
+                return {"ok": False, "error": "the server answered 500", "status": 500}
+            if name not in self.pages:
+                return {"ok": False, "error": "no such page", "status": 404}
+            return {"ok": True, "page": name, "html": self.pages[name]}
+        if path == "/pages" and method == "POST":
+            self.writes.append(body["page"])
+            self.pages[body["page"]] = body["html"]
+            return {"ok": True, "page": body["page"], "backup": "b"}
+        return {"ok": False, "error": f"no {method} {path}"}
+
+
+DUMMY = "info@worlddealtechnicalservices.ae"
+HIS_FILES = {
+    "index.php": '<?php include "includes/header.php"; ?><p>home</p><?php include "includes/footer.php"; ?>',
+    "contact.php": '<p>Email us: <a href="mailto:' + DUMMY + '">' + DUMMY + '</a></p>',
+    "includes/header.php": '<div class="sidemenu"><a href="mailto:' + DUMMY + '">' + DUMMY + '</a></div>',
+    "includes/footer.php": '<footer><a href="mailto:' + DUMMY + '">' + DUMMY + '</a></footer>',
+}
+
+
+def test_every_file_is_searched_footer_included():
+    from pipelines import site_api
+    print("\nHis footer, header and contact page are all searched — even with an old connector:")
+    with _Cabinet(), _HisSite(HIS_FILES, listed=["index.php", "contact.php"]):
+        r = site_api.plan_replace(DUMMY, HIS)
+        emails = site_api.plan_emails()
+    check("the dummy is found in all three files",
+          sorted(h["page"] for h in r["pages"]),
+          ["contact.php", "includes/footer.php", "includes/header.php"])
+    check("  each with the line it is on", all(DUMMY in h["sample"] for h in r["pages"]), True)
+    check("the email routine sees the same three",
+          sorted(p["page"] for p in emails["pages"]),
+          ["contact.php", "includes/footer.php", "includes/header.php"])
+
+    print("\n...a file that will not open is named, never passed off as 'not in your files':")
+    with _Cabinet(), _HisSite(HIS_FILES, listed=["index.php", "contact.php", "includes/footer.php"],
+                              broken={"includes/footer.php"}):
+        r = site_api.plan_replace(DUMMY, HIS)
+        why = site_api.why_still_showing({"emails": {DUMMY: 2}})
+    check("the unreadable file is listed", r["unreadable"], ["includes/footer.php"])
+    check("and the reason says it, not 'admin panel'",
+          ("includes/footer.php" in why or "includes/header.php" in why, "admin panel" in why),
+          (True, False))
+
+
+def test_his_order_is_his_yes():
+    from pipelines import it_fix
+    print("\nHis own order to change the email is approved by that order — no second yes:")
+    with _Cabinet() as cab, _HisSite(HIS_FILES, listed=["index.php", "contact.php"]):
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        try:
+            plan = it_fix.plans_for({"id": 0, "kind": "task", "severity": "high", "url": "",
+                                     "detail": "Owner's order: change the dummy mail on the "
+                                               "website to " + HIS, "task_id": "t9",
+                                     "his": True}, {"env": {"BUSINESS_EMAIL": HIS}})
+            mine = [p for p in plan if p.get("call") == "use_one_email"]
+            it_fix._hand_on("it-fixer", {"id": 0, "kind": "task", "severity": "high", "url": "",
+                                         "detail": "Owner's order: change the dummy mail",
+                                         "task_id": "t9", "his": True}, mine[0], con)
+            it_fix._hand_on("it-fixer", {"id": 0, "kind": "seo", "severity": "low", "url": "",
+                                         "detail": "an agency finding", "his": False},
+                            {"how": "call", "call": "repair_share_buttons", "why": "x",
+                             "pages": ["a.php"]}, con)
+        finally:
+            con.close()
+        rows = {r["kind"]: r for r in cab.sql("SELECT kind, status, note, detail FROM site_queue")}
+    check("the email change is planned across all three files", bool(mine), True)
+    check("his order's change is approved at once", rows["fix_task"]["status"], "approved")
+    check("  saying why", "your own order" in rows["fix_task"]["note"], True)
+    check("  and tied to his order", json.loads(rows["fix_task"]["detail"])["task_id"], "t9")
+    check("an agency finding still waits for his yes", rows["fix_seo"]["status"], "pending")
+
+
+def test_find_and_replace_from_the_office():
+    from coordination import review
+    from pipelines import it_release, site_api
+    print("\nFind and replace from the office: approved on his word, checked on the live site:")
+    with _Cabinet() as cab:
+        bad = review.act("site_replace", [], {"find": "<footer>", "replace_with": "<script>"})
+        check("page code cannot be changed from here", bad["ok"], False)
+        from coordination import chat_actions
+        real_start = chat_actions.start_release
+        chat_actions.start_release = lambda: True
+        try:
+            r = review.act("site_replace", [], {"find": DUMMY, "replace_with": HIS})
+        finally:
+            chat_actions.start_release = real_start
+        row = cab.sql("SELECT id, status, detail FROM site_queue")[0]
+        check("approved at once, because he typed both", (r["ok"], row["status"]), (True, "approved"))
+        check("and the Releaser reads it as a text change",
+              it_release.plan_of(row)["do"], "replace")
+
+    print("\n...a replace that finds nothing while the live site still shows it is NOT done:")
+    with _Cabinet() as cab, _HisSite({"index.php": "<p>home</p>"}, listed=["index.php"]):
+        cid = board.queue_site_change("owner", "replace_text",
+                                      {"change": {"replace": DUMMY, "with": HIS}})
+        board.decide_site_change(cid, "approved")
+        from coordination import sitepace
+        real = (site_api.live_has, site_api.why_not_ready, it_release.tests_pass, sitepace.resting)
+        site_api.live_has = lambda text, get=None: ["https://www.worlddealtechnicalservices.com/"]
+        site_api.why_not_ready = lambda s=None: ""
+        it_release.tests_pass = lambda timeout=None: {"ok": True, "took_s": 1, "why": "green"}
+        sitepace.resting = lambda: {}
+        try:
+            it_release.run()
+        finally:
+            site_api.live_has, site_api.why_not_ready, it_release.tests_pass, sitepace.resting = real
+        row = cab.sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("not marked done", row["status"], "failed")
+    check("  and says it is still on the live site", "still on your live site" in row["note"], True)
+
+
 def main():
-    for t in (test_done_means_a_visitor_sees_it, test_his_orders_followed_to_the_end):
+    for t in (test_done_means_a_visitor_sees_it, test_his_orders_followed_to_the_end,
+              test_every_file_is_searched_footer_included, test_his_order_is_his_yes,
+              test_find_and_replace_from_the_office):
         t()
     print()
     if _fail:

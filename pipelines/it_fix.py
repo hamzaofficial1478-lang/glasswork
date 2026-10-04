@@ -719,6 +719,15 @@ def fix_seo_finding(issue, ctx):
     return _advice(why or "The SEO audit found this on your site.", steps, needs=needs)
 
 
+def deskwork_is_his(task) -> bool:
+    """Is this board job one of his own orders?"""
+    try:
+        from coordination import desks
+        return bool(desks.is_owner_order(task))
+    except Exception:
+        return str((task or {}).get("title") or "").startswith("Owner's order")
+
+
 def _waiting(kind) -> bool:
     """A change of this kind is already waiting for his yes (or approved and queued)."""
     try:
@@ -981,7 +990,8 @@ def _work(agent, limit, only, dry_run):
                 "id": 0, "kind": "task", "severity": "high",
                 "detail": f"{task.get('title', '')}. {task.get('detail', '') or ''}",
                 "url": "", "status": "open", "found_by": task.get("created_by", "MD"),
-                "found_at": task.get("created_at") or _now(), "task_id": task["id"]})
+                "found_at": task.get("created_at") or _now(), "task_id": task["id"],
+                "his": deskwork_is_his(task)})
         if not issues:
             total = con.execute("SELECT count(*) FROM site_issues").fetchone()[0]
             waiting = con.execute("SELECT count(*) FROM site_issues"
@@ -1107,6 +1117,19 @@ def _hand_on(agent, issue, plan, con):
         detail = _for_the_owner(issue, plan)
         change_id = board.queue_site_change(agent, "fix_" + (issue["kind"] or "site"),
                                             detail)
+        # HIS ORDER IS HIS YES. "almost 10th time i asked to change the dummy
+        # mail" — each time the change was written and then waited in a queue
+        # for an approval he had already given, in the words of the order. A
+        # change that does exactly what his own order asked is approved by that
+        # order; the Releaser still runs the tests first and keeps a backup of
+        # every file. Agency-found tickets still wait for him.
+        if issue.get("his") and plan.get("how") in ("call", "replace"):
+            try:
+                board.decide_site_change(change_id, "approved")
+                board.note_site_change(change_id, "approved on your word — your own order "
+                                                  "asked for this")
+            except Exception:
+                pass
         if issue["id"]:
             with sqlite3.connect(board.DB, timeout=30) as c:
                 c.execute("UPDATE site_issues SET status='in_review' WHERE id=?",

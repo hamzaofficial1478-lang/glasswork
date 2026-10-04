@@ -906,6 +906,26 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
                     plan, f"'{plan['find']}' is still on {page} after the "
                           "change was written. Nothing further was touched; "
                           "this is worth a look by hand.")
+            # AND ON THE PAGES A VISITOR SEES. A replace that found nothing to
+            # change used to be marked done; if the text is still on his live
+            # site, it is not done, and he is told which files were read and
+            # which could not be.
+            try:
+                showing = site_api.live_has(plan["find"])
+            except Exception:
+                showing = []
+            if showing:
+                unread = r.get("unread") or []
+                return _could_not(
+                    plan, f"'{plan['find']}' is still on your live site ("
+                          + ", ".join(showing[:3]) + ") after "
+                          + (f"changing {len(r.get('changed') or [])} file(s)" if r.get("changed")
+                             else f"reading {r.get('looked_in', 'your')} files and finding it in none")
+                          + (". These file(s) could not be read: "
+                             + ", ".join(u["page"] for u in unread[:4])
+                             + " — it is most likely in there; press Try again" if unread else
+                             ". It is coming from somewhere outside your page files — your "
+                             "admin panel's settings or a folder the agency never opens"))
             _close_ticket(plan.get("issue_id"))
             board.mark_site_change(
                 row["id"], "applied",

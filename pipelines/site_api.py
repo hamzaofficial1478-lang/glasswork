@@ -836,19 +836,19 @@ def plan_replace(find, replace, s=None) -> dict:
     if find == replace:
         return {"ok": False, "error": "those are the same text"}
 
-    p = pages(s=s)
-    names = [x["page"] for x in (p.get("pages") or [])] if p.get("ok") else []
-    hits, looked, unreadable = [], [], []
-    for name in list(names) + [n for n in LIKELY_INCLUDES if n not in names]:
-        if name in looked:
-            continue
+    # EVERY FILE, THE SAME WAY EVERYTHING ELSE LOOKS. This read the page list
+    # and a list of likely HEADER files — and no footer. His dummy email sits in
+    # includes/footer.php (and includes/header.php, and contact.php); with a
+    # connector that lists the top level only, the footer was never opened. The
+    # shared walk reads the pages, the usual header and footer files, and every
+    # file a page includes.
+    hits, looked, unread = [], [], []
+    for name, html in _walk(s, unread=unread):
+        if name is None:
+            return {"ok": False, "unreachable": html.get("unreachable"),
+                    "error": html.get("error") or "could not list your pages"}
         looked.append(name)
-        got = read_page(name, s=s)
-        if not got.get("ok"):
-            if name in names:
-                unreadable.append(name)
-            continue
-        html = got.get("html") or ""
+        html = html or ""
         n = html.count(find)
         if not n:
             continue
@@ -864,11 +864,14 @@ def plan_replace(find, replace, s=None) -> dict:
     total = sum(h["times"] for h in hits)
     return {"ok": True, "find": find, "replace": replace, "pages": hits,
             "files": len(hits), "times": total, "looked_in": len(looked),
-            "unreadable": unreadable,
+            "looked": looked, "unreadable": [u["page"] for u in unread],
+            "unread": unread,
             "head": (f"'{find}' appears {total} time(s) in {len(hits)} file(s)"
                      if total else
                      f"'{find}' does not appear in any of the {len(looked)} "
-                     "files I can read")}
+                     "files I can read")
+                    + (f" — {len(unread)} file(s) could not be read: "
+                       + ", ".join(u["page"] for u in unread[:4]) if unread else "")}
 
 
 # ---------------------------------------------------------------------------
@@ -934,14 +937,20 @@ FOOTER_GUESSES = ("includes/footer.php", "inc/footer.php", "partials/footer.php"
                   "footer.php")
 
 
-def _walk(s=None):
-    """(name, html) for every page, then every file those pages include — each once."""
+def _walk(s=None, unread=None):
+    """
+    (name, html) for every page, then every file those pages include — each once.
+
+    `unread`, if given, collects the files that are there but could not be read,
+    so a search never says "it is in none of your files" when the truth is that
+    one of them was never looked at.
+    """
     p = pages(s=s)
     if not p.get("ok"):
         yield None, p
         return
-    todo = [x["page"] for x in (p.get("pages") or [])]
-    todo += [n for n in LIKELY_INCLUDES + FOOTER_GUESSES if n not in todo]
+    listed = [x["page"] for x in (p.get("pages") or [])]
+    todo = list(listed) + [n for n in LIKELY_INCLUDES + FOOTER_GUESSES if n not in listed]
     seen = set()
     while todo:
         name = todo.pop(0)
@@ -953,6 +962,8 @@ def _walk(s=None):
             if got.get("unreachable"):
                 yield None, got
                 return
+            if unread is not None and (name in listed or got.get("status") not in (404, None)):
+                unread.append({"page": name, "why": str(got.get("error") or "")[:120]})
             continue
         html = got.get("html") or ""
         for inc in _INCLUDE_RE.findall(html):
@@ -967,18 +978,19 @@ def plan_emails(s=None) -> dict:
     right, brand = right_email(), _brand(s)
     if not brand:
         return {"ok": False, "error": "no website is saved, so there is nothing to look at"}
-    found, per_page = {}, []
-    for name, html in _walk(s):
+    found, per_page, unread, looked = {}, [], [], []
+    for name, html in _walk(s, unread=unread):
         if name is None:
             return {"ok": False, "unreachable": html.get("unreachable"),
                     "error": html.get("error") or "could not list your pages"}
+        looked.append(name)
         wrong = _his_other_addresses(html, right, brand)
         if wrong:
             per_page.append({"page": name, "wrong": wrong})
             for a, n in wrong.items():
                 found[a] = found.get(a, 0) + n
     return {"ok": True, "right": right, "wrong": found, "pages": per_page,
-            "times": sum(found.values())}
+            "times": sum(found.values()), "looked": looked, "unread": unread}
 
 
 def use_one_email(agent=AGENT, s=None, dry_run=False) -> dict:
@@ -1341,6 +1353,37 @@ def publish_sitemap(agent=AGENT, s=None, dry_run=False) -> dict:
 # goes back to him with the one thing only he can do.
 
 LIVE_PATHS = ("", "contact.php", "about.php")
+# A wider look after a find-and-replace: the pages a visitor is most likely on.
+LIVE_LOOK = ("", "contact.php", "about.php", "service.php", "services.php", "faq.php",
+             "blog.php", "gallery.php")
+
+
+def live_has(text, get=None) -> list:
+    """The live pages (by address) still showing this exact text."""
+    try:
+        from coordination import site
+        base = (site.site_url() or "").rstrip("/")
+    except Exception:
+        base = ""
+    if not base or not text:
+        return []
+    if get is None:
+        if os.environ.get("AGENCY_IGNORE_DOTENV") == "1":
+            return []
+        import requests
+
+        def get(u):
+            r = requests.get(u, timeout=20, headers={"User-Agent": "Mozilla/5.0 (glasswork-check)"})
+            return r.status_code, r.text or ""
+    out = []
+    for path in LIVE_LOOK:
+        try:
+            status, html = get(base + "/" + path)
+        except Exception:
+            continue
+        if status == 200 and text in (html or ""):
+            out.append(base + "/" + path)
+    return out
 
 
 def still_showing(s=None, get=None) -> dict:
@@ -1386,15 +1429,27 @@ def still_showing(s=None, get=None) -> dict:
 def why_still_showing(left, s=None) -> str:
     """The plain sentence for what is still showing, and where it must come from."""
     try:
-        in_files = plan_emails(s=s).get("wrong") or {}
+        plan = plan_emails(s=s)
     except Exception:
-        in_files = {}
+        plan = {}
+    in_files = plan.get("wrong") or {}
+    unread = plan.get("unread") or []
+    where = {}
+    for pg in plan.get("pages") or []:
+        for a in pg.get("wrong") or {}:
+            where.setdefault(a, []).append(pg["page"])
     bits = []
     right = right_email()
     for a in sorted(left.get("emails") or {}):
         if a in in_files:
-            bits.append(f"{a} is still written in your files — the change did not take "
-                        "there; Try again, or say if a file was refused")
+            bits.append(f"{a} is still written in " + ", ".join(where.get(a, [])[:5])
+                        + " — the change did not take there; press Try again, and if it "
+                          "fails again the reason is on the change")
+        elif unread:
+            bits.append(f"your live site still shows {a}, and "
+                        + ", ".join(u["page"] for u in unread[:4])
+                        + " could not be read (" + (unread[0].get("why") or "no reason")
+                        + ") — it is most likely in there; press Try again")
         else:
             bits.append(
                 f"your live site still shows {a}, but it is not written in any website file "
@@ -1454,6 +1509,7 @@ def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:
             failed.append({"page": h["page"], "why": r.get("error")})
     return {"ok": not failed, "find": find, "replace": replace,
             "changed": changed, "failed": failed,
+            "unread": plan.get("unread") or [], "looked_in": plan.get("looked_in"),
             "head": (f"changed '{find}' to '{replace}' "
                      f"{sum(c['times'] for c in changed)} time(s) across "
                      f"{len(changed)} file(s)"
@@ -2154,9 +2210,15 @@ def main():
                          "of the markup carries it")
     ap.add_argument("--city", default="", help="the emirate, e.g. Dubai")
     ap.add_argument("--test-enquiry", action="store_true")
+    ap.add_argument("--find", metavar="TEXT",
+                    help="every file on the website holding this exact text, and the line")
     ap.add_argument("--as", dest="agent", default=AGENT)
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.find:
+        r = plan_replace(a.find, "")
+        print(json.dumps(r) if a.json else (r.get("head") or r.get("error")))
+        return 0 if r.get("ok") else 1
 
     # Before the mode banner: saving an address needs no site access at all,
     # and refusing it because full access is not configured would be silly.

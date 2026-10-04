@@ -723,6 +723,33 @@ def _repost(cid) -> dict:
            if started else "IT does it after the tests — press 'Put it live now' to start it."))}
 
 
+def _site_replace(data) -> dict:
+    # FIND AND REPLACE, FROM THE OFFICE. He typed both the old text and the
+    # new, after seeing every file and line it is in — that is his yes. The
+    # Releaser still runs the tests first and keeps a copy of every file.
+    find = str((data or {}).get("find") or "").strip()
+    to = str((data or {}).get("replace_with") or "").strip()
+    if len(find) < 6 or not to or find == to:
+        return {"ok": False, "error": "give the exact old text (6 or more characters) "
+                                      "and the new text"}
+    if any(ch in find + to for ch in "<>"):
+        return {"ok": False, "error": "only plain text can be changed here, not page code"}
+    if len(find) > 300 or len(to) > 300:
+        return {"ok": False, "error": "that is too long to change here"}
+    cid = board.queue_site_change("owner", "replace_text", {
+        "change": {"replace": find, "with": to},
+        "title": f"Change “{find[:60]}” to “{to[:60]}” everywhere on your website",
+        "why": "You asked for this in the office, under Find and replace."})
+    board.decide_site_change(cid, "approved")
+    board.note_site_change(cid, "approved on your word — you typed both in Find and replace")
+    from coordination import chat_actions
+    started = chat_actions.start_release()
+    return {"ok": True, "change": cid, "head": (
+        "Approved on your word. IT runs the tests, then changes it in every file "
+        "and checks your live site — Website changes and Your orders show how it went."
+        if started else "Approved on your word. IT changes it on its next pass.")}
+
+
 def act(do, ids, data=None) -> dict:
     ids = _ids(ids)
     if do in CAMPAIGN_ACTS:
@@ -731,6 +758,8 @@ def act(do, ids, data=None) -> dict:
         return _blog_act(do, ids, data)
     if do in SENT_ACTS:
         return sent_delete(ids, everything=(do == "sent_delete_all"))
+    if do == "site_replace":
+        return _site_replace(data)
     if not ids:
         return {"ok": False, "error": "nothing was picked"}
     when = time.strftime("%Y-%m-%d %H:%M")

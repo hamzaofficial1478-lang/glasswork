@@ -397,7 +397,7 @@ const API_CAPABILITIES = [
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
-  "test-gsc", "test-tomtom", "index-status", "orders",
+  "test-gsc", "test-tomtom", "index-status", "orders", "site-find",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {
@@ -1324,6 +1324,15 @@ app.get("/api/site/changes", async (q, res) => {
   if (q.query.outside) args.push("--outside");
   if (q.query.page) args.push("--page", String(q.query.page).slice(0, 200));
   res.json(await pyModule("coordination.changelog", args, 30000));
+});
+
+// FIND ON HIS WEBSITE: every file holding this exact text, with the line. Reads
+// only. "it cannot even check into the code" — this is the agency checking, in
+// front of him.
+app.get("/api/site/find", async (q, res) => {
+  const text = String(q.query.text || "").slice(0, 300);
+  if (text.trim().length < 6) return res.json({ ok: false, error: "give at least 6 characters to look for" });
+  res.json(await pyModule("pipelines.site_api", ["--find", text, "--json"], 180000));
 });
 
 app.post("/api/site/look", async (_q, res) =>
