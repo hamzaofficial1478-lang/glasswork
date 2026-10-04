@@ -1327,6 +1327,90 @@ def publish_sitemap(agent=AGENT, s=None, dry_run=False) -> dict:
             "head": head}
 
 
+# ---------------------------------------------------------------------------
+# WHAT A VISITOR STILL SEES — checked on the live site, not in the files
+# ---------------------------------------------------------------------------
+#
+# "almost 10th time i asked to change the dummy mail ... it did not change".
+# Each time, the routine changed every file it could read that held the dummy
+# address, found the rest of the files clean, and the Releaser marked the job
+# done — while his footer went on showing info@worlddealtechnicalservices.ae,
+# because the footer does not get it from a file the agency can edit (his admin
+# panel's settings, most likely). Done is now decided by the page a visitor
+# sees. What is still showing is named, with where it comes from, and the job
+# goes back to him with the one thing only he can do.
+
+LIVE_PATHS = ("", "contact.php", "about.php")
+
+
+def still_showing(s=None, get=None) -> dict:
+    """{ok, emails: {address: times}, domains: {domain: times}, read: [...]} on his live pages."""
+    try:
+        from coordination import site
+        base = (site.site_url() or "").rstrip("/")
+    except Exception:
+        base = ""
+    if not base:
+        return {"ok": False, "error": "no website address saved"}
+    right, brand, rhost = right_email(), _brand(s), _right_host(s)
+    if get is None:
+        if os.environ.get("AGENCY_IGNORE_DOTENV") == "1":
+            # The test suite never reaches a real website.
+            return {"ok": False, "error": "not read during the test run"}
+        import requests
+
+        def get(u):
+            r = requests.get(u, timeout=20, headers={"User-Agent": "Mozilla/5.0 (glasswork-check)"})
+            return r.status_code, r.text or ""
+    emails, domains, read = {}, {}, []
+    for path in LIVE_PATHS:
+        url = base + "/" + path
+        try:
+            status, html = get(url)
+        except Exception:
+            continue
+        if status != 200:
+            continue
+        read.append(url)
+        for a, n in _his_other_addresses(html, right, brand).items():
+            emails[a] = emails.get(a, 0) + n
+        without = _EMAIL_RE.sub(" ", html)
+        for m in _domain_re(brand).finditer(without):
+            d = m.group(0).lower()
+            if d != rhost:
+                domains[d] = domains.get(d, 0) + 1
+    return {"ok": bool(read), "emails": emails, "domains": domains, "read": read,
+            "error": "" if read else "none of the pages could be read"}
+
+
+def why_still_showing(left, s=None) -> str:
+    """The plain sentence for what is still showing, and where it must come from."""
+    try:
+        in_files = plan_emails(s=s).get("wrong") or {}
+    except Exception:
+        in_files = {}
+    bits = []
+    right = right_email()
+    for a in sorted(left.get("emails") or {}):
+        if a in in_files:
+            bits.append(f"{a} is still written in your files — the change did not take "
+                        "there; Try again, or say if a file was refused")
+        else:
+            bits.append(
+                f"your live site still shows {a}, but it is not written in any website file "
+                f"the agency is allowed to edit. So it comes from your admin panel's settings "
+                f"(most likely) — open your admin panel, find the contact or site settings, "
+                f"and change the email to {right}. If your admin panel has no email setting, "
+                f"it is in a file inside a folder the agency never opens (admin, config, "
+                f"assets): in Hostinger's File Manager, search your website folder for {a} "
+                f"and change it there. The agency is not allowed into your admin panel, "
+                "database or those folders, by design")
+    for d in sorted(left.get("domains") or {}):
+        bits.append(f"your live site still mentions {d} — most likely from your admin "
+                    "panel's settings or a post's own text; change it there")
+    return "; ".join(bits)
+
+
 def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:
     """
     Change this exact text to that, everywhere it appears. Releaser only.

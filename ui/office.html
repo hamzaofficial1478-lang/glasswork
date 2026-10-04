@@ -496,6 +496,7 @@ header>*{flex:none}
     <button class="htab" onclick="openComms()">Sector traffic <span id="commBadge"></span></button>
     <button class="htab" onclick="openResults()">Results</button>
     <a class="htab" href="/mail" style="text-decoration:none">Mail &amp; posts <span id="revBadge"></span></a>
+    <button class="htab" onclick="openOrders()">Your orders</button>
     <button class="htab" onclick="openChanges()">Website changes</button>
     <button class="htab" onclick="openIndex()">On Google</button>
     <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
@@ -631,6 +632,18 @@ header>*{flex:none}
      it catches him editing in the file manager, a designer, a plugin, and a
      hosting company restoring last week by mistake. The second kind is the
      half he actually asked for. -->
+<!-- YOUR ORDERS. "there is no any room where i can see that the commands i gave
+     how much work get done what remains and why" — every order, the jobs it became,
+     the changes they made, and what is left with its reason (coordination/orders_view). -->
+<div class="panel wide full" id="ordPanel">
+  <h2><span>Your orders <small id="ordHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" onclick="openOrders()">Refresh</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="ordBody"></div>
+</div>
+
 <!-- WHICH PAGES GOOGLE HAS LISTED. "the program did not figure that more then 8
      pages are still not indexed" — read from Google's own URL Inspection, each
      day, by pipelines/seo_index.py. -->
@@ -1820,6 +1833,83 @@ async function lookNow(){
   await openChanges(CHG.view);
 }
 
+let ORD = null, ORD_SAID = '';
+async function openOrders(){
+  openPanel('ordPanel');
+  if(!ORD) $('#ordBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px">Reading your orders…</p>`;
+  try{ ORD = await (await fetch('/api/orders',{cache:'no-store'})).json(); }
+  catch(e){ ORD = {ok:false, error:String(e)}; }
+  renderOrders();
+}
+const ORD_LOOK = {
+  'done':            ['var(--ok)',     'Done'],
+  'waiting for you': ['var(--amber)',  'Waiting for you'],
+  'in progress':     ['var(--glass)',  'Being worked'],
+  'stuck':           ['var(--danger)', 'Stuck'],
+  'not started':     ['var(--muted)',  'Not started'],
+};
+function renderOrders(){
+  const d = ORD || {}, B = $('#ordBody');
+  $('#ordHead').textContent = d.head ? '· '+d.head : '';
+  let H = ORD_SAID ? `<div class="warnbox" style="margin-bottom:14px">${esc(ORD_SAID)}</div>` : '';
+  if(!d.ok){ B.innerHTML = H + `<div class="warnbox"><b>Could not read them.</b><br>${esc(d.error||'no detail')}</div>`; return; }
+  const os = d.orders || [];
+  if(!os.length){
+    B.innerHTML = H + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">No orders in the last week.
+      Give one in the box for each sector when you press <b>Run the day</b>, or ask any desk in the chat —
+      every one you give shows here with what became of it.</p>`;
+    return;
+  }
+  let day = '';
+  H += os.map(o=>{
+    const [col, word] = ORD_LOOK[o.state] || ['var(--muted)', o.state];
+    let h = '';
+    if(o.day !== day){ day = o.day; h += `<div class="gh etch" style="margin:18px 0 8px">${esc(o.day)}</div>`; }
+    h += `<div style="border-left:2px solid ${col};padding:2px 0 12px 12px;margin-bottom:12px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+        <b style="font-size:13px">${esc(o.sector)}</b>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:${col}">${esc(word)}</span>
+        <span style="font-size:10.5px;color:var(--faint)">${o.origin==='chat'?'from the chat':'from the order box'}</span>
+      </div>
+      <div style="font-size:13px;line-height:1.6;margin-top:4px">“${esc(o.text)}”</div>`;
+    if(o.leads) h += `<div style="font-size:12px;color:var(--muted);margin-top:4px">Leads with an email today: <b>${o.leads.done}</b> of ${o.leads.asked}</div>`;
+    if((o.jobs||[]).length) h += `<div style="margin-top:8px">` + o.jobs.map(j=>
+      `<div style="font-size:12px;line-height:1.6;color:var(--fg)">· <b>${esc(j.who)}</b>: ${esc(j.says)}`
+      + (j.said?`<div style="color:var(--muted);margin-left:12px">${esc(j.said)}</div>`:'') + `</div>`).join('') + `</div>`;
+    if((o.changes||[]).length) h += `<div style="margin-top:6px">` + o.changes.map(c=>{
+      const btns = c.status==='pending'
+        ? `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0 6px 0 0" onclick="ordDo('approve',${Number(c.id)})">Approve</button>`
+          + `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0;border-color:var(--line2);background:var(--panel2);color:var(--muted)" onclick="ordDo('reject',${Number(c.id)})">Turn down</button>`
+        : c.status==='failed'
+        ? `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0 6px 0 0" onclick="ordDo('retry_change',${Number(c.id)})">Try again</button>`
+          + `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0;border-color:var(--line2);background:var(--panel2);color:var(--muted)" onclick="ordDo('drop_change',${Number(c.id)})">Drop it</button>`
+        : '';
+      return `<div style="font-size:12px;line-height:1.6;margin-top:4px">· change: ${esc(c.what)} — <b>${esc(c.says)}</b>`
+        + (c.note && c.status!=='pending'?`<div style="color:${c.status==='failed'?'var(--danger)':'var(--muted)'};margin-left:12px">${esc(c.note)}</div>`:'')
+        + (btns?`<div style="margin:6px 0 0 12px;display:flex;flex-wrap:wrap">${btns}</div>`:'') + `</div>`;
+    }).join('') + `</div>`;
+    if((o.left||[]).length) h += `<div style="margin-top:8px;font-size:12px;color:var(--amber);line-height:1.6">`
+      + `<b>What is left, and why</b>` + o.left.map(l=>`<div>→ ${esc(l)}</div>`).join('') + `</div>`;
+    return h + `</div>`;
+  }).join('');
+  B.innerHTML = H;
+}
+async function ordDo(act, id){
+  ORD_SAID = 'Working…'; renderOrders();
+  let j = null;
+  try{
+    if(act==='approve' || act==='reject'){
+      j = await (await fetch('/api/approve',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({kind:'site_change', id, decision: act==='approve'?'approved':'rejected'})})).json();
+    } else {
+      j = await (await fetch('/api/review/act',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({do:act, ids:[id]})})).json();
+    }
+  }catch(e){ j = {ok:false, error:String(e)}; }
+  ORD_SAID = (j && (j.why || j.head || j.error)) || (j && j.ok ? 'Done.' : 'No answer from the server.');
+  await openOrders();
+}
+
 let IDX = null;
 async function openIndex(){
   openPanel('idxPanel');
@@ -2454,7 +2544,8 @@ function runProgress(){
             +`${u.calls} call${u.calls===1?'':'s'}, ${(u.tokens_in+u.tokens_out).toLocaleString()} tokens, ${u.seconds}s`
             +`<small>${esc((u.models||[]).join(', '))}${u.answered<u.calls?` · ${u.calls-u.answered} did not answer`:''}</small></span></div>`;}).join('');
   }
-  H+=`</div><div class="pgroup"><button class="pbtn" onclick="openActivity()">See what each agent did →</button>`;
+  H+=`</div><div class="pgroup"><button class="pbtn" onclick="openOrders()">See your orders — what is done and what is left →</button>`
+    + `<button class="pbtn" style="margin-top:8px" onclick="openActivity()">See what each agent did →</button>`;
   if(!run.running) H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
         onclick="RUN.check=null;RUN.view='idle';RUN.stopMsg='';renderRun()">Back</button>`;
   H+=`</div>`;

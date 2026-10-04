@@ -417,6 +417,7 @@ def tests():
             "coordination.sitepace_tests",
             "coordination.daygate_tests",
             "coordination.honest_tests",
+            "coordination.orders_tests",
             "coordination.clock_tests",
             "providers.tests", "providers.team_tests",
             "providers.local_tests",

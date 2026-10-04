@@ -397,7 +397,7 @@ const API_CAPABILITIES = [
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
-  "test-gsc", "test-tomtom", "index-status",
+  "test-gsc", "test-tomtom", "index-status", "orders",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {
@@ -972,6 +972,12 @@ app.post("/api/integration", async (req, res) => {
 // "i had integrated the Google search console then why i see the same message
 //  again and again" — Setup never asked Google; this does, the same way the
 // keyword pass does, and says what Google answered.
+// Every order he gave and what became of it (coordination/orders_view).
+// "there is no any room where i can see that the commands i gave how much work
+//  get done what remains and why"
+app.get("/api/orders", async (_q, res) =>
+  res.json(await pyModule("coordination.orders_view", ["--json"], 30000)));
+
 // Which of his pages Google has listed, and why not (pipelines/seo_index).
 app.get("/api/index-status", async (_q, res) =>
   res.json(await pyModule("pipelines.seo_index", ["--status"], 30000)));

@@ -394,8 +394,19 @@ def _one_email_plan(right):
         return _advice("Could not work out the change: " + str(plan.get("error") or ""),
                        ["Check the Admin API address and token on /setup."])
     if not plan["times"]:
+        # The files are clean — but is the PAGE? An address that comes from his
+        # admin panel is in no file, and "already right" was the answer he got
+        # ten times while his footer still showed the dummy.
+        left = site_api.still_showing()
+        if left.get("ok") and left.get("emails"):
+            return _advice(site_api.why_still_showing(left)[:600],
+                           [f"Open your admin panel, find the contact or site settings, and "
+                            f"change the email to {right}.",
+                            "Then press Run the day — IT checks your live site again."],
+                           needs="you — your admin panel, which the agency may not enter")
         return {"how": "already_right",
-                "why": f"Every address on your website I can read is already {right}."}
+                "why": f"Every address on your website is already {right} — checked on "
+                       "your live pages as well as in the files."}
     return {"how": "call", "call": "use_one_email",
             "pages": [h["page"] for h in plan["pages"]][:12], "times": plan["times"],
             "why": (f"{', '.join(sorted(plan['wrong']))} is on {len(plan['pages'])} "
@@ -1127,6 +1138,9 @@ def _for_the_owner(issue, plan):
         "url": issue["url"] or "",
         "verdict": head,
         "why": plan["why"],
+        # Which of his orders this came from, so his Orders room can show the
+        # change under the words he typed.
+        "task_id": issue.get("task_id") or None,
     }
     if plan["how"] == "patch":
         body["change"] = {"page": plan["page"], "block": plan["block_id"],

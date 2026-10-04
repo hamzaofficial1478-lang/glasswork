@@ -918,6 +918,19 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
         r = fn(agent=agent)
         if not r.get("ok"):
             return _fail_or_wait(plan, r, "the routine reported it could not finish")
+        # DONE IS WHAT A VISITOR SEES. The email and domain routines change the
+        # files they can read; if the live site still shows the old address, the
+        # job is not done, whatever the files say — see site_api.still_showing.
+        if plan["call"] in ("use_one_email", "use_one_domain"):
+            try:
+                left = site_api.still_showing()
+            except Exception:
+                left = {"ok": False}
+            if left.get("ok") and (left.get("emails") or left.get("domains")):
+                why = site_api.why_still_showing(left)
+                _owner_must(why, left)
+                return _could_not(plan, (r.get("head") or "the files were changed")
+                                  + " — but " + why)
         _close_ticket(plan.get("issue_id"))
         board.mark_site_change(
             row["id"], "applied",
@@ -985,6 +998,24 @@ def _mark_published(content_id, page):
                       (int(content_id),))
     except Exception:
         pass
+
+
+def _owner_must(why, left):
+    """One to-do for him, kept current, when only he can finish a change."""
+    title = ("Change the email in your admin panel" if left.get("emails")
+             else "Change the old domain in your admin panel")
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            row = c.execute("SELECT id FROM tasks WHERE about='owner:still-showing'"
+                            " AND status IN ('open','in_progress')").fetchone()
+            if row:
+                c.execute("UPDATE tasks SET title=?, detail=? WHERE id=?",
+                          (title, why, row[0]))
+                return row[0]
+        return board.try_post_task("IT", title, why, risk="amber", created_by=AGENT,
+                                   about="owner:still-showing")
+    except Exception:
+        return None
 
 
 def _close_ticket(issue_id):
