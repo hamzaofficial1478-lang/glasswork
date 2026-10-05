@@ -52,7 +52,45 @@ def _table(c):
     c.execute("""CREATE TABLE IF NOT EXISTS index_status (
         url TEXT PRIMARY KEY, on_google INTEGER, verdict TEXT, coverage TEXT,
         why TEXT, doing TEXT, google_canonical TEXT, user_canonical TEXT,
-        last_crawl TEXT, checked_at INTEGER)""")
+        last_crawl TEXT, checked_at INTEGER, live_canonical TEXT)""")
+    try:
+        c.execute("ALTER TABLE index_status ADD COLUMN live_canonical TEXT")
+    except sqlite3.Error:
+        pass                                  # already there
+
+
+def live_canonical(url, get=None) -> str:
+    """The canonical this page names on his site right now — '' if none or unreadable."""
+    import re
+    import os
+    try:
+        if get is None:
+            if os.environ.get("AGENCY_IGNORE_DOTENV") == "1":
+                return ""                     # the test suite never reaches a real site
+            import requests
+            r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (glasswork-index)"})
+            status, html = r.status_code, r.text or ""
+        else:
+            status, html = get(url)
+    except Exception:
+        return ""
+    if status != 200:
+        return ""
+    m = re.search(r"<link\b[^>]*\brel=[\"']?canonical[\"']?[^>]*>", html, re.I)
+    h = re.search(r"\bhref=[\"']([^\"']+)[\"']", m.group(0), re.I) if m else None
+    return urllib.parse.urljoin(url, h.group(1).strip()) if h else ""
+
+
+def fix_state(kind="use_one_domain") -> str:
+    """The state of the most recent change of this kind: pending / approved / applied / failed / ''."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            r = c.execute("SELECT status FROM site_queue WHERE kind=? OR detail LIKE ?"
+                          " ORDER BY id DESC LIMIT 1",
+                          (kind, f'%"{kind}"%')).fetchone()
+        return (r[0] if r else "") or ""
+    except sqlite3.Error:
+        return ""
 
 
 def _bare(host):
@@ -60,26 +98,69 @@ def _bare(host):
     return host[4:] if host.startswith("www.") else host
 
 
-def explain(url, r) -> tuple:
-    """(on_google, why, doing) — Google's answer about one page, in his words."""
+# What is being done about a page naming the wrong address, by the REAL state
+# of the one-address change — never a fixed sentence. "it asks waiting for yes
+# in waiting room while in waiting room there was nothing": the old line said
+# "waiting for your yes" whatever the change's state, including long after it
+# had gone on.
+FIX_STATE = {
+    "pending": "the one-address fix is waiting for your yes under Waiting on you",
+    "approved": "the one-address fix is approved — IT is putting it on",
+    "applied": "IT changed your files, yet this page still names the other address — "
+               "see Your orders for which file",
+    "failed": "the one-address fix could not go on — the reason is in Your orders",
+}
+SOON = "IT has been asked to make every page name one address"
+ASK_AGAIN = ("nothing to change on your site — Google re-reads it by itself; to hurry "
+             "it, open URL Inspection in Search Console for this page and press "
+             "Request indexing")
+
+
+def _when(last_crawl):
+    return f" (on {last_crawl[:10]})" if last_crawl else ""
+
+
+def explain(url, r, live=None, fix=None) -> tuple:
+    """
+    (on_google, why, doing) — Google's answer about one page, in his words.
+
+    `live` is the canonical the page names TODAY, read off his site; `fix` the
+    state of the one-address change. Google's answer is about the page as it
+    was when Google last read it — weeks ago, sometimes — so a canonical it
+    reports is checked against the page now: "the page tells Google its real
+    address is https://worlddealtechnicalservices.com/" was shown as today's
+    fault while every page had already been put right.
+    """
     cov = (r.get("coverage") or "").strip()
     low = cov.lower()
     uc, gc = r.get("user_canonical") or "", r.get("google_canonical") or ""
     host = urllib.parse.urlparse(url).netloc.lower()
+    seen = _when(r.get("last_crawl") or "")
+    live_ok = bool(live) and urllib.parse.urlparse(live).netloc.lower() == host
     if r.get("verdict") == "PASS" or low.startswith("submitted and indexed") \
             or low.startswith("indexed"):
         return True, "on Google", ""
     if uc and urllib.parse.urlparse(uc).netloc.lower() != host:
+        if live_ok:
+            return (False,
+                    f"when Google last read this page{seen} it named {uc} as the real "
+                    f"address. Your page names {live} now, so this clears when Google "
+                    "reads it again", ASK_AGAIN)
         return (False,
-                f"the page tells Google its real address is {uc} — a different address "
-                "from the one your site is on, so Google treats this one as a copy",
-                "the one-address fix is waiting for your yes under Waiting on you")
+                f"the page tells Google its real address is {live or uc} — a different "
+                "address from the one your site is on, so Google treats this one as a copy",
+                FIX_STATE.get(fix or "", SOON))
     if "canonical" in low or (gc and gc.rstrip("/") != url.rstrip("/")):
+        if live_ok:
+            return (False,
+                    f"when Google last read this page{seen} it treated it as a copy of "
+                    f"{gc or 'another page'}. Your page names itself as the real one now, "
+                    "so this clears when Google reads it again", ASK_AGAIN)
         return (False,
                 "Google thinks this page is a copy of " + (gc or "another page")
                 + (f" ({cov})" if cov else ""),
-                "the one-address fix is waiting for your yes; if the content really "
-                "repeats another page, Content can make it its own")
+                FIX_STATE.get(fix or "", SOON)
+                + "; if the content really repeats another page, Content can make it its own")
     if "noindex" in low:
         return False, "the page asks Google not to list it (noindex)", \
             "IT will take the noindex off if you say the page should be on Google"
@@ -178,14 +259,14 @@ def _queue(kind, title, why):
                                                  "title": title, "why": why})
 
 
-def run(agent=AGENT, most=MOST_A_DAY) -> dict:
+def run(agent=AGENT, most=MOST_A_DAY, force=False) -> dict:
     with board.agent_run(agent) as row:
-        out = _run(most)
+        out = _run(most, force=force)
         row.note(out.get("head") or out.get("error") or "asked Google")
         return out
 
 
-def _run(most):
+def _run(most, force=False):
     from . import seo_intel, site_api, sitemap
     creds, prop, why = seo_intel._gsc_session()
     if not creds:
@@ -203,8 +284,11 @@ def _run(most):
     now = int(time.time())
     with sqlite3.connect(board.DB, timeout=30) as c:
         _table(c)
-        fresh = {r[0] for r in c.execute("SELECT url FROM index_status WHERE checked_at>=?",
-                                         (now - ASK_AGAIN_AFTER,))}
+        # Fresh means asked today AND read against the live page — a row from
+        # before the live check is asked again, or its old words would stand.
+        fresh = set() if force else {r[0] for r in c.execute(
+            "SELECT url FROM index_status WHERE checked_at>=? AND"
+            " (on_google=1 OR live_canonical IS NOT NULL)", (now - ASK_AGAIN_AFTER,))}
     asked, rows, errors = 0, [], []
     for url in urls:
         if url in fresh or asked >= most:
@@ -216,28 +300,33 @@ def _run(most):
             if r.get("status") in (401, 403, 429):
                 break
             continue
-        on, why_not, doing = explain(url, r)
+        live = "" if r.get("verdict") == "PASS" else live_canonical(url)
+        on, why_not, doing = explain(url, r, live=live, fix=fix_state())
         rows.append((url, int(on), r.get("verdict"), r.get("coverage"), why_not, doing,
                      r.get("google_canonical"), r.get("user_canonical"),
-                     r.get("last_crawl"), now))
+                     r.get("last_crawl"), now, live))
         time.sleep(0.3)
     with sqlite3.connect(board.DB, timeout=30) as c:
         _table(c)
         c.executemany("INSERT INTO index_status(url,on_google,verdict,coverage,why,doing,"
-                      "google_canonical,user_canonical,last_crawl,checked_at)"
-                      " VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET"
+                      "google_canonical,user_canonical,last_crawl,checked_at,live_canonical)"
+                      " VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET"
                       " on_google=excluded.on_google, verdict=excluded.verdict,"
                       " coverage=excluded.coverage, why=excluded.why, doing=excluded.doing,"
                       " google_canonical=excluded.google_canonical,"
                       " user_canonical=excluded.user_canonical,"
-                      " last_crawl=excluded.last_crawl, checked_at=excluded.checked_at",
+                      " last_crawl=excluded.last_crawl, checked_at=excluded.checked_at,"
+                      " live_canonical=excluded.live_canonical",
                       rows)
 
     # WHAT IT NEEDS DOING, PUT TO HIM ONCE.
     st = status()
     queued = []
-    split = [p for p in st["pages"] if p.get("user_canonical")
-             and urllib.parse.urlparse(p["user_canonical"]).netloc.lower() != site_host]
+    # On what each page names TODAY. Google's last reading can be weeks old;
+    # asking him to approve a fix that has already gone on is exactly the
+    # "waiting for your yes" with nothing waiting that he caught.
+    split = [p for p in st["pages"] if p.get("live_canonical")
+             and urllib.parse.urlparse(p["live_canonical"]).netloc.lower() != site_host]
     if mismatch:
         # Two addresses for one site in his own settings: say so, once, and
         # change nothing on the site until they agree.
@@ -251,12 +340,12 @@ def _run(most):
                                     created_by=AGENT, about="address:owner")
         except Exception:
             pass
-    elif split or any("copy" in (p.get("why") or "") for p in st["pages"]):
+    elif split:
         cid = _queue("use_one_domain",
                      f"Make every page name its real address: {site_host}",
-                     f"{len(split) or 'Some'} of your pages tell Google their real "
+                     f"{len(split)} of your pages tell Google their real "
                      f"address is the copy of your site without www (e.g. "
-                     f"{(split[0]['user_canonical'] if split else '')}). Google treats the "
+                     f"{split[0]['live_canonical']}). Google treats the "
                      f"pages on {site_host} — the ones in your Search Console — as copies, "
                      "which is why they are not indexed. This changes every canonical tag "
                      f"and link to {site_host}.")
@@ -323,9 +412,11 @@ def status() -> dict:
 def main():
     ap = argparse.ArgumentParser(description="Which of his pages Google has indexed.")
     ap.add_argument("--status", action="store_true", help="what was found last time")
+    ap.add_argument("--now", action="store_true",
+                    help="ask Google again about every page, even ones asked today")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-    r = status() if a.status else run()
+    r = status() if a.status else run(force=a.now)
     if a.json or a.status:
         print(json.dumps(r, default=str))
     else:

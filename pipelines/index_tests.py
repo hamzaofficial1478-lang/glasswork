@@ -252,7 +252,21 @@ def test_googles_answer_explained():
                                              "coverage": "Crawled - currently not indexed",
                                              "user_canonical": "https://worlddealtechnicalservices.com/about.php"})
     check("a canonical naming the copy without www is the reason given",
-          (on, "different address" in why, "one-address" in doing), (False, True, True))
+          (on, "different address" in why), (False, True))
+    check("  and what is done says the change's real state, not a fixed sentence",
+          seo_index.explain(url, {"coverage": "x", "user_canonical":
+                                  "https://worlddealtechnicalservices.com/about.php"},
+                            fix="pending")[2], seo_index.FIX_STATE["pending"])
+
+    print("\n...but Google's reading is weeks old, and the page is right today:")
+    on, why, doing = seo_index.explain(url, {
+        "verdict": "NEUTRAL", "coverage": "Alternative page with proper canonical tag",
+        "user_canonical": "https://worlddealtechnicalservices.com/about.php",
+        "last_crawl": "2026-09-21T10:00:00Z"}, live=url, fix="applied")
+    check("it says it is Google's old reading, with the date",
+          ("when Google last read this page (on 2026-09-21)" in why, url in why), (True, True))
+    check("  and that nothing is waiting for his yes", "waiting for your yes" in doing, False)
+    check("  and how to hurry Google", "Request indexing" in doing, True)
     on, why, _d = seo_index.explain(url, {"coverage": "Discovered - currently not indexed"})
     check("discovered: known, not read yet", "not read it yet" in why, True)
     on, why, _d = seo_index.explain(url, {"coverage": "URL is unknown to Google"})
@@ -274,6 +288,8 @@ def test_the_day_asks_google_and_queues_the_fixes_once():
             {"ok": True, "verdict": "NEUTRAL", "coverage": "Crawled - currently not indexed",
              "user_canonical": u.replace("www.", "")})
         seo_index._pages = lambda: ([HOME, HOME + "about.php", HOME + "blog-details.php?slug=a"], False)
+        real_live = seo_index.live_canonical
+        seo_index.live_canonical = lambda u, get=None: u.replace("www.", "")   # still wrong today
         sitemap.is_published = lambda home=None, get=None: False
         site_api.plan_share_buttons = lambda s=None: {"ok": True, "times": 3,
                                                       "pages": [{"page": "blog-details.php", "times": 3}]}
@@ -283,6 +299,7 @@ def test_the_day_asks_google_and_queues_the_fixes_once():
         finally:
             (seo_intel._gsc_session, seo_intel.gsc_inspect, seo_index._pages,
              sitemap.is_published, site_api.plan_share_buttons) = real
+            seo_index.live_canonical = real_live
         check("every page was asked about", len(asked), 3)
         check("1 of 3 on Google", (r["on_google"], r["pages"]), (1, 3))
         kinds = sorted(x["kind"] for x in cab.sql("SELECT kind FROM site_queue"))
@@ -400,6 +417,40 @@ def test_he_can_simply_ask_it_for_them():
           [p["how"] for p in again], ["already_right"])
 
 
+def test_an_old_reading_asks_for_nothing():
+    print("\nGoogle's old reading says 'without www', the pages say www today: nothing is queued:")
+    with _Cabinet() as cab:
+        real = (seo_intel._gsc_session, seo_intel.gsc_inspect, seo_index._pages,
+                sitemap.is_published, site_api.plan_share_buttons, seo_index.live_canonical)
+        seo_intel._gsc_session = lambda scope=None: (types.SimpleNamespace(token="t"), HOME, "")
+        seo_intel.gsc_inspect = lambda u, creds=None, prop="": {
+            "ok": True, "verdict": "NEUTRAL", "coverage": "Alternative page with proper canonical tag",
+            "user_canonical": u.replace("www.", ""), "last_crawl": "2026-09-21T10:00:00Z"}
+        seo_index._pages = lambda: ([HOME, HOME + "about.php"], True)
+        sitemap.is_published = lambda home=None, get=None: True
+        site_api.plan_share_buttons = lambda s=None: {"ok": True, "times": 0, "pages": []}
+        seo_index.live_canonical = lambda u, get=None: u                     # right today
+        try:
+            seo_index._run(40)
+        finally:
+            (seo_intel._gsc_session, seo_intel.gsc_inspect, seo_index._pages,
+             sitemap.is_published, site_api.plan_share_buttons, seo_index.live_canonical) = real
+        check("no fix is put to him for a page that is already right",
+              cab.sql("SELECT kind FROM site_queue"), [])
+        st = seo_index.status()
+        check("each page says it is Google's old reading",
+              all("when Google last read this page" in p["why"] for p in st["pages"]), True)
+        check("  and keeps what the page names today",
+              [p["live_canonical"] for p in st["pages"]], [HOME, HOME + "about.php"])
+
+
+def test_waiting_on_you_shows_every_change():
+    from coordination import state
+    import inspect
+    print("\nWaiting on you lists every website change waiting, not the newest three:")
+    check("no cut to three", "if _can(s)][:3]" in inspect.getsource(state), False)
+
+
 def main():
     for t in (test_the_canonical_names_the_one_address_and_nothing_else,
               test_the_share_buttons_go_to_the_networks_again,
@@ -409,7 +460,9 @@ def main():
               test_the_day_asks_google_and_queues_the_fixes_once,
               test_it_turns_the_audit_findings_into_fixes,
               test_google_is_asked_at_the_address_search_console_knows,
-              test_he_can_simply_ask_it_for_them):
+              test_he_can_simply_ask_it_for_them,
+              test_an_old_reading_asks_for_nothing,
+              test_waiting_on_you_shows_every_change):
         t()
     print()
     if _fail:

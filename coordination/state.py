@@ -828,9 +828,11 @@ def build():
             _can = lambda row: _rel.carryable(dict(row))[0]
         except Exception:
             _can = lambda row: True
+        # EVERY ONE, NOT THE NEWEST THREE. "[:3]" hid every change past the
+        # third — he was told a fix was waiting for his yes and found nothing.
         shown = [s for s in c.execute(
             "SELECT id,agent,kind,detail,status FROM site_queue WHERE status='pending'"
-            " AND kind!='new_page' ORDER BY queued_at DESC LIMIT 20") if _can(s)][:3]
+            " AND kind!='new_page' ORDER BY queued_at DESC LIMIT 40") if _can(s)]
         for s in shown:
             approvals.append({"kind": "site_change", "id": s["id"],
                               "lvl": "amber · IT",
