@@ -260,10 +260,19 @@ STEP_TIMEOUT = 420
 #               stops one page short of its own budget and banks what it has
 #               (see content_write._deadline), and the budget is honest about
 #               what writing pages costs.
+#   leads_hunt  "Leads collects — timed out after 420s". Every business the
+#               map gives back has its own website read for an email, one
+#               polite request at a time, and only about one site in three
+#               prints an address — so twenty leads he can write to is sixty
+#               sites, which does not fit in seven minutes. It now saves after
+#               every few sites and stops short of its own budget (see
+#               leads_hunt.pass_budget), so the longer slot buys more leads,
+#               never a longer wait for nothing.
 LONGER = {
     "pipelines.it_release": 1200,
     "pipelines.seo_intel": 1500,
     "pipelines.content_write": 1500,
+    "pipelines.leads_hunt": 900,
 }
 
 

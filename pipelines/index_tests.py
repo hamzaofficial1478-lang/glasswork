@@ -250,12 +250,14 @@ def test_googles_answer_explained():
     check("indexed is on Google", on, True)
     on, why, doing = seo_index.explain(url, {"verdict": "NEUTRAL",
                                              "coverage": "Crawled - currently not indexed",
-                                             "user_canonical": "https://worlddealtechnicalservices.com/about.php"})
+                                             "user_canonical": "https://worlddealtechnicalservices.com/about.php"},
+                                     live="https://worlddealtechnicalservices.com/about.php")
     check("a canonical naming the copy without www is the reason given",
           (on, "different address" in why), (False, True))
     check("  and what is done says the change's real state, not a fixed sentence",
           seo_index.explain(url, {"coverage": "x", "user_canonical":
                                   "https://worlddealtechnicalservices.com/about.php"},
+                            live="https://worlddealtechnicalservices.com/about.php",
                             fix="pending")[2], seo_index.FIX_STATE["pending"])
 
     print("\n...but Google's reading is weeks old, and the page is right today:")
@@ -367,6 +369,8 @@ def test_google_is_asked_at_the_address_search_console_knows():
         sitemap.is_published = lambda home=None, get=None: False
         site_api.plan_share_buttons = lambda s=None: {"ok": True, "times": 0, "pages": []}
         sitemap.site_address = lambda: "https://worlddealtechnicalservices.com"
+        real_live = seo_index.live_canonical
+        seo_index.live_canonical = lambda u, get=None: u.replace("www.", "")
         try:
             check("the two addresses are noticed",
                   "must be the same address" in seo_index.address_mismatch(HOME), True)
@@ -375,6 +379,7 @@ def test_google_is_asked_at_the_address_search_console_knows():
         finally:
             (seo_intel._gsc_session, seo_intel.gsc_inspect, seo_index._pages,
              sitemap.is_published, site_api.plan_share_buttons, sitemap.site_address) = real
+            seo_index.live_canonical = real_live
         check("every page was asked about at the www address", asked,
               [HOME, HOME + "about.php"])
         check("he is told which to save, in the run's own words",
@@ -444,6 +449,62 @@ def test_an_old_reading_asks_for_nothing():
               [p["live_canonical"] for p in st["pages"]], [HOME, HOME + "about.php"])
 
 
+def test_a_page_that_did_not_answer_is_not_called_wrong():
+    print("\nA page that did not answer is never reported as still naming the other address:")
+    url = HOME + "about.php"
+    old = {"verdict": "NEUTRAL", "coverage": "Alternative page with proper canonical tag",
+           "user_canonical": "https://worlddealtechnicalservices.com/about.php",
+           "last_crawl": "2026-09-21T10:00:00Z"}
+    on, why, doing = seo_index.explain(url, old, live=None, fix="applied")
+    check("it says the page did not answer", "did not answer" in why, True)
+    check("  and does not claim it still names the other address",
+          "still names" in why + doing, False)
+    check("  and says it looks again", "next run" in doing, True)
+    on, why, doing = seo_index.explain(url, old, live="https://worlddealtechnicalservices.com/about.php",
+                                       fix="applied")
+    check("a page read today that really is wrong still says so, naming the address",
+          "still names https://worlddealtechnicalservices.com/about.php" in doing, True)
+
+    print("\n...reading his page tells 'did not answer' from 'names nothing':")
+    check("a refused read is unknown",
+          seo_index.live_canonical(url, get=lambda u: (503, "")), None)
+    check("a page with no canonical names nothing",
+          seo_index.live_canonical(url, get=lambda u: (200, "<html><head></head></html>")), "")
+    check("a canonical is read",
+          seo_index.live_canonical(url, get=lambda u: (200, f'<link rel="canonical" href="{url}">')),
+          url)
+    tries, real = [], (seo_index.live_canonical, seo_index.LIVE_RETRY_PAUSE)
+    seo_index.live_canonical = lambda u, get=None: tries.append(u) or (None if len(tries) == 1 else u)
+    seo_index.LIVE_RETRY_PAUSE = 0
+    try:
+        check("a page that did not answer is asked once more", seo_index._live_now(url), url)
+        check("  twice in all", len(tries), 2)
+    finally:
+        seo_index.live_canonical, seo_index.LIVE_RETRY_PAUSE = real
+
+
+def test_two_addresses_open_the_same_page():
+    print("\nGoogle picked the copy without www, and that address still opens by itself:")
+    check("the other address sending visitors to www is seen",
+          seo_index.twin_moves(HOME, get=lambda u: (301, HOME)), True)
+    check("the other address opening its own page is seen",
+          seo_index.twin_moves(HOME, get=lambda u: (200, "")), False)
+    check("  it asks at the address without www",
+          seo_index.twin_moves(HOME, get=lambda u: (200, "") if "//www." not in u else (301, HOME)),
+          False)
+    check("no answer is not a guess", seo_index.twin_moves(HOME, get=lambda u: (500, "")), None)
+    r = {"verdict": "NEUTRAL", "coverage": "Duplicate, Google chose different canonical than user",
+         "google_canonical": "https://worlddealtechnicalservices.com/", "user_canonical": HOME}
+    on, why, doing = seo_index.explain(HOME, r, live=HOME, moved=False)
+    check("it says Google sees two copies", "two copies" in why, True)
+    check("  and the fix is the redirect in Hostinger, not a file",
+          ("Hostinger" in doing, "301" in doing, "worlddealtechnicalservices.com send visitors"
+           in doing), (True, True, True))
+    on, why, doing = seo_index.explain(HOME, r, live=HOME, moved=True)
+    check("once the redirect is on, it is Google's old reading", "Request indexing" in doing, True)
+    check("  and the redirect is not asked for again", "Hostinger" in doing, False)
+
+
 def test_waiting_on_you_shows_every_change():
     from coordination import state
     import inspect
@@ -462,6 +523,8 @@ def main():
               test_google_is_asked_at_the_address_search_console_knows,
               test_he_can_simply_ask_it_for_them,
               test_an_old_reading_asks_for_nothing,
+              test_a_page_that_did_not_answer_is_not_called_wrong,
+              test_two_addresses_open_the_same_page,
               test_waiting_on_you_shows_every_change):
         t()
     print()

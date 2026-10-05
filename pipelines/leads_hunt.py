@@ -470,7 +470,7 @@ def emails_from_site(url, max_pages=3, timeout=12):
     return rank_emails(found, host), read
 
 
-def enrich(candidate, timeout=12):
+def enrich(candidate, timeout=12, deadline=None):
     """
     Read the business's own site for everything Maps does not hold, and read
     their own words for a better service match.
@@ -494,7 +494,13 @@ def enrich(candidate, timeout=12):
         candidate["pages_read"] = []
         return candidate
 
-    h = harvest.harvest(site, timeout=max(timeout, 20))
+    wait = max(timeout, 20)
+    if deadline:
+        # A site read near the end of the pass gets the time that is left,
+        # shared across its pages, so the last read cannot carry the pass past
+        # its own stopping point and lose the batch it was about to save.
+        wait = max(5, min(wait, int((deadline - time.time()) / harvest.MAX_PAGES)))
+    h = harvest.harvest(site, timeout=wait)
     pages = [p["url"] for p in h.get("pages") or []]
     candidate["pages_read"] = pages
     candidate["harvest"] = h.get("head", "")
@@ -528,7 +534,7 @@ def enrich(candidate, timeout=12):
             for row in (h.get(k) or [])[:4]]
         for k in ("emails", "phones", "whatsapp", "people")}
 
-    if pages:
+    if pages and not (deadline and time.time() >= deadline):
         # their own site describes what they do better than a Maps category does
         blurb = _get(pages[0], timeout)[:20000]
         svc, why = services.match_service(candidate["company"], candidate.get("category"),
@@ -715,9 +721,10 @@ def run(agent="leads-hunter", segment=None, area=None, limit=20, per_segment=1,
             run_row.note(out.get("error") or "no maps key — left for OpenStreetMap")
             return out
         with deskwork.at_the_desk("Leads", agent, run_row) as job:
+            wanted = None
             if job:
-                limit, max_searches = _sized(job.how_many(None),
-                                             limit, max_searches)
+                wanted = job.how_many(None)
+                limit, max_searches = _sized(wanted, limit, max_searches)
                 area = job.first_mention(ls.DISTRICTS, area)
                 # resolve_service already forgives our internal spelling —
                 # "frameless shower" and "shower_glass" land on the same job
@@ -727,7 +734,7 @@ def run(agent="leads-hunter", segment=None, area=None, limit=20, per_segment=1,
                 if area is None:
                     area = job.first_mention(EMIRATES, None)
             out = _hunt(agent, segment, area, limit, per_segment, max_searches,
-                        dry_run, enrich_sites, run_row, service)
+                        dry_run, enrich_sites, run_row, service, wanted=wanted)
             _answer(job, out, area, service)
         run_row.note(out.get("summary") or out.get("error") or "hunted")
         return out
@@ -812,11 +819,18 @@ def _answer(job, out, area, service):
                    + "; ".join(out.get("critic_reasons") or ["no reason given"]))
         return
     stored, dupes = out.get("stored", 0), out.get("duplicates", 0)
+    clock = out.get("stopped") == "clock"
     if stored:
         job.did(f"Collected {stored} new lead(s){what}{where} from "
                 f"{len(out.get('searches') or [])} searches"
-                + (f"; {dupes} were already in the cabinet." if dupes else "."),
+                + (f"; {dupes} were already in the cabinet." if dupes else ".")
+                + (" It stopped at its time limit and saved what it had."
+                   if clock else ""),
                 stored=stored, duplicates=dupes)
+    elif clock and out.get("not_reached_this_pass"):
+        # Out of time with sites still unread is not "nobody new" — left
+        # unanswered, so the job is handed back and the next round reads them.
+        return
     elif dupes:
         job.did(f"Searched{where}{what} and found {dupes} firm(s) — every one of "
                 "them already in the cabinet, so nothing new was collected. "
@@ -830,6 +844,36 @@ def _answer(job, out, area, service):
             job.did(f"Searched{where}{what} across "
                     f"{len(out.get('searches') or [])} queries and found no "
                     "businesses at all matching them.", stored=0)
+
+
+# "Leads collects — timed out after 420s", with nothing stored.
+#
+# The pass used to search every target, THEN read every website it had found,
+# THEN store them all at the end. TomTom hands back fifty businesses a search,
+# and reading fifty sites one polite request at a time is many minutes, so the
+# day's stopwatch took the step away before the last line — and a pass killed
+# before its last line stores nothing. It looked as though TomTom was not being
+# used at all, when TomTom had answered every search.
+#
+# So, the same rule leads_osm follows: the pass takes most of its step's
+# ceiling, read from the runner rather than copied; it skips firms already in
+# the cabinet before reading anything; it saves after every BANK_EVERY sites;
+# and it stops reading with WRITE_RESERVE left to save the last batch. Partial
+# and saved beats complete and killed.
+OF_THE_CEILING = 0.80
+WRITE_RESERVE = 45       # screening, dedup and storing, with room for a bad day
+HUNT_BUDGET = 330        # only if the runner's ceiling cannot be read
+BANK_EVERY = 8           # sites read between saves — at most this many lost
+
+
+def pass_budget() -> int:
+    """Seconds this whole pass may take, from the day run's own step limit."""
+    try:
+        from . import day_run
+        return max(90, int(day_run.step_timeout_for("pipelines.leads_hunt")
+                           * OF_THE_CEILING))
+    except Exception:
+        return HUNT_BUDGET
 
 
 def _refused(err) -> bool:
@@ -850,7 +894,7 @@ def _search_map(src, t, limit):
 
 
 def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
-          enrich_sites, run_row, service=None):
+          enrich_sites, run_row, service=None, wanted=None):
     sources = _map_sources()
     key = sources[0]["key"] if sources else None
     targets = plan_targets(segment, area, per_segment, service)[:max_searches]
@@ -889,11 +933,69 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
 
     # only one Hunter goes shopping at a time: two of them running the same
     # segment would spend twice and collect the same firms.
-    with board.lock("leads_collection", agent, ttl=900):
-        candidates, searched, errors = [], [], []
-        seen_here = set()
+    budget = pass_budget()
+    started = time.time()
+    stop_looking = started + budget - WRITE_RESERVE
+    with board.lock("leads_collection", agent, ttl=budget + 120):
+        searched, errors, seen_here = [], [], set()
         at, switched = 0, []            # which map is in use, and any hand-over
+        kept = []                       # every live business met, for the totals
+        got = {"stored": [], "duplicates": [], "refused": [], "personal_data_held": []}
+        n = {"already": 0, "unreachable": 0, "sites_read": 0, "left_unread": 0,
+             "mailable": 0}
+        rejected, new_ones = [], []      # new_ones: the candidates intake stored
+
+        def have():
+            # "20 leads" means 20 he can write to when sites are read — the
+            # Leads room lists those. A pass that does not read sites can only
+            # count what it stored.
+            return n["mailable"] if enrich_sites else len(got["stored"])
+
+        def bank(batch):
+            """Read their sites, then STORE — now, not at the end of the pass."""
+            ready = []
+            for c in batch:
+                if enrich_sites and c.get("website"):
+                    if time.time() >= stop_looking:
+                        # Not stored unread: a lead in the cabinet is skipped
+                        # by every later search, so its site would never be
+                        # read. It is found again next round and read then.
+                        n["left_unread"] += 1
+                        continue
+                    try:
+                        enrich(c, deadline=stop_looking)
+                    except Exception:            # one bad site is not a lost batch
+                        pass
+                    n["sites_read"] += 1
+                ready.append(c)
+            # A listing with no phone and no published email cannot be
+            # reached, so it is not a lead — left out here, and counted, rather
+            # than letting one such row make the Critic throw away the batch.
+            # TomTom lists more businesses without a phone than Google does.
+            reach = [c for c in ready if c.get("email") or c.get("phone")]
+            n["unreachable"] += len(ready) - len(reach)
+            if not reach:
+                return
+            ok, reasons = critic_check(reach, searched, errors)
+            if not ok:
+                rejected.extend(r for r in reasons if r not in rejected)
+                return
+            # screen + dedup + store. intake() is the only door into the leads table.
+            res = ls.intake(reach, agent=agent)
+            for k in got:
+                got[k].extend(res.get(k) or [])
+            names = {(x.get("company") or "").strip().lower() for x in res.get("stored") or []}
+            new_ones.extend(c for c in reach if c["company"].strip().lower() in names)
+            n["mailable"] = sum(1 for x in got["stored"] if (x.get("email") or "").strip())
+
+        stopped = "searched"
         for t in targets:
+            if wanted and have() >= wanted:
+                stopped = "target"
+                break
+            if time.time() >= stop_looking:
+                stopped = "clock"
+                break
             found, err = _search_map(sources[at], t, limit)
             # ONE MAP SAYING NO IS NOT THE DAY SAYING NO. Google refusing the
             # key (the "unavailable" API, billing off) hands the rest of the
@@ -909,6 +1011,7 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
             if err:
                 errors.append(err)
                 continue
+            fresh = []
             for c in found:
                 # Hunting FOR a service beats guessing one back out of the
                 # listing: we already know what job we went looking for, and the
@@ -924,63 +1027,83 @@ def _hunt(agent, segment, area, limit, per_segment, max_searches, dry_run,
                 if (c.get("status") or "OPERATIONAL") != "OPERATIONAL":
                     continue             # closed businesses are not leads
                 seen_here.add(nm)
-                candidates.append(c)
+                kept.append(c)
+                # Asked BEFORE a website is read: a business already in the
+                # cabinet should cost nothing, not a site read that intake then
+                # throws away as a duplicate. With TomTom's long lists, most of
+                # a page on a swept area is last week's firms.
+                if board.lead_seen(c.get("email"), c.get("phone"), c.get("company"),
+                                   c.get("website")):
+                    n["already"] += 1
+                    continue
+                fresh.append(c)
+            # the ones with a website first: only they can give an email
+            fresh.sort(key=lambda c: 0 if c.get("website") else 1)
+            for i in range(0, len(fresh), BANK_EVERY):
+                if wanted and have() >= wanted:
+                    break
+                bank(fresh[i:i + BANK_EVERY])
             time.sleep(0.5)
+        if stopped == "searched" and wanted and have() >= wanted:
+            stopped = "target"
+        elif stopped == "searched" and n["left_unread"]:
+            stopped = "clock"
 
-        if enrich_sites:
-            for c in candidates:
-                if c.get("website"):
-                    enrich(c)
-
-        # A listing with no phone and no published email cannot be reached, so
-        # it is not a lead — left out here, and counted, rather than letting one
-        # such row make the Critic throw away the whole batch. TomTom lists more
-        # businesses without a phone than Google does.
-        unreachable = [c for c in candidates if not (c.get("email") or c.get("phone"))]
-        if unreachable:
-            candidates = [c for c in candidates if c.get("email") or c.get("phone")]
-
-        ok, reasons = critic_check(candidates, searched, errors)
-        if not ok:
-            return {"ok": True, "critic": "rejected", "critic_reasons": reasons,
-                    "searches": searched, "found": len(candidates),
-                    "stored": 0,
-                    "summary": "critic rejected: " + "; ".join(reasons)}
-
-        # screen + dedup + store. intake() is the only door into the leads table.
-        result = ls.intake(candidates, agent=agent)
+        stored, dupes = len(got["stored"]), len(got["duplicates"]) + n["already"]
+        # Nothing met at all is only a result when a search said why.
+        ok, reasons = (True, []) if kept else critic_check([], searched, errors)
+        if not ok or (rejected and not stored):
+            why = (reasons or []) + rejected
+            return {"ok": True, "critic": "rejected", "critic_reasons": why,
+                    "searches": searched, "found": len(kept),
+                    "stored": 0, "duplicates": dupes,
+                    "summary": "critic rejected: " + "; ".join(why)}
 
         did = board.log_decision(
             "leads-hunt",
             reasoning=(f"Searched {len(searched)} segment/area combinations via "
                        f"{sources[at]['label']} ({sources[at]['from']}); "
-                       f"{len(candidates)} live businesses found, "
-                       f"{len(result['stored'])} new, {len(result['duplicates'])} already "
-                       f"in the cabinet, {len(result['refused'])} screened out."),
+                       f"{len(kept)} live businesses found, "
+                       f"{stored} new, {dupes} already "
+                       f"in the cabinet, {len(got['refused'])} screened out."),
             expectation="Each new lead carries the service it needs, so outreach writes "
                         "about that job rather than reciting the whole service list.",
             confidence=0.7,
-            evidence={"lead_ids": [s["id"] for s in result["stored"]]})
+            evidence={"lead_ids": [s["id"] for s in got["stored"]]})
 
         by_service = {}
-        for c in candidates:
-            by_service[c["service_label"]] = by_service.get(c["service_label"], 0) + 1
-
+        for c in new_ones:
+            label = c.get("service_label") or services.label(c.get("service") or "")
+            by_service[label] = by_service.get(label, 0) + 1
+        mailable = n["mailable"]
+        took = int(time.time() - started)
+        tail = ""
+        if stopped == "clock":
+            tail = (f". It stopped at its time limit ({took}s) and saved what it had"
+                    + (f"; {n['left_unread']} website(s) not yet read are picked "
+                       "up next round" if n["left_unread"] else ""))
+        elif stopped == "target":
+            tail = f". That is the {wanted} asked for"
         return {"ok": True, "agent": agent, "critic": "passed",
                 "map": sources[at]["label"], "switched": switched,
-                "unreachable_left_out": len(unreachable),
-                "searches": searched, "found": len(candidates),
-                "stored": len(result["stored"]), "duplicates": len(result["duplicates"]),
-                "refused": result["refused"],
-                "with_email": sum(1 for c in candidates if c.get("email")),
-                "with_phone": sum(1 for c in candidates if c.get("phone")),
+                "unreachable_left_out": n["unreachable"],
+                "searches": searched, "found": len(kept),
+                "stored": stored, "duplicates": dupes,
+                "already_in_cabinet": n["already"],
+                "refused": got["refused"],
+                "with_email": mailable,
+                "with_phone": sum(1 for c in new_ones if c.get("phone")),
+                "sites_read": n["sites_read"],
+                "not_reached_this_pass": n["left_unread"],
+                "stopped": stopped, "seconds": took,
+                "critic_notes": rejected,
                 "by_service": by_service,
-                "personal_data_held": result["personal_data_held"],
+                "personal_data_held": got["personal_data_held"],
                 "contacted": 0, "decision_id": did,
-                "summary": (f"{len(result['stored'])} new leads from {len(searched)} "
+                "summary": (f"{stored} new leads from {len(searched)} "
                             f"{sources[at]['label']} searches "
-                            f"({sum(1 for c in candidates if c.get('email'))} "
-                            f"with a published email)"
+                            f"({mailable} with a published email)"
+                            + tail
                             + (". " + switched[0] if switched else ""))}
 
 

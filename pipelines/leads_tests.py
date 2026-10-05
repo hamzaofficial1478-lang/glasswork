@@ -981,6 +981,101 @@ def test_the_hunter_collects_with_tomtom():
     check("the other is counted as left out", r["unreachable_left_out"], 1)
 
 
+def _tt_firm(i):
+    """A distinct TomTom hotel with a website and a phone."""
+    return {**TT_RESULT, "id": f"tt{i}",
+            "poi": {**TT_RESULT["poi"], "name": f"Firm {i} Hotel",
+                    "phone": f"+971 4 555 {i:04d}", "url": f"www.firm{i}hotel.ae"}}
+
+
+class _Clock:
+    """The Hunter's clock, moved on by hand: every site read costs `per_read`."""
+
+    def __init__(self):
+        self.now = 1_000_000.0
+
+    def time(self):
+        return self.now
+
+    def sleep(self, s):
+        pass
+
+
+def _timed_hunt(firms, budget=300, per_read=30, wanted=None, before=None):
+    """
+    A TomTom hunt where reading a site takes `per_read` seconds of a
+    `budget`-second pass. Returns (result, companies read, rows in the cabinet).
+    """
+    real = (lh.search_tomtom, lh._places_key, lh._tomtom_key, lh.enrich,
+            lh.pass_budget, lh.time, board.DB)
+    board.DB = _fresh_db()
+    clock, read = _Clock(), []
+    try:
+        if before:
+            ls.intake(before)
+        lh._places_key = lambda: (None, None)
+        lh._tomtom_key = lambda: ("t-key", "test")
+        lh.search_tomtom = lambda q, a, k, limit=50, timeout=25: (firms, None)
+        lh.pass_budget = lambda: budget
+        lh.time = clock
+
+        def fake_enrich(c, timeout=12, deadline=None):
+            read.append(c["company"])
+            clock.now += per_read
+            c["email"] = "info@" + c["website"].split("www.", 1)[1]
+            return c
+        lh.enrich = fake_enrich
+        r = lh._hunt("leads-hunter", "hotel", "Dubai Marina", 20, 1, 1, False,
+                     True, None, wanted=wanted)
+        con = sqlite3.connect(board.DB)
+        rows = con.execute("SELECT count(*) FROM leads").fetchone()[0]
+        con.close()
+        return r, read, rows
+    finally:
+        (lh.search_tomtom, lh._places_key, lh._tomtom_key, lh.enrich,
+         lh.pass_budget, lh.time, board.DB) = real
+
+
+def test_the_hunter_saves_as_it_goes():
+    print("\n\"Leads collects — timed out after 420s\": the Hunter saves as it goes:")
+    firms = [_tt_firm(i) for i in range(20)]
+    # 300s pass, 45s kept to save: reading stops once 255s are spent, which
+    # is after the ninth site at 30s apiece.
+    r, read, rows = _timed_hunt(firms)
+    check("it read sites until its own stopping point, not all twenty", len(read), 9)
+    check("everything it read is in the cabinet", rows, 9)
+    check("and reported as stored", r["stored"], 9)
+    check("each with the email off its own site", r["with_email"], 9)
+    check("it says it stopped for time", r["stopped"], "clock")
+    check("  and the summary tells him so", "time limit" in r["summary"], True)
+    check("the eleven it never reached are counted, not thrown away",
+          r["not_reached_this_pass"], 11)
+
+    print("\n...a firm already in the cabinet costs no site read at all:")
+    known = lh._tomtom_to_candidate(firms[0], "hotel", "Dubai Marina")
+    r, read, rows = _timed_hunt(firms[:3], before=[{**known, "email": "info@firm0hotel.ae"}])
+    check("its site was not read again", "Firm 0 Hotel" in read, False)
+    check("the other two were", len(read), 2)
+    check("it is counted as already held", r["already_in_cabinet"], 1)
+    check("  and among the duplicates", r["duplicates"], 1)
+    check("the cabinet holds three, not four", rows, 3)
+
+    print("\n...and it stops at the number he asked for:")
+    r, read, rows = _timed_hunt(firms, budget=3000, wanted=5)
+    check("five he can write to", r["with_email"] >= 5, True)
+    check("without reading all twenty sites", len(read) < 20, True)
+    check("  one batch at most", len(read) <= lh.BANK_EVERY, True)
+    check("and it says the number was met", r["stopped"], "target")
+
+    print("\n...its budget comes from the runner, with room kept back to save:")
+    from . import day_run
+    ceiling = day_run.step_timeout_for("pipelines.leads_hunt")
+    check("the Hunter has its own, longer slot", ceiling > day_run.STEP_TIMEOUT, True)
+    check("the pass fits inside it", lh.pass_budget() < ceiling, True)
+    check("and leaves time to save after reading",
+          lh.pass_budget() - lh.WRITE_RESERVE > 0, True)
+
+
 class _TomTomStandIn:
     """TomTom's two endpoints on this machine, recording what was asked."""
 
@@ -1087,6 +1182,7 @@ def _main():
     test_a_tomtom_listing_becomes_a_usable_lead()
     test_which_map_is_used()
     test_the_hunter_collects_with_tomtom()
+    test_the_hunter_saves_as_it_goes()
     test_the_tomtom_calls_are_the_right_ones()
     test_never_collected_twice()
     test_the_mail_is_about_one_service()

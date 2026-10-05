@@ -59,26 +59,84 @@ def _table(c):
         pass                                  # already there
 
 
-def live_canonical(url, get=None) -> str:
-    """The canonical this page names on his site right now — '' if none or unreadable."""
+# His server's firewall resets visits that come too close together, and a
+# page that did not answer used to read exactly like a page naming no address —
+# so about.php, which names the www address, was shown as "still names the
+# other address". A read now waits its turn, is tried twice, and an unread page
+# is said to be unread.
+LIVE_PAUSE = 1.5
+LIVE_RETRY_PAUSE = 4
+UA = {"User-Agent": "Mozilla/5.0 (glasswork-index)"}
+
+
+def live_canonical(url, get=None):
+    """
+    The canonical this page names on his site right now: the address, '' when
+    the page was read and names none, or None when it could not be read.
+    """
     import re
     import os
     try:
         if get is None:
             if os.environ.get("AGENCY_IGNORE_DOTENV") == "1":
-                return ""                     # the test suite never reaches a real site
+                return None                   # the test suite never reaches a real site
             import requests
-            r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (glasswork-index)"})
+            time.sleep(LIVE_PAUSE)
+            r = requests.get(url, timeout=20, headers=UA)
             status, html = r.status_code, r.text or ""
         else:
             status, html = get(url)
     except Exception:
-        return ""
+        return None
     if status != 200:
-        return ""
+        return None
     m = re.search(r"<link\b[^>]*\brel=[\"']?canonical[\"']?[^>]*>", html, re.I)
     h = re.search(r"\bhref=[\"']([^\"']+)[\"']", m.group(0), re.I) if m else None
     return urllib.parse.urljoin(url, h.group(1).strip()) if h else ""
+
+
+def _live_now(url):
+    """live_canonical, asked a second time after a pause if the page did not answer."""
+    got = live_canonical(url)
+    if got is None:
+        time.sleep(LIVE_RETRY_PAUSE)
+        got = live_canonical(url)
+    return got
+
+
+def twin_moves(url, get=None):
+    """
+    Whether the site's other address — the same host with or without www —
+    sends visitors on to this one. True, False (it opens a page of its own),
+    or None when that could not be told.
+
+    A page can name the right address and still be listed as a copy while
+    the other address opens the same page by itself: Google sees two copies
+    and picks one. Only a redirect on the other address settles that, and
+    that is a hosting setting, not a file the agency can write.
+    """
+    import os
+    p = urllib.parse.urlparse(url)
+    host = p.netloc.lower()
+    twin = host[4:] if host.startswith("www.") else "www." + host
+    probe = urllib.parse.urlunparse((p.scheme or "https", twin, "/", "", "", ""))
+    try:
+        if get is None:
+            if os.environ.get("AGENCY_IGNORE_DOTENV") == "1":
+                return None
+            import requests
+            time.sleep(LIVE_PAUSE)
+            r = requests.get(probe, timeout=20, headers=UA, allow_redirects=False)
+            status, where = r.status_code, r.headers.get("Location", "")
+        else:
+            status, where = get(probe)
+    except Exception:
+        return None
+    if status in (301, 302, 303, 307, 308):
+        return urllib.parse.urlparse(urllib.parse.urljoin(probe, where or "")).netloc.lower() == host
+    if status == 200:
+        return False
+    return None
 
 
 def fix_state(kind="use_one_domain") -> str:
@@ -106,30 +164,54 @@ def _bare(host):
 FIX_STATE = {
     "pending": "the one-address fix is waiting for your yes under Waiting on you",
     "approved": "the one-address fix is approved — IT is putting it on",
-    "applied": "IT changed your files, yet this page still names the other address — "
-               "see Your orders for which file",
+    "applied": "IT has changed your files to name one address",
     "failed": "the one-address fix could not go on — the reason is in Your orders",
 }
 SOON = "IT has been asked to make every page name one address"
 ASK_AGAIN = ("nothing to change on your site — Google re-reads it by itself; to hurry "
              "it, open URL Inspection in Search Console for this page and press "
              "Request indexing")
+UNREAD = "the agency reads the page again on the next run and says which"
+
+
+def redirect_advice(url) -> str:
+    """What settles two addresses opening the same page: his host's redirect."""
+    host = urllib.parse.urlparse(url).netloc.lower()
+    twin = host[4:] if host.startswith("www.") else "www." + host
+    return (f"in Hostinger, make {twin} send visitors on to {host} with a permanent "
+            "(301) redirect — in hPanel open your website and search for Redirects, "
+            "or ask Hostinger's chat to set it — then press Request indexing for this "
+            "page in Search Console")
+
+
+def _doing(fix, live, host):
+    """What is being done, by the real state of the change AND the page today."""
+    if fix == "applied" and live and urllib.parse.urlparse(live).netloc.lower() != host:
+        return ("IT changed your files, yet this page still names " + live
+                + " — see Your orders for which file")
+    return FIX_STATE.get(fix or "", SOON)
 
 
 def _when(last_crawl):
     return f" (on {last_crawl[:10]})" if last_crawl else ""
 
 
-def explain(url, r, live=None, fix=None) -> tuple:
+def explain(url, r, live=None, fix=None, moved=None) -> tuple:
     """
     (on_google, why, doing) — Google's answer about one page, in his words.
 
-    `live` is the canonical the page names TODAY, read off his site; `fix` the
-    state of the one-address change. Google's answer is about the page as it
-    was when Google last read it — weeks ago, sometimes — so a canonical it
-    reports is checked against the page now: "the page tells Google its real
-    address is https://worlddealtechnicalservices.com/" was shown as today's
-    fault while every page had already been put right.
+    `live` is the canonical the page names TODAY, read off his site: the
+    address, '' when the page names none, None when the page did not answer.
+    `fix` is the state of the one-address change; `moved` whether the other
+    address of the site (with or without www) sends visitors to this one.
+
+    Google's answer is about the page as it was when Google last read it —
+    weeks ago, sometimes — so a canonical it reports is checked against the
+    page now: "the page tells Google its real address is
+    https://worlddealtechnicalservices.com/" was shown as today's fault while
+    every page had already been put right. And a page that could not be read
+    is never reported as still wrong: about.php said "this page still names
+    the other address" when it names the www one and simply had not answered.
     """
     cov = (r.get("coverage") or "").strip()
     low = cov.lower()
@@ -137,6 +219,11 @@ def explain(url, r, live=None, fix=None) -> tuple:
     host = urllib.parse.urlparse(url).netloc.lower()
     seen = _when(r.get("last_crawl") or "")
     live_ok = bool(live) and urllib.parse.urlparse(live).netloc.lower() == host
+    gc_host = urllib.parse.urlparse(gc).netloc.lower() if gc else ""
+    twin_chosen = bool(gc_host) and gc_host != host and _bare(gc_host) == _bare(host)
+    open_twin = "" if moved is not False else (
+        "; the address without www still opens by itself, so " + redirect_advice(url)
+        if host.startswith("www.") else "; " + redirect_advice(url))
     if r.get("verdict") == "PASS" or low.startswith("submitted and indexed") \
             or low.startswith("indexed"):
         return True, "on Google", ""
@@ -145,21 +232,44 @@ def explain(url, r, live=None, fix=None) -> tuple:
             return (False,
                     f"when Google last read this page{seen} it named {uc} as the real "
                     f"address. Your page names {live} now, so this clears when Google "
-                    "reads it again", ASK_AGAIN)
+                    "reads it again", ASK_AGAIN + open_twin)
+        if live is None:
+            return (False,
+                    f"when Google last read this page{seen} it named {uc} as the real "
+                    "address. Your page did not answer just now, so whether it still "
+                    "does could not be checked",
+                    (FIX_STATE["applied"] + "; " if fix == "applied" else "") + UNREAD)
+        if live == "":
+            return (False,
+                    f"when Google last read this page{seen} it named {uc} as the real "
+                    "address. Your page names no address of its own now, so Google "
+                    "chooses one itself", _doing(fix, live, host))
         return (False,
-                f"the page tells Google its real address is {live or uc} — a different "
+                f"the page tells Google its real address is {live} — a different "
                 "address from the one your site is on, so Google treats this one as a copy",
-                FIX_STATE.get(fix or "", SOON))
+                _doing(fix, live, host))
     if "canonical" in low or (gc and gc.rstrip("/") != url.rstrip("/")):
+        if live_ok and twin_chosen and moved is False:
+            return (False,
+                    f"Google picked {gc} — the same page at your site's other address — "
+                    f"as the real one. Your page names {live}, but the other address "
+                    "still opens the same page by itself, so Google sees two copies",
+                    redirect_advice(url))
         if live_ok:
             return (False,
                     f"when Google last read this page{seen} it treated it as a copy of "
                     f"{gc or 'another page'}. Your page names itself as the real one now, "
-                    "so this clears when Google reads it again", ASK_AGAIN)
+                    "so this clears when Google reads it again", ASK_AGAIN + open_twin)
+        if live is None:
+            return (False,
+                    f"when Google last read this page{seen} it treated it as a copy of "
+                    f"{gc or 'another page'}. Your page did not answer just now, so what "
+                    "it names today could not be checked",
+                    (FIX_STATE["applied"] + "; " if fix == "applied" else "") + UNREAD)
         return (False,
                 "Google thinks this page is a copy of " + (gc or "another page")
                 + (f" ({cov})" if cov else ""),
-                FIX_STATE.get(fix or "", SOON)
+                _doing(fix, live, host)
                 + "; if the content really repeats another page, Content can make it its own")
     if "noindex" in low:
         return False, "the page asks Google not to list it (noindex)", \
@@ -290,6 +400,7 @@ def _run(most, force=False):
             "SELECT url FROM index_status WHERE checked_at>=? AND"
             " (on_google=1 OR live_canonical IS NOT NULL)", (now - ASK_AGAIN_AFTER,))}
     asked, rows, errors = 0, [], []
+    moved = "ask"                      # the other address: asked once, when needed
     for url in urls:
         if url in fresh or asked >= most:
             continue
@@ -300,8 +411,11 @@ def _run(most, force=False):
             if r.get("status") in (401, 403, 429):
                 break
             continue
-        live = "" if r.get("verdict") == "PASS" else live_canonical(url)
-        on, why_not, doing = explain(url, r, live=live, fix=fix_state())
+        live = None if r.get("verdict") == "PASS" else _live_now(url)
+        if moved == "ask" and r.get("verdict") != "PASS":
+            moved = twin_moves(url)
+        on, why_not, doing = explain(url, r, live=live, fix=fix_state(),
+                                     moved=None if moved == "ask" else moved)
         rows.append((url, int(on), r.get("verdict"), r.get("coverage"), why_not, doing,
                      r.get("google_canonical"), r.get("user_canonical"),
                      r.get("last_crawl"), now, live))
@@ -375,14 +489,18 @@ def _run(most, force=False):
     head = (f"{on} of {total} page(s) are on Google"
             + (f"; {total - on} are not — reasons and fixes in the office under On Google"
                if total - on else "")
-            + (f"; {len(queued)} fix(es) waiting for your yes" if queued else ""))
+            + (f"; {len(queued)} fix(es) waiting for your yes" if queued else "")
+            + ("; your site's other address (with or without www) still opens by itself — "
+               "a redirect in Hostinger settles that, the steps are under On Google"
+               if moved is False else ""))
     if mismatch:
         head = mismatch + " " + head
     if errors and not rows:
         return {"ok": False, "error": (mismatch + " " if mismatch else "")
                 + "Google would not answer about your pages: " + errors[0]}
     return {"ok": True, "asked": asked, "on_google": on, "pages": total,
-            "queued": queued, "head": head, "errors": errors[:3], "mismatch": mismatch}
+            "queued": queued, "head": head, "errors": errors[:3], "mismatch": mismatch,
+            "other_address_redirects": None if moved == "ask" else moved}
 
 
 def status() -> dict:
