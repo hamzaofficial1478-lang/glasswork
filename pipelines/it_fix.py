@@ -787,6 +787,40 @@ def fix_sitemap_asked(issue, ctx):
     return None
 
 
+def fix_reindex_asked(issue, ctx):
+    """
+    "can the program cannot do that re indexing the www address pages?" — the
+    part of it a program can do: date the changed pages in the sitemap and give
+    it to Search Console again (site_api.tell_google_again). The Request
+    indexing button itself has no API, and this says so rather than pretend.
+    """
+    if issue.get("kind") != "task":
+        return None
+    t = (issue.get("detail") or "").lower()
+    # "indexing"/"indexed", never bare "index" — that is index.php
+    if not re.search(r"\bre-?\s*index|\brequest(ing)?\s+index|\bindex(ing|ed)\b|"
+                     r"\btell google\b", t):
+        return None
+    if _waiting("tell_google_again"):
+        return {"how": "already_right",
+                "why": "telling Google which pages changed is already on its way"}
+    from . import seo_index
+    pages = seo_index.changed_since_google()
+    if not pages:
+        return {"how": "already_right",
+                "why": ("no page has changed since Google last read it, so there is "
+                        "nothing new to tell Google. The Request indexing button in Search "
+                        "Console is the only other lever, and only you can press it — "
+                        "Google gives programs no way to")}
+    from . import sitemap
+    return {"how": "call", "call": "tell_google_again", "pages": [sitemap.PAGE],
+            "why": (f"{len(pages)} page(s) Google has not listed are different now from "
+                    "when Google last read them. This dates them as changed today in your "
+                    "sitemap and gives it to Search Console again, so Google reads them "
+                    "sooner. The Request indexing button itself only you can press."),
+            "undo": f"python -m pipelines.site_api --undo --page {sitemap.PAGE}"}
+
+
 RECIPES = (
     # Before everything: an audit ticket must never reach a recipe that only
     # matches on its wording. See fix_seo_finding.
@@ -799,6 +833,7 @@ RECIPES = (
     fix_dead_email,
     fix_from_his_words,
     fix_sitemap_asked,
+    fix_reindex_asked,
     fix_viewport,
     fix_canonical,
     fix_placeholders,

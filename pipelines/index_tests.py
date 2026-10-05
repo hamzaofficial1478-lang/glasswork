@@ -440,8 +440,9 @@ def test_an_old_reading_asks_for_nothing():
         finally:
             (seo_intel._gsc_session, seo_intel.gsc_inspect, seo_index._pages,
              sitemap.is_published, site_api.plan_share_buttons, seo_index.live_canonical) = real
-        check("no fix is put to him for a page that is already right",
-              cab.sql("SELECT kind FROM site_queue"), [])
+        check("no fix is put to him for a page that is already right — only telling "
+              "Google the pages changed",
+              [r["kind"] for r in cab.sql("SELECT kind FROM site_queue")], ["tell_google_again"])
         st = seo_index.status()
         check("each page says it is Google's old reading",
               all("when Google last read this page" in p["why"] for p in st["pages"]), True)
@@ -505,6 +506,74 @@ def test_two_addresses_open_the_same_page():
     check("  and the redirect is not asked for again", "Hostinger" in doing, False)
 
 
+def test_google_is_told_which_pages_changed():
+    print("\nThe part of Request indexing a program can do — telling Google which pages changed:")
+    old = sitemap.as_php([HOME, HOME + "about.php", HOME + "gallery.php"],
+                         {HOME: "2026-01-01", HOME + "about.php": "2026-01-01"})
+    check("the sitemap can carry the day each page last changed",
+          f"<loc>{HOME}</loc><lastmod>2026-01-01</lastmod>" in old, True)
+    check("  and read it back", sitemap.dates_in(old).get(HOME + "about.php"), "2026-01-01")
+    with _Cabinet() as cab, _Site({"index.php": "<p>home</p>", "sitemap.php": old}) as s:
+        row = ("INSERT INTO index_status(url,on_google,user_canonical,google_canonical,"
+               "live_canonical) VALUES(?,?,?,?,?)")
+        with sqlite3.connect(board.DB) as c:
+            seo_index._table(c)
+            c.execute(row, (HOME, 1, HOME, HOME, None))
+            # Google last saw about.php naming the copy without www; it names www today
+            c.execute(row, (HOME + "about.php", 0, "https://worlddealtechnicalservices.com/about.php",
+                            "https://worlddealtechnicalservices.com/about.php", HOME + "about.php"))
+            # gallery.php is not listed, but is just as Google last saw it
+            c.execute(row, (HOME + "gallery.php", 0, HOME + "gallery.php", HOME + "gallery.php",
+                            HOME + "gallery.php"))
+        real = (sitemap.site_address, seo_intel.gsc_submit_sitemap)
+        given = []
+        sitemap.site_address = lambda: HOME.rstrip("/")
+        seo_intel.gsc_submit_sitemap = lambda url: given.append(url) or {"ok": True}
+        try:
+            changed = seo_index.changed_since_google()
+            refused = site_api.tell_google_again(agent="seo-lead")
+            r = site_api.tell_google_again(agent="it-releaser")
+            now = s.pages["sitemap.php"]
+        finally:
+            sitemap.site_address, seo_intel.gsc_submit_sitemap = real
+        queued = [x["kind"] for x in cab.sql("SELECT kind FROM site_queue")]
+    check("only the page that changed since Google read it is picked", changed, [HOME + "about.php"])
+    check("anyone but the Releaser puts it to him", (bool(refused.get("queued")), queued),
+          (True, ["tell_google_again"]))
+    check("the changed page is dated today",
+          f"<loc>{HOME}about.php</loc><lastmod>{sitemap.today()}</lastmod>" in now, True)
+    check("a page that did not change keeps its own date",
+          f"<loc>{HOME}</loc><lastmod>2026-01-01</lastmod>" in now, True)
+    check("  and one with no date is not given today's",
+          f"<loc>{HOME}gallery.php</loc></url>" in now, True)
+    check("the sitemap goes to Search Console again", given, [HOME + "sitemap.php"])
+    check("he is told Google still decides when", "still decides" in r["head"], True)
+    check("the Releaser may run it", "tell_google_again" in it_release.ALLOWED_CALLS, True)
+
+
+def test_he_can_ask_for_his_pages_to_be_reindexed():
+    print("\n\"can the program do that re indexing the www address pages?\" — asked in his words:")
+    ctx = {"env": {"SITE_URL": "https://www.worlddealtechnicalservices.com"}}
+    ask = {"id": 0, "kind": "task", "severity": "high", "url": "",
+           "detail": "Owner's order: re index the www address pages on Google"}
+    with _Cabinet():
+        real = seo_index.changed_since_google
+        try:
+            seo_index.changed_since_google = lambda: [HOME + "about.php", HOME + "gallery.php"]
+            got = [p for p in it_fix.plans_for(ask, ctx) if p.get("how") == "call"]
+            seo_index.changed_since_google = lambda: []
+            none = it_fix.fix_reindex_asked(ask, ctx)
+        finally:
+            seo_index.changed_since_google = real
+    check("IT plans the part a program can do", [p["call"] for p in got], ["tell_google_again"])
+    check("  and says the button itself is his",
+          "only you can press" in got[0]["why"], True)
+    check("with nothing changed, it says so instead of pretending",
+          (none["how"], "only you can press" in none["why"]), ("already_right", True))
+    check("index.php is not an indexing request",
+          it_fix.fix_reindex_asked({**ask, "detail": "fix the title on index.php"}, ctx), None)
+
+
 def test_waiting_on_you_shows_every_change():
     from coordination import state
     import inspect
@@ -525,6 +594,8 @@ def main():
               test_an_old_reading_asks_for_nothing,
               test_a_page_that_did_not_answer_is_not_called_wrong,
               test_two_addresses_open_the_same_page,
+              test_google_is_told_which_pages_changed,
+              test_he_can_ask_for_his_pages_to_be_reindexed,
               test_waiting_on_you_shows_every_change):
         t()
     print()

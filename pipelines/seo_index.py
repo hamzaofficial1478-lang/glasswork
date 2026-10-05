@@ -168,9 +168,11 @@ FIX_STATE = {
     "failed": "the one-address fix could not go on — the reason is in Your orders",
 }
 SOON = "IT has been asked to make every page name one address"
-ASK_AGAIN = ("nothing to change on your site — Google re-reads it by itself; to hurry "
-             "it, open URL Inspection in Search Console for this page and press "
-             "Request indexing")
+ASK_AGAIN = ("nothing to change on your site — Google re-reads it by itself, and the "
+             "agency marks it as changed in your sitemap so Google comes sooner; to "
+             "hurry it further, open URL Inspection in Search Console for this page and "
+             "press Request indexing (only you can press that — Google gives programs "
+             "no way to)")
 UNREAD = "the agency reads the page again on the next run and says which"
 
 
@@ -350,6 +352,34 @@ def _pages():
     return (d.get("pages") or []), False
 
 
+def changed_since_google() -> list:
+    """
+    The pages not on Google whose page today is not what Google last read:
+    it names a different address now, or Google picked the copy at the
+    site's other address. Those are the pages a <lastmod> of today is TRUE
+    for — and the only ones worth telling Google about.
+    """
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.row_factory = sqlite3.Row
+            _table(c)
+            rows = [dict(r) for r in c.execute(
+                "SELECT url, user_canonical, google_canonical, live_canonical"
+                " FROM index_status WHERE on_google=0 AND COALESCE(live_canonical,'')<>''")]
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        live = urllib.parse.urlparse(r["live_canonical"]).netloc.lower()
+        if urllib.parse.urlparse(r["url"]).netloc.lower() != live:
+            continue                          # still wrong today: fix it first, then tell
+        before = {urllib.parse.urlparse(x).netloc.lower()
+                  for x in (r["user_canonical"], r["google_canonical"]) if x}
+        if before - {live}:
+            out.append(r["url"])
+    return out
+
+
 def _asked_for(kind, days=14) -> bool:
     """Already put to him (or done) recently — do not ask again every day."""
     since = int(time.time()) - days * 86400
@@ -463,6 +493,21 @@ def _run(most, force=False):
                      f"pages on {site_host} — the ones in your Search Console — as copies, "
                      "which is why they are not indexed. This changes every canonical tag "
                      f"and link to {site_host}.")
+        if cid:
+            queued.append(cid)
+    # THE PART OF "REQUEST INDEXING" A PROGRAM CAN DO. The button has no API;
+    # a sitemap dating the changed pages, given to Search Console again, is
+    # the nearest thing. Once the sitemap is up, and once per fortnight.
+    changed = changed_since_google() if not mismatch else []
+    if changed and (from_sitemap or sitemap.is_published()):
+        cid = _queue("tell_google_again",
+                     f"Tell Google {len(changed)} of your pages have changed",
+                     f"{len(changed)} page(s) Google has not listed are different now from "
+                     f"when Google last read them (they name {site_host} now"
+                     + (", and your site's other address moves to it" if moved is True
+                        else "") + "). This dates them as changed "
+                     "today in your sitemap and gives it to Search Console again, so "
+                     "Google reads them sooner. Nothing a visitor sees changes.")
         if cid:
             queued.append(cid)
     if not mismatch and not from_sitemap and not sitemap.is_published():

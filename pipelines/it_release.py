@@ -454,6 +454,8 @@ ALLOWED_CALLS = {
     "use_one_domain": "make every mention of his old domain the one his site is on",
     "repair_share_buttons": "put Facebook, WhatsApp and LinkedIn back in the share buttons",
     "publish_sitemap": "put the sitemap on his website and give it to Search Console",
+    "tell_google_again": "mark the pages that changed in the sitemap and give it to "
+                         "Search Console again, so Google reads them sooner",
 }
 
 

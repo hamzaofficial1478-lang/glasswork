@@ -185,20 +185,47 @@ def discover(home=None, most=MOST_PAGES, get=None) -> dict:
             "error": "" if pages else "no page of the site could be read"}
 
 
-def as_xml(urls) -> str:
-    rows = "\n".join(f"  <url><loc>{_html.escape(u, quote=True)}</loc></url>" for u in urls)
+def today() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
+def as_xml(urls, dates=None) -> str:
+    """
+    The sitemap. `dates` maps a page to the day it last really changed, sent as
+    <lastmod> — the one thing a sitemap can say that makes Google come back to
+    a page sooner. Only a date that is TRUE: Google stops trusting the dates of
+    a site that stamps every page with today on every rebuild.
+    """
+    dates = dates or {}
+
+    def row(u):
+        d = dates.get(u)
+        return (f"  <url><loc>{_html.escape(u, quote=True)}</loc>"
+                + (f"<lastmod>{d}</lastmod>" if d else "") + "</url>")
+    rows = "\n".join(row(u) for u in urls)
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
             + rows + "\n</urlset>\n")
 
 
-def as_php(urls) -> str:
+def dates_in(xml) -> dict:
+    """The <lastmod> of each page in a sitemap already up, so a rebuild keeps them."""
+    out = {}
+    for block in re.findall(r"<url>(.*?)</url>", xml or "", re.S):
+        loc = re.search(r"<loc>([^<]+)</loc>", block)
+        mod = re.search(r"<lastmod>([^<]+)</lastmod>", block)
+        if loc and mod:
+            out[_html.unescape(loc.group(1).strip())] = mod.group(1).strip()
+    return out
+
+
+def as_php(urls, dates=None) -> str:
     """
     The page that sends the sitemap. Written as a nowdoc, never as XML inline:
     with short_open_tag on, PHP reads '<?xml' as the start of PHP code and the
     page dies with a parse error — Google would get a blank page.
     """
-    xml = as_xml(urls)
+    xml = as_xml(urls, dates)
     if "\nXML;" in xml:                                   # pragma: no cover — cannot occur
         raise ValueError("the sitemap cannot contain its own end marker")
     return ("<?php\n"
@@ -227,11 +254,15 @@ def is_published(home=None, get=None) -> bool:
         return False
 
 
-def keep_up(agent, add=(), drop=()) -> dict:
+def keep_up(agent, add=(), drop=(), touched=()) -> dict:
     """
     After a post goes up or comes down: the same sitemap with that address in or
     out. Reads the sitemap the agency put there; does nothing if there is none
     yet (publishing the first one is his decision).
+
+    Each page keeps the date it last changed. A page added, or one in
+    `touched` (it changed today), is dated today, so Google knows which pages
+    are worth reading again.
     """
     from . import site_api
     got = site_api.read_page(PAGE)
@@ -239,19 +270,30 @@ def keep_up(agent, add=(), drop=()) -> dict:
         return {"ok": False, "skipped": True, "why": "no sitemap on the site yet"}
     home = site_address().rstrip("/") + "/"
     have = [_html.unescape(u) for u in re.findall(r"<loc>([^<]+)</loc>", got["html"])]
+    had = dates_in(got["html"])
+    dates = dict(had)
     gone = {normalise(u, home, home) for u in drop if u}
     urls = [u for u in have if u not in gone]
     for u in add:
         n = normalise(u, home, home) if u else ""
         if n and n not in urls:
             urls.append(n)
-    if urls == have:
-        return {"ok": True, "unchanged": True}
-    r = site_api.put_page(PAGE, as_php(urls), agent=agent, before=got["html"],
+        if n:
+            dates[n] = today()
+    for u in touched:
+        n = normalise(u, home, home) if u else ""
+        if n in urls:
+            dates[n] = today()
+    dates = {u: d for u, d in dates.items() if u in urls}
+    if urls == have and dates == had:
+        return {"ok": True, "unchanged": True, "pages": len(urls)}
+    r = site_api.put_page(PAGE, as_php(urls, dates), agent=agent, before=got["html"],
                           _action="replace",
                           summary=("added the new post to your sitemap" if add and not drop
                                    else "brought your sitemap up to date"))
-    return {"ok": bool(r.get("ok")), "pages": len(urls), "error": r.get("error")}
+    return {"ok": bool(r.get("ok")), "pages": len(urls), "error": r.get("error"),
+            "dated_today": sorted(u for u in urls if dates.get(u) == today()
+                                  and had.get(u) != today())}
 
 
 def main():

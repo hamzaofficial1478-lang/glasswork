@@ -1319,7 +1319,9 @@ def publish_sitemap(agent=AGENT, s=None, dry_run=False) -> dict:
             "why": "A sitemap tells Google every page your website has."})
         return {"ok": False, "queued": cid, "error": refused}
     was = read_page(sitemap.PAGE, s=s)
-    r = put_page(sitemap.PAGE, sitemap.as_php(d["pages"]), agent=agent, s=s,
+    # a page keeps the date it last changed across a rebuild
+    dates = sitemap.dates_in(was.get("html") or "") if was.get("ok") else {}
+    r = put_page(sitemap.PAGE, sitemap.as_php(d["pages"], dates), agent=agent, s=s,
                  _action="new_page" if not was.get("ok") else "replace",
                  before=(was.get("html") if was.get("ok") else None),
                  summary=f"put a sitemap of {len(d['pages'])} page(s) on your website")
@@ -1337,6 +1339,57 @@ def publish_sitemap(agent=AGENT, s=None, dry_run=False) -> dict:
                f"in Search Console open Sitemaps and add  sitemap.php"))
     return {"ok": True, "url": url, "pages": d["pages"], "submitted": bool(sub.get("ok")),
             "head": head}
+
+
+def tell_google_again(agent=AGENT, s=None, dry_run=False) -> dict:
+    """
+    "in google search consle can the program cannot do that re indexing the www
+     address pages?"
+
+    Not the button itself: Request indexing has no API. Search Console's own
+    API only reads (URL Inspection), and Google's Indexing API is for job
+    adverts and live-stream videos only — using it for service pages breaks
+    Google's terms and Google says it ignores them.
+
+    What a program CAN do is the next best thing, and this is it: date the
+    pages that changed since Google last read them in the sitemap (<lastmod>)
+    and give the sitemap to Search Console again. Google reads changed pages
+    sooner. It still decides when. Releaser only — sitemap.php is on his site.
+    """
+    from . import seo_index, sitemap
+    pages = seo_index.changed_since_google()
+    if not pages:
+        return {"ok": True, "pages": [], "head": "no page has changed since Google last "
+                                                 "read it — nothing to tell Google"}
+    url = sitemap.live_url()
+    if dry_run:
+        return {"ok": True, "dry_run": True, "pages": pages,
+                "head": f"would mark {len(pages)} page(s) as changed in {url}"}
+    refused = _may_write(agent)
+    if refused:
+        cid = _queue_for_him(agent, "tell_google_again", "site", {
+            "change": {"call": "tell_google_again"},
+            "why": "Tells Google which pages changed, so it reads them again sooner."})
+        return {"ok": False, "queued": cid, "error": refused}
+    k = sitemap.keep_up(agent, touched=pages)
+    if k.get("skipped"):
+        return {"ok": False, "error": "there is no sitemap on your website yet, so there is "
+                                      "nothing to date — the sitemap goes up first"}
+    if not k.get("ok"):
+        return {"ok": False, "unreachable": True,
+                "error": k.get("error") or "the sitemap could not be written"}
+    try:
+        from . import seo_intel
+        sub = seo_intel.gsc_submit_sitemap(url)
+    except Exception as e:
+        sub = {"ok": False, "why": f"{type(e).__name__}: {e}"}
+    head = (f"{len(pages)} page(s) marked as changed today in your sitemap"
+            + (" and the sitemap given to Search Console again — Google reads changed "
+               "pages sooner, though it still decides when"
+               if sub.get("ok") else
+               f"; Search Console could not be given it ({sub.get('why')}) — in Search "
+               "Console open Sitemaps and submit sitemap.php again"))
+    return {"ok": True, "pages": pages, "submitted": bool(sub.get("ok")), "head": head}
 
 
 # ---------------------------------------------------------------------------
