@@ -48,11 +48,42 @@ def cmd_team_test(a):
     A real one-line call per model, so a green tick means that model answered
     today — on the main account, and on the backup if there is one.
     """
+    from . import engines
+    if engines.engine() != engines.CLAUDE_CODE:
+        rows = engines.test(only=a.get("model") or None)
+        return {"ok": bool(rows) and all(r["ok"] for r in rows), "results": rows}
     models = [claude_team.clamp(a["model"])] if a.get("model") else None
     rows = claude_team.test(models)
     if len(claude_team.accounts()) > 1:
         rows += claude_team.test(models, account="backup")
     return {"ok": all(r["ok"] for r in rows), "results": rows}
+
+
+def cmd_engine(_):
+    """The Engine page: which AI thinks, its models, the cap and today's spend. No keys."""
+    from . import engines
+    return engines.status()
+
+
+def cmd_engine_brief(_):
+    """Which engine, whether it is ready, today's spend and the cap — for the top bar."""
+    from . import engines
+    return engines.brief()
+
+
+def cmd_engine_save(a):
+    """Save the Engine page: the engine, a key (stored, never returned), models, the cap."""
+    from . import engines
+    r = engines.save(a)
+    return {**r, "status": engines.status()} if r.get("ok") else r
+
+
+def cmd_engine_test(a):
+    """One tiny real call per model on the chosen engine (or just one model)."""
+    from . import engines
+    rows = engines.test(only=a.get("model") or None)
+    return {"ok": bool(rows) and all(r["ok"] for r in rows), "results": rows,
+            "status": engines.status()}
 
 
 def cmd_team_forget(_):
@@ -157,6 +188,8 @@ DISPATCH = {
     "view": cmd_view,
     "team": cmd_team, "team_set": cmd_team_set, "team_test": cmd_team_test,
     "team_forget": cmd_team_forget,
+    "engine": cmd_engine, "engine_save": cmd_engine_save, "engine_test": cmd_engine_test,
+    "engine_brief": cmd_engine_brief,
     "save_tool": cmd_save_tool, "delete_tool": cmd_delete_tool, "shelves": cmd_shelves,
     "test_tool": cmd_test_tool, "resolve_shelf": cmd_resolve_shelf,
     "test_integration": cmd_test_integration, "preflight": cmd_preflight,

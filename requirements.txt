@@ -46,3 +46,9 @@ sqlcipher3-wheels>=0.5
 # format (coordination/countries.py). Without it a short built-in table keeps
 # the common countries working.
 phonenumbers>=8.13
+
+# CLAUDE BY API KEY — Anthropic's official library, for an account that thinks
+# with Claude through its own API key (providers/engines.py). OpenAI and Gemini
+# are reached with `requests`, above. Without it: Claude Code on this computer
+# works exactly as before; only the Claude-by-API-key choice says to install it.
+anthropic>=1.12

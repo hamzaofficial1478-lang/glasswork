@@ -231,6 +231,22 @@ someone else's in read-only mode:
   - Outreach follows each country's email rule.
   - Your website keeps exactly what it had.
 
+- **Phase 3 is built (8 October).**
+  - A new account's first stop is **How your agency thinks**: Claude, OpenAI
+    or Google Gemini, each with the person's own API key, a **Test** button,
+    and "about $X a day" before anything is spent.
+  - Each desk gets the strongest, everyday or lightest model of that company.
+    The Managing Director, Security and IT get the strongest; Report the
+    lightest. Each can be changed. A model that fails steps down a tier.
+  - The daily spending limit is checked before every AI call and every paid
+    tool, across both websites. A call that would pass it is not made.
+  - Keys are kept encrypted in the account and never shown again, not even on
+    that page. Changing them later asks for the password, like Setup.
+  - Your own copy keeps Claude Code on your Claude plan, exactly as today. A
+    new customer's account is not offered that, because of Anthropic's terms.
+  - Not built: signing in with a ChatGPT or Gemini subscription. Their terms
+    still have to be checked.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

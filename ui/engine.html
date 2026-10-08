@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your AI engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* The office's tokens (ui/office.html), as on the account and business pages. */
+:root{
+  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
+  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
+  --text:#e7eff3; --muted:#8a9ea9; --faint:#54666f;
+  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.14);
+  --amber:#eaa543; --amber-dim:rgba(234,165,67,.13);
+  --danger:#e5565b; --danger-dim:rgba(229,86,91,.13); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:28px 16px 120px}
+main{max-width:760px;margin:0 auto;display:grid;gap:16px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.top a{color:var(--glass);text-decoration:none;font-size:14px}
+h1{font-size:26px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+.lead{color:var(--muted);font-size:14.5px;line-height:1.6;margin:0;max-width:62ch}
+section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 22px 24px}
+h2{font-size:16px;font-weight:600;margin:0 0 4px}
+.hint{color:var(--muted);font-size:13px;line-height:1.55;margin:0 0 6px}
+.hint a,.note a{color:var(--glass)}
+label{display:block;font-size:12.5px;color:var(--etch);margin:14px 0 6px}
+input[type=text],input[type=password],input[type=number],select{width:100%;padding:11px 12px;border-radius:10px;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--text);font:inherit;font-size:15px}
+input:focus,select:focus,button:focus-visible,.pick:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.btn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass);color:#06222a;
+  font:inherit;font-weight:600;font-size:15px;cursor:pointer}
+.btn.quiet{background:transparent;color:var(--glass)}
+.btn.small{padding:7px 11px;font-size:13px}
+.btn.danger{border-color:var(--line2);background:transparent;color:var(--muted)}
+.btn[disabled]{opacity:.55;cursor:progress}
+.note{padding:12px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;
+  background:var(--amber-dim);border:1px solid rgba(234,165,67,.35);color:#f2cf9b}
+.note.ok{background:var(--ok-dim);border-color:rgba(92,192,136,.35);color:#a9e2c1}
+.note.bad{background:var(--danger-dim);border-color:rgba(229,86,91,.35);color:#f3a7aa}
+.note.plain{background:var(--panel2);border-color:var(--line2);color:var(--muted)}
+
+/* the three engines */
+.picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px}
+.pick{position:relative;text-align:left;padding:16px 16px 14px;border-radius:14px;border:1px solid var(--line2);
+  background:var(--panel2);color:var(--text);font:inherit;cursor:pointer;display:grid;gap:6px}
+.pick:hover{border-color:var(--etch)}
+.pick.on{border-color:var(--glass);background:var(--glass-dim);box-shadow:inset 0 0 0 1px var(--glass)}
+.pick .nm{font-size:17px;font-weight:600}
+.pick .bl{font-size:12.5px;color:var(--muted);line-height:1.5}
+.pick .ft{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:4px;font-size:12.5px}
+.tag{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12px;
+  border:1px solid var(--line2);color:var(--muted)}
+.tag.ok{color:#a9e2c1;border-color:rgba(92,192,136,.45);background:var(--ok-dim)}
+.tag.now{color:var(--glass);border-color:var(--glass)}
+
+/* key row */
+.keyrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.keyrow input{flex:1;min-width:220px}
+
+/* tiers */
+.tier{display:grid;grid-template-columns:150px 1fr;gap:6px 16px;align-items:start;padding:14px 0;
+  border-top:1px solid var(--line)}
+.tier:first-of-type{border-top:0}
+.tier .who{font-size:14px;font-weight:600}
+.tier .who small{display:block;font-weight:400;color:var(--muted);font-size:12px;line-height:1.5;margin-top:3px}
+.tier .sel{display:grid;gap:8px}
+.tier .price{font-size:12px;color:var(--muted)}
+@media (max-width:620px){.tier{grid-template-columns:1fr}}
+
+/* results */
+.results{display:grid;gap:6px;margin-top:12px}
+.res{display:flex;justify-content:space-between;gap:12px;padding:9px 12px;border-radius:10px;
+  background:var(--panel2);border:1px solid var(--line);font-size:13.5px}
+.res .st{flex:none}
+.res.good .st{color:var(--ok)} .res.bad .st{color:var(--danger)}
+.res .why{color:var(--muted);font-size:12.5px}
+
+/* money */
+.money{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.money div{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px}
+.money b{display:block;font-size:20px;font-weight:600}
+.money span{font-size:12px;color:var(--muted)}
+.meter{height:8px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);overflow:hidden;margin-top:12px}
+.meter i{display:block;height:100%;background:var(--glass)}
+.meter i.hot{background:var(--amber)} .meter i.over{background:var(--danger)}
+@media (max-width:620px){.money{grid-template-columns:1fr}}
+
+.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(12,18,22,.94);border-top:1px solid var(--line);
+  padding:12px 16px;backdrop-filter:blur(6px)}
+.bar .in{max-width:760px;margin:0 auto;display:flex;gap:12px;align-items:center;justify-content:space-between}
+.bar .msg{font-size:13.5px;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){.pick{transition:border-color .15s,background .15s}}
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <h1>How your agency thinks</h1>
+      <p class="lead">Every desk — the Managing Director, the writers, SEO, the lead finders — asks an AI
+        to think for it. Choose which company that is. You pay them directly for what the agency uses,
+        and the agency stops before it passes your daily limit.</p>
+    </div>
+    <a href="/" id="backLink">← Back to the office</a>
+  </div>
+
+  <div class="note" id="state" style="display:none"></div>
+
+  <section>
+    <h2>Choose the AI</h2>
+    <p class="hint">Each one does the same work. They differ in price and in how they write.
+      You can change your mind at any time.</p>
+    <div class="picks" id="picks"></div>
+    <p class="hint" style="margin-top:14px">Signing in with a ChatGPT, Claude or Gemini subscription is not offered:
+      each company's rules have to allow a program like this one to use it, and that is still being checked.</p>
+  </section>
+
+  <section id="keyBox" style="display:none">
+    <h2 id="keyTitle">Your API key</h2>
+    <p class="hint" id="keyHint"></p>
+    <label for="key" id="keyLabel">Paste the key here</label>
+    <div class="keyrow">
+      <input type="password" id="key" autocomplete="off" spellcheck="false" placeholder="Paste your key">
+      <button class="btn quiet" id="testBtn" onclick="testNow()">Test</button>
+    </div>
+    <p class="hint" id="keySaved" style="margin-top:8px"></p>
+    <div class="results" id="results"></div>
+  </section>
+
+  <section id="ccBox" style="display:none">
+    <h2>Claude Code on this computer</h2>
+    <p class="hint">The agency asks the Claude Code program installed here, signed in with your own Claude plan.
+      There is nothing to pay per use. Which Claude model each desk uses, and the backup account,
+      are on the <a href="/setup" style="color:var(--glass)">Setup</a> screen.</p>
+  </section>
+
+  <section id="modelBox" style="display:none">
+    <h2>Which model does which work</h2>
+    <p class="hint">The strongest model costs the most, so it is kept for the decisions that cost money if
+      they are wrong. Prices are per million tokens (roughly 750,000 words), in and out.</p>
+    <div id="tiers"></div>
+    <p class="hint" id="estimate" style="margin-top:10px"></p>
+  </section>
+
+  <section>
+    <h2>Daily spending limit</h2>
+    <p class="hint">Before each paid step — every AI call, and every paid tool — the agency checks what has been
+      spent today. If the next one would pass this limit, it is not made, and you are told. It covers both of
+      your websites.</p>
+    <label for="cap">Limit per day, in US dollars</label>
+    <input type="number" id="cap" min="0.5" max="10000" step="0.5" style="max-width:200px">
+    <div class="meter"><i id="meter" style="width:0"></i></div>
+    <div class="money">
+      <div><b class="mono" id="spentAi">$0.00</b><span>on AI today (about)</span></div>
+      <div><b class="mono" id="spentAll">$0.00</b><span>everything today (about)</span></div>
+      <div><b class="mono" id="capNow">$0.00</b><span>today's limit</span></div>
+    </div>
+    <p class="hint" id="pricesNote" style="margin-top:12px"></p>
+  </section>
+</main>
+
+<div class="bar"><div class="in">
+  <span class="msg" id="saveMsg">Nothing changed yet.</span>
+  <button class="btn" id="saveBtn" onclick="save()">Save</button>
+</div></div>
+
+<script>
+const $ = (q) => document.querySelector(q);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = (n, dp) => '$' + Number(n || 0).toFixed(dp == null ? 2 : dp);
+const FIRST = new URLSearchParams(location.search).has('first');
+let S = null, PICK = '', CHOSEN = {};
+
+async function get(url) {
+  try { const r = await fetch(url); const j = await r.json(); return lockCheck(j); } catch (e) { return {}; }
+}
+async function post(url, body) {
+  try {
+    const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify(body || {})});
+    return lockCheck(await r.json());
+  } catch (e) { return {ok: false, error: 'The office did not answer — is it still running?'}; }
+}
+function lockCheck(j) {
+  // The lock's ten minutes ran out: opening the page again asks for the password.
+  if (j && j.needsSetupUnlock) { location.reload(); }
+  return j || {};
+}
+function opt(id) { return (S.options || []).find((o) => o.id === id) || null; }
+
+function renderState() {
+  const n = $('#state');
+  n.style.display = '';
+  if (!S.chosen) {
+    n.className = 'note';
+    n.innerHTML = FIRST ? '<b>One last step.</b> Choose how your agency thinks, paste your key, and press Save. '
+      + 'Nothing is spent until you start a day\'s work.'
+      : 'No AI is chosen yet, so no desk can think. Choose one below.';
+  } else if (S.ready) {
+    n.className = 'note ok';
+    n.innerHTML = `Your agency thinks with <b>${esc(S.name)}</b>, and it is ready.`
+      + (FIRST ? ' <a href="/">Go to your office →</a>' : '');
+  } else {
+    n.className = 'note bad';
+    n.innerHTML = `Your agency is set to think with <b>${esc(S.name)}</b>, but it is not ready: ${esc(S.why)}`;
+  }
+}
+
+function renderPicks() {
+  $('#picks').innerHTML = (S.options || []).map((o) => {
+    const est = o.estimate ? `about ${money(o.estimate.usd)} a day` : 'your Claude plan';
+    const tag = S.engine === o.id ? '<span class="tag now">in use</span>'
+      : (o.key_saved && o.id !== 'claude_code' ? '<span class="tag ok">key saved</span>' : '');
+    return `<button type="button" class="pick ${PICK === o.id ? 'on' : ''}" aria-pressed="${PICK === o.id}"
+      onclick="choose('${o.id}')"><span class="nm">${esc(o.name)}</span>
+      <span class="bl">${esc(o.blurb)}</span>
+      <span class="ft"><span class="mono">${esc(est)}</span>${tag}</span></button>`;
+  }).join('');
+}
+
+function renderKey() {
+  const o = opt(PICK);
+  const api = o && o.id !== 'claude_code';
+  $('#keyBox').style.display = api ? '' : 'none';
+  $('#ccBox').style.display = o && o.id === 'claude_code' ? '' : 'none';
+  $('#modelBox').style.display = api ? '' : 'none';
+  if (!api) return;
+  $('#keyTitle').textContent = `Your ${o.company} API key`;
+  $('#keyHint').innerHTML = `Make one at <a href="${esc(o.key_page)}" target="_blank" rel="noopener">${esc(o.key_page.replace('https://', ''))}</a>, `
+    + `add a little credit to that account, then paste the key here. It is kept encrypted in your account on this computer, `
+    + `and never shown again — not even here.`;
+  $('#key').value = '';
+  $('#key').placeholder = o.key_saved ? 'Paste a new key to replace the saved one' : 'Paste your key';
+  $('#keySaved').innerHTML = o.key_saved
+    ? `A key is saved (ending <span class="mono">${esc(o.key_hint)}</span>). `
+      + `<button class="btn danger small" onclick="forgetKey()">Forget it</button>`
+    : 'No key saved yet.';
+  $('#results').innerHTML = '';
+}
+
+function renderTiers() {
+  const o = opt(PICK);
+  if (!o || o.id === 'claude_code') return;
+  const chosen = CHOSEN[o.id] || (CHOSEN[o.id] = {...o.tiers});
+  $('#tiers').innerHTML = (S.tiers || []).map((t) => {
+    const cur = chosen[t.id] || '';
+    const known = o.models.some((m) => m.id === cur);
+    const opts = o.models.map((m) => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>`
+      + `${esc(m.label)}${m.in != null ? ` — ${money(m.in)} in / ${money(m.out)} out` : ''}`
+      + `${o.defaults[t.id] === m.id ? ' (suggested)' : ''}</option>`).join('')
+      + `<option value="__other" ${known ? '' : 'selected'}>Another model, by its name…</option>`;
+    return `<div class="tier"><div class="who">${esc(t.label)}<small>${esc(t.sectors.join(', '))} — ${esc(t.why)}</small></div>
+      <div class="sel"><select onchange="tierPick('${t.id}', this.value)" aria-label="${esc(t.label)} model">${opts}</select>
+      <input type="text" id="other_${t.id}" value="${known ? '' : esc(cur)}" placeholder="e.g. ${esc(o.defaults[t.id])}"
+        style="${known ? 'display:none' : ''}" oninput="CHOSEN['${o.id}']['${t.id}'] = this.value.trim()">
+      </div></div>`;
+  }).join('');
+  const est = o.estimate || {};
+  $('#estimate').innerHTML = `About <b class="mono">${money(est.usd)}</b> a day at the saved models, worked out from `
+    + (est.basis === 'your last days' ? 'what your agency actually used over the last few days.'
+       : 'a typical day — a rough guess until the agency has run a few days.');
+}
+
+function tierPick(tier, value) {
+  const o = opt(PICK);
+  const box = document.getElementById('other_' + tier);
+  if (value === '__other') { box.style.display = ''; box.focus(); CHOSEN[o.id][tier] = box.value.trim(); }
+  else { box.style.display = 'none'; CHOSEN[o.id][tier] = value; }
+}
+
+function renderMoney() {
+  const cap = Number(S.cap || 0), all = Number(S.spent_all || 0);
+  $('#cap').value = cap ? String(cap) : '';
+  $('#spentAi').textContent = money(S.spent_ai);
+  $('#spentAll').textContent = money(all);
+  $('#capNow').textContent = money(cap);
+  const pct = cap ? Math.min(100, (all / cap) * 100) : 0;
+  const m = $('#meter');
+  m.style.width = pct + '%';
+  m.className = pct >= 100 ? 'over' : pct >= 75 ? 'hot' : '';
+  $('#pricesNote').textContent = `Costs here are estimates from each company's published prices (checked ${S.prices_checked}). `
+    + `The bill on your AI account is the real figure.`;
+}
+
+function choose(id) { PICK = id; renderPicks(); renderKey(); renderTiers(); }
+
+function render() { renderState(); renderPicks(); renderKey(); renderTiers(); renderMoney(); }
+
+function body() {
+  const b = {engine: PICK};
+  const k = $('#key').value.trim();
+  if (k && PICK !== 'claude_code') b.key = k;
+  if (PICK && CHOSEN[PICK]) b.models = CHOSEN[PICK];
+  const cap = $('#cap').value.trim();
+  if (cap) b.cap = cap;
+  return b;
+}
+
+async function save(quiet) {
+  if (!PICK) { $('#saveMsg').textContent = 'Choose an AI first.'; return false; }
+  const o = opt(PICK);
+  if (o && o.id !== 'claude_code' && !o.key_saved && !$('#key').value.trim()) {
+    $('#saveMsg').textContent = `Paste your ${o.company} key first.`; $('#key').focus(); return false;
+  }
+  $('#saveBtn').disabled = true; $('#saveMsg').textContent = 'Saving…';
+  const j = await post('/api/engine', body());
+  $('#saveBtn').disabled = false;
+  if (!j.ok) { $('#saveMsg').textContent = j.error || 'Could not save.'; return false; }
+  S = j.status || await get('/api/engine'); CHOSEN = {};
+  render();
+  if (!quiet) $('#saveMsg').textContent = S.ready ? 'Saved. Press Test to prove the key works.' : 'Saved.';
+  return true;
+}
+
+async function testNow() {
+  if (!(await save(true))) return;
+  $('#testBtn').disabled = true;
+  $('#saveMsg').textContent = 'Asking each model to say OK — this takes up to a minute…';
+  $('#results').innerHTML = '';
+  const j = await post('/api/engine/test', {});
+  $('#testBtn').disabled = false;
+  if (j.status) { S = j.status; renderState(); renderPicks(); renderMoney(); }
+  const rows = j.results || [];
+  $('#results').innerHTML = rows.map((r) => `<div class="res ${r.ok ? 'good' : 'bad'}">
+      <span><b>${esc(r.label || r.model)}</b><br><span class="why">${r.ok
+        ? `answered in ${esc(r.seconds)}s — that cost about ${money(r.usd, 4)}`
+        : esc(r.why || 'no answer')}</span></span>
+      <span class="st">${r.ok ? '✓ working' : '✗ not working'}</span></div>`).join('')
+    || `<div class="note bad">${esc(j.error || 'Nothing was tested.')}</div>`;
+  $('#saveMsg').textContent = j.ok ? `Working — about ${money((opt(PICK) || {}).estimate?.usd)} a day at these models.`
+    : 'Not every model answered — see why above.';
+}
+
+async function forgetKey() {
+  if (!confirm('Forget the saved key? The agency cannot think with this AI until you paste a new one.')) return;
+  const j = await post('/api/engine', {engine: PICK, forget_key: true});
+  if (!j.ok) { $('#saveMsg').textContent = j.error || 'Could not forget it.'; return; }
+  S = j.status; render(); $('#saveMsg').textContent = 'The key is forgotten.';
+}
+
+(async function boot() {
+  S = await get('/api/engine');
+  if (!S || !S.options) { $('#saveMsg').textContent = (S && S.error) || 'Could not read the engine settings.'; return; }
+  PICK = S.engine || '';
+  render();
+})();
+</script>
+</body>
+</html>

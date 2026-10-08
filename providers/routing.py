@@ -33,9 +33,19 @@ def resolve_task(task: str) -> dict:
         return {"ok": False, "task": s, "candidates": [],
                 "error": (f"'{task}' is not a sector the Claude team has. "
                           f"It has: {', '.join(claude_team.SECTORS)}")}
-    ready, why = local_cli.available()
+    from . import engines
+    ready, why = engines.available()
     if not ready:
         return {"ok": False, "task": s, "error": why, "candidates": []}
+    eng = engines.engine()
+    if eng != engines.CLAUDE_CODE:
+        first = engines.model_for(s, eng)
+        return {"ok": True, "task": s,
+                "route": {"primary": first, "enabled": True, "timeout": engines.BUDGET},
+                "candidates": [
+                    {"credential_id": f"{eng}:key", "credential_name": f"{engines.NAME[eng]} API key",
+                     "model_id": m, "api_model_id": m, "cost_tier": "per use"}
+                    for m in [first] + engines._below(eng, first)]}
     labels = {a["id"]: a["label"] for a in claude_team.accounts()}
     return {
         "ok": True, "task": s,

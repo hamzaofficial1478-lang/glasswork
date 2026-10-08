@@ -163,10 +163,12 @@ def _brains(task):
     back and why — have nothing left to count. Cheap: no call is made here.
     """
     try:
-        from providers import claude_team, local_cli
+        from providers import claude_team, engines, local_cli
     except Exception as e:
         return {"ok": False, "error": str(e)}
     try:
+        if engines.engine() != engines.CLAUDE_CODE:
+            return engines.brain(claude_team.normalise(task))
         ready, why = local_cli.available()
         model = claude_team.model_for(task)
         return {"ok": ready, "error": "" if ready else why,

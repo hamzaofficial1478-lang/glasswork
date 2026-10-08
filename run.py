@@ -426,7 +426,7 @@ def tests():
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",
-            "providers.tests", "providers.team_tests",
+            "providers.tests", "providers.team_tests", "providers.engine_tests",
             "providers.local_tests",
             "pipelines.md_tests", "pipelines.competitor_tests",
             "pipelines.content_tests",

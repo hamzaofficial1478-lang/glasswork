@@ -1066,14 +1066,35 @@ function renderConns(){
    then belongs to that website — plus managing them and signing out.
    Before any account exists it is the one website, as it always was, with a
    way in to making one. */
-let ACCOUNT = null;
+let ACCOUNT = null, ENGINE = null;
 async function loadAccount(){
   try{
     const r = await fetch('/api/account/me'); if(!r.ok) return;
-    ACCOUNT = await r.json(); renderSiteMenu();
+    ACCOUNT = await r.json();
+    await loadEngine();
+    renderSiteMenu();
     const open = ACCOUNT && ACCOUNT.signedIn && (ACCOUNT.sites||[]).find(x=>x.id===ACCOUNT.open);
     if(open){ $('#curSite').textContent = shortSite(open.name||open.url); $('#curFav').textContent = siteFav(open.url||open.name); }
   }catch(e){}
+}
+/* WHICH AI THINKS, AND TODAY'S SPEND (providers/engines.py). A new account has
+   not chosen one yet, and until it does no desk can think — so the first
+   visit to the office goes to the Engine page instead. */
+async function loadEngine(){
+  try{
+    const r = await fetch('/api/engine-state'); if(!r.ok) return;
+    ENGINE = await r.json();
+    if(ENGINE && ENGINE.ok && !ENGINE.chosen && ACCOUNT && ACCOUNT.signedIn && ACCOUNT.open){
+      location.href = '/engine?first=1';
+    }
+  }catch(e){}
+}
+function engineLine(){
+  if(!ENGINE || !ENGINE.ok) return '';
+  const what = ENGINE.chosen ? ENGINE.name : 'not chosen yet';
+  const spend = ENGINE.api ? ` · about $${Number(ENGINE.spent_all||0).toFixed(2)} of $${Number(ENGINE.cap||0).toFixed(2)} today` : '';
+  return `<a class="site-add" href="/engine" style="display:block;text-decoration:none;border-style:solid">`
+    + `AI engine — ${esc(what)}${esc(spend)}${ENGINE.ready ? '' : ' (not ready)'} →</a>`;
 }
 function siteFav(s){ const t=String(s||'').replace(/^https?:\/\//,'').replace(/^www\./,''); return (t.slice(0,2)||'··').toUpperCase(); }
 async function openAccountSite(id){
@@ -1096,6 +1117,7 @@ function renderSiteMenu(){
         + `<span class="fav">${esc(siteFav(s.url||s.name))}</span><div style="flex:1;min-width:0"><b>${esc(s.name)}</b>`
         + `<small>${esc(s.id===ACCOUNT.open?'open now':(s.url||'switch to this website'))}</small></div></div>`).join('')
       + `<a class="site-add" href="/business" style="display:block;text-decoration:none;border-style:solid">Your business — what you sell, where →</a>`
+      + engineLine()
       + `<a class="site-add" href="/account" style="display:block;text-decoration:none">`
       + (sites.length < (ACCOUNT.maxSites||2) ? 'Add a website · manage →' : 'Manage websites and account →') + `</a>`
       + `<div class="site-add" style="border-style:solid;color:var(--muted)" onclick="signOutHere()">Sign out · ${esc(ACCOUNT.signedIn.name)}</div>`;

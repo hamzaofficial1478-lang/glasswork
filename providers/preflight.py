@@ -29,7 +29,7 @@ pass, because that is the truth.
 import sys
 import time
 
-from . import claude_team, client, integrations, store
+from . import claude_team, client, engines, integrations, store
 
 COVERED, SINGLE, DOWN, EMPTY = "COVERED", "SINGLE", "DOWN", "EMPTY"
 # Five, not four. Under --quick nothing is called, so every link comes back
@@ -62,6 +62,7 @@ def sweep_team(quick=False) -> dict:
     however many sectors use it.
     """
     st = claude_team.status()
+    api = st.get("engine") in engines.API_ENGINES
     tested = {}
     if st["ready"] and not quick:
         for acc in st["accounts"]:
@@ -70,7 +71,9 @@ def sweep_team(quick=False) -> dict:
                     tested[(acc["id"], row["model"])] = row
     brains = []
     for (aid, m), r in sorted(tested.items(), key=lambda kv: (kv[0][0], claude_team.rank(kv[0][1]))):
-        brains.append({"credential": f"{aid} Claude account", "model": claude_team.LABEL.get(m, m),
+        brains.append({"credential": (f"{engines.NAME[aid]} API key" if api
+                                      else f"{aid} Claude account"),
+                       "model": engines.label(m) if api else claude_team.LABEL.get(m, m),
                        "ok": r["ok"], "ms": int((r.get("seconds") or 0) * 1000),
                        "cause": r.get("why") or ""})
     routing = []
@@ -87,7 +90,8 @@ def sweep_team(quick=False) -> dict:
             cause = ("" if ok else
                      "skipped (--quick): unverified" if quick else
                      acc.get("why") if not acc.get("ok") else (r or {}).get("why", ""))
-            chain.append({"role": acc["id"], "name": claude_team.LABEL.get(model, model),
+            chain.append({"role": acc["id"],
+                          "name": engines.label(model) if api else claude_team.LABEL.get(model, model),
                           "ok": ok, "ms": int(((r or {}).get("seconds") or 0) * 1000),
                           "cause": cause})
         routing.append({"task": row["sector"], "label": row["label"],
@@ -134,7 +138,26 @@ def sweep(quick=False, notify=False) -> dict:
 
     blocking, warn = [], []
     signed = [a for a in st["accounts"] if a.get("ok")]
-    if not st["ready"]:
+    if st.get("engine", engines.CLAUDE_CODE) in engines.API_ENGINES:
+        # Claude, OpenAI or Gemini by API key: one key, no backup account, and a
+        # model that fails steps down to the next tier by itself.
+        if not st["ready"]:
+            blocking.append("the AI engine is not ready, so no sector can think: "
+                            + (st["why"] or "").splitlines()[0])
+        else:
+            for r in team["routing"]:
+                main = r["chain"][0] if r["chain"] else {}
+                if main.get("ok") is False:
+                    warn.append(f"{r['label']}: {engines.label(r['model'])} did not answer "
+                                f"({main.get('cause') or 'no reason given'}) — it will step "
+                                "down to a lighter model")
+            if quick:
+                warn.append("nothing was actually called, so no model is proven — "
+                            "only that a key is saved")
+            cap_why = engines.cap_block()
+            if cap_why:
+                blocking.append(cap_why)
+    elif not st["ready"]:
         blocking.append("Claude Code is not ready on this machine, so no sector can "
                         "think: " + st["why"].splitlines()[0])
     elif not signed:

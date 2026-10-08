@@ -126,6 +126,12 @@ def spent_today() -> float:
 
     Nothing is counted twice: crawler spend goes to the meter and is never also
     passed to release(usd_cost=). If you add a paid capability, pick one door.
+
+    AND THE AI, WHEN IT IS PAID BY API KEY. An account that thinks with Claude,
+    OpenAI or Gemini by its own key pays per call, so those calls count too —
+    on both of the account's websites, because the cap is the person's, not one
+    website's (providers/engines.py). Claude Code on his own plan is not money
+    spent and is not counted.
     """
     lt = time.localtime()
     day0 = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
@@ -149,6 +155,11 @@ def spent_today() -> float:
             total += usage.spent_today()
         except Exception:
             pass
+    try:
+        from providers import engines
+        total += engines.ai_spent_today()
+    except Exception:
+        pass
     return round(total, 4)
 
 

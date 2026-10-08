@@ -284,7 +284,7 @@ def _conn():
               " sector TEXT, agent TEXT, account TEXT, model_asked TEXT,"
               " model_ran TEXT, ok INTEGER, seconds REAL, input INTEGER,"
               " output INTEGER, cache_read INTEGER, cache_write INTEGER,"
-              " api_usd REAL, why TEXT)")
+              " api_usd REAL, why TEXT, engine TEXT)")
     return c
 
 
@@ -524,7 +524,15 @@ def call(sector, messages, max_tokens=512, timeout=0, *, model=None,
          stepped_down, failovers, skipped}
     — the shape routing.call_task has always returned, so nothing that asked a
     sector for an answer needs to know the brain changed.
+
+    When the account thinks with Claude, OpenAI or Gemini by API key instead of
+    Claude Code (providers/engines.py), the call is handed over there and comes
+    back in this same shape.
     """
+    from . import engines
+    if engines.engine() != engines.CLAUDE_CODE:
+        return engines.call(sector, messages, max_tokens, timeout, model=model,
+                            demanding=demanding, agent=agent)
     s = normalise(sector)
     asked = clamp(model) or model_for(s)
     ready, why = local_cli.available()
@@ -607,6 +615,9 @@ def _why_nobody(sector, asked, failovers, skipped) -> str:
 
 def second_model(sector) -> str:
     """The Critic's model — or one rung below the sector's own, if they match."""
+    from . import engines
+    if engines.engine() != engines.CLAUDE_CODE:
+        return engines.second_model(sector)
     own = model_for(sector)
     other = model_for(SECOND_OPINION)
     if other != own:
@@ -683,6 +694,9 @@ def signed_in(account) -> dict:
 
 def test(models=None, account="main") -> list:
     """One tiny real call per model — the only proof a model answers today."""
+    from . import engines
+    if engines.engine() != engines.CLAUDE_CODE:
+        return engines.test(only=(models or [None])[0])
     acc = _account(account)
     if not acc:
         return [{"account": account, "ok": False,
@@ -708,10 +722,14 @@ def test(models=None, account="main") -> list:
 
 
 def status() -> dict:
+    from . import engines
+    if engines.engine() != engines.CLAUDE_CODE:
+        return engines.team_status()
     ready, why = local_cli.available()
     t = team()
     return {
         "ready": ready, "why": why,
+        "engine": engines.CLAUDE_CODE, "engine_name": engines.NAME[engines.CLAUDE_CODE],
         # Which Claude Code answers, so "which one is it using?" has an answer
         # on the screen rather than a guess.
         "cli": local_cli.cli_path() if ready else "",

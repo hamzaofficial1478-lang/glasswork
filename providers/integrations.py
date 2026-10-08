@@ -201,6 +201,30 @@ def write_env(values: dict, path=None) -> dict:
     return {"ok": True, "saved": sorted(saved), "path": ", ".join(where)}
 
 
+def forget_env(keys, path=None) -> dict:
+    """Remove settings (an API key the person no longer wants kept), every other line untouched."""
+    from coordination import workspace
+    keys = {k for k in (keys or []) if re.fullmatch(r"[A-Z0-9_]+", str(k))}
+    if not keys:
+        return {"ok": False, "error": "nothing to forget"}
+    files = _files(path)
+    if len(files) > 1:
+        files = [workspace.env_path_for(k) for k in keys]
+    for p in dict.fromkeys(Path(f) for f in files):
+        try:
+            lines = (workspace.read_secret(p, "") or "").splitlines()
+        except Exception as e:
+            return {"ok": False, "error": f"could not read {p}: {e}"}
+        kept = [ln for ln in lines
+                if not ((m := re.match(r"^([A-Z0-9_]+)=", ln.strip())) and m.group(1) in keys)]
+        if kept != lines:
+            try:
+                workspace.write_secret(p, "\n".join(kept).rstrip("\n") + "\n")
+            except Exception as e:
+                return {"ok": False, "error": f"could not write {p}: {e}"}
+    return {"ok": True, "forgot": sorted(keys)}
+
+
 def _write_one(p, values) -> dict:
     """One settings file, with every other line exactly as it was."""
     from coordination import workspace

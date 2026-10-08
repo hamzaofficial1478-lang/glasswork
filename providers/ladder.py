@@ -66,9 +66,10 @@ def spread(sector, jobs, max_tokens=512, timeout=0, agent="", workers=None) -> d
 
 def who_could_answer(sector) -> dict:
     """Could this sector think at all right now? Read-only; spends nothing."""
-    claude_team, local_cli = _team()
+    claude_team, _ = _team()
+    from . import engines
     s = claude_team.normalise(sector)
-    ready, why = local_cli.available()
+    ready, why = engines.available()
     known = s in claude_team.DEFAULT_TEAM
     ok = ready and known
     why = "" if ok else (why or f"'{sector}' is not on the Claude team")

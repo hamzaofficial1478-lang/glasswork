@@ -337,7 +337,12 @@ const SETUP_TTL_MS = 10 * 60 * 1000;  // long enough to finish, short enough to 
 const SETUP_API = [
   "/api/settings", "/api/website", "/api/optional", "/api/integration",
   "/api/providers", "/api/team", "/api/preflight", "/api/shelves",
+  // The Engine page: the AI keys and the spending cap. /api/engine-state (no
+  // keys, just which engine and today's spend) is a different path, not gated.
+  "/api/engine",
 ];
+// The pages behind the same lock. Unlocking returns you to the one you asked for.
+const SETUP_PAGES = new Set(["/setup", "/setup.html", "/engine", "/engine.html"]);
 
 function setupToken(req) {
   const raw = req.headers.cookie || "";
@@ -348,6 +353,15 @@ function setupToken(req) {
   return "";
 }
 
+// A fresh ticket, as a cookie. Also handed out at sign-up: the person typed
+// their new password a moment ago, and the next screen asks them to choose
+// their AI engine — asking for the password again there helps nobody.
+function setupCookie() {
+  const tok = crypto.randomBytes(32).toString("hex");
+  SETUP_TICKETS.set(tok, { expires: Date.now() + SETUP_TTL_MS, navUsed: false });
+  return `${SETUP_COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SETUP_TTL_MS / 1000}`;
+}
+
 function setupTicket(req) {
   const t = SETUP_TICKETS.get(setupToken(req));
   if (!t) return null;
@@ -355,9 +369,11 @@ function setupTicket(req) {
   return t;
 }
 
-function unlockPage(err) {
+function unlockPage(err, next) {
+  const engine = String(next || "").startsWith("/engine");
+  const back = engine ? "/engine" : "/setup";
   return `<!doctype html><meta charset="utf-8">
-<title>Setup — password required</title>
+<title>${engine ? "AI engine" : "Setup"} — password required</title>
 <style>
  body{margin:0;height:100vh;display:grid;place-items:center;background:#0c1216;
    color:#e7eff3;font-family:system-ui,sans-serif}
@@ -371,9 +387,10 @@ function unlockPage(err) {
  .err{color:#e5565b;font-size:12.5px;margin-top:10px;min-height:16px}
 </style>
 <form method="POST" action="/api/setup/unlock">
-  <h1>&#128274; Setup</h1>
-  <p>This screen holds every API key in the agency, your model routing and your
+  <h1>&#128274; ${engine ? "AI engine" : "Setup"}</h1>
+  <p>This screen holds ${engine ? "your AI keys" : "every API key in the agency, your model routing"} and your
      spend cap. Being signed in is not enough &mdash; it asks each time you open it.</p>
+  <input type="hidden" name="next" value="${back}">
   <input type="password" name="password" placeholder="Your password" autofocus required>
   <button>Open Setup</button>
   ${err ? `<div class="err">${err}</div>` : ""}
@@ -383,8 +400,7 @@ function unlockPage(err) {
 
 app.use((req, res, next) => {
   if (!adminHash() && !accountsExist()) return next();   // no password: nothing to ask
-  const isPage = req.method === "GET" &&
-    (req.path === "/setup" || req.path === "/setup.html");
+  const isPage = req.method === "GET" && SETUP_PAGES.has(req.path);
   const isApi = SETUP_API.some((p) => req.path === p || req.path.startsWith(p + "/"));
   if (!isPage && !isApi) return next();
   if (req.path === "/api/setup/unlock") return next();
@@ -399,7 +415,7 @@ app.use((req, res, next) => {
     // ticket quietly kept /api/settings open for the rest of its ten minutes,
     // which is the lock on the door and the window left open again.
     SETUP_TICKETS.delete(setupToken(req));
-    return res.type("html").send(unlockPage(""));
+    return res.type("html").send(unlockPage("", req.path));
   }
   if (t) return next();
   return res.status(401).json({ ok: false, needsSetupUnlock: true,
@@ -411,14 +427,12 @@ app.post("/api/setup/unlock", express.urlencoded({ extended: false }), async (re
   const ok = accountsExist()
     ? !!(SIGNED_IN && (await pyAccounts("check", { account: SIGNED_IN.account, password: supplied })).ok)
     : passwordOk(supplied);
+  const next = (req.body && req.body.next) === "/engine" ? "/engine" : "/setup";
   if (!ok) {
-    return res.status(401).type("html").send(unlockPage("That is not the password."));
+    return res.status(401).type("html").send(unlockPage("That is not the password.", next));
   }
-  const tok = crypto.randomBytes(32).toString("hex");
-  SETUP_TICKETS.set(tok, { expires: Date.now() + SETUP_TTL_MS, navUsed: false });
-  res.setHeader("Set-Cookie",
-    `${SETUP_COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SETUP_TTL_MS / 1000}`);
-  res.redirect("/setup");
+  res.setHeader("Set-Cookie", setupCookie());
+  res.redirect(next);
 });
 
 // Past the gate, and only past it.
@@ -431,6 +445,7 @@ app.get("/status", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "statu
 app.get("/review", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
 app.get("/account", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "account.html")));
 app.get("/business", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "business.html")));
+app.get("/engine", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "engine.html")));
 
 /* ---- YOUR BUSINESS (coordination/profile.py) ------------------------------
    What this website's business is, sells, who buys it and where. Read and
@@ -456,6 +471,19 @@ app.post("/api/business/draft", async (req, res) => {
   const url = String((req.body || {}).url || "").trim();
   res.json(await pyModule("pipelines.business_draft", url ? ["--url", url] : [], 300000));
 });
+
+/* ---- THE AI ENGINE (providers/engines.py) ---------------------------------
+   Which company does the thinking — Claude, OpenAI or Gemini by the person's
+   own API key, or Claude Code on his own copy — its models, the daily cap and
+   today's spend. A key goes to Python on stdin and is never sent back: the
+   page only ever learns whether one is saved, and its last four characters. */
+app.get("/api/engine", async (_q, res) => res.json(await pyProvider("engine", {}, 60000)));
+app.post("/api/engine", async (req, res) =>
+  res.json(await pyProvider("engine_save", req.body || {}, 60000)));
+app.post("/api/engine/test", async (req, res) =>
+  res.json(await pyProvider("engine_test", req.body || {}, 600000)));
+// Cheap and key-free, for the office's top bar and the first-run check.
+app.get("/api/engine-state", async (_q, res) => res.json(await pyProvider("engine_brief", {}, 30000)));
 
 /* ---- ACCOUNTS AND WEBSITES (coordination/accounts.py) ---------------------
    Passwords and recovery keys go to Python on stdin, never on a command line,
@@ -504,6 +532,7 @@ app.post("/api/account/sign-up", async (req, res) => {
   const r = await pyAccounts("sign-up", { name: b.name, password: b.password, confirm: b.confirm });
   if (!r.ok) return res.status(400).json(r);
   startSession(res, r.account.id, r.account.name, r.key);
+  res.setHeader("Set-Cookie", [res.getHeader("Set-Cookie"), setupCookie()].flat());
   // The recovery key is shown ONCE, here, and kept nowhere.
   res.json(strip(r));
 });
@@ -614,7 +643,7 @@ const API_CAPABILITIES = [
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
-  "account", "business",
+  "account", "business", "engine",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {
@@ -682,9 +711,10 @@ const ACCOUNT_KEYS = new Set([
   "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
   "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
   "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
+  "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
   "PORT",
 ]);
-const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json"]);
+const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json", "engine.local.json"]);
 const MACHINE_CONFIG = new Set(["claude_code.local.json"]);
 const LEGACY_ENV = path.join(__dirname, ".env");
 
@@ -1960,10 +1990,12 @@ app.get("/api/status", async (_q, res) => {
   // which Claude model each sector thinks with, and whether Claude is ready
   const team = await pyProvider("team", {});
   const signedIn = !!(team && team.ready && (team.accounts || []).some((a) => a.ok));
+  const apiEngine = !!(team && team.engine && team.engine !== "claude_code");
   const brains = ((team && team.team) || []).map((t) => ({
     key: t.sector, label: t.label, ok: signedIn,
-    detail: signedIn ? `${t.model_label} on Claude`
-      : ((team && team.why) || "Claude is not signed in on this machine — run  claude  once and sign in"),
+    detail: signedIn ? `${t.model_label} on ${apiEngine ? team.engine_name : "Claude"}`
+      : ((team && team.why) || (apiEngine ? "The AI engine is not ready — open the Engine page"
+        : "Claude is not signed in on this machine — run  claude  once and sign in")),
   }));
   const brainsReady = brains.filter((b) => b.ok).length;
   const brainsTotal = brains.length;

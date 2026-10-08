@@ -59,13 +59,15 @@ ACCOUNT_KEYS = frozenset({
     "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
     "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
     "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
     "PORT",
 })
 
 # Files kept on the account (the person's keys and AI team) and on the
 # computer (where Claude Code is installed — nobody's in particular). Every
 # other config file is about one website.
-ACCOUNT_CONFIG = frozenset({"providers.local.json", "claude_team.local.json"})
+ACCOUNT_CONFIG = frozenset({"providers.local.json", "claude_team.local.json",
+                            "engine.local.json"})
 MACHINE_CONFIG = frozenset({"claude_code.local.json"})
 
 

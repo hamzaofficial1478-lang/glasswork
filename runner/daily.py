@@ -26,6 +26,11 @@ PROMPT = (
 
 
 def main():
+    from providers import engines
+    if engines.engine() != engines.CLAUDE_CODE:
+        sys.exit("This morning runner drives Claude Code itself, and this account "
+                 f"thinks with {engines.NAME.get(engines.engine(), 'no engine yet')}. "
+                 "Start the day from the office instead (Run today).")
     ready, why = local_cli.available()
     if not ready:
         sys.exit("Claude Code is not ready on this machine, so the MD cannot "

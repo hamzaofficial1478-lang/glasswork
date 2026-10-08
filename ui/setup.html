@@ -487,8 +487,18 @@ function teamStateLine(t){
   return accs.join(' · ')+struggling+cli;
 }
 function renderTeam(){
-  $('#teamState').innerHTML=teamStateLine(TEAM);
   const host=$('#teamList');
+  // Claude, OpenAI or Gemini by API key: the models and the key live on the
+  // Engine page, and this section's Claude Code controls do not apply.
+  if(TEAM && TEAM.ok && TEAM.engine && TEAM.engine!=='claude_code'){
+    $('#teamState').innerHTML=(TEAM.ready?'<span style="color:var(--ok)">✓ ':'<span style="color:var(--danger)">✕ ')
+      +'This account thinks with '+esc(TEAM.engine_name||'an API key')+(TEAM.ready?'':' — '+esc(TEAM.why||'not ready'))+'</span>'
+      +' · <a href="/engine" style="color:var(--glass)">change it on the Engine page →</a>';
+    host.innerHTML=(TEAM.team||[]).map(r=>'<div class="hint" style="margin:4px 0">'+esc(r.label)+' — '+esc(r.model_label||r.model)+'</div>').join('');
+    ['#teamForget'].forEach(q=>{ const b=$(q); if(b) b.style.display='none'; });
+    return;
+  }
+  $('#teamState').innerHTML=teamStateLine(TEAM);
   if(!TEAM || !TEAM.ok){ host.innerHTML=''; return; }
   const today=(TEAM.usage_today&&TEAM.usage_today.sectors)||{};
   host.innerHTML=(TEAM.team||[]).map(r=>{
