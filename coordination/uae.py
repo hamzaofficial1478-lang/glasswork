@@ -1,6 +1,14 @@
 """
 uae.py — where this business actually works. One list, read by everyone.
 
+THE NAME IS HISTORY NOW. This file was the UAE and only the UAE; since going
+public it is wherever the open website's business profile says
+(coordination/profile.py). The UAE lists below are the STARTER — what the
+owner's own website uses — and a website in Manchester gets its own country,
+regions and districts through the same functions. The names (EMIRATES,
+is_uae, emirate_in) stay so that nothing calling them had to change: read
+"emirate" as "region" (a county, a state) and is_uae as "is in the country".
+
 "there you mentioned only 3 cities of UAE while we are covering the whole UAE
  and you can collect the leads from any where in the UAE"
 
@@ -44,7 +52,7 @@ Three different jobs, so three lists rather than one:
 import os
 import re
 
-EMIRATES = (
+_UAE_EMIRATES = (
     "Dubai",
     "Abu Dhabi",
     "Sharjah",
@@ -56,7 +64,7 @@ EMIRATES = (
 
 # Towns people search for by name rather than by emirate. Kept short and real:
 # every one of these is somewhere a glazier gets called out to.
-CITIES = (
+_UAE_CITIES = (
     "Al Ain",           # Abu Dhabi emirate, and nobody there searches "Abu Dhabi"
     "Ruwais",
     "Madinat Zayed",
@@ -69,7 +77,7 @@ CITIES = (
 
 # Where a MAP search finds businesses. Searching an emirate returns the same
 # forty well-known names; searching a district returns the street.
-DISTRICTS = (
+_UAE_DISTRICTS = (
     # Dubai
     "Business Bay", "Al Quoz", "Al Barsha", "Jumeirah Village Circle",
     "Dubai Marina", "Downtown Dubai", "Deira", "Jumeirah Lake Towers",
@@ -86,6 +94,50 @@ DISTRICTS = (
     "Al Jazeera Al Hamra", "RAK Industrial Zone",
     "Fujairah Free Zone",
 )
+
+
+# Which emirate each district and town belongs to. Only needed for the ones
+# whose name does not contain their emirate.
+_UAE_PARENT = {
+    "Business Bay": "Dubai", "Al Quoz": "Dubai", "Al Barsha": "Dubai",
+    "Jumeirah Village Circle": "Dubai", "Dubai Marina": "Dubai",
+    "Downtown Dubai": "Dubai", "Deira": "Dubai",
+    "Jumeirah Lake Towers": "Dubai", "Dubai Investment Park": "Dubai",
+    "Dubai Silicon Oasis": "Dubai", "Al Qusais": "Dubai", "Mirdif": "Dubai",
+    "Dubai South": "Dubai", "Al Ras": "Dubai", "Bur Dubai": "Dubai",
+    "Ras Al Khor": "Dubai", "Umm Ramool": "Dubai", "Jebel Ali": "Dubai",
+    "Hatta": "Dubai",
+    "Mussafah": "Abu Dhabi", "Khalifa City": "Abu Dhabi",
+    "Al Reem Island": "Abu Dhabi", "Yas Island": "Abu Dhabi",
+    "Mohammed Bin Zayed City": "Abu Dhabi", "Al Mafraq": "Abu Dhabi",
+    "Al Ain": "Abu Dhabi", "Ruwais": "Abu Dhabi", "Madinat Zayed": "Abu Dhabi",
+    "Al Qasimia": "Sharjah", "Industrial Area Sharjah": "Sharjah",
+    "Muwaileh": "Sharjah", "Al Nahda Sharjah": "Sharjah",
+    "Sharjah Airport Free Zone": "Sharjah", "Khor Fakkan": "Sharjah",
+    "Kalba": "Sharjah",
+    "Ajman Industrial Area": "Ajman", "Al Jurf Ajman": "Ajman",
+    "Al Jazeera Al Hamra": "Ras Al Khaimah",
+    "RAK Industrial Zone": "Ras Al Khaimah",
+    "Fujairah Free Zone": "Fujairah", "Dibba": "Fujairah",
+}
+
+# The owner's starter: the UAE, as a place in a business profile.
+UAE_PLACE = {"regions": list(_UAE_EMIRATES), "region_word": "emirate",
+             "cities": list(_UAE_CITIES), "districts": list(_UAE_DISTRICTS),
+             "parent": dict(_UAE_PARENT), "served": [], "home": ""}
+
+# The open website's places. For the owner's website these are the UAE lists
+# above, exactly as before; for anyone else, what their profile says.
+from . import countries as _countries  # noqa: E402
+from . import profile as _profile      # noqa: E402
+
+_PLACE = _profile.place(UAE_PLACE)
+COUNTRY = _profile.country("AE")
+EMIRATES = tuple(_PLACE["regions"])        # the big divisions: emirates, counties, states
+REGIONS = EMIRATES
+CITIES = tuple(_PLACE["cities"])
+DISTRICTS = tuple(_PLACE["districts"])
+_EMIRATE_OF = dict(_PLACE["parent"])
 
 
 def _env(name, default=""):
@@ -126,14 +178,16 @@ def served() -> list:
     """
     raw = _env("BUSINESS_AREAS", "")
     picked = [a.strip() for a in raw.split(",") if a.strip()]
-    return picked or list(EMIRATES)
+    return picked or list(_PLACE["served"]) or list(EMIRATES) or list(CITIES) or list(DISTRICTS)
 
 
 def served_phrase(joiner="and") -> str:
     """The areas as a person would say them: 'Dubai, Sharjah and Ajman'."""
     areas = served()
-    if len(areas) >= len(EMIRATES):
-        return "the UAE"
+    if not areas:
+        return _countries.in_a_sentence(COUNTRY) if COUNTRY else "your area"
+    if EMIRATES and set(a.lower() for a in areas) >= set(e.lower() for e in EMIRATES):
+        return _countries.in_a_sentence(COUNTRY)
     if len(areas) == 1:
         return areas[0]
     return ", ".join(areas[:-1]) + f" {joiner} " + areas[-1]
@@ -210,34 +264,12 @@ def emirate_of(place) -> str:
 
 
 def is_uae(text) -> bool:
-    """Does this text name somewhere in the country at all?"""
+    """Does this text name somewhere in the open website's country at all?"""
     t = (text or "").lower()
-    if re.search(r"(?<![a-z])(uae|u\.a\.e|emirates)(?![a-z])", t):
-        return True
+    for alias in _countries.aliases(COUNTRY):
+        if alias and re.search(r"(?<![a-z])" + re.escape(alias) + r"(?![a-z])", t):
+            return True
     return bool(place_in(t))
 
 
-# Which emirate each district and town belongs to. Only needed for the ones
-# whose name does not contain their emirate.
-_EMIRATE_OF = {
-    "Business Bay": "Dubai", "Al Quoz": "Dubai", "Al Barsha": "Dubai",
-    "Jumeirah Village Circle": "Dubai", "Dubai Marina": "Dubai",
-    "Downtown Dubai": "Dubai", "Deira": "Dubai",
-    "Jumeirah Lake Towers": "Dubai", "Dubai Investment Park": "Dubai",
-    "Dubai Silicon Oasis": "Dubai", "Al Qusais": "Dubai", "Mirdif": "Dubai",
-    "Dubai South": "Dubai", "Al Ras": "Dubai", "Bur Dubai": "Dubai",
-    "Ras Al Khor": "Dubai", "Umm Ramool": "Dubai", "Jebel Ali": "Dubai",
-    "Hatta": "Dubai",
-    "Mussafah": "Abu Dhabi", "Khalifa City": "Abu Dhabi",
-    "Al Reem Island": "Abu Dhabi", "Yas Island": "Abu Dhabi",
-    "Mohammed Bin Zayed City": "Abu Dhabi", "Al Mafraq": "Abu Dhabi",
-    "Al Ain": "Abu Dhabi", "Ruwais": "Abu Dhabi", "Madinat Zayed": "Abu Dhabi",
-    "Al Qasimia": "Sharjah", "Industrial Area Sharjah": "Sharjah",
-    "Muwaileh": "Sharjah", "Al Nahda Sharjah": "Sharjah",
-    "Sharjah Airport Free Zone": "Sharjah", "Khor Fakkan": "Sharjah",
-    "Kalba": "Sharjah",
-    "Ajman Industrial Area": "Ajman", "Al Jurf Ajman": "Ajman",
-    "Al Jazeera Al Hamra": "Ras Al Khaimah",
-    "RAK Industrial Zone": "Ras Al Khaimah",
-    "Fujairah Free Zone": "Fujairah", "Dibba": "Fujairah",
-}
+in_country = is_uae

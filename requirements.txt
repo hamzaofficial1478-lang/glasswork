@@ -40,3 +40,9 @@ google-auth>=2.29
 # needs them, and the account screen says so.
 cryptography>=41
 sqlcipher3-wheels>=0.5
+
+# PHONE NUMBERS IN ANY COUNTRY — Google's numbering rules, so "0161 496 0000"
+# in Manchester and "04 385 1122" in Dubai are each read in their own country's
+# format (coordination/countries.py). Without it a short built-in table keeps
+# the common countries working.
+phonenumbers>=8.13

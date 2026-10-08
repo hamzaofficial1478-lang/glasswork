@@ -57,7 +57,7 @@ DISTRICTS = uae.search_areas()
 #
 # Each segment carries the search terms that find it on a map, because the
 # Hunter needs a real query, not a category label.
-SEGMENTS = {
+GLASS_SEGMENTS = {
     # --- the trade, who buy in volume ---------------------------------------
     "fitout_contractor": {
         "why": "Fit-out contractors — partitions, shopfronts and doors on every single job.",
@@ -263,7 +263,13 @@ SEGMENTS = {
 # business's OWN website, off the contact page where they printed it so people
 # would write to them. That second hop is where real, working addresses come
 # from, and it is why the two entries below run as a pair.
-SOURCES = [
+# THE OPEN WEBSITE'S customer types: the owner's list above for his website
+# (the starter in coordination/profile.py), the business's own for anyone else.
+from coordination import profile as _profile  # noqa: E402
+
+SEGMENTS = _profile.customers(GLASS_SEGMENTS)
+
+GLASS_SOURCES = [
     {"name": "Google Maps (Places API) by category + area", "kind": "maps",
      "segments": list(SEGMENTS), "business_data": True, "access": "api key",
      "why": "Every UAE business, with category, area, phone and website. The Hunter's "
@@ -361,6 +367,25 @@ SOURCES = [
      "access": "public", "why": "Private individuals at home — see the note on ALLOW_INDIVIDUALS."},
 ]
 
+# The sources that work in any country, for any website that is not the
+# owner's. The list above is his: Dubai's chamber, DED licences, Mollak.
+GENERIC_SOURCES = [
+    {"name": "Maps (Google Places or TomTom) by customer type + area", "kind": "maps",
+     "segments": list(SEGMENTS), "business_data": True, "access": "api key",
+     "why": "Every listed business, with category, area, phone and website."},
+    {"name": "OpenStreetMap by customer type + area", "kind": "maps",
+     "segments": list(SEGMENTS), "business_data": True, "access": "public",
+     "why": "Businesses on the open map, with no key at all."},
+    {"name": "The business's own website contact page", "kind": "website",
+     "segments": list(SEGMENTS), "business_data": True, "access": "public",
+     "why": "Where the company itself publishes its address for people to write to."},
+    {"name": "Local business directories", "kind": "directory",
+     "segments": list(SEGMENTS), "business_data": True, "access": "public",
+     "why": "Street-level businesses that are not on the big maps yet."},
+]
+
+SOURCES = GLASS_SOURCES if _profile.is_starter() else GENERIC_SOURCES
+
 # WHICH SEGMENTS ARE "THE LOCALS"
 #
 # Not a category of business, a category of DECISION. On this list the person
@@ -369,13 +394,37 @@ SOURCES = [
 # The rest have a process to get through. The owner asked to be pointed at the
 # first group, and this is what lets the source map answer him rather than
 # leaving him to count the list himself.
-LOCAL_SEGMENTS = {
+GLASS_LOCAL = {
     "supermarket", "local_market", "signage", "holiday_let", "landlord",
     "builder", "laundry", "garage", "clinic_small", "nursery_local",
     "food_stall",
     "salon", "gym", "spa", "restaurant", "retail", "startup", "coworking",
     "villa_compound",
 }
+
+
+LOCAL_SEGMENTS = _profile.local_customers(GLASS_LOCAL)
+
+# Every kind of business the program knows how to find, for the "Your
+# business" page: its name and the map searches that find it. Taken from the
+# owner's list — those are buyer types, not glass types — plus a few his trade
+# never needed.
+CATALOGUE = {k: {"label": v["why"].split(" — ")[0], "queries": list(v["queries"]),
+                 "local": k in GLASS_LOCAL}
+             for k, v in GLASS_SEGMENTS.items()}
+CATALOGUE.update({
+    "care_home": {"label": "Care homes and nursing homes",
+                  "queries": ["care home", "nursing home", "assisted living"], "local": False},
+    "event_venue": {"label": "Event venues and conference centres",
+                    "queries": ["event venue", "wedding venue", "conference centre"], "local": False},
+    "pub_bar": {"label": "Pubs and bars", "queries": ["pub", "bar", "wine bar"], "local": True},
+    "dentist": {"label": "Dental practices", "queries": ["dentist", "dental practice"], "local": True},
+    "accountant": {"label": "Accountants and solicitors",
+                   "queries": ["accountant", "solicitor", "law firm"], "local": True},
+    "car_dealer": {"label": "Car dealers", "queries": ["car dealer", "used car dealer"], "local": True},
+    "manufacturer": {"label": "Manufacturers and workshops",
+                     "queries": ["manufacturer", "factory", "workshop"], "local": False},
+})
 
 
 def reaches_locals(source) -> bool:
@@ -548,6 +597,11 @@ def screen_source(src) -> tuple:
     return (not reasons, reasons)
 
 
+def _where() -> str:
+    from coordination import countries
+    return countries.in_a_sentence(_profile.country("AE"))
+
+
 def screen_lead(c: dict) -> tuple:
     """
     The gate every candidate passes before it can be stored. Order matters:
@@ -569,9 +623,14 @@ def screen_lead(c: dict) -> tuple:
     # uae.is_uae as well: UAE_HINTS has no Al Ain, Mussafah or Khor Fakkan, and
     # the OSM hunt now widens into Al Ain — every lead from there was being
     # refused as "outside the UAE".
-    if not any(h in geo for h in UAE_HINTS) and not uae.is_uae(geo):
-        return (False, "outside the UAE — not a market this business serves")
-    if not any(r in blob.lower() for r in RELEVANT):
+    # A collector that searched INSIDE the country says so (c["country"]); a
+    # map search fenced to that country cannot return a firm from another one,
+    # and most map addresses never name the country at all.
+    here = (c.get("country") or "").upper() == _profile.country("AE")
+    hints = UAE_HINTS if _profile.is_starter() else ()
+    if not here and not any(h in geo for h in hints) and not uae.is_uae(geo):
+        return (False, f"outside {_where()} — not a market this business serves")
+    if _profile.is_starter() and not any(r in blob.lower() for r in RELEVANT):
         return (False, "no connection to glass, aluminium or the trades that buy it")
     # A STREET ADDRESS IS A CONTACT ROUTE FOR THIS BUSINESS.
     #
@@ -597,7 +656,7 @@ def screen_lead(c: dict) -> tuple:
         # just a company detail. Prefer the switchboard where one exists.
         return (True, "business, but a NAMED PERSON's address — personal data under "
                       "PDPL; prefer the company's role inbox and keep a lawful basis")
-    return (True, f"business, in the UAE, relevant, contactable ({kind} inbox)")
+    return (True, f"business, in {_where()}, relevant, contactable ({kind} inbox)")
 
 
 def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:

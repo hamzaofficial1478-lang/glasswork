@@ -49,7 +49,7 @@ import urllib.parse
 import urllib.request
 
 from coordination import board
-from coordination import deskwork, uae
+from coordination import countries, deskwork, profile, uae
 from . import harvest
 from . import leads_sources as ls
 from . import services
@@ -142,6 +142,15 @@ def _map_sources() -> list:
     return out
 
 
+def _cc() -> str:
+    """The open website's country, as the maps take it."""
+    return profile.country("AE") or "AE"
+
+
+def _country_name() -> str:
+    return countries.name(_cc()) or "United Arab Emirates"
+
+
 def search_places(query, area, key, limit=20, timeout=25):
     """
     One text search against the Places API. Returns (places, error).
@@ -150,8 +159,8 @@ def search_places(query, area, key, limit=20, timeout=25):
     which matters: 'hotel Marina' without it returns Marina del Rey.
     """
     body = json.dumps({
-        "textQuery": f"{query} in {area}, United Arab Emirates",
-        "regionCode": "AE",
+        "textQuery": f"{query} in {area}, {_country_name()}",
+        "regionCode": _cc(),
         "maxResultCount": min(int(limit), 20),
     }).encode()
     req = urllib.request.Request(PLACES_URL, data=body, method="POST", headers={
@@ -244,9 +253,9 @@ def _tomtom_where(area, key, timeout=25):
     """(lat, lon, radius) for an area name, asked once per area. None if unknown."""
     if area in _TT_WHERE:
         return _TT_WHERE[area]
-    d = _tomtom_get("geocode/" + urllib.parse.quote(f"{area}, United Arab Emirates",
+    d = _tomtom_get("geocode/" + urllib.parse.quote(f"{area}, {_country_name()}",
                                                     safe="") + ".json",
-                    {"key": key, "countrySet": "AE", "limit": 1}, timeout)
+                    {"key": key, "countrySet": _cc(), "limit": 1}, timeout)
     res = (d.get("results") or [])
     if not res or not (res[0].get("position") or {}).get("lat"):
         _TT_WHERE[area] = None
@@ -274,7 +283,7 @@ def search_tomtom(query, area, key, limit=TOMTOM_PAGE, timeout=25):
     """
     try:
         where = _tomtom_where(area, key, timeout)
-        params = {"key": key, "countrySet": "AE", "language": "en-GB",
+        params = {"key": key, "countrySet": _cc(), "language": profile.language() or "en-GB",
                   "limit": min(int(limit or TOMTOM_PAGE), 100)}
         if where:
             params.update({"lat": where[0], "lon": where[1], "radius": where[2]})
@@ -319,6 +328,7 @@ def _tomtom_to_candidate(r, segment, area):
         "segment": segment,
         "category": cat,
         "source": "tomtom (search api)",
+        "country": _cc(),                 # the search was fenced to this country
         "service": svc,
         "service_label": services.label(svc),
         "service_reason": why,
@@ -336,14 +346,22 @@ def tomtom_check() -> dict:
     if not key:
         return {"ok": False, "why": "No TomTom key saved yet — paste it in the TomTom "
                                     "box and press Save first."}
-    found, err = search_tomtom("glass", "Dubai", key, limit=5)
+    # The owner's test is the one he knows ("glass near Dubai"); anyone else's
+    # asks for the first kind of business their profile sells to.
+    if profile.is_starter():
+        what, near = "glass", "Dubai"
+    else:
+        first = next(iter(ls.SEGMENTS.values()), {})
+        what = (list(first.get("queries") or []) or ["business"])[0]
+        near = (uae.served() or [_country_name()])[0]
+    found, err = search_tomtom(what, near, key, limit=5)
     if err:
         return {"ok": False, "why": err}
     names = [((r.get("poi") or {}).get("name") or "") for r in found][:5]
     return {"ok": True, "found": len(found), "sample": names,
-            "why": (f"TomTom answered — {len(found)} glass business(es) near Dubai, e.g. "
+            "why": (f"TomTom answered — {len(found)} {what} business(es) near {near}, e.g. "
                     + ", ".join(n for n in names[:3] if n) if found else
-                    "TomTom answered, but found nothing for 'glass' near Dubai — the "
+                    f"TomTom answered, but found nothing for '{what}' near {near} — the "
                     "key works; try a run and see what it collects.")}
 
 
@@ -366,6 +384,7 @@ def _place_to_candidate(p, segment, area):
         "segment": segment,
         "category": cat,
         "source": "google maps (places api)",
+        "country": _cc(),                 # the search was fenced to this country
         "service": svc,
         "service_label": services.label(svc),
         "service_reason": why,

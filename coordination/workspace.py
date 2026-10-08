@@ -480,6 +480,11 @@ def bring_in_current(account_id, site_id) -> dict:
             to = (adir if f.name in ACCOUNT_CONFIG else sdir) / "config" / f.name
             write_secret(to, f.read_text(encoding="utf-8"))
             done.append(f"config/{f.name}")
+    # His website keeps what it is: the glass-and-aluminium-in-the-UAE starter
+    # profile (coordination/profile.py). A website added fresh starts blank.
+    prof = sdir / "config" / "business.local.json"
+    if not prof.exists():
+        write_secret(prof, json.dumps({"starter": "glass_uae"}))
     db = ROOT / "coordination" / "agency.db"
     if db.exists():
         _copy_cabinet(db, sdir / "agency.db", account_id, site_id)

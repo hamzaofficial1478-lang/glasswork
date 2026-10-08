@@ -59,7 +59,11 @@ from . import fetcher
 
 # UAE first. A Dubai trading company registers .ae far more often than anything
 # else, and trying .com first spends a fetch on a parked domain most times.
-TLDS = ("ae", "com", "net", "co.ae", "org")
+from coordination import countries as _countries, profile as _profile, uae as _uae  # noqa: E402
+
+# Anywhere else, the open website's country's own endings first (.co.uk, .de).
+TLDS = (("ae", "com", "net", "co.ae", "org") if _profile.is_starter() else
+        tuple(dict.fromkeys(_countries.tlds(_profile.country()) + ("com", "net", "org"))))
 
 # Stripped before the domain is guessed. Nobody registers
 # alfurgentradingllc.ae — they register alfurgen.ae.
@@ -79,6 +83,11 @@ PLACE_NOISE = {
     "ras", "al", "khaimah", "umm", "quwain", "uae", "emirates", "gulf",
     "jlt", "jvc", "deira", "bur", "quoz", "karama", "barsha",
 }
+# ...and the open website's own places, when it is not the owner's.
+if not _profile.is_starter():
+    for _p in (list(_uae.EMIRATES) + list(_uae.CITIES) + list(_uae.DISTRICTS)
+               + list(_countries.aliases(_profile.country()))):
+        PLACE_NOISE.update(w for w in _p.lower().replace(".", " ").split() if len(w) > 1)
 
 # A word that identifies nobody. If everything distinctive is stripped and only
 # these are left, we refuse to guess rather than mail a stranger.

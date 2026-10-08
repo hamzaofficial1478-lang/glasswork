@@ -112,6 +112,8 @@ WA_PATTERNS = (
     re.compile(r"(?:wa\.me|api\.whatsapp\.com/send|web\.whatsapp\.com/send)"
                r"[/?][^\"'\s<>]*?(?:phone=)?(\+?\d[\d\s\-]{7,17})", re.I),
     re.compile(r"whatsapp[^\"'<>]{0,40}?(\+?971[\d\s\-]{7,14})", re.I),
+    # anywhere else: a number with its + code beside the word
+    re.compile(r"whatsapp[^\"'<>]{0,40}?(\+[1-9][\d\s\-]{7,16})", re.I),
 )
 WA_GROUP_RE = re.compile(r"chat\.whatsapp\.com/([A-Za-z0-9]{8,})", re.I)
 
@@ -144,14 +146,49 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 # NORMALISING, SO THE SAME THING FOUND TWICE IS ONE THING
 # ---------------------------------------------------------------------------
 
-def normalise_phone(raw, default_cc="971"):
+def _here():
+    """The open website's country and its dialling code — the UAE for the owner's."""
+    from coordination import countries, profile
+    cc = profile.country("AE") or "AE"
+    return cc, countries.calling_code(cc) or "971"
+
+
+def _phones_in(text):
+    """Every number written in this text, for a country that is not the UAE."""
+    try:
+        import phonenumbers
+    except Exception:
+        return []
+    cc, _code = _here()
+    out = []
+    try:
+        for m in phonenumbers.PhoneNumberMatcher(text or "", cc):
+            out.append(phonenumbers.format_number(m.number, phonenumbers.PhoneNumberFormat.E164))
+    except Exception:
+        pass
+    return out
+
+
+def normalise_phone(raw, default_cc=None):
     """
-    A UAE number in one shape: +971XXXXXXXXX. Returns "" if it is not one.
+    A number in one shape: +<code><number>, for the open website's country —
+    +971XXXXXXXXX for the owner's. Returns "" if it is not one.
+
+    Anywhere but the UAE the country's own rules come from
+    coordination/countries.py (Google's numbering library); the UAE keeps the
+    rules below, which are what every number in his cabinet was made with.
 
     Everything downstream depends on this. '04 385 1122', '+971 4 385 1122'
     and '0097143851122' are one number, and a lead list that holds all three
     is a lead list that will ring the same business three times.
     """
+    cc, code = _here()
+    if default_cc is None:
+        default_cc = code
+    if default_cc != "971":
+        from coordination import countries
+        e = countries.normalise_phone(raw, cc)
+        return e if e.startswith("+" + default_cc) else ""
     s = re.sub(r"[^\d+]", "", str(raw or ""))
     if not s:
         return ""
@@ -177,7 +214,13 @@ def normalise_phone(raw, default_cc="971"):
 def phone_kind(e164):
     """mobile, landline, or "". A mobile is what WhatsApp can reach."""
     if not e164.startswith("+971"):
-        return ""
+        try:
+            import phonenumbers
+            t = phonenumbers.number_type(phonenumbers.parse(e164, None))
+        except Exception:
+            return ""
+        return {phonenumbers.PhoneNumberType.MOBILE: "mobile",
+                phonenumbers.PhoneNumberType.FIXED_LINE: "landline"}.get(t, "")
     rest = e164[4:]
     if rest.startswith("5") and len(rest) == 9:
         return "mobile"
@@ -425,12 +468,17 @@ def read_page(url, html) -> dict:
         a = usable_email(a)
         if a:
             found["emails"].append({"value": a, "where": url, "how": "printed on the page"})
-    for pat in PHONE_PATTERNS:
-        for m in pat.findall(text):
-            p = normalise_phone("".join(m) if isinstance(m, tuple) else m)
-            if p:
-                found["phones"].append({"value": p, "where": url,
-                                        "how": "printed on the page"})
+    printed = []
+    if _here()[1] == "971":
+        for pat in PHONE_PATTERNS:
+            printed += ["".join(m) if isinstance(m, tuple) else m for m in pat.findall(text)]
+    else:
+        printed = _phones_in(text)          # the country's own formats
+    for m in printed:
+        p = normalise_phone(m)
+        if p:
+            found["phones"].append({"value": p, "where": url,
+                                    "how": "printed on the page"})
 
     # Socials are the one thing we deliberately look for OFF the host.
     for href in _HREF_RE.findall(html):

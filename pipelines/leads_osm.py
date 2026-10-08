@@ -55,8 +55,17 @@ SECTOR = "Leads"
 
 # Who we are. A free service is entitled to know who is calling it, and an
 # anonymous scraper is the first thing an operator blocks.
-UA = ("glasswork-leads/1.0 (UAE glass and aluminium; contact via "
-      "worlddealtechnicalservices.com)")
+def _ua():
+    """Who is calling: the program, and the website it is working for."""
+    try:
+        from coordination import site
+        url = site.site_url() or ""
+    except Exception:
+        url = ""
+    return "glasswork-leads/1.0 (small-business lead finder" + (f"; {url}" if url else "") + ")"
+
+
+UA = _ua()
 
 # Tried in order. The main instance is busiest and refuses first under load;
 # the mirrors exist precisely so nobody hammers one host.
@@ -123,7 +132,71 @@ def pass_budget() -> int:
         return OSM_BUDGET
 
 
-DEFAULT_AREAS = ("Dubai", "Sharjah", "Abu Dhabi")
+# THE OWNER'S AREAS are the three emirates where most of his work is; anyone
+# else's are the first places their profile names (coordination/uae.py).
+from coordination import profile as _profile  # noqa: E402
+
+if _profile.is_starter():
+    DEFAULT_AREAS = ("Dubai", "Sharjah", "Abu Dhabi")
+else:
+    _served = list(dict.fromkeys(([uae._PLACE["home"]] if uae._PLACE["home"] else [])
+                                 + uae.served() + list(uae.CITIES)))
+    DEFAULT_AREAS = tuple(a for a in _served if a)[:3]
+
+
+# ANYWHERE ELSE, an area's box comes from OpenStreetMap's own place search
+# (Nominatim), once, and is remembered in the website's config. Its rules are
+# one request a second and a real name on the request, both kept.
+GEOCODER = "https://nominatim.openstreetmap.org/search"
+BOXES_FILE = "osm-boxes.local.json"
+
+
+def _geocode(area, cc, timeout=20):
+    """'south,west,north,east' for a place name in a country, or ''."""
+    import os
+    if os.environ.get("AGENCY_IGNORE_DOTENV") == "1":
+        return ""                          # the test suite never reaches the network
+    q = urllib.parse.urlencode({"q": area, "countrycodes": (cc or "").lower(),
+                                "format": "json", "limit": 1})
+    req = urllib.request.Request(f"{GEOCODER}?{q}", headers={"User-Agent": _ua()})
+    try:
+        time.sleep(1.1)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            hits = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return ""
+    if not hits or not hits[0].get("boundingbox"):
+        return ""
+    south, north, west, east = hits[0]["boundingbox"]
+    return f"{float(south):.4f},{float(west):.4f},{float(north):.4f},{float(east):.4f}"
+
+
+def box_for(area, geocode=None):
+    """The box to search for this area: the owner's UAE boxes, else a remembered lookup."""
+    if not area:
+        return ""
+    if _profile.is_starter():
+        # The owner's UAE boxes, and only those: an emirate is a known box, a
+        # name it does not know is refused rather than guessed at.
+        return BBOX.get(area, "")
+    from coordination import workspace
+    path = workspace.config_path(BOXES_FILE)
+    try:
+        known = json.loads(workspace.read_secret(path, "") or "{}")
+    except Exception:
+        known = {}
+    cc = _profile.country("AE")
+    k = f"{cc}:{area.strip().lower()}"
+    if k in known:
+        return known[k]
+    box = (geocode or _geocode)(area, cc)
+    if box:
+        known[k] = box
+        try:
+            workspace.write_secret(path, json.dumps(known, indent=1))
+        except Exception:
+            pass
+    return box
 
 # Our segments, in OSM's vocabulary. Only tags that genuinely exist in the UAE
 # extract — inventing a tag produces a query that always returns nothing, which
@@ -556,7 +629,7 @@ def to_candidate(el, segment, area="") -> dict:
     # '00971...' for the same line depending on who mapped it, and a cabinet
     # holding all three rings the same business three times.
     raw_phone = _first(tags, "contact:phone", "phone", "contact:mobile")
-    phone = harvest.normalise_phone(raw_phone) or raw_phone.strip()
+    phone = harvest.normalise_phone(raw_phone) or raw_phone.strip()   # the website's country
     site = _first(tags, "contact:website", "website", "url", "contact:facebook")
     if site and "://" not in site:
         site = "https://" + site.lstrip("/")
@@ -587,6 +660,8 @@ def to_candidate(el, segment, area="") -> dict:
         "service_label": services.label(svc),
         "service_reason": why,
         "source": f"openstreetmap:{el.get('type', '?')}/{el.get('id', '?')}",
+        # searched inside a box in the website's own country
+        "country": _profile.country("AE"),
     }
 
 
@@ -617,10 +692,11 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False,
                               f"The way to reach them is: {instead}")}
         return {"ok": False, "error": f"no OSM tags mapped for '{segment}'. "
                                       f"Mapped: {', '.join(segments_covered())}"}
-    bbox = BBOX.get(area)
+    bbox = box_for(area)
     if not bbox:
-        return {"ok": False, "error": f"no box for '{area}'. "
-                                      f"Known: {', '.join(BBOX)}"}
+        return {"ok": False, "error": f"OpenStreetMap does not know where '{area}' is"
+                                      + (f". Known: {', '.join(BBOX)}" if _profile.is_starter() else
+                                         " — check the spelling on Your business")}
     q = build_query(tags, bbox, limit, contactable_only=contactable_only)
     r = ask(q, deadline=deadline) if deadline else ask(q)
     if not r["ok"]:
@@ -866,7 +942,11 @@ REFUSALS_LIMIT = 2        # rounds in a row where every mirror refused: stop, ne
 WIDEN_BEFORE = 0.75       # only go further afield with a quarter of the clock left
 
 # The other emirates, nearest first, for a pass that was not told where.
-WIDER_AREAS = ("Ajman", "Umm Al Quwain", "Al Ain", "Ras Al Khaimah", "Fujairah")
+WIDER_AREAS = (("Ajman", "Umm Al Quwain", "Al Ain", "Ras Al Khaimah", "Fujairah")
+               if _profile.is_starter() else
+               tuple(a for a in dict.fromkeys(uae.served() + list(uae.CITIES)
+                                               + list(uae.DISTRICTS))
+                     if a not in DEFAULT_AREAS)[:8])
 
 # Who to name when a named emirate runs out. Said, not done: he picked the place.
 NEIGHBOURS = {
@@ -1014,9 +1094,9 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     if area is None:
         # A district first, because a map search for a district returns the
         # street and one for an emirate returns the same well-known forty.
-        area = asked.first_mention(list(BBOX), None) or \
+        area = asked.first_mention(list(BBOX) if _profile.is_starter() else [], None) or \
             asked.first_mention(uae.search_areas(), None)
-        if area and area not in BBOX:
+        if area and _profile.is_starter() and area not in BBOX:
             # He named somewhere real that has no bounding box of its own —
             # Al Quoz, Mussafah. Search the emirate it sits in rather than
             # dropping the instruction on the floor.

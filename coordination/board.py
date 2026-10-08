@@ -2123,14 +2123,21 @@ def phone_key(phone) -> str:
     digits = re.sub(r"\D", "", str(phone or ""))
     if not digits:
         return ""
-    for prefix in ("00971", "971"):
-        if digits.startswith(prefix) and len(digits) > len(prefix):
+    # The open website's own country code — 971 for the owner's.
+    try:
+        from . import countries, profile
+        code = countries.calling_code(profile.country("AE")) or "971"
+    except Exception:
+        code = "971"
+    for prefix in ("00" + code, code):
+        if digits.startswith(prefix) and len(digits) > len(prefix) + 5:
             digits = digits[len(prefix):]
             break
     digits = digits.lstrip("0")
-    # Anything left that is still longer than a UAE number is a foreign one
-    # written in full; keep its own significant tail rather than mangling it.
-    return digits[-10:] if len(digits) > 10 else digits
+    # Anything left that is still longer than a national number is a foreign
+    # one written in full; keep its own significant tail rather than mangling it.
+    most = 10 if code == "971" else 12
+    return digits[-most:] if len(digits) > most else digits
 
 
 def domain_key(url) -> str:

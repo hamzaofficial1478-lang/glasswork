@@ -32,7 +32,10 @@ restaurant a pergola pitch and nothing else.
 import re
 from functools import lru_cache
 
-SERVICES = {
+# THE OWNER'S CATALOGUE — glass and aluminium. Since going public this is the
+# STARTER his website's business profile builds on (coordination/profile.py);
+# another business's website reads its own services through SERVICES below.
+GLASS_SERVICES = {
     "glass_partition": {
         "label": "office glass partitions",
         "names": ("glass partition",
@@ -388,13 +391,50 @@ SERVICES = {
     },
 }
 
-# What the whole list is called on a website and in an email footer. Ordered the
-# way the owner would say them, not alphabetically.
-ALL_SERVICE_LABELS = [SERVICES[k]["label"] for k in
-                      ("glass_partition", "shopfront", "glass_door", "shower_glass",
-                       "glass_railing", "mirror", "aluminium_windows", "aluminium_doors",
-                       "cladding", "curtain_wall", "wooden_doors", "pergola",
-                       "skylight", "glass_repair")]
+# The order the owner would say them in, not alphabetical.
+GLASS_ORDER = ("glass_partition", "shopfront", "glass_door", "shower_glass",
+               "glass_railing", "mirror", "aluminium_windows", "aluminium_doors",
+               "cladding", "curtain_wall", "wooden_doors", "pergola",
+               "skylight", "glass_repair")
+
+# THE OPEN WEBSITE'S services: his catalogue above for his website, the
+# business's own for anyone else's.
+from coordination import profile as _profile  # noqa: E402
+
+
+def _signals_from_buyers(svcs):
+    """
+    A service saved on "Your business" names what it is and who buys it; the
+    words that say a business NEEDS it (signals) come from those buyers' own
+    map search terms, so matching works without a hand-written list.
+    """
+    from coordination import profile as p
+    cust = p.customers() if not p.is_starter() else {}
+    out = {}
+    for key, s in (svcs or {}).items():
+        s = dict(s)
+        s.setdefault("label", key.replace("_", " "))
+        s["names"] = tuple(s.get("names") or (s["label"],))
+        s["buyers"] = tuple(s.get("buyers") or ())
+        s["related"] = tuple(s.get("related") or ())
+        if not s.get("signals"):
+            words = []
+            for b in s["buyers"]:
+                for q in (cust.get(b) or {}).get("queries") or ():
+                    words += [w for w in q.lower().split() if len(w) > 3]
+            s["signals"] = tuple(dict.fromkeys(words))
+        else:
+            s["signals"] = tuple(s["signals"])
+        out[key] = s
+    return out
+
+
+SERVICES = _signals_from_buyers(_profile.services(GLASS_SERVICES))
+ORDER = [k for k in _profile.service_order(list(GLASS_ORDER)) if k in SERVICES]
+FALLBACK = _profile.fallback_service("glass_repair")
+
+# What the whole list is called on a website and in an email footer.
+ALL_SERVICE_LABELS = [SERVICES[k]["label"] for k in ORDER]
 
 
 # Words that turn a glazing term into a different product: a film, a sticker or
@@ -534,5 +574,9 @@ def match_service(*texts, segment: str = "") -> tuple:
     by_segment = services_for_segment(segment)
     if by_segment:
         return by_segment[0], f"typical for a {segment.replace('_', ' ')}"
-    return "glass_repair", "no strong signal — defaulted to repair and replacement, "\
-                           "which every building needs eventually"
+    if FALLBACK == "glass_repair":
+        return "glass_repair", "no strong signal — defaulted to repair and replacement, "\
+                               "which every building needs eventually"
+    if FALLBACK in SERVICES:
+        return FALLBACK, f"no strong signal — defaulted to {label(FALLBACK)}"
+    return "", "this website has no services yet — add them on Your business"
