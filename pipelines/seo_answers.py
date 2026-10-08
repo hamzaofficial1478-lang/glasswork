@@ -682,7 +682,7 @@ def pages_to_audit(base, home_html, max_pages=12):
     except ImportError:  # pragma: no cover
         import competitors as _c
     try:
-        for u in _c.sitemap_urls(host)[:max_pages * 3]:
+        for u in _c.sitemap_urls(host)[0][:max_pages * 3]:     # (urls, source, error)
             add(u)
     except Exception:
         pass

@@ -67,7 +67,7 @@ ACCOUNT_KEYS = frozenset({
 # computer (where Claude Code is installed — nobody's in particular). Every
 # other config file is about one website.
 ACCOUNT_CONFIG = frozenset({"providers.local.json", "claude_team.local.json",
-                            "engine.local.json"})
+                            "engine.local.json", "report-brand.local.json"})
 MACHINE_CONFIG = frozenset({"claude_code.local.json"})
 
 

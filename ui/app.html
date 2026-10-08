@@ -173,6 +173,31 @@ ol.feed li:last-child{border-bottom:0}
   .tabs .b{position:absolute;top:6px;left:calc(50% + 6px);font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:0 5px;
     border-radius:999px;background:var(--wait-bg);color:var(--wait)}
 }
+/* website check */
+.ck-hero{display:flex;flex-wrap:wrap;gap:20px 36px;align-items:center;padding:20px 22px}
+.ck-score{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:56px;line-height:1;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ck-score small{font-size:18px;color:var(--faint);font-weight:400;letter-spacing:0}
+.ck-bars{flex:1 1 380px;display:grid;gap:10px;min-width:0}
+.ck-bar{display:grid;grid-template-columns:minmax(0,1fr) 34px minmax(80px,1.1fr);gap:12px;align-items:center;font-size:14.5px}
+.ck-bar b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+.ck-bar .meter{height:8px}
+.meter i.good{background:var(--done)} .meter i.mid{background:var(--wait)} .meter i.low{background:var(--stuck)}
+details.ck{border-top:1px solid var(--line-soft)}
+details.ck:first-of-type{border-top:0}
+details.ck summary{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:52px;padding:12px 20px;cursor:pointer;
+  list-style:none;font-weight:600}
+details.ck summary::-webkit-details-marker{display:none}
+details.ck summary:hover{background:var(--sunken)}
+details.ck summary>span:first-child::before{content:"";display:inline-block;width:7px;height:7px;margin:0 12px 2px 2px;border-right:2px solid var(--faint);
+  border-bottom:2px solid var(--faint);transform:rotate(-45deg)}
+details.ck[open] summary>span:first-child::before{transform:rotate(45deg)}
+details.ck .row{padding-left:40px}
+#ckLive:empty{display:none}
+.ev{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;color:var(--faint);overflow-wrap:anywhere}
+.ck-logo{display:flex;align-items:center;justify-content:center;min-width:120px;min-height:56px;padding:6px 10px;border:1px dashed var(--line-strong);
+  border-radius:10px;background:#FFFFFF}
+.ck-logo img{max-height:48px;max-width:200px;display:block}
+@media (max-width:760px){.ck-score{font-size:44px} details.ck .row{padding-left:20px}}
 @media (prefers-reduced-motion:no-preference){.btn,.nav a,.chip,.switch,.seg{transition:background .15s,border-color .15s,color .15s}}
 </style>
 </head>
@@ -634,15 +659,241 @@ async function google(main) {
 }
 
 /* ======================= WEBSITE CHECK ======================= */
-function check(main) {
+const CHK = {timer: null, depth: 'quick', logo: ''};
+const IMPACT_PILL = {high: 'stuck', medium: 'wait', low: 'plain'};
+function tone(v) { return v >= 80 ? 'good' : v >= 55 ? 'mid' : 'low'; }
+function scorePill(v) { return pill(v >= 80 ? 'done' : v >= 55 ? 'wait' : 'stuck', String(v)); }
+function day(ts) { return ts ? new Date(Number(ts) * 1000).toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'}) : ''; }
+function goCheck(id) {
+  const h = id ? '#check?id=' + Number(id) : '#check';
+  if (location.hash === h) check($('#main')); else location.hash = h;
+}
+async function check(main) {
+  clearTimeout(CHK.timer);
+  const want = Number(new URLSearchParams(location.hash.split('?')[1] || '').get('id')) || 0;
+  const [list, brand] = await Promise.all([api('/api/check/list'), api('/api/check/brand')]);
+  const checks = (list && list.checks) || [];
+  const running = checks.find((c) => c.status === 'running');
+  const pick = want ? checks.find((c) => c.id === want) : (running || checks[0]);
+  const shown = pick && pick.status === 'done' ? await api(`/api/check/${Number(pick.id)}`) : null;
+  const last = (shown && shown.ok && shown) || pick || {};
   main.innerHTML = `<div class="page narrow">${head('Website Check',
-    'A report on any website — yours, a rival’s, or a prospect’s you want to win. It only reads what any visitor’s browser sees, and never changes or probes the site.')}
+    'A report on any website — yours, a rival’s, or one belonging to a business you want to win. Every desk looks at it and scores what it finds. It only reads what any visitor’s browser sees: it never changes the site, and never probes it.')}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <label for="checkUrl" style="font-weight:600">Website address</label>
-      <div style="display:flex;flex-wrap:wrap;gap:10px"><input id="checkUrl" type="url" placeholder="www.example.com" style="flex:1 1 300px;min-width:0" disabled>
-        <button class="btn" type="button" disabled>Check this website</button></div>
-      <div class="note">Coming next. The report — scores for every desk, the five fixes that matter most, and a PDF with your logo — is the next part being built.</div>
-    </section></div>`;
+      <div style="display:flex;flex-wrap:wrap;gap:10px"><input id="checkUrl" type="url" inputmode="url" autocomplete="url" placeholder="www.example.com" value="${esc(last.url || '')}" style="flex:1 1 300px;min-width:0">
+        <button class="btn" type="button" id="ckGo"${running ? ' disabled' : ''}>Check this website</button></div>
+      <div role="group" aria-label="How much to read" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        ${[['quick', 'Quick', 'up to 20 pages · a minute or two'], ['full', 'Full', 'up to 200 pages · usually under ten minutes']].map(([k, n, s]) =>
+          `<button type="button" class="seg ${CHK.depth === k ? 'on' : ''}" aria-pressed="${CHK.depth === k}" data-depth="${k}">${n} <span class="n">${s}</span></button>`).join('')}
+      </div>
+      <div id="ckSay" class="muted" style="font-size:14px;min-height:1.2em" aria-live="polite">${running ? 'One check at a time — you can start another when this one finishes.' : ''}</div>
+    </section>
+    <div id="ckLive">${running ? liveCard(running) : ''}</div>
+    ${shown && shown.ok ? resultView(shown) : pick && pick.status === 'failed' ? failedCard(pick) : ''}
+    ${checks.some((c) => c.status !== 'running') ? historyCard(checks.filter((c) => c.status !== 'running'), pick) : ''}
+    ${brandCard((brand && brand.ok && brand) || {})}
+  </div>`;
+  wireCheck(main, shown);
+  if (running) watchCheck(running.id);
+}
+function liveCard(c) {
+  const done = Number(c.pages_done || 0), total = Number(c.pages_total || 0) || 20;
+  return `<section class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"><b style="font-weight:600">${esc(c.host)}</b>${pill('work', 'Checking')}</div>
+      <button class="btn quiet small" type="button" data-stop="${Number(c.id)}">Stop</button></div>
+    <div aria-live="polite">${esc(c.phase || 'Starting')} · <span class="mono">${done}</span> of up to <span class="mono">${total}</span> pages read</div>
+    <span class="meter" style="height:8px"><i style="width:${Math.max(3, Math.min(100, done / total * 100))}%"></i></span>
+    <p class="muted" style="margin:0;font-size:14px">It reads one page a second at most and follows the website’s robots.txt. You can leave this screen — the check carries on.</p>
+  </section>`;
+}
+function failedCard(c) {
+  return `<div class="note"><b>The check of ${esc(c.host)} did not finish.</b> ${esc(sentence(c.error || 'It stopped.'))}</div>`;
+}
+function resultView(chk) {
+  const r = chk.report || {}, sc = r.scores || {}, id = Number(chk.id);
+  const secs = r.sectors || [];
+  const byKey = {};
+  (r.findings || []).forEach((f) => { byKey[f.code + '|' + f.sector] = f; });
+  const top = (r.top || []).map((k) => byKey[k]).filter(Boolean);
+  const bars = secs.map(([k, n]) => `<div class="ck-bar"><span>${esc(n)}</span><b>${Number(sc[k] || 0)}</b>
+    <span class="meter"><i class="${tone(sc[k] || 0)}" style="width:${Math.max(2, Number(sc[k] || 0))}%"></i></span></div>`).join('');
+  const p = r.progress;
+  let since = '';
+  if (p) {
+    const ch = Number(p.overall_change || 0);
+    since = `<section class="card"><div class="card-h"><h2>Since the check on ${esc(day(p.since))}</h2>
+      ${pill(ch > 0 ? 'done' : ch < 0 ? 'stuck' : 'plain', (ch > 0 ? '+' : '') + ch + ' overall')}</div>
+      <div class="row"><span class="grow">
+        <span>Overall score <span class="mono">${Number(p.overall_was || 0)}</span> → <span class="mono">${Number(r.overall || 0)}</span>.</span>
+        ${(p.fixed || []).length ? `<span><b style="font-weight:600">Fixed:</b> ${(p.fixed || []).map(esc).join('; ')}</span>` : ''}
+        ${(p.new || []).length ? `<span><b style="font-weight:600">New:</b> ${(p.new || []).map(esc).join('; ')}</span>` : ''}
+        ${!(p.fixed || []).length && !(p.new || []).length ? '<span class="muted">The same findings as last time.</span>' : ''}
+      </span></div></section>`;
+  }
+  const fixRow = (f) => `<div class="row"><span class="grow"><b style="font-weight:600">${esc(f.title)}</b>
+      <span class="muted" style="font-size:14px">${esc(f.why)}</span><span style="font-size:14px;color:var(--accent)">${esc(f.fix)}</span></span>
+      <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">${pill(IMPACT_PILL[f.severity] || 'plain', f.impact || '')}
+      <span class="muted" style="font-size:13px">${esc(f.effort_label)}</span></span></div>`;
+  const groups = secs.map(([k, n]) => {
+    const fs = (r.findings || []).filter((f) => f.sector === k);
+    const rows = fs.map((f) => `<div class="row"><span class="grow"><b style="font-weight:600">${esc(f.title)}</b>
+        <span style="font-size:14px;color:var(--accent)">${esc(f.fix)}</span>
+        <span class="ev">${esc((f.pages || []).slice(0, 6).join(', '))}${Number(f.page_count || 0) > 6 ? ' and ' + (Number(f.page_count) - 6) + ' more' : ''}${f.evidence ? ' — ' + esc(f.evidence) : ''}</span></span>
+        ${pill(IMPACT_PILL[f.severity] || 'plain', f.impact || '')}</div>`).join('');
+    return `<details class="ck"><summary><span>${esc(n)} <span class="muted" style="font-weight:400;font-size:14px">· ${fs.length ? fs.length + ' found' : 'nothing found'}</span></span>
+      <span class="mono">${Number(sc[k] || 0)}/100</span></summary>${rows || '<div class="row muted">Nothing to fix here.</div>'}</details>`;
+  }).join('');
+  const working = (r.working || []).map((w) => `<li>${esc(w.text)} <span class="muted" style="font-size:13px">· ${esc(w.sector_name)}</span></li>`).join('');
+  const left = [];
+  if (Number(r.blocked_by_robots || 0)) left.push(`${Number(r.blocked_by_robots)} page(s) were left alone because the website’s robots.txt asks visitors like this one not to read them.`);
+  if (Number(r.not_reached || 0)) left.push(`${Number(r.not_reached)} page(s) were not reached in the time allowed — a full check reads more.`);
+  return `<section class="card">
+      <div class="card-h" style="flex-wrap:wrap"><div><h2>${esc(r.host)}</h2><span class="muted" style="font-size:14px">${esc(day(r.checked_at))} · ${Number(r.pages_read || 0)} pages read · ${r.depth === 'full' ? 'full' : 'quick'} check</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><a class="btn ghost small" href="/check/${id}/report" target="_blank" rel="noopener">Open the report</a>
+          <button class="btn ghost small" type="button" id="ckPdf" data-id="${id}">Download PDF</button>
+          <button class="btn small" type="button" id="ckAgain">Check again</button></div></div>
+      <div class="ck-hero"><div><div class="ck-score">${Number(r.overall || 0)}<small>/100</small></div>
+        <p style="margin:8px 0 0;max-width:30ch">${esc(r.summary)}</p></div><div class="ck-bars">${bars}</div></div>
+      ${left.length ? `<div class="row muted" style="font-size:14px">${left.map(esc).join(' ')}</div>` : ''}
+    </section>
+    ${since}
+    <section class="card"><div class="card-h"><h2>The fixes that matter most</h2><span class="muted" style="font-size:14px">most good for least effort</span></div>
+      ${top.map(fixRow).join('') || '<div class="row muted">Nothing important was found.</div>'}</section>
+    <section class="card"><div class="card-h"><h2>Everything that was found, desk by desk</h2></div>${groups}</section>
+    <section class="card"><div class="card-h"><h2>What is working well</h2></div>
+      <ul style="margin:0;padding:14px 20px 16px 38px;display:flex;flex-direction:column;gap:6px">${working || '<li class="muted">Nothing stood out.</li>'}</ul></section>`;
+}
+function historyCard(checks, pick) {
+  const rows = checks.map((c) => {
+    const st = c.status === 'done' ? scorePill(Number(c.overall || 0)) : c.status === 'running' ? pill('work', 'Checking') : pill('stuck', 'Did not finish');
+    const on = pick && pick.id === c.id;
+    return `<div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">${esc(c.host)}</b>
+        <span class="muted" style="font-size:14px">${esc(day(c.started_at))} · ${c.depth === 'full' ? 'full' : 'quick'}${on ? ' · showing now' : ''}</span></span>
+      ${st}
+      <span style="display:flex;gap:6px">${c.status === 'done' && !on ? `<a class="btn ghost small" href="#check?id=${Number(c.id)}">View</a>` : ''}
+        ${c.status !== 'running' ? `<button class="btn quiet small" type="button" data-del="${Number(c.id)}" aria-label="Delete the check of ${esc(c.host)}">Delete</button>` : ''}</span></div>`;
+  }).join('');
+  return `<section class="card"><div class="card-h"><h2>Earlier checks</h2><span class="muted" style="font-size:14px">kept on this computer</span></div>${rows}</section>`;
+}
+function brandCard(b) {
+  CHK.logo = '';
+  const fallback = (S.brand && S.brand.agencyName) || 'Your business name';
+  return `<section class="card"><div class="card-h"><h2>Your name and logo on the report</h2></div>
+    <div style="padding:16px 20px 20px;display:flex;flex-direction:column;gap:12px">
+      <p class="muted" style="margin:0;font-size:14px">Every report and PDF carries these at the top — useful when you send a report to a client.</p>
+      <label for="ckName" style="font-weight:600">Name on the report</label>
+      <input id="ckName" type="text" maxlength="80" value="${esc(b.name || '')}" placeholder="${esc(fallback)}">
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+        <div class="ck-logo" id="ckLogoView">${b.logo ? `<img src="${esc(b.logo)}" alt="Your logo">` : '<span class="muted" style="font-size:14px">No logo yet</span>'}</div>
+        <button class="btn ghost small" type="button" id="ckPickLogo">Choose a logo</button>
+        <input id="ckLogo" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+        ${b.has_logo ? '<button class="btn quiet small" type="button" id="ckNoLogo">Remove the logo</button>' : ''}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center"><button class="btn small" type="button" id="ckSaveBrand">Save</button>
+        <span class="muted" style="font-size:14px">A PNG, JPEG or WebP picture. It is made smaller to fit the top of the page.</span></div>
+    </div></section>`;
+}
+function shrinkLogo(file) {
+  return new Promise((resolve, reject) => {
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { reject(new Error('Choose a PNG, JPEG or WebP picture.')); return; }
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 600 / img.width, 200 / img.height);
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0, c.width, c.height);
+      let d = c.toDataURL('image/png');
+      if (d.length > 700000) { g.globalCompositeOperation = 'destination-over'; g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, c.width, c.height); d = c.toDataURL('image/jpeg', 0.88); }
+      URL.revokeObjectURL(url); resolve(d);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That picture could not be read.')); };
+    img.src = url;
+  });
+}
+async function downloadPdf(id, btn) {
+  btn.disabled = true; toast('Making the PDF — this takes a few seconds…');
+  try {
+    const r = await fetch(`/api/check/${Number(id)}/pdf`, {cache: 'no-store'});
+    if (!r.ok || !(r.headers.get('Content-Type') || '').includes('pdf')) {
+      let j = {}; try { j = await r.json(); } catch (e) { j = {}; }
+      toast(j.error || 'The PDF could not be made. Open the report and use Print, then Save as PDF.');
+      return;
+    }
+    const blob = await r.blob();
+    const name = ((r.headers.get('Content-Disposition') || '').match(/filename="?([^";]+)"?/) || [])[1] || 'website-check.pdf';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    toast('Saved ' + name + ' to your downloads.');
+  } catch (e) { toast('The office did not answer. Is the agency window still open?'); }
+  finally { btn.disabled = false; }
+}
+function watchCheck(id) {
+  clearTimeout(CHK.timer);
+  CHK.timer = setTimeout(async () => {
+    if (!location.hash.startsWith('#check')) return;
+    const c = await api(`/api/check/${Number(id)}`);
+    if (!location.hash.startsWith('#check')) return;
+    if (c && c.ok && c.status === 'running') { const live = $('#ckLive'); if (live) live.innerHTML = liveCard(c); watchCheck(id); return; }
+    if (c && c.ok && c.status === 'done') toast('The check of ' + c.host + ' is ready.');
+    goCheck(c && c.ok && c.status === 'done' ? id : 0);
+  }, 2500);
+}
+function wireCheck(main, shown) {
+  const start = async (url, depth) => {
+    const say = $('#ckSay');
+    if (!url) { say.textContent = 'Type the website’s address first — for example www.example.com.'; $('#checkUrl').focus(); return; }
+    const b = $('#ckGo'); b.disabled = true; say.textContent = 'Starting…';
+    const j = await api('/api/check/start', {url, depth});
+    if (!j.ok) { b.disabled = false; say.textContent = sentence(j.error || 'The check could not start.'); return; }
+    toast('Checking ' + host(j.url) + '…');
+    goCheck(0);
+  };
+  $('#ckGo').onclick = () => start($('#checkUrl').value.trim(), CHK.depth);
+  $('#checkUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('#ckGo').disabled) $('#ckGo').click(); });
+  main.querySelectorAll('[data-depth]').forEach((b) => b.onclick = () => {
+    CHK.depth = b.dataset.depth;
+    main.querySelectorAll('[data-depth]').forEach((x) => { const on = x.dataset.depth === CHK.depth; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)); });
+  });
+  const again = $('#ckAgain');
+  if (again && shown) again.onclick = () => start((shown.report || {}).url || shown.url, shown.depth);
+  const pdfBtn = $('#ckPdf');
+  if (pdfBtn) pdfBtn.onclick = () => downloadPdf(pdfBtn.dataset.id, pdfBtn);
+  main.onclick = async (e) => {
+    const stop = e.target.closest('[data-stop]'), del = e.target.closest('[data-del]');
+    if (stop) { stop.disabled = true; await api(`/api/check/${Number(stop.dataset.stop)}/stop`, {}); clearTimeout(CHK.timer); goCheck(0); }
+    if (del) {
+      if (!confirm('Delete this check and its report?')) return;
+      const j = await api(`/api/check/${Number(del.dataset.del)}/delete`, {});
+      if (!j.ok) { toast(j.error || 'Could not delete it.'); return; }
+      goCheck(0);
+    }
+  };
+  $('#ckPickLogo').onclick = () => $('#ckLogo').click();
+  $('#ckLogo').onchange = async () => {
+    const f = $('#ckLogo').files[0]; if (!f) return;
+    try {
+      CHK.logo = await shrinkLogo(f);
+      $('#ckLogoView').innerHTML = `<img src="${esc(CHK.logo)}" alt="Your logo, not saved yet">`;
+      toast('Press Save to keep this logo.');
+    } catch (err) { toast(err.message); }
+  };
+  $('#ckSaveBrand').onclick = async () => {
+    const body = {name: $('#ckName').value.trim()};
+    if (CHK.logo) body.logo = CHK.logo;
+    const j = await api('/api/check/brand', body);
+    toast(j.ok ? 'Saved. New reports and PDFs carry it.' : (j.error ? sentence(j.error) : 'Could not save it.'));
+    if (j.ok) goCheck(Number(new URLSearchParams(location.hash.split('?')[1] || '').get('id')) || 0);
+  };
+  const noLogo = $('#ckNoLogo');
+  if (noLogo) noLogo.onclick = async () => {
+    const j = await api('/api/check/brand', {remove_logo: true});
+    toast(j.ok ? 'The logo is removed.' : (j.error || 'Could not remove it.'));
+    if (j.ok) goCheck(Number(new URLSearchParams(location.hash.split('?')[1] || '').get('id')) || 0);
+  };
 }
 
 /* ======================= SETTINGS ======================= */

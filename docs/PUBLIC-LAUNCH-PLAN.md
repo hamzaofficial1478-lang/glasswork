@@ -279,6 +279,30 @@ someone else's in read-only mode:
     page) move into the new design.
   - Website Check shows what is coming; it is built in phase 5.
 
+- **Phase 5 is built (8 October): Website Check.**
+  - Type any website's address and choose **Quick** (up to 20 pages, a minute
+    or two) or **Full** (up to 200 pages, usually under ten minutes). It
+    carries on if the screen is closed, shows its progress, and can be
+    stopped. One check runs at a time.
+  - Six desks look at it and each gives a score out of 100: Speed and health,
+    Found on Google, Words and trust, Picked by AI answers, Easy to get in
+    touch, and Security from outside. The overall score is their average.
+  - **The five fixes that matter most**, chosen for the most good for the
+    least effort, each marked with how much it matters and how long it takes.
+    Then every finding, desk by desk, with the pages it was seen on and the
+    evidence, and what is working well.
+  - **Check again** later and the report says what was fixed, what is new, and
+    how the score moved.
+  - **The report** opens as its own page and downloads as a **PDF** with your
+    name and logo at the top. The PDF is made by the Edge or Chrome already on
+    the computer; without one, the report page prints to PDF.
+  - The rules it keeps: only ever reads (no form is sent), follows the site's
+    robots.txt and its Crawl-delay, one page a second at most, and security
+    stays passive. It refuses addresses on the computer or its local network.
+  - Not built yet: comparing the site side by side with a rival's, and uptime,
+    which one visit cannot measure. Speed is the server's answer time, not a
+    full phone speed test.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

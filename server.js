@@ -14,6 +14,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const http = require("http");
+const os = require("os");
 const { spawn, spawnSync } = require("child_process");
 const app = express();
 
@@ -79,7 +80,11 @@ if (SUPERVISED) {
   }, 4000).unref();
 }
 
-app.use(express.json());
+// Request bodies are small everywhere but one place: a report's logo, sent as
+// a picture, may be a few hundred KB. Only that path gets the larger limit.
+const JSON_BODY = express.json();
+const JSON_LOGO = express.json({ limit: "1mb" });
+app.use((req, res, next) => (req.path === "/api/check/brand" ? JSON_LOGO : JSON_BODY)(req, res, next));
 // NOTE: express.static is mounted AFTER the front-door middleware below, not
 // here. Mounted first it serves ui/setup.html at /setup.html to anybody, gate
 // or no gate — the lock would be on the door and the window left open.
@@ -524,6 +529,96 @@ app.post("/api/connect/wordpress", async (req, res) => {
 });
 app.post("/api/connect/readonly", async (_q, res) => res.json(await pyConnect(["--readonly"], null, 60000)));
 
+/* ---- WEBSITE CHECK (pipelines/website_check.py) ----------------------------
+   A report on any website, every desk's view of it. Starting one makes its
+   record and hands the reading to a detached process, so the page can be
+   closed and the check carries on; the page asks for its progress. Only ever
+   GET and HEAD requests to the website, robots.txt followed — see the module. */
+const CHECK_MOD = "pipelines.website_check";
+const checkId = (req) => (/^\d{1,9}$/.test(String(req.params.id || "")) ? String(req.params.id) : "");
+app.get("/api/check/list", async (_q, res) => res.json(await pyModule(CHECK_MOD, ["--list"], 30000)));
+app.get("/api/check/brand", async (_q, res) => res.json(await pyModule(CHECK_MOD, ["--brand"], 30000)));
+app.post("/api/check/brand", async (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const b = req.body || {};
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", CHECK_MOD, "--save-brand"], {
+    cwd: __dirname, input: JSON.stringify({ name: b.name, logo: b.logo, remove_logo: !!b.remove_logo }),
+    timeout: 30000,
+  });
+  try { return res.json(JSON.parse(String(r.stdout || "").trim().split("\n").pop())); }
+  catch (_) { return res.json({ ok: false, error: "could not save: " + String(r.stderr || "").slice(-300) }); }
+});
+app.post("/api/check/start", async (req, res) => {
+  const b = req.body || {};
+  const url = String(b.url || "").trim().slice(0, 300);
+  if (!url) return res.json({ ok: false, error: "Type the website's address." });
+  const made = await pyModule(CHECK_MOD, ["--new", url, "--depth", b.depth === "full" ? "full" : "quick"], 60000);
+  if (!made.ok) return res.json(made);
+  const py = resolvePython();
+  let child;
+  try {
+    child = spawn(py.cmd, [...py.prefix, "-m", CHECK_MOD, "--run", String(made.id), "--json"], {
+      cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,
+    });
+  } catch (e) {
+    await pyModule(CHECK_MOD, ["--delete", String(made.id)], 30000);
+    return res.json({ ok: false, error: "Could not start the check: " + e.message });
+  }
+  child.on("error", () => { pyModule(CHECK_MOD, ["--stop", String(made.id)], 30000).catch(() => {}); });
+  child.unref();
+  res.json({ ok: true, id: made.id, url: made.url, depth: made.depth });
+});
+app.get("/api/check/:id", async (req, res) => {
+  const id = checkId(req);
+  if (!id) return res.status(404).json({ ok: false, error: "no such check" });
+  res.json(await pyModule(CHECK_MOD, ["--get", id], 30000));
+});
+app.post("/api/check/:id/stop", async (req, res) => {
+  const id = checkId(req);
+  if (!id) return res.status(404).json({ ok: false, error: "no such check" });
+  res.json(await pyModule(CHECK_MOD, ["--stop", id], 30000));
+});
+app.post("/api/check/:id/delete", async (req, res) => {
+  const id = checkId(req);
+  if (!id) return res.status(404).json({ ok: false, error: "no such check" });
+  res.json(await pyModule(CHECK_MOD, ["--delete", id], 30000));
+});
+// The report as a page of its own: read on screen, printed, or saved as PDF.
+app.get("/check/:id/report", async (req, res) => {
+  const id = checkId(req);
+  const py = resolvePython();
+  if (!id || !py) return res.status(404).type("text/plain").send("No such report.");
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", CHECK_MOD, "--html", id], {
+    cwd: __dirname, timeout: 60000, maxBuffer: 16 * 1024 * 1024,
+  });
+  const out = String(r.stdout || "");
+  if (!out.startsWith("<!DOCTYPE html>")) return res.status(404).type("text/plain").send("That check has no report yet.");
+  res.setHeader("Cache-Control", "no-store");
+  res.type("html").send(out);
+});
+// And as a PDF, printed by the Edge or Chrome already on this computer.
+app.get("/api/check/:id/pdf", async (req, res) => {
+  const id = checkId(req);
+  const py = resolvePython();
+  if (!id) return res.status(404).json({ ok: false, error: "no such check" });
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "website-check-"));
+  const out = path.join(dir, "report.pdf");
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", CHECK_MOD, "--pdf", id, out], {
+    cwd: __dirname, timeout: 150000,
+  });
+  let ans = {};
+  try { ans = JSON.parse(String(r.stdout || "").trim().split("\n").pop()); } catch (_) {}
+  if (!ans.ok || !fs.existsSync(out)) {
+    fs.rm(dir, { recursive: true, force: true }, () => {});
+    return res.status(ans.no_browser ? 404 : 500).json({ ok: false, no_browser: !!ans.no_browser,
+      error: ans.error || "the PDF could not be made" });
+  }
+  const name = String(ans.filename || "website-check.pdf").replace(/[^A-Za-z0-9._-]/g, "_");
+  res.download(out, name, () => fs.rm(dir, { recursive: true, force: true }, () => {}));
+});
+
 /* ---- ACCOUNTS AND WEBSITES (coordination/accounts.py) ---------------------
    Passwords and recovery keys go to Python on stdin, never on a command line,
    and never into a log. What comes back with a key keeps it here, in memory. */
@@ -682,7 +777,7 @@ const API_CAPABILITIES = [
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
-  "account", "business", "engine", "connect",
+  "account", "business", "engine", "connect", "check",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 // Which copy of the program this is, without saying where it lives: run.py
@@ -758,7 +853,8 @@ const ACCOUNT_KEYS = new Set([
   "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
   "PORT",
 ]);
-const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json", "engine.local.json"]);
+const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json", "engine.local.json",
+  "report-brand.local.json"]);
 const MACHINE_CONFIG = new Set(["claude_code.local.json"]);
 const LEGACY_ENV = path.join(__dirname, ".env");
 
