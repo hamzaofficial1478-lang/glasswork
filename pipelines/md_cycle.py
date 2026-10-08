@@ -80,6 +80,15 @@ INBOX_PER_CYCLE = 5
 # MD keeps its own deterministic ranking and says so — it does not stall, and it
 # does not pretend a coin-flip was a decision.
 
+def _business() -> str:
+    """'a UAE glass and aluminium business' for the owner's website; the profile's line otherwise."""
+    try:
+        from coordination import profile
+        return "a UAE glass and aluminium business" if profile.is_starter() else profile.describe()
+    except Exception:
+        return "a UAE glass and aluminium business"
+
+
 def _ask_both_which_matters(candidates, facts, deliberate=None):
     """
     Returns (ordered_titles, note). On any doubt the MD's own order is kept.
@@ -99,7 +108,7 @@ def _ask_both_which_matters(candidates, facts, deliberate=None):
     r = deliberate(
         "md",
         [{"role": "system", "content":
-          "You rank a day's work for a UAE glass and aluminium business. Reply with "
+          f"You rank a day's work for {_business()}. Reply with "
           "the titles only, most important first, one per line, nothing else. A dead "
           "enquiry path outranks everything; the owner's own orders come next."},
          {"role": "user", "content":

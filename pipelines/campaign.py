@@ -99,6 +99,15 @@ ANY_LINE = "Supplied, made to size and installed by our own team."
 
 
 def _line_for(label) -> str:
+    from coordination import profile
+    if not profile.is_starter():
+        # Any other website: the line it wrote for that service on "Your
+        # business", or a plain one that is true of any trade.
+        from . import services
+        for sv in services.SERVICES.values():
+            if (sv.get("label") or "").lower() == (label or "").lower() and sv.get("line"):
+                return sv["line"]
+        return "Done properly, by our own team."
     low = (label or "").lower()
     for word, line in SERVICE_LINES:
         if word in low:
@@ -116,8 +125,10 @@ def business() -> dict:
     b["areas_phrase"] = uae.served_phrase()
     # For the top of the mail: the emirates by name, or the country in full —
     # "the UAE" on its own reads like the end of a sentence.
-    b["areas_label"] = ("United Arab Emirates" if b["areas_phrase"] == "the UAE"
-                        else " · ".join(uae.served()))
+    from coordination import countries, profile
+    whole = countries.in_a_sentence(profile.country("AE"))
+    b["areas_label"] = ((countries.name(profile.country("AE")) or "United Arab Emirates")
+                        if b["areas_phrase"] == whole else " · ".join(uae.served()))
     return b
 
 
@@ -185,6 +196,9 @@ def standard_copy(biz, tiles) -> dict:
     company speaking, and nothing in it that is not true of the business.
     Always available — no model needed — so the Mail room never opens empty.
     """
+    from coordination import profile
+    if not profile.is_starter():
+        return _standard_copy_for(biz, tiles)
     areas = biz.get("areas_phrase") or "the UAE"
     years = str(biz.get("years") or "10")
     return {
@@ -729,7 +743,52 @@ def retire() -> dict:
     return {"ok": True, "head": "Put away. Build a new one whenever you like."}
 
 
+def _standard_copy_for(biz, tiles) -> dict:
+    """The standard campaign for any website that is not the owner's: its own trade."""
+    from coordination import profile
+    b = profile.business()
+    trade = profile.trade_line()
+    areas = biz.get("areas_phrase") or profile.where()
+    return {
+        "subject": f"{trade[:1].upper() + trade[1:]} for your business",
+        "preheader": "Done properly, by our own team — reply for a quote.",
+        "headline": f"{trade[:1].upper() + trade[1:]} across {areas}",
+        "intro": (f"We are {biz.get('name') or 'a local business'}"
+                  f"{' — ' + b['description'] if b.get('description') else ''}. "
+                  f"We work with businesses across {areas}."),
+        "why_us": ["Our own team does the work", f"Covering {areas}",
+                   "A clear quote before anything starts"],
+        "cta": "Have something coming up? Reply to this email and we will come back with a price.",
+        "lines": {t["label"]: _line_for(t["label"]) for t in tiles},
+        "focus": "",
+    }
+
+
 # ---- the agency rewriting the words -----------------------------------------
+
+def _services_fallback() -> str:
+    from coordination import profile
+    return "glass and aluminium work" if profile.is_starter() else profile.trade_line()
+
+
+def _writer_brief() -> str:
+    """WRITER_BRIEF for the owner's website; the same rules in another trade's words otherwise."""
+    from coordination import profile
+    if profile.is_starter():
+        return WRITER_BRIEF
+    return (WRITER_BRIEF
+            .replace("a glass and \
+aluminium company in the UAE ({areas})",
+                     profile.describe().replace("{", "{{").replace("}", "}}") + " ({areas})")
+            .replace("a glass and aluminium company in the UAE ({areas})",
+                     profile.describe().replace("{", "{{").replace("}", "}}") + " ({areas})")
+            .replace("property managers, facilities teams, real-estate firms, fit-out "
+                     "contractors and businesses", "the kinds of business it sells to")
+            .replace("we supply, fabricate and install with our own team; we measure on "
+                     "site; we give quotes from a photo sent on WhatsApp; we do repairs and "
+                     "replacements as well as new work; ", "")
+            .replace("plain British English", "plain " + profile.spelling()))
+
 
 WRITER_BRIEF = """You are writing ONE marketing email for {name}, a glass and \
 aluminium company in the UAE ({areas}), {years}+ years in the trade. It goes to \
@@ -791,9 +850,9 @@ def rewrite(focus=None, think=None) -> dict:
     biz = business()
     tiles = camp.get("tiles") or []
     focus = (camp["copy"].get("focus") if focus is None else focus) or ""
-    brief = WRITER_BRIEF.format(
+    brief = _writer_brief().format(
         name=biz["name"], areas=biz["areas_phrase"], years=biz.get("years") or "10",
-        services=", ".join(t["label"] for t in tiles[:MOST_TILES]) or "glass and aluminium work",
+        services=", ".join(t["label"] for t in tiles[:MOST_TILES]) or _services_fallback(),
         focus=(f"WHAT THE OWNER WANTS IT TO LEAD WITH: {focus}\n\n" if focus else ""))
 
     def ask(extra=""):

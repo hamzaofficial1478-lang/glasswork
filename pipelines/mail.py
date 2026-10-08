@@ -127,6 +127,38 @@ def email_type(stage: str) -> dict:
     return dict(_TYPES.get((stage or "new").strip().lower(), _TYPES["new"]))
 
 
+def _defaults() -> dict:
+    """
+    What a mail says when the company record leaves something out: the owner's
+    glass-and-aluminium words for his website, the profile's for anyone else's.
+    """
+    try:
+        from coordination import profile
+        if not profile.is_starter():
+            b = profile.business()
+            return {"name": b.get("name") or "",
+                    "tagline": b.get("tagline") or profile.trade_line(),
+                    "services": [sv.get("label") for sv in services.SERVICES.values()][:4]}
+    except Exception:
+        pass
+    return {"name": "Glassworks", "tagline": "Glass & aluminium, done properly",
+            "services": ["glass work", "aluminium", "doors", "pergolas"]}
+
+
+def _levers() -> list:
+    """The attention levers, in the open website's own trade and spelling."""
+    try:
+        from coordination import profile
+        if profile.is_starter():
+            return _LEVERS
+        return [l.replace("(the glass, the frame, the fixing)", "(the materials, the method)")
+                 .replace(" (WhatsApp beats a form in the UAE)", "")
+                 .replace("British-English", profile.spelling().replace(" English", "-English"))
+                for l in _LEVERS]
+    except Exception:
+        return _LEVERS
+
+
 def banner_spec(company: dict) -> dict:
     """
     The professional banner: brand block with the firm's real details, and a
@@ -134,9 +166,9 @@ def banner_spec(company: dict) -> dict:
     """
     return {
         "brand_block": {
-            "name": company.get("name", "Glassworks"),
-            "tagline": company.get("tagline", "Glass & aluminium, done properly"),
-            "services": company.get("services", ["glass work", "aluminium", "doors", "pergolas"]),
+            "name": company.get("name", _defaults()["name"]),
+            "tagline": company.get("tagline", _defaults()["tagline"]),
+            "services": company.get("services", _defaults()["services"]),
             "phone": company.get("phone", ""),
             "whatsapp": company.get("whatsapp", ""),
             "areas": company.get("areas", uae.served()),
@@ -189,7 +221,7 @@ def writing_brief(lead: dict, company: dict, owner_voice: str = "") -> dict:
         "length_words": [90, 130],
         "voice": owner_voice or (f"plain, human, confident, no filler — a tradesman "
                                  f"with {_years()}+ years in the trade, writing like a person"),
-        "attention_levers": _LEVERS,
+        "attention_levers": _levers(),
         # Every line here is one the Auditor checks afterwards. The brief used
         # to ask for "one real proof point" and no opt-out, and the Auditor
         # refused every draft for exactly those — so the two now say the same.
@@ -312,8 +344,8 @@ def render(plan_or_brief: dict, draft: str, company: dict, lead: dict) -> dict:
     phone = (fb.get("phone") or company.get("phone") or "").strip()
     wa = (fb.get("whatsapp") or company.get("whatsapp") or "").strip()
     areas = fb.get("areas") or company.get("areas") or uae.served()
-    name = company.get("name", "Glassworks")
-    tagline = company.get("tagline", "Glass & aluminium, done properly")
+    name = company.get("name", _defaults()["name"])
+    tagline = company.get("tagline", _defaults()["tagline"])
 
     subject, body = _split_subject(draft)
     if not subject:
@@ -1012,6 +1044,35 @@ def smtp_said(e) -> str:
     return f"could not reach the mail server: {type(e).__name__}: {e}"
 
 
+def _default_subject() -> str:
+    """What a mail with no subject line of its own is about: the business's trade."""
+    try:
+        from coordination import profile
+        if profile.is_starter():
+            return "Glass & aluminium work"
+        t = profile.business().get("trade_short") or profile.business().get("trade") or ""
+        return (t[:1].upper() + t[1:] + " work") if t else "A note from us"
+    except Exception:
+        return "Glass & aluminium work"
+
+
+def country_rule() -> dict:
+    """{may_send, rule, why} — may this website write to a business first?"""
+    try:
+        from coordination import profile
+        r = profile.outreach()
+    except Exception:
+        return {"may_send": True, "rule": "allowed", "why": ""}
+    if r["may_send"]:
+        return {"may_send": True, "rule": r["rule"], "why": r.get("law", "")}
+    if r["rule"] == "consent":
+        why = (r["law"] + " So the agency writes these as drafts for you to send to "
+               "people who have agreed to hear from you, and sends nothing itself.")
+    else:
+        why = r["law"]
+    return {"may_send": False, "rule": r["rule"], "why": why}
+
+
 def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
                headers=None) -> dict:
     """
@@ -1044,6 +1105,16 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
     if not to:
         return {"ok": False, "error": "this lead has no email address"}
 
+    # --- the country's rule on writing to a business first -------------------
+    # Not ours to decide, and not the same everywhere (coordination/countries):
+    # where it is settled that a business may be written to with an opt-out
+    # (the UAE, the UK, the US) this passes; where consent is needed first
+    # (Germany, Austria) nothing goes; anywhere else nothing goes until the
+    # owner has read his country's rule and confirmed it on Setup.
+    rule = country_rule()
+    if not rule["may_send"]:
+        return {"ok": False, "law": True, "error": "not sent: " + rule["why"]}
+
     # --- the cap, before anything leaves ------------------------------------
     cap = daily_cap()
     already = sent_today()
@@ -1059,7 +1130,7 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
         return {"ok": False, "wrong_domain": True, "error": "refusing to send: " + wrong}
 
     subject, body = _split_subject(draft)
-    msg = _message(sender, to, subject or "Glass & aluminium work", body or draft,
+    msg = _message(sender, to, subject or _default_subject(), body or draft,
                    html, from_name, headers)
     # Inside `with batch():` the batch's connection, pace and Sent copies are
     # shared; on its own, one mail gets a Mailer of its own.

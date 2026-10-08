@@ -135,6 +135,24 @@ SEEDS = [
      "hard to land and worth trying once you have two or three published pieces"),
 ]
 
+# THE LIST ABOVE IS THE OWNER'S: UAE directories, chambers and glazing
+# suppliers. Any other website starts from the listings every local business
+# in every country needs, and the desk finds its own country's directories,
+# trade bodies and suppliers from there (coordination/profile.py).
+GLASS_SEEDS = SEEDS
+try:
+    from coordination import profile as _pf
+    if not _pf.is_starter():
+        _everywhere = ("google.com/business", "bing.com/places", "apple.com/maps", "cybo.com")
+        SEEDS = [(h, n, k, e, w.replace("a Business Bay office manager finds a glazier",
+                                        "a customer nearby finds a business like yours")
+                                 .replace("asking Siri for a glazier near them",
+                                          "asking Siri for a business like yours nearby")
+                                 .replace("with a strong UAE section", "covering most countries"))
+                 for h, n, k, e, w in GLASS_SEEDS if h in _everywhere]
+except Exception:
+    pass
+
 # What we refuse, and the word that gives it away. Kept as data so the refusal
 # can be shown to the owner rather than living only in a docstring.
 REFUSED_TACTICS = {

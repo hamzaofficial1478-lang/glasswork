@@ -53,6 +53,17 @@ SERVICES = [
 AREAS = ["Dubai Marina", "Business Bay", "Downtown Dubai", "Jumeirah Village Circle",
          "Al Quoz", "Al Barsha", "Abu Dhabi", "Sharjah", "Dubai"]
 
+# The lists above are the owner's. Any other website's services and areas come
+# from its own business profile (coordination/profile.py).
+from coordination import profile as _profile  # noqa: E402
+
+if not _profile.is_starter():
+    from . import services as _svc
+    SERVICES = [(s["label"], list(dict.fromkeys([s["label"]] + list(s["names"]))))
+                for s in _svc.SERVICES.values()]
+    AREAS = uae.search_areas(9)
+WIDE = "UAE-wide" if _profile.is_starter() else "everywhere"
+
 # What every page on this site has to do, because the business's edge is real
 # finished work and fast replies — not word count. These are brief requirements,
 # not decoration: a page missing them is a page that wins no job.
@@ -116,7 +127,7 @@ def make_brief(g, rank):
     """A brief a human could actually write from, grounded in the real phrases."""
     svc, area = g["service"], g["area"]
     where = f" in {area}" if area else f" across {uae.served_phrase('&')}"
-    title = f"{svc.title()}{where}".replace("Uae", "UAE")
+    title = f"{svc.title()}{where}".replace("Uae", "UAE").replace("The Uk", "the UK")
     primary = sorted(g["phrases"], key=len)[0]      # shortest = the head term
     secondary = [p for p in sorted(set(g["phrases"])) if p != primary][:10]
     return {
@@ -125,7 +136,7 @@ def make_brief(g, rank):
         "url": "/" + _slug(f"{svc} {area}" if area else svc),
         "type": "service_page",
         "service": svc,
-        "area": area or "UAE-wide",
+        "area": area or WIDE,
         "primary_keyword": primary,
         "secondary_keywords": secondary,
         "evidence": {

@@ -82,6 +82,25 @@ def looks_like_uae_number(tel: str) -> bool:
     return bool(re.fullmatch(r"0(?:5\d{8}|[234679]\d{7})", n))
 
 
+def _country_word() -> str:
+    """'UAE' for the owner's website; the open website's country otherwise."""
+    from coordination import countries, profile
+    return "UAE" if profile.country("AE") == "AE" else countries.name(profile.country())
+
+
+def looks_like_local_number(tel) -> bool:
+    """
+    A real number in the open website's country — the UAE rules above for the
+    owner's website, the country's own numbering rules anywhere else.
+    """
+    from coordination import countries, profile
+    cc = profile.country("AE")
+    if cc == "AE":
+        return looks_like_uae_number(tel)
+    e = countries.normalise_phone(tel, cc)
+    return bool(e) and e.startswith("+" + countries.calling_code(cc))
+
+
 def _fetch(url, timeout=20):
     """One read-only GET. Returns (status, html, ms, error)."""
     req = urllib.request.Request(url, headers={"User-Agent": UA})
@@ -128,9 +147,10 @@ def check_enquiry_path(html, more_html=""):
     # a phone number that is not a UAE number is worse than none — it looks wrong
     tel = set(re.findall(r'href=["\']tel:([^"\']+)', blob, re.I))
     for t in sorted(tel):
-        if not looks_like_uae_number(t):
+        if not looks_like_local_number(t):
             out.append({"kind": "form_dead", "severity": "high",
-                        "detail": f"click-to-call number does not look like a UAE number: {t}"})
+                        "detail": f"click-to-call number does not look like a {_country_word()} "
+                                  f"number: {t}"})
     return out, found
 
 
@@ -180,7 +200,7 @@ def check_health(status, ms, url, err):
                               "which costs enquiries before anyone reads a word."})
     if ms >= VERY_SLOW_MS:
         out.append({"kind": "speed", "severity": "high",
-                    "detail": f"Home page took {ms}ms. On UAE mobile that is a bounce."})
+                    "detail": f"Home page took {ms}ms. On a phone on mobile data that is a bounce."})
     elif ms >= SLOW_MS:
         out.append({"kind": "speed", "severity": "medium",
                     "detail": f"Home page took {ms}ms — slower than a visitor will wait."})
@@ -264,7 +284,7 @@ def check_hygiene(html):
     if not re.search(r'<meta[^>]+name=["\']viewport["\']', html, re.I):
         out.append({"kind": "bug", "severity": "high",
                     "detail": "No viewport meta tag — the site will render desktop-sized "
-                              "on a phone, where most UAE enquiries start."})
+                              "on a phone, where most enquiries start."})
     if not re.search(r"<title[^>]*>\s*\S", html, re.I):
         out.append({"kind": "bug", "severity": "medium",
                     "detail": "The page has no title."})

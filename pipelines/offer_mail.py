@@ -306,6 +306,18 @@ def business() -> dict:
     g = lambda k, d="": (mail.setting(k) or d).strip()   # noqa: E731
     # Not AGENCY_NAME: that is this program's name ("World Deal Technical
     # Agency"), and a customer is written to by the company, not by its software.
+    from coordination import profile
+    if not profile.is_starter():
+        # Any other website: its own name and trade, never the owner's.
+        pb = profile.business()
+        return {
+            "name": g("BUSINESS_NAME") or pb.get("name") or "",
+            "tagline": g("BUSINESS_TAGLINE") or pb.get("tagline") or profile.trade_line(),
+            "areas": [a.strip() for a in (g("BUSINESS_AREAS") or ", ".join(uae.served())).split(",")
+                      if a.strip()],
+            "years": g("BUSINESS_YEARS") or str(pb.get("years") or ""),
+            "trade": profile.trade_line(),
+        }
     return {
         "name": g("BUSINESS_NAME") or "World Deal Technical Services",
         "tagline": g("BUSINESS_TAGLINE") or "Glass, aluminium and wooden works",
@@ -405,7 +417,8 @@ def build(url="", timeout=SITE_TIMEOUT, images="auto") -> dict:
                         "button to press — set BUSINESS_PHONE on /setup")
 
     where = _join(biz["areas"])
-    subject = f"Glass, aluminium and wooden works across {where}"
+    subject = (f"{biz['tagline']} across {where}" if biz.get("trade")
+               else f"Glass, aluminium and wooden works across {where}")
     preheader = (f"{biz['years']}+ years in the trade. "
                  f"{len(services)} services, photographs of recent work, and "
                  "one number to call.")
@@ -437,9 +450,11 @@ def _text_email(biz, services, con) -> str:
     lines = [
         f"{biz['name']} — {biz['tagline']}",
         "",
-        f"{biz['years']}+ years of glass and aluminium work across "
-        f"{_join(biz['areas'])}. Supply, fabrication and installation, all "
-        "done by our own fitters.",
+        (f"{biz['years']}+ years of {biz['trade']} across {_join(biz['areas'])}. "
+         "All done by our own team." if biz.get("trade") else
+         f"{biz['years']}+ years of glass and aluminium work across "
+         f"{_join(biz['areas'])}. Supply, fabrication and installation, all "
+         "done by our own fitters."),
         "",
         "WHAT WE DO",
     ]
@@ -585,10 +600,11 @@ def _html_email(biz, services, con, preheader, more="") -> str:
 
   <tr><td style="padding:24px 24px 4px">
     <div style="font-size:19px;font-weight:700;line-height:1.35;color:#12313a">
-      {e(biz['years'])}+ years of glass and aluminium work<br>across {where}.</div>
+      {e(biz['years'])}+ years of {e(biz.get('trade') or 'glass and aluminium work')}<br>across {where}.</div>
     <p style="margin:12px 0 0;font-size:15px;line-height:1.65;color:#3c4c53">
-      Supply, fabrication and installation — all of it by our own fitters, not
-      subcontracted out. Villas, offices, shopfronts and fit-outs.</p>
+      {e('All of it by our own team.') if biz.get('trade') else
+       'Supply, fabrication and installation — all of it by our own fitters, not '
+       'subcontracted out. Villas, offices, shopfronts and fit-outs.'}</p>
   </td></tr>
 
   <tr><td style="padding:20px 18px 0">

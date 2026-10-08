@@ -55,6 +55,9 @@ CONCESSION = (
     r"discount", r"free of charge", r"no charge", r"complimentary",
     r"special offer", r"off the price", r"best price", r"cheapest",
     r"price match", r"% off", r"aed\s*\d", r"dhs?\s*\d",
+    # any other website's money too: a price in pounds, euros or dollars is
+    # still a price the owner has not approved
+    r"[£€$]\s*\d", r"\b(?:gbp|eur|usd|sar|qar|inr|pkr)\s*\d",
 )
 
 # Placeholders a template leaves behind when something did not get filled in.
@@ -322,6 +325,7 @@ CODE_IN_A_PAGE = (
 ENQUIRY = (
     r"\bwhatsapp\b", r"wa\.me/", r"\btel:", r"\bhref\s*=\s*[\"']?/?contact",
     r"(?:\+?971|0)\s?\d[\d\s\-()]{6,13}\d",
+    r"\+\d{1,3}[\s\-]?\d[\d\s\-()]{6,13}\d",     # a number in any country
     r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
 )
 
@@ -404,7 +408,7 @@ def check_page(html, brief=None, site_host="") -> dict:
             warnings.append(f"it never says {primary!r}, which is the phrase this "
                             "page was briefed for")
         area = str(brief.get("area") or "").strip()
-        if area and area.lower() not in ("uae-wide", "") and area.lower() not in text.lower():
+        if area and area.lower() not in ("uae-wide", "everywhere", "") and area.lower() not in text.lower():
             warnings.append(f"it never mentions {area}, and the page is meant to be "
                             "the one that ranks there")
         if not re.search(r"<img\b", html or "", re.I):

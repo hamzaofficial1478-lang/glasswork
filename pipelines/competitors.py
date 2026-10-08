@@ -448,6 +448,28 @@ NOT_A_RIVAL = (
     "pharmacy", "supermarket", "mosque", "tower", "residence",
 )
 
+# THE TAGS AND NAMES ABOVE ARE THE OWNER'S TRADE. Any other website looks for
+# firms named for ITS services — the words in its own catalogue
+# (coordination/profile.py) — since no map tags a plumber or a bakery the same
+# way it tags a glazier.
+_TRADE_RE = r"glass|alumin|glaz|pergola|shopfront|curtain wall"
+from coordination import profile as _pf  # noqa: E402
+try:
+    if not _pf.is_starter():
+        from . import services as _svc
+        _words = sorted({w for sv in _svc.SERVICES.values()
+                         for n in [sv["label"]] + list(sv["names"])
+                         for w in re.findall(r"[a-z]{4,}", n.lower())}
+                        | {w for w in re.findall(r"[a-z]{4,}", (_pf.business().get("trade") or "").lower())})
+        _words = [w for w in _words if w not in {"work", "works", "services", "service", "repair",
+                                                 "installation", "supply", "fitting"}][:20]
+        if _words:
+            RIVAL_TAGS = ()
+            RIVAL_NAME_RE = "|".join(f"{w}|{w.capitalize()}|{w.upper()}" for w in _words)
+            _TRADE_RE = "|".join(re.escape(w) for w in _words)
+except Exception:
+    pass
+
 # How many rivals it is worth putting in front of him at once. A list of forty
 # is a list he will not read, and confirming a rival costs him a glance rather
 # than nothing.
@@ -462,8 +484,7 @@ def _looks_like_a_rival(name, tags) -> bool:
         return False
     # It has to actually be in the trade — either tagged as it, or named for it.
     tagged = any(tags.get(k) == v for k, v in RIVAL_TAGS)
-    named = bool(re.search(r"glass|alumin|glaz|pergola|shopfront|curtain wall",
-                           n, re.I))
+    named = bool(re.search(_TRADE_RE, n, re.I))
     return tagged or named
 
 
@@ -545,10 +566,10 @@ def discover(areas=None, limit=MOST_TO_SUGGEST, timeout=45,
                 "found": 0, "suggested": []}
     try:
         from coordination import uae
-        wanted = [a for a in (areas or uae.EMIRATES) if a in osm.BBOX]
+        wanted = [a for a in (areas or uae.EMIRATES or uae.served()) if osm.box_for(a)]
     except Exception:                                         # pragma: no cover
         wanted = [a for a in (areas or ()) if a in osm.BBOX] or list(osm.BBOX)
-    if not wanted:
+    if not wanted and _pf.is_starter():
         wanted = list(osm.BBOX)
     # Only if the caller did not name them. "--find --area Dubai" means Dubai,
     # not "Dubai if it is Dubai's turn".
@@ -563,7 +584,7 @@ def discover(areas=None, limit=MOST_TO_SUGGEST, timeout=45,
         if time.time() >= stop_at:
             ran_out = True
             break
-        bbox = osm.BBOX[area]
+        bbox = osm.box_for(area)
         tagged = "".join(f'nwr["{k}"="{v}"]({bbox});' for k, v in RIVAL_TAGS)
         named = (f'nwr["name"~"{RIVAL_NAME_RE}"]["shop"]({bbox});'
                  f'nwr["name"~"{RIVAL_NAME_RE}"]["craft"]({bbox});'
@@ -602,7 +623,9 @@ def discover(areas=None, limit=MOST_TO_SUGGEST, timeout=45,
     put_forward.sort(key=lambda r: (not r["domain"], r["name"].lower()))
     added = []
     for r in put_forward[:limit]:
-        why = (f"mapped as a {('glass or aluminium firm' if r['domain'] else 'glass or aluminium firm')}"
+        firm = ("glass or aluminium firm" if _pf.is_starter()
+                else f"{_pf.trade_line()} business")
+        why = (f"mapped as a {firm}"
                f" in {r['area']} on OpenStreetMap"
                + (f" ({r['domain']})" if r["domain"] else ", with no website listed"))
         if suggest_rival(r["name"], evidence=why, domain=r["domain"]):

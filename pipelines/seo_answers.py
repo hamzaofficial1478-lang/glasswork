@@ -348,8 +348,8 @@ def _c_localbusiness(p):
     if missing:
         return False, "LocalBusiness markup is missing " + ", ".join(missing)
     if not b.get("areaServed"):
-        return False, ("LocalBusiness markup has no areaServed — name Dubai, Abu Dhabi "
-                       "and Sharjah explicitly")
+        return False, _localise("LocalBusiness markup has no areaServed — name Dubai, "
+                                "Abu Dhabi and Sharjah explicitly")
     return True, "LocalBusiness markup with name, address, phone and areas served"
 
 
@@ -536,6 +536,36 @@ CHECKS = [
      "from a dated one.", "IT"),
 ]
 
+
+def _localise(text: str) -> str:
+    """
+    The advice above was written with the owner's examples (a glass partition in
+    Dubai). Any other website reads the same advice with its own service, place
+    and currency — coordination/profile.py.
+    """
+    from coordination import profile, uae
+    if profile.is_starter():
+        return text
+    first = next(iter(services.SERVICES.values()), {}).get("label") or "your main service"
+    home = (uae.served() or [profile.where()])[0]
+    swaps = (
+        ("How much does a frameless glass partition cost in Dubai?",
+         f"How much does {first} cost in {home}?"),
+        ("How much does a glass partition cost in Dubai?", f"How much does {first} cost in {home}?"),
+        ("areaServed listing every emirate you work in", "areaServed listing every area you work in"),
+        ("a price range in AED, glass thickness in mm", f"a price range in {profile.money()}, a size or measurement"),
+        ("a Dubai Municipality regulation, a glass standard", "a local regulation, an industry standard"),
+        ("“A frameless glass partition is a floor-to-ceiling divider made from toughened glass with no "
+         "vertical framing.” ", ""),
+        ("name Dubai, Abu Dhabi and Sharjah explicitly", "name the areas you serve explicitly"),
+    )
+    for old, new in swaps:
+        text = text.replace(old, new)
+    return text
+
+
+CHECKS = [tuple(_localise(x) if isinstance(x, str) else x for x in c) for c in CHECKS]
+
 WEIGHT_TOTAL = sum(c[3] for c in CHECKS)
 
 
@@ -686,6 +716,9 @@ def llms_txt(base="", svc_keys=None) -> str:
             keys = list(services.SERVICES.keys())
         except Exception:
             keys = []
+    from coordination import profile
+    if not profile.is_starter():
+        return _llms_txt_for(base, keys)
     lines = [
         "# Glass & aluminium services, UAE",
         "",
@@ -712,6 +745,21 @@ def llms_txt(base="", svc_keys=None) -> str:
         "the site is a range from real jobs, not a fixed price.",
         "- Work is carried out in the UAE only.",
     ]
+    return "\n".join(lines) + "\n"
+
+
+def _llms_txt_for(base, keys) -> str:
+    """llms.txt for any website that is not the owner's: its own trade and places."""
+    from coordination import profile, uae
+    b = profile.business()
+    where = uae.served_phrase()
+    lines = [f"# {(b.get('trade_short') or b.get('trade') or 'Our services').capitalize()}, {profile.where()}",
+             "", f"> {b.get('description') or b.get('trade') or 'Our services'} — across {where}.",
+             "", "## Services"]
+    for k in keys:
+        lab = services.label(k)
+        lines.append(f"- [{lab}]({base}/{k.replace('_', '-')}): {lab}, across {where}.")
+    lines += ["", "## Contact", f"- [Enquiries]({base}/contact): get in touch for a quote.", ""]
     return "\n".join(lines) + "\n"
 
 
@@ -745,9 +793,9 @@ def faq_pairs_on(url, html=None):
             continue
         pairs.append((h.strip(), a[:1200].strip()))
     if not pairs:
-        return [], ("no question-shaped headings on that page. Write the question "
-                    "as an H2 first — 'How much does a glass partition cost in "
-                    "Dubai?' — with the answer underneath, then run this again.")
+        return [], _localise("no question-shaped headings on that page. Write the "
+                             "question as an H2 first — 'How much does a glass partition "
+                             "cost in Dubai?' — with the answer underneath, then run this again.")
     return pairs, ""
 
 
@@ -834,7 +882,10 @@ def localbusiness_jsonld(base, pages) -> tuple:
 
     missing = []
     if not tel:
-        tel = "YOUR PHONE, IN FULL INTERNATIONAL FORM e.g. +9715XXXXXXXX"
+        from coordination import countries as _cc, profile as _pf
+        code = _cc.calling_code(_pf.country("AE")) or "971"
+        tel = ("YOUR PHONE, IN FULL INTERNATIONAL FORM e.g. +9715XXXXXXXX" if code == "971"
+               else "YOUR PHONE, IN FULL INTERNATIONAL FORM")
         missing.append("telephone")
     if not name:
         name = "YOUR REGISTERED BUSINESS NAME"
@@ -854,7 +905,9 @@ def localbusiness_jsonld(base, pages) -> tuple:
     # remember why. Saved once on /setup (or in .env) it survives every rebuild.
     street, city = _saved_address()
     if not street:
-        street, city = "YOUR STREET / UNIT", city or "YOUR EMIRATE e.g. Dubai"
+        from coordination import profile as _pf
+        street, city = "YOUR STREET / UNIT", city or (
+            "YOUR EMIRATE e.g. Dubai" if _pf.is_starter() else "YOUR TOWN OR CITY")
         missing.append("address")
 
     doc = {
@@ -867,8 +920,8 @@ def localbusiness_jsonld(base, pages) -> tuple:
         "address": {
             "@type": "PostalAddress",
             "streetAddress": street,
-            "addressLocality": city or "Dubai",
-            "addressCountry": "AE",
+            "addressLocality": city or (__import__("coordination.uae", fromlist=["served"]).served() or ["Dubai"])[0],
+            "addressCountry": __import__("coordination.profile", fromlist=["country"]).country("AE"),
         },
         "areaServed": uae.served(),
         "openingHours": "Mo-Sa 08:00-18:00",

@@ -207,10 +207,13 @@ def opening(lead, service_label="") -> str:
     first message, not a quotation.
     """
     who = lead.get("company") or "there"
-    what = service_label or "glass and aluminium work"
-    where = lead.get("area") or "Dubai"
+    from coordination import profile, uae
+    starter = profile.is_starter()
+    what = service_label or ("glass and aluminium work" if starter else profile.trade_line())
+    where = lead.get("area") or ("Dubai" if starter else (uae.served() or ["your area"])[0])
+    trade = "glass and aluminium workshop" if starter else f"{profile.trade_line()} business"
     return (f"Hello {who} — I saw the WhatsApp button on your website. "
-            f"I run a glass and aluminium workshop and we do a lot of {what} "
+            f"I run a {trade} and we do a lot of {what} "
             f"around {where}. If anything needs fixing or replacing, send me a "
             "photo and I'll tell you straight away whether it's worth doing and "
             "what it involves. No obligation.")

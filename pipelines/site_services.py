@@ -54,6 +54,19 @@ TRADE_WORDS = ("glass", "alumin", "door", "window", "partition", "railing",
                "installation", "repair", "maintenance", "glazing", "wooden",
                "timber", "steel", "stainless", "acp", "upvc")
 
+# ...those are the owner's trade. Any other website's are the words in its own
+# service catalogue and trade (coordination/profile.py).
+try:
+    from coordination import profile as _pf
+    if not _pf.is_starter():
+        TRADE_WORDS = tuple(sorted({w for sv in services.SERVICES.values()
+                                    for n in [sv["label"]] + list(sv["names"])
+                                    for w in re.findall(r"[a-z]{4,}", n.lower())}
+                                   | {w for w in re.findall(r"[a-z]{4,}",
+                                                            (_pf.business().get("trade") or "").lower())}))
+except Exception:
+    pass
+
 # Headings, nav links and list items. NOT <title> — "Glassworks Dubai | Glass &
 # Aluminium" contains the trade words and is the company name, not a service,
 # and letting it in puts the business's own name on the list of things it sells.

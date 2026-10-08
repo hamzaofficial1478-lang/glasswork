@@ -104,6 +104,17 @@ SHELF_MEANING = {
 }
 
 
+
+def _trade() -> str:
+    """What the business does and where, for an agent's briefing."""
+    try:
+        from . import profile
+        if profile.is_starter():
+            return "glass & aluminium fabrication and installation, UAE"
+        return f"{profile.business().get('trade') or profile.trade_line()}, {profile.where()}"
+    except Exception:
+        return "glass & aluminium fabrication and installation, UAE"
+
 def _one(c, q, args=(), default=0):
     try:
         r = c.execute(q, args).fetchone()
@@ -182,7 +193,7 @@ def build():
         "generated_at": int(time.time()),
         "todays_orders": orders,
         "business": {
-            "trade": "glass & aluminium fabrication and installation, UAE",
+            "trade": _trade(),
             "services": sells,
             "sells_to": sells_to,
             "areas": areas,

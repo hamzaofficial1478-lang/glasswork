@@ -130,10 +130,13 @@ def scan_lead(lead: dict):
                     "excerpt": email})
 
     phone = re.sub(r"[^\d+]", "", str(lead.get("phone") or ""))
-    if phone and not (phone.startswith("+971") or phone.startswith("971")
+    from coordination import countries, profile
+    code = countries.calling_code(profile.country("AE")) or "971"
+    if phone and not (phone.startswith("+" + code) or phone.startswith(code)
                       or phone.startswith("0")):
+        here = "UAE" if code == "971" else countries.name(profile.country())
         out.append({"kind": "scam_lead", "severity": "medium", "where": "phone",
-                    "why": "claims to be a UAE firm on a non-UAE number",
+                    "why": f"claims to be a {here} firm on a non-{here} number",
                     "excerpt": phone})
 
     blob = " ".join(str(lead.get(k) or "") for k in

@@ -281,7 +281,7 @@ def build(brief, kind="blog", site="", suggest=None, serp=None, fetch=None,
         areas = list(uae.served() or [])
     except Exception:
         areas = ["Dubai", "Abu Dhabi", "Sharjah"]
-    if brief.get("area") and brief.get("area") != "UAE-wide":
+    if brief.get("area") and brief.get("area") not in ("UAE-wide", "everywhere"):
         areas = [brief["area"]] + [a for a in areas if a != brief["area"]]
 
     # 1. THE CANDIDATES, WITH THEIR EVIDENCE
@@ -500,11 +500,12 @@ def for_the_writer(pack, kind="blog") -> list:
         if pack.get("headings_to_cover"):
             L.append("  WHAT THEIR PAGES COVER — cover all of it, better and more specifically:")
             L += [f"    - {h}" for h in pack["headings_to_cover"]]
+        from coordination import profile as _pf
         L.append("  BEAT THEM ON: real trade detail, a clear comparison table, straight answers, "
-                 "UAE conditions — the things a generic page lacks.")
+                 f"{_pf.conditions()} — the things a generic page lacks.")
     if re.search(r"price|cost|rate|quote", " ".join([pack["primary"]] + list(pack.get("secondary") or []))):
         L.append("  PRICE KEYWORDS: use the words, and explain what the cost depends on and how "
-                 "a quote is worked out — never a figure, an AED amount, a range or a rate. "
+                 f"a quote is worked out — never a figure, an {__import__('coordination.profile', fromlist=['money']).money()} amount, a range or a rate. "
                  "A page with one is thrown out.")
     L.append(f"  LENGTH: about {pack['target_words']} words"
              + (f" — the pages ranking now run to about {pack['rival_median_words']}"

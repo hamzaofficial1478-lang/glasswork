@@ -101,13 +101,31 @@ BRAND_LOOKUP = ("reviews", "review", "photos", "contact number", "careers",
                 "opening hours", "location map", "whatsapp number")
 _BRAND_RE = re.compile(r"\b(" + "|".join(re.escape(b) for b in BRAND_LOOKUP)
                        + r")\b")
+# ANY OTHER WEBSITE: its own services, the words of its trade, and every
+# country that is not its own as the "somewhere else" list (coordination/profile.py).
+from coordination import countries as _countries, profile as _profile  # noqa: E402
+
+_GL = "ae"
+_SCOPE_WORDS = ("glass", "aluminium", "aluminum", "pergola", "door", "window", "partition",
+                "balustrade", "railing")
+if not _profile.is_starter():
+    from . import services as _svc
+    SERVICES = [s["label"] for s in _svc.SERVICES.values()]
+    _GL = (_profile.country() or "gb").lower()
+    _here = set(_countries.aliases(_profile.country()))
+    NON_UAE = tuple(n.lower() for _c, n in _countries.all_countries()
+                    if _c != _profile.country() and n.lower() not in _here)
+    _SCOPE_WORDS = tuple(dict.fromkeys(
+        w for s in _svc.SERVICES.values() for n in [s["label"]] + list(s["names"])
+        for w in n.lower().split() if len(w) > 3))
+
 _NON_UAE_RE = re.compile(r"\b(" + "|".join(re.escape(g) for g in NON_UAE) + r")\b")
 
 
 def _suggest(q):
     """Real, keyless keyword-demand data from Google Suggest (read-only)."""
     url = "https://suggestqueries.google.com/complete/search?" + urllib.parse.urlencode(
-        {"client": "firefox", "hl": "en", "gl": "ae", "q": q})
+        {"client": "firefox", "hl": "en", "gl": _GL, "q": q})
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (glasswork-seo)"})
     with urllib.request.urlopen(req, timeout=12) as r:
         data = json.loads(r.read().decode("utf-8", "replace"))
@@ -174,6 +192,15 @@ _TRADE_WORDS = {"glass", "aluminium", "aluminum", "works", "work", "dubai",
                 "sharjah", "technical", "services", "contracting", "trading",
                 "company", "industries", "emirates", "national", "general",
                 "decor"}
+try:
+    from coordination import profile as _p, uae as _u
+    if not _p.is_starter():
+        _TRADE_WORDS |= {w for t in (_p.business().get("trade") or "",
+                                     _p.business().get("trade_short") or "")
+                         for w in t.lower().split() if len(w) > 2}
+        _TRADE_WORDS |= {w for a in _u.search_areas() for w in a.lower().split()}
+except Exception:
+    pass
 
 # Small words and company suffixes that sit between a name and the trade words
 # after it, and must be trimmed with them. Without "and", the same run offered
@@ -244,9 +271,7 @@ def _in_scope(phrase):
     # company name, so this keeps working as new firms open.
     if _BRAND_RE.search(p):
         return False
-    return ("glass" in p or "aluminium" in p or "aluminum" in p
-            or "pergola" in p or "door" in p or "window" in p or "partition" in p
-            or "balustrade" in p or "railing" in p)
+    return any(w in p for w in _SCOPE_WORDS)
 
 
 def critic_check(gaps, seeds_used):
@@ -467,9 +492,18 @@ def seeds_for(job, max_seeds):
     return (named + wanted + rest)[:max_seeds]
 
 
+def _what() -> str:
+    """'UAE glass & aluminium' — what this business is, in a line for a log."""
+    if _profile.is_starter():
+        return "UAE glass & aluminium"
+    b = _profile.business()
+    return f"{b.get('trade_short') or b.get('trade') or 'the business'} in " \
+           f"{_countries.in_a_sentence(_profile.country())}"
+
+
 def _gap(agent, max_seeds, cost_ceiling, job=None):
     b = cabinet.borrow("seo_data", agent, "SEO",
-                       reason="keyword-gap pull for UAE glass & aluminium",
+                       reason="keyword-gap pull for " + _what(),
                        data_class="external", cost_ceiling=cost_ceiling, wait=True)
     if not b["ok"]:
         return {"ok": False, "error": "could not borrow the seo_data shelf: " + b.get("error", "")}
@@ -581,7 +615,7 @@ def _gap(agent, max_seeds, cost_ceiling, job=None):
         con.commit()
 
         buy = [g["phrase"] for g in top if g["intent"] == "buy"][:12]
-        body = (f"Keyword-gap list for UAE glass & aluminium — {len(top)} new in-scope "
+        body = (f"Keyword-gap list for {_what()} — {len(top)} new in-scope "
                 f"phrases not yet tracked (source: {source}). Top buying-intent gaps:\n- "
                 + "\n- ".join(buy or [g["phrase"] for g in top[:12]]))
         # SEO words this itself where it has a brain — coordination/ask.py. The

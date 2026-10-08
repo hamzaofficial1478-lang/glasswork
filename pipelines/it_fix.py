@@ -459,7 +459,9 @@ def fix_title(issue, ctx):
     if issue["kind"] != "bug" or "title" not in text:
         return None
     suggestion = (ctx.get("business_name") or "").strip()
-    trade = "Glass & Aluminium"
+    from coordination import profile
+    trade = ("Glass & Aluminium" if profile.is_starter()
+             else profile.trade_line().title().replace("&Amp;", "&"))
     where = (ctx.get("emirate") or "").strip()
     draft = " | ".join([b for b in
                         [suggestion or None, trade, where or None] if b])
@@ -507,7 +509,7 @@ def fix_speed(issue, ctx):
     ms = re.search(r"(\d{3,6})\s*ms", issue["detail"] or "")
     took = f"{ms.group(1)}ms" if ms else "too long"
     return _advice(
-        f"The page took {took}. On UAE mobile that is somebody going back to "
+        f"The page took {took}. On a phone that is somebody going back to "
         "the search results. I can measure it but I cannot tell you WHY from "
         "one number, so this is what to check, in the order that usually pays.",
         ["Photos of finished jobs are almost always it: anything over about "

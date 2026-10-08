@@ -211,6 +211,56 @@ Reply with JSON and nothing else:
 td, strong, em, a, blockquote, and the image markers>",
  "note": "<one line on what you led with and why>"}"""
 
+# For any website that is not the owner's: the same rules, written for its own
+# trade and country (coordination/profile.py). His keeps SYSTEM, word for word.
+GENERIC_HEAD = """\
+You write for the website of __BUSINESS__ — __WHAT__. What you write goes on \
+the business's own site, under its name, and customers read it before they \
+get in touch.
+
+WRITE LIKE THE PEOPLE WHO DO THE WORK
+__SPELLING__. Write as the business, "we", the way a good tradesperson talks a \
+customer through a job: plain, specific, a little opinionated, never salesy. \
+Vary the length of your sentences. Open with the situation the reader is in, \
+not a definition. One idea to a paragraph. Contractions are fine. No \
+exclamation marks. No rhetorical questions as headings. Do not finish with a \
+summary of what you already said.
+
+USE WHAT THE TRADE KNOWS — THAT IS WHAT MAKES IT READ AS REAL
+You may and should use accurate, general knowledge of this trade: the \
+materials and options, how a job runs from first visit to finish, what local \
+conditions in __WHERE__ do to the work, what to check before choosing who to \
+hire, what goes wrong with cheap work, and how to look after it afterwards. \
+Explain the trade-offs a customer is actually weighing. That detail is what a \
+generic page lacks.
+
+"""
+
+
+def system_prompt() -> str:
+    """The writer's instructions for the open website's business."""
+    from coordination import countries, profile
+    years = str(_years())
+    if profile.is_starter():
+        return SYSTEM.replace("__YEARS__", years)
+    b = profile.business()
+    cur = (profile.current().get("currency") or "").strip()
+    rest = SYSTEM[SYSTEM.index("WHAT YOU MUST NOT CLAIM"):]
+    rest = rest.replace("no AED amount", f"no {cur} amount" if cur else "no money amount")
+    return (GENERIC_HEAD
+            .replace("__BUSINESS__", profile.describe())
+            .replace("__WHAT__", b.get("description") or b.get("trade") or "its services")
+            .replace("__WHERE__", countries.in_a_sentence(profile.country()))
+            .replace("__SPELLING__", profile.spelling())
+            + rest).replace("__YEARS__", years)
+
+
+def _local_conditions() -> str:
+    from coordination import countries, profile
+    return ("UAE conditions" if profile.is_starter()
+            else countries.in_a_sentence(profile.country()) + "'s conditions")
+
+
 KIND_NOTES = {
     "blog": ("THIS IS A BLOG ARTICLE WRITTEN TO RANK, not a sales page. SEO has "
              "given you a keyword plan below; the piece is built on it. Title: the "
@@ -322,7 +372,8 @@ def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
     except Exception as e:                                    # pragma: no cover
         return {"ok": False, "error": f"the provider shelf did not load ({e})"}
 
-    lines = [KIND_NOTES.get(kind, KIND_NOTES["service_page"]), "",
+    lines = [KIND_NOTES.get(kind, KIND_NOTES["service_page"])
+             .replace("in UAE conditions", "in " + _local_conditions()), "",
              f"THE SUBJECT: {brief.get('title') or ''}",
              f"WHAT IT IS FOR: {brief.get('angle') or ''}"]
     if pack:
@@ -335,11 +386,13 @@ def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
         if sec:
             lines.append("OTHER PHRASES PEOPLE SEARCH: " + ", ".join(sec[:10]))
     area = brief.get("area") or ""
-    if area and area != "UAE-wide":
+    if area and area not in ("UAE-wide", "everywhere"):
         lines.append(f"THE AREA: {area}")
     else:
-        lines.append("THE AREA: the whole UAE — "
-                     + ", ".join(facts.get("areas") or []))
+        from coordination import countries, profile
+        whole = ("the whole UAE" if profile.is_starter()
+                 else "all of " + countries.in_a_sentence(profile.country()))
+        lines.append(f"THE AREA: {whole} — " + ", ".join(facts.get("areas") or []))
     lines.append("HOW LONG: " + (f"about {pack['target_words']} words" if pack and
                                  pack.get("target_words") else LENGTH.get(kind, LENGTH['service_page']))
                  + " — full, specific and useful; never padded")
@@ -387,7 +440,7 @@ def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
                   "Same JSON shape.", "", "YOUR DRAFT:",
                   json.dumps({k: previous.get(k) for k in ("title", "meta", "h1", "html")})]
 
-    r = think(BRAIN, [{"role": "system", "content": SYSTEM.replace("__YEARS__", str(_years()))},
+    r = think(BRAIN, [{"role": "system", "content": system_prompt()},
                       {"role": "user", "content": "\n".join(lines)}],
               agent=AGENT, max_tokens=tokens or TOKENS.get(kind, WRITE_TOKENS),
               timeout=540,

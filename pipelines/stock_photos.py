@@ -172,7 +172,12 @@ BETTER_WORDS = {
 def for_service(label, width=600) -> dict:
     """A photograph for one of his services, searched with words that work."""
     key = " ".join((label or "").lower().split())
-    return find(BETTER_WORDS.get(key, f"{label} glass aluminium"), width=width)
+    try:
+        from coordination import profile
+        trade = "glass aluminium" if profile.is_starter() else profile.trade_line()
+    except Exception:
+        trade = "glass aluminium"
+    return find(BETTER_WORDS.get(key, f"{label} {trade}".strip()), width=width)
 
 
 def _cli():

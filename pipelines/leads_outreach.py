@@ -567,6 +567,15 @@ def preview(to_email="", lead=None, company=None) -> dict:
     "preview" can never quietly become "send to a lead".
     """
     company = company or _company()
+    from coordination import profile
+    if lead is None and not profile.is_starter():
+        # Any other website: a sample business of a kind it sells to, in its own area.
+        from . import leads_sources
+        seg = next(iter(leads_sources.SEGMENTS), "")
+        area = (uae.served() or [""])[0]
+        lead = {"company": "Example Business", "email": to_email or "preview@example.com",
+                "area": area, "segment": seg, "service": services.FALLBACK,
+                "website": "", "address": area}
     lead = lead or {
         # A realistic lead, not a lorem-ipsum one: the mail is only judgeable
         # if the reader can picture the business it is going to.

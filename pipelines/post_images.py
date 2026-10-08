@@ -37,12 +37,22 @@ SKIP_NAMES = ("logo", "icon", "favicon", "sprite", "avatar", "flag", "arrow",
               "quote", "bg", "background", "pattern", "shape", "dot", "banner-shape")
 
 
+# Words that say where or how much, not what is in the picture — the owner's
+# places, or the open website's own (coordination/uae.py).
+_NOT_THE_SUBJECT = {"with", "your", "from", "that", "this", "dubai", "sharjah",
+                    "abu", "dhabi", "uae", "across", "near", "best", "price"}
+try:
+    from coordination import uae as _uae
+    _NOT_THE_SUBJECT |= {w for a in _uae.search_areas() for w in a.lower().split()}
+except Exception:
+    pass
+
+
 def _words(*phrases) -> set:
     out = set()
     for p in phrases:
         for w in re.findall(r"[a-z]{4,}", str(p or "").lower()):
-            if w not in ("with", "your", "from", "that", "this", "dubai", "sharjah",
-                         "abu", "dhabi", "uae", "across", "near", "best", "price"):
+            if w not in _NOT_THE_SUBJECT:
                 out.add(w.rstrip("s"))
     # His site spells it "aluminum"; the briefs say "aluminium". Both.
     if any(w.startswith("alumini") for w in out):
@@ -120,7 +130,12 @@ def stock_photos(label, subject, limit=MOST) -> list:
     except Exception:
         return []
     out, tried = [], []
-    for query in (stock.BETTER_WORDS.get(label.lower().strip(), f"{label} glass aluminium"),
+    try:
+        from coordination import profile
+        trade = "glass aluminium" if profile.is_starter() else profile.trade_line()
+    except Exception:
+        trade = "glass aluminium"
+    for query in (stock.BETTER_WORDS.get(label.lower().strip(), f"{label} {trade}".strip()),
                   f"{label} installation detail", f"{subject} modern interior"):
         if len(out) >= limit or query in tried:
             break

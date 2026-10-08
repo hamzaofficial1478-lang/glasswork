@@ -556,7 +556,9 @@ def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
 PLACEHOLDERS = {
     "YOUR STREET / UNIT": "BUSINESS_ADDRESS",
     "YOUR EMIRATE e.g. Dubai": "BUSINESS_CITY",
+    "YOUR TOWN OR CITY": "BUSINESS_CITY",             # any other country's
     "YOUR PHONE, IN FULL INTERNATIONAL FORM e.g. +9715XXXXXXXX": "",
+    "YOUR PHONE, IN FULL INTERNATIONAL FORM": "",
     "YOUR REGISTERED BUSINESS NAME": "",
     "YOUR EMAIL": "",
 }
@@ -625,8 +627,11 @@ def fix_address(agent=AGENT, s=None) -> dict:
     if refused:
         return {"ok": False, "error": refused}
     where = find_placeholders(s=s)
+    from coordination import uae
+    home = city or (uae.served() or ["Dubai"])[0]
     swaps = {"YOUR STREET / UNIT": street,
-             "YOUR EMIRATE e.g. Dubai": city or "Dubai"}
+             "YOUR EMIRATE e.g. Dubai": home,
+             "YOUR TOWN OR CITY": home}
     changed, failed, left = [], [], []
     for row in where["found"]:
         got = read_page(row["page"], s=s)
@@ -1751,7 +1756,7 @@ def schema_plan(s=None) -> dict:
     # The two placeholders are left in CAPITALS on purpose by the generator. A
     # wrong address costs the map-pack ranking the block exists to win, so it
     # is better to refuse than to publish "YOUR STREET / UNIT" to the world.
-    if lb and ("YOUR STREET" in lb or "YOUR EMIRATE" in lb):
+    if lb and ("YOUR STREET" in lb or "YOUR EMIRATE" in lb or "YOUR TOWN OR CITY" in lb):
         problems.append(
             "your workshop address is not saved yet, and it is nowhere on your "
             "website for the agency to read. A wrong address here costs the "

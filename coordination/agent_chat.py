@@ -495,6 +495,18 @@ def _facts_text(f: dict) -> str:
     return "\n".join(L)
 
 
+def _system() -> str:
+    """SYSTEM, about the open website's business (coordination/profile.py)."""
+    try:
+        from . import profile
+        if not profile.is_starter():
+            return SYSTEM.replace("UAE glass & aluminium business", profile.describe()[2:]
+                                  if profile.describe().startswith("a ") else profile.describe())
+    except Exception:
+        pass
+    return SYSTEM
+
+
 SYSTEM = """You are one employee of a small agency running the online growth of a
 UAE glass & aluminium business. You are speaking directly to the owner.
 
@@ -638,7 +650,7 @@ def ask(agent: str, message: str, max_tokens: int = 500) -> dict:
 
     from . import chat_actions
     r = call_task(w["brain_task"], [
-        {"role": "system", "content": SYSTEM + "\n\n" + chat_actions.HOW
+        {"role": "system", "content": _system() + "\n\n" + chat_actions.HOW
                                       + "\n\n--- YOUR RECORD ---\n" + record},
         {"role": "user", "content": message or "What have you done today?"},
     ], max_tokens=max(max_tokens, 700), timeout=CHAT_TIMEOUT)

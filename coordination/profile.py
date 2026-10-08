@@ -175,6 +175,29 @@ def describe() -> str:
     return f"a {trade} business in {where}"
 
 
+def where() -> str:
+    """'the UAE', 'the UK', 'Germany' — the open website's country in a sentence."""
+    return countries.in_a_sentence(country()) if country() else "your area"
+
+
+def conditions() -> str:
+    """'UAE conditions' for the owner's website; 'local conditions in Germany' elsewhere."""
+    return "UAE conditions" if is_starter() else f"local conditions in {where()}"
+
+
+def money() -> str:
+    """The currency a price would be written in: 'AED' for the owner's website."""
+    if is_starter():
+        return "AED"
+    return (stored().get("currency") or "").strip() or "money"
+
+
+def trade_line() -> str:
+    """'glass & aluminium' — the trade in two or three words."""
+    b = business()
+    return b.get("trade_short") or b.get("trade") or "the business"
+
+
 def missing() -> list:
     """What a website still needs before every desk can work for it, in his words."""
     out = []

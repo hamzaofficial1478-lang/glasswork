@@ -150,6 +150,13 @@ UA = "Mozilla/5.0 (compatible; glasswork-seo/1.0)"
 
 DEFAULT_AREAS = ["Dubai", "Abu Dhabi", "Sharjah", "Al Quoz", "Business Bay",
                  "Jumeirah", "Deira", "Ajman", "Dubai Marina"]
+# ...for the owner's website. Any other's are its own (coordination/profile.py).
+try:
+    from coordination import profile as _pf, uae as _uae
+    if not _pf.is_starter():
+        DEFAULT_AREAS = _uae.search_areas(9)
+except Exception:
+    pass
 
 # How a person finishes a search when they are close to paying somebody.
 DEFAULT_BUY_WORDS = ["price", "cost", "near me", "company", "supplier",
