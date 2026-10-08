@@ -13,6 +13,10 @@ The shelf in providers/store.py holds the tools that are not AI models — stock
 photos, the crawler, maps, SEO data — and providers/integrations.py the routes
 to the outside world (ntfy, Telegram, SMTP).
 """
+# The coordination package first: it decides which sqlite3 every module gets
+# (coordination/cipher.py), and that has to happen before routing imports one.
+import coordination  # noqa: F401,E402
+
 from .routing import call_task, deliberate, resolve_task
 from .ladder import think, spread
 from . import store, integrations

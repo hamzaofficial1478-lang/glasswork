@@ -5,6 +5,16 @@ Making this a package lets other modules import the board and the cabinet cleanl
 (`python3 coordination/init_db.py`) via the defensive imports inside them.
 """
 
+# FIRST, before any module here imports sqlite3: when the open website's
+# cabinet is encrypted, `sqlite3` becomes the cipher-capable one, so every
+# module gets the same one. Nothing changes until an encrypted account exists.
+# See coordination/cipher.py.
+try:
+    from .cipher import install as _cipher_install
+    _cipher_install()
+except Exception:                                            # pragma: no cover
+    pass
+
 # The terminal is set up before anything in this package prints. On Windows the
 # default codepage is cp1252/cp1256, which has no ● and no ✕ — and this program
 # prints both. See coordination/console.py.

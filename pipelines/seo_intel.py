@@ -329,6 +329,25 @@ def _sa_path():
     return _config_file(GSC_SA)
 
 
+def _sa_json() -> dict:
+    """The key file's contents, opened with the account's key when it is sealed."""
+    from coordination import workspace
+    return json.loads(workspace.read_secret(_sa_path(), "") or "{}")
+
+
+def _sa_credentials(service_account, scopes):
+    """
+    The Search Console sign-in. A sealed key file (an encrypted account) is
+    opened in memory and never written out in the clear; a plain one is read
+    from its path as before.
+    """
+    from coordination import vault
+    p = _sa_path()
+    if p.exists() and vault.is_sealed(p.read_bytes()):
+        return service_account.Credentials.from_service_account_info(_sa_json(), scopes=scopes)
+    return service_account.Credentials.from_service_account_file(str(p), scopes=scopes)
+
+
 def gsc_note(ok, why, rows=0):
     """Write down what Google said, and settle his to-do either way."""
     try:
@@ -343,9 +362,10 @@ def gsc_note(ok, why, rows=0):
         if (__import__("os").environ.get("AGENCY_IGNORE_DOTENV") == "1"
                 and GSC_STATUS == "config/gsc-status.local.json"):
             raise RuntimeError("not during the test run")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"ok": bool(ok), "why": (why or "")[:600], "rows": int(rows or 0),
-                                 "property": prop, "at": int(time.time())}), encoding="utf-8")
+        from coordination import workspace
+        workspace.write_secret(p, json.dumps({"ok": bool(ok), "why": (why or "")[:600],
+                                              "rows": int(rows or 0), "property": prop,
+                                              "at": int(time.time())}))
     except Exception:
         pass
     try:
@@ -375,8 +395,7 @@ def _gsc_session(scope=GSC_SCOPE):
     from providers import integrations
     prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
     try:
-        creds = service_account.Credentials.from_service_account_file(
-            str(_sa_path()), scopes=[scope])
+        creds = _sa_credentials(service_account, [scope])
         creds.refresh(google.auth.transport.requests.Request())
     except Exception as e:
         return None, prop, _login_failed(e)
@@ -469,11 +488,7 @@ def gsc_check() -> dict:
 def _service_account_email() -> str:
     """The address he has to add as a user in Search Console."""
     try:
-        import json as _json
-        from pathlib import Path as _Path
-        p = _sa_path()
-        return (_json.loads(p.read_text(encoding="utf-8")).get("client_email")
-                or "") if p.exists() else ""
+        return _sa_json().get("client_email") or ""
     except Exception:
         return ""
 
@@ -481,10 +496,7 @@ def _service_account_email() -> str:
 def _project_id() -> str:
     """The Google Cloud project the service-account key belongs to."""
     try:
-        from pathlib import Path as _Path
-        p = _sa_path()
-        return (json.loads(p.read_text(encoding="utf-8")).get("project_id") or "") \
-            if p.exists() else ""
+        return _sa_json().get("project_id") or ""
     except Exception:
         return ""
 
@@ -669,8 +681,7 @@ def gsc_queries(days=90, limit=500):
     # twice, a little later each time; a refusal is not, because asking again
     # does not change Google's mind.
     try:
-        creds = service_account.Credentials.from_service_account_file(
-            str(_sa_path()), scopes=[GSC_SCOPE])
+        creds = _sa_credentials(service_account, [GSC_SCOPE])
     except Exception as e:
         return [], (f"the Search Console key file could not be read ({e}). Upload "
                     "the service-account JSON again on /setup → Integrations.")

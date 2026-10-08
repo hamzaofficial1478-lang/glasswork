@@ -209,6 +209,18 @@ someone else's in read-only mode:
 
 ---
 
+## Progress
+
+- **Phase 1 is built (8 October).**
+  - Accounts with a password and a recovery key, and up to two websites each,
+    with switching from the office.
+  - Each person's data is encrypted on the computer: every website's database,
+    settings and keys.
+  - **Bring in your current website** copies your agency into your account,
+    encrypted. A separate button removes the old, unencrypted copy once you've
+    checked everything came across.
+  - Until you make an account, the program runs exactly as before.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

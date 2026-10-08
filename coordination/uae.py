@@ -103,7 +103,7 @@ def _env(name, default=""):
         from . import workspace
         p = workspace.env_path_for(name)
         if p.exists():
-            for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            for line in (workspace.read_secret(p, "") or "").splitlines():
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue

@@ -1061,7 +1061,45 @@ function renderConns(){
    this page's memory and nothing else: it vanished on refresh, no agent ever
    heard of it, and the agency has exactly one SITE_URL. It offers the thing
    that actually works instead — changing the website on the setup screen. */
+/* ONCE ACCOUNTS EXIST the menu is the account's websites (up to two), each
+   opened for real on the server — every room, order and lead on this page
+   then belongs to that website — plus managing them and signing out.
+   Before any account exists it is the one website, as it always was, with a
+   way in to making one. */
+let ACCOUNT = null;
+async function loadAccount(){
+  try{
+    const r = await fetch('/api/account/me'); if(!r.ok) return;
+    ACCOUNT = await r.json(); renderSiteMenu();
+    const open = ACCOUNT && ACCOUNT.signedIn && (ACCOUNT.sites||[]).find(x=>x.id===ACCOUNT.open);
+    if(open){ $('#curSite').textContent = shortSite(open.name||open.url); $('#curFav').textContent = siteFav(open.url||open.name); }
+  }catch(e){}
+}
+function siteFav(s){ const t=String(s||'').replace(/^https?:\/\//,'').replace(/^www\./,''); return (t.slice(0,2)||'··').toUpperCase(); }
+async function openAccountSite(id){
+  if(ACCOUNT && id===ACCOUNT.open){ $('#siteMenu').classList.remove('open'); return; }
+  const r = await fetch('/api/account/open-site',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({site:id})});
+  const j = await r.json().catch(()=>({}));
+  if(!j.ok){ alert(j.error||'Could not switch website.'); return; }
+  location.reload();
+}
+async function signOutHere(){
+  const r = await fetch('/api/account/sign-out',{method:'POST'});
+  const j = await r.json().catch(()=>({}));
+  if(!j.ok){ alert(j.error||'Could not sign out.'); return; }
+  location.href='/account';
+}
 function renderSiteMenu(){
+  if(ACCOUNT && ACCOUNT.signedIn){
+    const sites = ACCOUNT.sites||[];
+    $('#siteMenu').innerHTML = sites.map(s=>`<div class="site-item" onclick="openAccountSite('${escA(s.id)}')">`
+        + `<span class="fav">${esc(siteFav(s.url||s.name))}</span><div style="flex:1;min-width:0"><b>${esc(s.name)}</b>`
+        + `<small>${esc(s.id===ACCOUNT.open?'open now':(s.url||'switch to this website'))}</small></div></div>`).join('')
+      + `<a class="site-add" href="/account" style="display:block;text-decoration:none">`
+      + (sites.length < (ACCOUNT.maxSites||2) ? 'Add a website · manage →' : 'Manage websites and account →') + `</a>`
+      + `<div class="site-add" style="border-style:solid;color:var(--muted)" onclick="signOutHere()">Sign out · ${esc(ACCOUNT.signedIn.name)}</div>`;
+    return;
+  }
   const items=Object.entries(SITES).map(([id,s])=>{
     // When he has not given the site a name, the label IS the domain — and
     // printing the domain twice, once bold and once small, looks like a bug.
@@ -1073,7 +1111,9 @@ function renderSiteMenu(){
   const st=SITES[CURRENT]||{};
   $('#siteMenu').innerHTML = items
     + `<a class="site-add" href="/setup" style="display:block;text-decoration:none">`
-    + (st.configured ? 'Change this website →' : 'Save your website →') + `</a>`;
+    + (st.configured ? 'Change this website →' : 'Save your website →') + `</a>`
+    + `<a class="site-add" href="/account" style="display:block;text-decoration:none;border-style:solid">`
+    + `Make your account — two websites, encrypted →</a>`;
 }
 /* The label for the bar. Drops www. and the .com, and cuts at 16 characters —
    enough to know which site it is, short enough not to own the header. */
@@ -2739,6 +2779,7 @@ async function brandPayload(){
 }
 
 (async function brand(){
+  await loadAccount();
   try{
     const j = await brandPayload(); if(!j) return;
     const n = (j.agencyName || '').trim();
@@ -2756,6 +2797,13 @@ async function brandPayload(){
 
 function applySite(w){
   const st = SITES[CURRENT]; if(!st) return;
+  // Signed into an account: its open website is what this page is about, even
+  // before that website's own settings say so.
+  const acc = ACCOUNT && ACCOUNT.signedIn && (ACCOUNT.sites||[]).find(x=>x.id===ACCOUNT.open);
+  if(acc && !(w && w.siteConfigured)){
+    w = {siteConfigured:true, siteName:acc.name, siteHost:(acc.url||'').replace(/^https?:\/\//,'').replace(/\/$/,''),
+         siteInitials:siteFav(acc.url||acc.name)};
+  }
   if(w && w.siteConfigured){
     st.name = w.siteName || w.siteHost || 'Your website';
     st.url  = w.siteHost || '';

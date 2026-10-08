@@ -136,10 +136,12 @@ def read_env(path=None) -> dict:
         return {k: str(v).strip() for k in ENV_KEYS
                 if (v := os.environ.get(k)) is not None and str(v).strip()}
 
+    from coordination import workspace
     for p in _files(path):
         try:
             if p.exists():
-                for line in p.read_text(encoding="utf-8").splitlines():
+                # sealed when the account is encrypted; a locked one reads as empty
+                for line in (workspace.read_secret(p, "") or "").splitlines():
                     m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
                     if m:
                         env[m.group(1)] = m.group(2).strip()
@@ -201,9 +203,10 @@ def write_env(values: dict, path=None) -> dict:
 
 def _write_one(p, values) -> dict:
     """One settings file, with every other line exactly as it was."""
+    from coordination import workspace
     p = Path(p)
     try:
-        lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
+        lines = (workspace.read_secret(p, "") or "").splitlines()
     except Exception as e:
         return {"ok": False, "error": f"could not read {p}: {e}"}
     left = dict(values)
@@ -217,8 +220,7 @@ def _write_one(p, values) -> dict:
     for k, v in left.items():
         out.append(f"{k}={v}")
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+        workspace.write_secret(p, "\n".join(out).rstrip("\n") + "\n")
     except Exception as e:
         return {"ok": False, "error": f"could not write {p}: {e}"}
     return {"ok": True, "saved": sorted(values), "path": str(p)}

@@ -41,7 +41,6 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -203,16 +202,164 @@ def _save(acct: dict) -> None:
     _write_json(_accounts_dir() / acct["id"] / "account.json", acct)
 
 
-def create_account(name) -> dict:
-    """A new account with no website yet. Sign-in and encryption come with it in phase 1b."""
+def find_account(who) -> dict:
+    """An account by its id or its name (any case)."""
+    who = (who or "").strip()
+    for a in accounts():
+        if a["id"] == who or a.get("name", "").strip().lower() == who.lower():
+            return a
+    return {}
+
+
+def create_account(name, password=None) -> dict:
+    """
+    A new account with no website yet. With a password (every real account),
+    its data is encrypted: the result carries the master key for the office to
+    hold, and the recovery key to show him ONCE.
+    """
+    from . import vault
     name = (name or "").strip()
     if not name:
         return {"ok": False, "error": "an account needs a name"}
+    if find_account(name):
+        return {"ok": False, "error": f"there is already an account called {name} on this computer"}
     acct = {"id": _slug(name, "account"), "name": name,
             "created": int(time.time()), "sites": []}
+    out = {"ok": True}
+    if password is not None:
+        try:
+            keys, master, recovery = vault.create(password, acct["id"])
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        acct["keys"] = keys
+        out.update(key=vault.as_env(master), recovery_key=recovery)
     (_accounts_dir() / acct["id"] / "config").mkdir(parents=True, exist_ok=True)
     _save(acct)
-    return {"ok": True, "account": acct}
+    out["account"] = public(acct)
+    return out
+
+
+def public(acct: dict) -> dict:
+    """An account as it may be shown: never its keys."""
+    return {k: v for k, v in (acct or {}).items() if k != "keys"}
+
+
+def encrypted(account_id) -> bool:
+    return bool(account(account_id).get("keys"))
+
+
+def master_key(account_id=None):
+    """The master key handed to this program (AGENCY_KEY), if it is this account's."""
+    from . import vault
+    a = account_id or (active() or {}).get("account")
+    keys = account(a).get("keys") if a else None
+    m = vault.master_from_env()
+    if not keys or m is None:
+        return None
+    import hmac
+    return m if hmac.compare_digest(vault.check_of(m), keys.get("check", "")) else None
+
+
+def locked() -> bool:
+    """An encrypted account is open and its key is not here."""
+    a = active()
+    return bool(a) and encrypted(a["account"]) and master_key(a["account"]) is None
+
+
+def sign_in(who, password) -> dict:
+    """The master key for this account and password, or why not."""
+    from . import vault
+    acct = find_account(who)
+    if not acct or not acct.get("keys"):
+        return {"ok": False, "error": "no account by that name on this computer"}
+    master = vault.open_with(acct["keys"], "password", password or "", acct["id"])
+    if master is None:
+        return {"ok": False, "error": "that password does not open this account"}
+    return {"ok": True, "account": public(acct), "key": vault.as_env(master)}
+
+
+def recover(who, recovery_key, new_password) -> dict:
+    """Forgotten password: the recovery key opens the account and a new password is set."""
+    from . import vault
+    acct = find_account(who)
+    if not acct or not acct.get("keys"):
+        return {"ok": False, "error": "no account by that name on this computer"}
+    master = vault.open_with(acct["keys"], "recovery", recovery_key or "", acct["id"])
+    if master is None:
+        return {"ok": False, "error": "that recovery key does not open this account"}
+    try:
+        acct["keys"] = vault.relock(acct["keys"], master, "password", new_password or "", acct["id"])
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    _save(acct)
+    return {"ok": True, "account": public(acct), "key": vault.as_env(master)}
+
+
+def change_password(who, current, new_password) -> dict:
+    from . import vault
+    acct = find_account(who)
+    master = vault.open_with((acct or {}).get("keys"), "password", current or "",
+                             (acct or {}).get("id", ""))
+    if not acct or master is None:
+        return {"ok": False, "error": "that is not the current password"}
+    try:
+        acct["keys"] = vault.relock(acct["keys"], master, "password", new_password or "", acct["id"])
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    _save(acct)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# settings and files, sealed when the account is encrypted
+# ---------------------------------------------------------------------------
+
+def _account_of(path):
+    """(account id, the file's place inside the account folder) — or (None, None)."""
+    try:
+        rel = Path(path).resolve().relative_to(_accounts_dir().resolve())
+    except Exception:
+        return None, None
+    if len(rel.parts) < 2:
+        return None, None
+    return rel.parts[0], Path(*rel.parts[1:]).as_posix()
+
+
+def read_secret(path, default=None):
+    """A settings or config file's text, opened with the account's key when sealed."""
+    from . import vault
+    p = Path(path)
+    if not p.exists():
+        return default
+    data = p.read_bytes()
+    if vault.is_sealed(data):
+        acct, where = _account_of(p)
+        master = master_key(acct) if acct else None
+        if master is None:
+            raise vault.Locked(f"{p.name} is locked — sign in on the office screen first")
+        data = vault.unseal(master, data, where)
+    return data.decode("utf-8")
+
+
+def write_secret(path, text) -> None:
+    """Write a settings or config file — sealed when it belongs to an encrypted account."""
+    from . import vault
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    acct, where = _account_of(p)
+    data = text.encode("utf-8")
+    if acct and encrypted(acct):
+        master = master_key(acct)
+        if master is None:
+            raise vault.Locked(f"{p.name} cannot be saved while signed out")
+        data = vault.seal(master, data, where)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_bytes(data)
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    os.replace(tmp, p)
 
 
 def add_site(account_id, name, url="") -> dict:
@@ -233,9 +380,18 @@ def add_site(account_id, name, url="") -> dict:
     d = site_dir(acct["id"], site["id"])
     for sub in ("config", "logs"):
         (d / sub).mkdir(parents=True, exist_ok=True)
+    if site["url"]:
+        # The address goes in the website's own settings straight away, where
+        # every desk reads it — or the new website reads as "no website saved".
+        clean = lambda v: re.sub(r"[\r\n]+", " ", v).strip()
+        try:
+            write_secret(d / "site.env", f"SITE_URL={clean(site['url'])}\n"
+                                         f"SITE_NAME={clean(name)}\n")
+        except Exception:
+            pass                       # signed out: Setup asks for it instead
     acct.setdefault("sites", []).append(site)
     _save(acct)
-    return {"ok": True, "site": site, "account": acct}
+    return {"ok": True, "site": site, "account": public(acct)}
 
 
 def _run_going() -> str:
@@ -314,11 +470,7 @@ def bring_in_current(account_id, site_id) -> dict:
         mine, site = _split_env(env.read_text(encoding="utf-8").splitlines())
         for p, rows in ((adir / "account.env", mine), (sdir / "site.env", site)):
             if rows:
-                p.write_text("\n".join(rows) + "\n", encoding="utf-8")
-                try:
-                    os.chmod(p, 0o600)
-                except OSError:
-                    pass
+                write_secret(p, "\n".join(rows) + "\n")
         done.append(".env")
     cfg = ROOT / "config"
     if cfg.is_dir():
@@ -326,23 +478,59 @@ def bring_in_current(account_id, site_id) -> dict:
             if not f.is_file() or f.name.endswith(".example.json") or f.name in MACHINE_CONFIG:
                 continue
             to = (adir if f.name in ACCOUNT_CONFIG else sdir) / "config" / f.name
-            to.parent.mkdir(parents=True, exist_ok=True)
-            to.write_bytes(f.read_bytes())
+            write_secret(to, f.read_text(encoding="utf-8"))
             done.append(f"config/{f.name}")
     db = ROOT / "coordination" / "agency.db"
     if db.exists():
-        # The backup API, not a file copy: the cabinet runs in WAL mode and the
-        # newest writes live beside the file until a checkpoint.
-        src, dst = sqlite3.connect(db), sqlite3.connect(sdir / "agency.db")
-        try:
-            src.backup(dst)
-        finally:
-            src.close()
-            dst.close()
+        _copy_cabinet(db, sdir / "agency.db", account_id, site_id)
         done.append("coordination/agency.db")
     acct["brought_in"] = {"site": site_id, "at": int(time.time()), "copied": done}
     _save(acct)
     return {"ok": True, "copied": done}
+
+
+def _copy_cabinet(src, dst, account_id, site_id):
+    """
+    The old cabinet into the website's — encrypted on the way when the account
+    is. Never a file copy: the cabinet runs in WAL mode, and its newest writes
+    live beside the file until a checkpoint.
+    """
+    dst = Path(dst)
+    if not encrypted(account_id):
+        import sqlite3 as plain
+        a, b = plain.connect(src), plain.connect(dst)
+        try:
+            a.backup(b)
+        finally:
+            a.close()
+            b.close()
+        return
+    from . import cipher, vault
+    master = master_key(account_id)
+    if master is None:
+        raise vault.Locked("sign in before bringing a website in")
+    key = vault.cabinet_key(master, site_id)
+    fresh = dst.with_name(dst.name + ".incoming")
+    for p in (fresh, Path(str(fresh) + "-wal"), Path(str(fresh) + "-shm")):
+        if p.exists():
+            p.unlink()
+    con = cipher.plain_connect(str(src))
+    try:
+        con.execute("PRAGMA wal_checkpoint(FULL)")
+        con.execute(f"ATTACH DATABASE ? AS sealed KEY \"x'{key}'\"", (str(fresh),))
+        con.execute("SELECT sqlcipher_export('sealed')")
+        con.execute("DETACH DATABASE sealed")
+    finally:
+        con.close()
+    for p in (Path(str(dst) + "-wal"), Path(str(dst) + "-shm")):
+        if p.exists():
+            p.unlink()
+    os.replace(fresh, dst)
+
+
+def legacy_present() -> bool:
+    """Is there a website in the program's original files to bring in?"""
+    return (ROOT / "coordination" / "agency.db").exists() or (ROOT / ".env").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +542,9 @@ def describe() -> dict:
            "logs": str(logs_dir()), "accounts": len(accounts())}
     if a:
         acct = account(a["account"])
+        out.update(brought_in=bool(acct.get("brought_in")),
+                   retired_original=bool(acct.get("retired_original")),
+                   encrypted=bool(acct.get("keys")))
         out.update(account={"id": acct.get("id"), "name": acct.get("name")},
                    sites=acct.get("sites") or [],
                    site=next((s for s in acct.get("sites") or [] if s["id"] == a["site"]), {}),

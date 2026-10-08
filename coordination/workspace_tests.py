@@ -129,7 +129,8 @@ def test_each_website_keeps_its_own_things():
             con.close()
             check("the first website's task is not on the second's board", n, 0)
             env = integrations.read_env()
-            check("the first website's address is not the second's", env.get("SITE_URL"), None)
+            check("the second website has its own address, not the first's",
+                  env.get("SITE_URL"), "https://secondshop.ae")
             check("but how to reach him is shared by both", env.get("TELEGRAM_CHAT_ID"), "12345")
             check("the person's tool keys are one file for both",
                   workspace.config_path("providers.local.json"),
@@ -213,6 +214,21 @@ def test_his_website_is_copied_in_not_moved():
                                        old / "coordination" / "agency.db")), True)
 
 
+def test_the_cabinet_builder_runs_by_path():
+    print("\nThe server builds the cabinet by running coordination/init_db.py by path:")
+    import subprocess
+    with _Place() as place:
+        db = place.dir / "built.db"
+        env = dict(os.environ, AGENCY_DB=str(db))
+        r = subprocess.run([sys.executable, str(ROOT / "coordination" / "init_db.py")],
+                           cwd=str(ROOT), env=env, capture_output=True, text=True, encoding="utf-8")
+        check("it runs", (r.returncode, r.stderr[-200:]), (0, ""))
+        con = sqlite3.connect(db)
+        have = {t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        con.close()
+        check("and builds the tables", {"tasks", "leads", "day_runs"} <= have, True)
+
+
 def test_server_and_python_agree():
     print("\nserver.js and the Python side agree on which settings are the person's:")
     js = (ROOT / "server.js").read_text(encoding="utf-8")
@@ -230,7 +246,8 @@ def test_server_and_python_agree():
 def main():
     for t in (test_nothing_moves_before_an_account, test_two_websites_and_no_more,
               test_each_website_keeps_its_own_things, test_no_switching_mid_run,
-              test_his_website_is_copied_in_not_moved, test_server_and_python_agree):
+              test_his_website_is_copied_in_not_moved, test_the_cabinet_builder_runs_by_path,
+              test_server_and_python_agree):
         t()
     print()
     if _fail:

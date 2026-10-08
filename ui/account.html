@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* The office's own tokens (ui/office.html), so signing in feels like the same
+   building. The redesign (phase 4) revisits these for every screen at once. */
+:root{
+  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
+  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
+  --text:#e7eff3; --muted:#8a9ea9; --faint:#54666f;
+  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.14);
+  --amber:#eaa543; --amber-dim:rgba(234,165,67,.13);
+  --danger:#e5565b; --danger-dim:rgba(229,86,91,.13); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+body{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:48px 16px 64px;
+  background:radial-gradient(1200px 500px at 50% -10%,rgba(84,203,217,.07),transparent 60%),var(--bg)}
+.mark{display:flex;align-items:center;gap:10px;margin-bottom:28px;color:var(--etch);
+  font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase}
+.pane{width:22px;height:22px;border-radius:5px;border:1.5px solid var(--glass);position:relative;
+  background:linear-gradient(135deg,rgba(84,203,217,.25),transparent 55%)}
+.pane:after{content:"";position:absolute;inset:4px 9px 4px 4px;border-right:1.5px solid rgba(84,203,217,.6)}
+main{width:100%;max-width:440px}
+section{display:none;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  padding:28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+section.on{display:block}
+h1{font-size:22px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:15px;font-weight:600;margin:0 0 4px}
+p.lead{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px}
+label{display:block;font-size:12.5px;color:var(--etch);margin:14px 0 6px}
+input[type=text],input[type=password],input[type=url],select{width:100%;padding:12px 13px;border-radius:10px;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--text);font:inherit;font-size:15px}
+input:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
+.btn{display:block;width:100%;margin-top:20px;padding:12px 14px;border-radius:10px;border:1px solid var(--glass);
+  background:var(--glass);color:#06222a;font:inherit;font-weight:600;font-size:15px;cursor:pointer;text-align:center;text-decoration:none}
+.btn:hover{filter:brightness(1.08)}
+.btn[disabled]{opacity:.55;cursor:progress}
+.btn.quiet{background:transparent;color:var(--glass)}
+.btn.small{display:inline-block;width:auto;margin:0;padding:8px 12px;font-size:13px}
+.links{display:flex;justify-content:space-between;gap:12px;margin-top:18px;font-size:13px}
+.links a,.link{color:var(--glass);text-decoration:none;cursor:pointer;background:none;border:0;font:inherit;padding:0}
+.links a:hover,.link:hover{text-decoration:underline}
+.err{display:none;margin-top:14px;padding:10px 12px;border-radius:9px;background:var(--danger-dim);
+  border:1px solid rgba(229,86,91,.35);color:#f3a7aa;font-size:13.5px;line-height:1.5}
+.err.on{display:block}
+.note{padding:12px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;margin:0 0 16px;
+  background:var(--amber-dim);border:1px solid rgba(234,165,67,.35);color:#f2cf9b}
+.note.ok{background:var(--ok-dim);border-color:rgba(92,192,136,.35);color:#a9e2c1}
+.key{font-family:'IBM Plex Mono',monospace;font-size:clamp(14px,4.2vw,18.5px);letter-spacing:.03em;text-align:center;
+  padding:18px 10px;border-radius:12px;border:1px dashed var(--glass);background:var(--panel2);
+  white-space:nowrap;overflow-x:auto;user-select:all;margin:6px 0 12px;font-variant-numeric:tabular-nums}
+.row{display:flex;gap:10px}
+.row .btn{margin-top:0}
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-size:14px;line-height:1.5;color:var(--text)}
+.check input{margin-top:3px;accent-color:var(--glass);width:16px;height:16px;flex:none}
+.sites{display:grid;gap:10px;margin:14px 0 6px}
+.site{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--line2);background:var(--panel2)}
+.site .fav{width:30px;height:30px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--glass-dim);border:1px solid var(--glass);color:var(--glass)}
+.site .nm{flex:1;min-width:0}
+.site .nm b{display:block;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.site .nm small{display:block;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  padding:4px 8px;border-radius:999px;background:var(--ok-dim);color:var(--ok);border:1px solid rgba(92,192,136,.35)}
+.block{border-top:1px solid var(--line);margin-top:22px;padding-top:18px}
+.block p{color:var(--muted);font-size:13.5px;line-height:1.6;margin:4px 0 0}
+.who{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px}
+.who small{color:var(--muted);font-size:13px}
+.choice{display:block;width:100%;text-align:left;margin-top:12px;padding:14px 16px;border-radius:12px;border:1px solid var(--line2);
+  background:var(--panel2);color:var(--text);font:inherit;cursor:pointer}
+.choice:hover{border-color:var(--glass)}
+.choice b{display:block;font-size:15px;margin-bottom:3px}
+.choice span{color:var(--muted);font-size:13px;line-height:1.5}
+footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-width:440px;line-height:1.6}
+@media (prefers-reduced-motion:no-preference){section.on{animation:rise .25s ease-out}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}}
+</style>
+</head>
+<body>
+<div class="mark"><span class="pane" aria-hidden="true"></span><span id="product">Your agency</span></div>
+<main>
+
+  <section id="loading" class="on"><p class="lead" style="margin:0">One moment…</p></section>
+
+  <!-- SIGN IN -->
+  <section id="signin">
+    <h1>Sign in</h1>
+    <p class="lead">Your websites and everything the agency knows about them are encrypted. Your password opens them.</p>
+    <form onsubmit="signIn(event)">
+      <label for="siWho">Account</label>
+      <select id="siWho"></select>
+      <label for="siPw">Password</label>
+      <input id="siPw" type="password" autocomplete="current-password" required>
+      <button class="btn" id="siBtn">Sign in</button>
+      <div class="err" id="siErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('recover')">Forgot your password?</button>
+      <button class="link" onclick="show('signup')">Make a new account</button></div>
+  </section>
+
+  <!-- MAKE AN ACCOUNT -->
+  <section id="signup">
+    <h1>Make your account</h1>
+    <p class="lead">Each person on this computer has their own account. Nobody else can open yours — not even another account on the same computer.</p>
+    <div class="note" id="cipherNote" style="display:none"></div>
+    <form onsubmit="signUp(event)">
+      <label for="suName">Your name</label>
+      <input id="suName" type="text" autocomplete="name" required maxlength="60">
+      <label for="suPw">Password <span style="color:var(--faint)">— at least 8 characters</span></label>
+      <input id="suPw" type="password" autocomplete="new-password" required minlength="8">
+      <label for="suPw2">Password again</label>
+      <input id="suPw2" type="password" autocomplete="new-password" required minlength="8">
+      <button class="btn" id="suBtn">Make my account</button>
+      <div class="err" id="suErr"></div>
+    </form>
+    <div class="links" id="suBack"><button class="link" onclick="show('signin')">I already have an account</button><span></span></div>
+  </section>
+
+  <!-- THE RECOVERY KEY, SHOWN ONCE -->
+  <section id="recovery">
+    <h1>Write down your recovery key</h1>
+    <p class="lead">If you ever forget your password, this key is the only way back in. It is shown once and kept nowhere — not on this computer, not by us.</p>
+    <div class="key" id="rkKey">—</div>
+    <div class="row">
+      <button class="btn quiet" onclick="copyKey()" id="rkCopy">Copy</button>
+      <button class="btn quiet" onclick="saveKey()">Save as a file</button>
+    </div>
+    <label class="check"><input type="checkbox" id="rkDone" onchange="$('#rkNext').disabled=!this.checked">
+      <span>I have written it down or saved it somewhere safe, away from this computer.</span></label>
+    <button class="btn" id="rkNext" disabled onclick="afterKey()">Continue</button>
+  </section>
+
+  <!-- RECOVER WITH THE KEY -->
+  <section id="recover">
+    <h1>Use your recovery key</h1>
+    <p class="lead">Type the key you wrote down when you made your account, and choose a new password.</p>
+    <form onsubmit="recover(event)">
+      <label for="reWho">Account</label>
+      <select id="reWho"></select>
+      <label for="reKey">Recovery key</label>
+      <input id="reKey" type="text" autocomplete="off" spellcheck="false" required
+             style="font-family:'IBM Plex Mono',monospace;letter-spacing:.05em" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX">
+      <label for="rePw">New password</label>
+      <input id="rePw" type="password" autocomplete="new-password" required minlength="8">
+      <label for="rePw2">New password again</label>
+      <input id="rePw2" type="password" autocomplete="new-password" required minlength="8">
+      <button class="btn" id="reBtn">Open my account</button>
+      <div class="err" id="reErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('signin')">Back to sign in</button><span></span></div>
+  </section>
+
+  <!-- FIRST WEBSITE -->
+  <section id="start">
+    <h1>Which website first?</h1>
+    <p class="lead">An account holds two websites. The agency works on one at a time, and you switch between them from the office.</p>
+    <button class="choice" id="startBring" onclick="bringIn()" style="display:none">
+      <b id="startBringName">Bring in your current website</b>
+      <span>Everything the agency has for it today — leads, orders, approvals, settings — is copied into your account and encrypted. Your original files stay where they are until you remove them.</span>
+    </button>
+    <button class="choice" onclick="show('addfirst')"><b>Start with a new website</b>
+      <span>Give it a name and its address. You connect it on the Setup screen after.</span></button>
+    <div class="err" id="stErr"></div>
+  </section>
+
+  <section id="addfirst">
+    <h1>Add a website</h1>
+    <form onsubmit="addSite(event,'af')">
+      <label for="afName">Name</label>
+      <input id="afName" type="text" required maxlength="60" placeholder="e.g. World Deal">
+      <label for="afUrl">Address</label>
+      <input id="afUrl" type="url" required placeholder="https://www.example.com">
+      <button class="btn" id="afBtn">Add it</button>
+      <div class="err" id="afErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('start')">Back</button><span></span></div>
+  </section>
+
+  <!-- SIGNED IN: WEBSITES AND ACCOUNT -->
+  <section id="manage">
+    <div class="who"><h1 id="mgName">Your account</h1>
+      <button class="link" onclick="signOut()">Sign out</button></div>
+    <p class="lead" style="margin-bottom:6px">Your websites <span id="mgCount" style="color:var(--faint)"></span></p>
+    <div class="sites" id="mgSites"></div>
+    <div class="err" id="mgErr"></div>
+    <a class="btn" href="/">Go to the office</a>
+
+    <div class="block" id="mgBring" style="display:none">
+      <h2 id="mgBringTitle">Bring in your current website</h2>
+      <p>Everything the agency has for it today — leads, orders, approvals, settings — is copied into this account and encrypted. Your original files stay where they are until you remove them.</p>
+      <button class="btn quiet" id="mgBringBtn" onclick="bringIn()">Bring it in</button>
+    </div>
+
+    <div class="block" id="mgRetire" style="display:none">
+      <h2>Remove the original, unencrypted copy</h2>
+      <p>Your website is in your account now, encrypted. The program's original files are still in its folder, unencrypted. Once you have checked the office shows everything as it should, remove them so nothing readable is left behind. This cannot be undone.</p>
+      <label class="check"><input type="checkbox" id="rtYes"><span>I have checked my website in the office, and I want the original copy removed.</span></label>
+      <button class="btn quiet" id="rtBtn" onclick="retireOld()">Remove the original copy</button>
+    </div>
+
+    <div class="block" id="mgAdd" style="display:none">
+      <h2>Add your second website</h2>
+      <form onsubmit="addSite(event,'ad')">
+        <label for="adName">Name</label>
+        <input id="adName" type="text" required maxlength="60">
+        <label for="adUrl">Address</label>
+        <input id="adUrl" type="url" required placeholder="https://www.example.com">
+        <button class="btn quiet" id="adBtn">Add it</button>
+        <div class="err" id="adErr"></div>
+      </form>
+    </div>
+
+    <div class="block">
+      <h2>Change your password</h2>
+      <form onsubmit="changePw(event)">
+        <label for="cpCur">Current password</label>
+        <input id="cpCur" type="password" autocomplete="current-password" required>
+        <label for="cpNew">New password</label>
+        <input id="cpNew" type="password" autocomplete="new-password" required minlength="8">
+        <label for="cpNew2">New password again</label>
+        <input id="cpNew2" type="password" autocomplete="new-password" required minlength="8">
+        <button class="btn quiet" id="cpBtn">Change password</button>
+        <div class="err" id="cpErr"></div>
+      </form>
+    </div>
+  </section>
+</main>
+<footer>Your data is encrypted on this computer and opened only with your password. Forget the password and lose the recovery key, and nobody can open it again.</footer>
+
+<script>
+const $ = (q) => document.querySelector(q);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let LIST = null, ME = null, RECOVERY = '', ACCOUNT_NAME = '';
+
+function show(id) {
+  document.querySelectorAll('section').forEach((s) => s.classList.toggle('on', s.id === id));
+  const f = id === 'signin' ? $('#siPw') : document.querySelector('#' + id + ' input, #' + id + ' select');
+  if (f && id !== 'manage') setTimeout(() => f.focus(), 30);
+}
+function fail(id, msg) { const e = $('#' + id); e.textContent = msg || ''; e.classList.toggle('on', !!msg); }
+async function call(url, body) {
+  let r, j = {};
+  try {
+    r = await fetch(url, body === undefined ? {} : {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    j = await r.json();
+  } catch (e) { return {ok: false, error: 'The office did not answer. Is the program still running?'}; }
+  return j || {ok: false};
+}
+function busy(btn, on, label) {
+  const b = $('#' + btn); if (!b) return;
+  if (on) { b.dataset.label = b.textContent; b.textContent = label || 'One moment…'; b.disabled = true; }
+  else { b.textContent = b.dataset.label || b.textContent; b.disabled = false; }
+}
+function fillAccounts(sel) {
+  const accts = (LIST && LIST.accounts) || [];
+  $(sel).innerHTML = accts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+}
+function initials(s) {
+  const t = String(s || '').replace(/^https?:\/\//, '').replace(/^www\./, '');
+  return (t.slice(0, 2) || '··').toUpperCase();
+}
+
+async function boot() {
+  LIST = await call('/api/account/list');
+  if (LIST.cipher_problem) {
+    $('#cipherNote').textContent = 'Encryption is not ready on this computer yet: ' + LIST.cipher_problem;
+    $('#cipherNote').style.display = 'block';
+  }
+  if (LIST.signedIn) return manage();
+  const accts = LIST.accounts || [];
+  if (!accts.length) { $('#suBack').style.display = 'none'; return show('signup'); }
+  fillAccounts('#siWho'); fillAccounts('#reWho');
+  show('signin');
+}
+
+async function signIn(e) {
+  e.preventDefault(); fail('siErr', '');
+  busy('siBtn', true, 'Opening your account…');
+  const j = await call('/api/account/sign-in', {account: $('#siWho').value, password: $('#siPw').value});
+  busy('siBtn', false);
+  if (!j.ok) return fail('siErr', j.error || 'That did not work.');
+  $('#siPw').value = '';
+  if (!j.site) { LIST = await call('/api/account/list'); return firstSite(); }
+  location.href = '/';
+}
+
+async function signUp(e) {
+  e.preventDefault(); fail('suErr', '');
+  if ($('#suPw').value !== $('#suPw2').value) return fail('suErr', 'The two passwords do not match.');
+  busy('suBtn', true, 'Making your account…');
+  const j = await call('/api/account/sign-up', {name: $('#suName').value, password: $('#suPw').value,
+                                               confirm: $('#suPw2').value});
+  busy('suBtn', false);
+  if (!j.ok) return fail('suErr', j.error || 'That did not work.');
+  $('#suPw').value = $('#suPw2').value = '';
+  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name;
+  $('#rkKey').textContent = RECOVERY;
+  show('recovery');
+}
+function copyKey() {
+  navigator.clipboard && navigator.clipboard.writeText(RECOVERY).then(() => {
+    $('#rkCopy').textContent = 'Copied'; setTimeout(() => $('#rkCopy').textContent = 'Copy', 1600);
+  });
+}
+function saveKey() {
+  const text = 'Recovery key for the account "' + ACCOUNT_NAME + '"\n\n' + RECOVERY + '\n\n'
+    + 'Keep this somewhere safe, away from the computer. It is the only way back into the account\n'
+    + 'if the password is forgotten. Anyone who has it and this computer can open the account.\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: 'text/plain'}));
+  a.download = 'recovery-key.txt'; a.click();
+}
+async function afterKey() { RECOVERY = ''; $('#rkKey').textContent = '—'; LIST = await call('/api/account/list'); firstSite(); }
+
+function firstSite() {
+  const lp = LIST && LIST.legacy_present, ls = (LIST && LIST.legacy_site) || {};
+  $('#startBring').style.display = lp ? 'block' : 'none';
+  if (lp) $('#startBringName').textContent = 'Bring in ' + (ls.name || ls.url || 'your current website');
+  show('start');
+}
+
+async function bringIn() {
+  fail('stErr', ''); fail('mgErr', '');
+  const btn = $('#manage').classList.contains('on') ? 'mgBringBtn' : null;
+  if (btn) busy(btn, true, 'Copying and encrypting…');
+  else { $('#startBring').disabled = true; $('#startBringName').textContent = 'Copying and encrypting…'; }
+  const j = await call('/api/account/bring-in', {});
+  if (btn) busy(btn, false); else $('#startBring').disabled = false;
+  if (!j.ok) return fail(btn ? 'mgErr' : 'stErr', j.error || 'That did not work.');
+  manage('Your website is in your account now, encrypted: ' + (j.copied || []).length + ' things were copied across.');
+}
+
+async function addSite(e, p) {
+  e.preventDefault(); fail(p + 'Err', '');
+  busy(p + 'Btn', true, 'Adding…');
+  const j = await call('/api/account/add-site', {name: $('#' + p + 'Name').value, url: $('#' + p + 'Url').value});
+  busy(p + 'Btn', false);
+  if (!j.ok) return fail(p + 'Err', j.error || 'That did not work.');
+  if (p === 'af') return (location.href = '/setup');
+  $('#adName').value = $('#adUrl').value = '';
+  manage();
+}
+
+async function recover(e) {
+  e.preventDefault(); fail('reErr', '');
+  if ($('#rePw').value !== $('#rePw2').value) return fail('reErr', 'The two passwords do not match.');
+  busy('reBtn', true, 'Opening your account…');
+  const j = await call('/api/account/recover', {account: $('#reWho').value,
+    recovery_key: $('#reKey').value, password: $('#rePw').value});
+  busy('reBtn', false);
+  if (!j.ok) return fail('reErr', j.error || 'That did not work.');
+  $('#reKey').value = $('#rePw').value = $('#rePw2').value = '';
+  if (!j.site) { LIST = await call('/api/account/list'); return firstSite(); }
+  location.href = '/';
+}
+
+async function manage(happy) {
+  ME = await call('/api/account/me');
+  if (!ME.signedIn) return boot();
+  $('#mgName').textContent = ME.signedIn.name;
+  const sites = ME.sites || [];
+  $('#mgCount').textContent = '— ' + sites.length + ' of ' + (ME.maxSites || 2);
+  $('#mgSites').innerHTML = (happy ? `<div class="note ok" style="margin:0">${esc(happy)}</div>` : '')
+    + (sites.length ? sites.map((s) => `<div class="site"><span class="fav">${esc(initials(s.url || s.name))}</span>`
+      + `<div class="nm"><b>${esc(s.name)}</b><small>${esc(s.url || 'no address yet')}</small></div>`
+      + (s.id === ME.open ? `<span class="chip">Open</span>`
+         : `<button class="btn quiet small" onclick="openSite('${esc(s.id)}')">Open</button>`) + `</div>`).join('')
+      : `<p style="color:var(--muted);font-size:14px;margin:4px 0">No website yet.</p>`);
+  const canBring = ME.legacyPresent && !ME.broughtIn && sites.length < (ME.maxSites || 2);
+  $('#mgBring').style.display = canBring ? 'block' : 'none';
+  if (canBring) $('#mgBringTitle').textContent = 'Bring in ' + (ME.legacySite.name || ME.legacySite.url || 'your current website');
+  $('#mgRetire').style.display = ME.broughtIn && ME.legacyPresent ? 'block' : 'none';
+  $('#mgAdd').style.display = sites.length < (ME.maxSites || 2) ? 'block' : 'none';
+  $('#mgAdd h2').textContent = sites.length ? 'Add your second website' : 'Add a website';
+  show('manage');
+}
+
+async function openSite(id) {
+  fail('mgErr', '');
+  const j = await call('/api/account/open-site', {site: id});
+  if (!j.ok) return fail('mgErr', j.error || 'That did not work.');
+  manage();
+}
+
+async function retireOld() {
+  fail('mgErr', '');
+  if (!$('#rtYes').checked) return fail('mgErr', 'Tick the box first: this removes the original copy for good.');
+  busy('rtBtn', true, 'Removing…');
+  const j = await call('/api/account/retire-old', {confirm: true});
+  busy('rtBtn', false);
+  if (!j.ok) return fail('mgErr', j.error || 'That did not work.');
+  manage('The original copy is gone: ' + (j.removed || []).length + ' files removed. Only the encrypted copy is left.');
+}
+
+async function changePw(e) {
+  e.preventDefault(); fail('cpErr', '');
+  if ($('#cpNew').value !== $('#cpNew2').value) return fail('cpErr', 'The two passwords do not match.');
+  busy('cpBtn', true, 'Changing…');
+  const j = await call('/api/account/password', {current: $('#cpCur').value,
+    password: $('#cpNew').value, confirm: $('#cpNew2').value});
+  busy('cpBtn', false);
+  if (!j.ok) return fail('cpErr', j.error || 'That did not work.');
+  $('#cpCur').value = $('#cpNew').value = $('#cpNew2').value = '';
+  manage('Password changed. Your recovery key still works.');
+}
+
+async function signOut() {
+  const j = await call('/api/account/sign-out', {});
+  if (!j.ok) return fail('mgErr', j.error || 'That did not work.');
+  location.href = '/account';
+}
+
+boot();
+</script>
+</body>
+</html>

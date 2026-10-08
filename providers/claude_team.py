@@ -223,7 +223,7 @@ def _saved() -> dict:
     if CONFIG == _REAL_CONFIG and local_cli._suite_isolated():
         return {}
     try:
-        return json.loads(CONFIG.read_text(encoding="utf-8")).get("team") or {}
+        return json.loads(_workspace.read_secret(CONFIG, "") or "{}").get("team") or {}
     except Exception:
         return {}
 
@@ -254,10 +254,7 @@ def save_model(sector, model) -> dict:
                                        + ", ".join(LABEL[x] for x in LADDER))}
     saved = _saved()
     saved[s] = m
-    CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"team": saved}, indent=2), encoding="utf-8")
-    os.replace(tmp, CONFIG)
+    _workspace.write_secret(CONFIG, json.dumps({"team": saved}, indent=2))
     typed = str(model).strip().lower()
     note = ("" if typed in LADDER or typed in _ALIASES
             else f"{model} is above Opus 5, so {LABEL[m]}")

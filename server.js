@@ -129,6 +129,39 @@ function passwordOk(supplied) {
 const SESSIONS = new Set();          // in memory: restarting the server logs you out
 const COOKIE = "glasswork_admin";
 
+/* ---------------------------------------------------------------------------
+   ACCOUNTS — once anyone has made one, the office is theirs to sign into.
+   ---------------------------------------------------------------------------
+   Each person's data is encrypted (coordination/vault.py). Signing in hands
+   this server the account's key; it is kept HERE, in memory, for as long as
+   they are signed in, and given to each program the office starts
+   (AGENCY_KEY). It is never written to disk. Signed out, nothing is readable.
+
+   One person signed in at a time on a computer: signing in replaces whoever
+   was before. Until the first account exists, the front door below behaves
+   exactly as it always has. --------------------------------------------- */
+const ACCOUNT_COOKIE = "glasswork_account";
+const ACCOUNT_SESSIONS = new Set();
+let SIGNED_IN = null;                // { account, name, key: Buffer } while signed in
+const ACCOUNT_OPEN = new Set(["/account", "/api/account/list", "/api/account/sign-in",
+  "/api/account/sign-up", "/api/account/recover", "/api/ping"]);
+
+function accountsExist() {
+  try {
+    const dir = path.join(process.env.AGENCY_DATA || path.join(__dirname, "data"), "accounts");
+    return fs.readdirSync(dir).some((d) => fs.existsSync(path.join(dir, d, "account.json")));
+  } catch (_) { return false; }
+}
+function accountToken(req) {
+  const raw = req.headers.cookie || "";
+  for (const part of raw.split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === ACCOUNT_COOKIE) return part.slice(i + 1).trim();
+  }
+  return "";
+}
+function signedIn(req) { return !!SIGNED_IN && ACCOUNT_SESSIONS.has(accountToken(req)); }
+
 function cookieToken(req) {
   const raw = req.headers.cookie || "";
   for (const part of raw.split(";")) {
@@ -144,6 +177,27 @@ app.use((req, res, next) => {
     return res.status(403).type("text/plain").send(
       "Refused: this server answers to localhost only. If you meant to reach it " +
       "over the network, start it with BIND_HOST set and put a password on it.");
+  }
+  if (accountsExist()) {
+    // Accounts exist: the account sign-in is the front door, and the old
+    // single admin password no longer applies.
+    if (ACCOUNT_OPEN.has(req.path)) return next();
+    if (signedIn(req)) {
+      // Signed in with no website open yet: nothing but the account page, or
+      // the office would be reading the program's ORIGINAL files — someone
+      // else's agency, before it has been brought into an account.
+      if (activeSite() || req.path.startsWith("/api/account/")) return next();
+      if (req.path.startsWith("/api/")) {
+        return res.status(409).json({ ok: false, needsSite: true,
+          error: "Add a website to your account first, at /account." });
+      }
+      return res.redirect("/account");
+    }
+    if (req.path.startsWith("/api/")) {
+      return res.status(401).json({ ok: false, signin: true,
+        error: "Signed out. Sign in at /account." });
+    }
+    return res.redirect("/account");
   }
   if (!adminHash()) return next();                       // no password set
   if (req.path === "/login" || req.path === "/api/login") return next();
@@ -320,7 +374,7 @@ function unlockPage(err) {
   <h1>&#128274; Setup</h1>
   <p>This screen holds every API key in the agency, your model routing and your
      spend cap. Being signed in is not enough &mdash; it asks each time you open it.</p>
-  <input type="password" name="password" placeholder="Your admin password" autofocus required>
+  <input type="password" name="password" placeholder="Your password" autofocus required>
   <button>Open Setup</button>
   ${err ? `<div class="err">${err}</div>` : ""}
   <a href="/">&larr; Back to the office</a>
@@ -328,7 +382,7 @@ function unlockPage(err) {
 }
 
 app.use((req, res, next) => {
-  if (!adminHash()) return next();               // no password set: nothing to ask
+  if (!adminHash() && !accountsExist()) return next();   // no password: nothing to ask
   const isPage = req.method === "GET" &&
     (req.path === "/setup" || req.path === "/setup.html");
   const isApi = SETUP_API.some((p) => req.path === p || req.path.startsWith(p + "/"));
@@ -352,9 +406,12 @@ app.use((req, res, next) => {
     error: "Setup is locked. Open the Setup screen and enter your password." });
 });
 
-app.post("/api/setup/unlock", express.urlencoded({ extended: false }), (req, res) => {
+app.post("/api/setup/unlock", express.urlencoded({ extended: false }), async (req, res) => {
   const supplied = (req.body && req.body.password) || "";
-  if (!passwordOk(supplied)) {
+  const ok = accountsExist()
+    ? !!(SIGNED_IN && (await pyAccounts("check", { account: SIGNED_IN.account, password: supplied })).ok)
+    : passwordOk(supplied);
+  if (!ok) {
     return res.status(401).type("html").send(unlockPage("That is not the password."));
   }
   const tok = crypto.randomBytes(32).toString("hex");
@@ -372,6 +429,139 @@ app.get("/control", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "agen
 app.get("/setup", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
 app.get("/status", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
 app.get("/review", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
+app.get("/account", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "account.html")));
+
+/* ---- ACCOUNTS AND WEBSITES (coordination/accounts.py) ---------------------
+   Passwords and recovery keys go to Python on stdin, never on a command line,
+   and never into a log. What comes back with a key keeps it here, in memory. */
+async function pyAccounts(command, payload) {
+  const py = resolvePython();
+  if (!py) return { ok: false, error: NO_PY };
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.accounts", command], {
+    cwd: __dirname, input: JSON.stringify(payload || {}), timeout: 180000,
+  });
+  if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
+  try { return JSON.parse(String(r.stdout || "").trim().split("\n").pop()); }
+  catch (_) { return { ok: false, error: "accounts: " + String(r.stderr || r.stdout || "no answer").slice(-300) }; }
+}
+
+function startSession(res, account, name, keyHex) {
+  SIGNED_IN = { account, name, key: Buffer.from(keyHex, "hex") };
+  process.env.AGENCY_KEY = keyHex;            // every program the office starts gets it
+  ACCOUNT_SESSIONS.clear();                  // one person at a time on this computer
+  SESSIONS.clear(); SETUP_TICKETS.clear();
+  const tok = crypto.randomBytes(32).toString("hex");
+  ACCOUNT_SESSIONS.add(tok);
+  res.setHeader("Set-Cookie", `${ACCOUNT_COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/`);
+}
+function endSession() {
+  SIGNED_IN = null;
+  delete process.env.AGENCY_KEY;
+  ACCOUNT_SESSIONS.clear(); SETUP_TICKETS.clear();
+}
+// After signing in or switching website: build or upgrade that website's cabinet.
+async function cabinetReady() { try { await ensureDb(); } catch (_) {} }
+
+function strip(r) {                          // the key never goes to the browser
+  const out = { ...(r || {}) };
+  delete out.key;
+  return out;
+}
+
+app.get("/api/account/list", async (_q, res) => {
+  const r = await pyAccounts("list", {});
+  res.json({ ...r, signedIn: SIGNED_IN ? { account: SIGNED_IN.account, name: SIGNED_IN.name } : null });
+});
+
+app.post("/api/account/sign-up", async (req, res) => {
+  const b = req.body || {};
+  const r = await pyAccounts("sign-up", { name: b.name, password: b.password, confirm: b.confirm });
+  if (!r.ok) return res.status(400).json(r);
+  startSession(res, r.account.id, r.account.name, r.key);
+  // The recovery key is shown ONCE, here, and kept nowhere.
+  res.json(strip(r));
+});
+
+app.post("/api/account/sign-in", async (req, res) => {
+  const b = req.body || {};
+  const r = await pyAccounts("sign-in", { account: b.account, password: b.password });
+  if (!r.ok) return res.status(401).json(r);
+  startSession(res, r.account.id, r.account.name, r.key);
+  await cabinetReady();
+  res.json(strip(r));
+});
+
+app.post("/api/account/recover", async (req, res) => {
+  const b = req.body || {};
+  const r = await pyAccounts("recover", { account: b.account, recovery_key: b.recovery_key,
+                                         password: b.password });
+  if (!r.ok) return res.status(401).json(r);
+  startSession(res, r.account.id, r.account.name, r.key);
+  await cabinetReady();
+  res.json(strip(r));
+});
+
+app.post("/api/account/sign-out", async (_q, res) => {
+  if (!SIGNED_IN) return res.json({ ok: true });
+  const st = await pyAccounts("status", {});
+  if (st.run_going) {
+    return res.status(409).json({ ok: false,
+      error: "Today's run is still going. Let it finish or press Stop, then sign out." });
+  }
+  endSession();
+  res.json({ ok: true });
+});
+
+app.get("/api/account/me", async (_q, res) => {
+  if (!SIGNED_IN) return res.json({ ok: true, signedIn: null });
+  const [list, st] = await Promise.all([pyAccounts("list", {}), pyAccounts("status", {})]);
+  const mine = (list.accounts || []).find((a) => a.id === SIGNED_IN.account) || {};
+  res.json({ ok: true, signedIn: { account: SIGNED_IN.account, name: SIGNED_IN.name },
+             sites: mine.sites || [], open: (st.site || {}).id || null, maxSites: list.max_sites,
+             runGoing: !!st.run_going, legacyPresent: !!list.legacy_present,
+             legacySite: list.legacy_site || {}, broughtIn: !!st.brought_in });
+});
+
+app.post("/api/account/password", async (req, res) => {
+  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
+  const b = req.body || {};
+  if ((b.password || "") !== (b.confirm || "")) {
+    return res.status(400).json({ ok: false, error: "The two passwords do not match." });
+  }
+  const r = await pyAccounts("change-password", { account: SIGNED_IN.account,
+                                                  current: b.current, password: b.password });
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post("/api/account/add-site", async (req, res) => {
+  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
+  const b = req.body || {};
+  const r = await pyAccounts("add-site", { account: SIGNED_IN.account, name: b.name, url: b.url });
+  if (r.ok) await cabinetReady();
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post("/api/account/open-site", async (req, res) => {
+  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
+  const r = await pyAccounts("open-site", { account: SIGNED_IN.account, site: (req.body || {}).site });
+  if (r.ok) await cabinetReady();
+  res.status(r.ok ? 200 : (r.running ? 409 : 400)).json(r);
+});
+
+app.post("/api/account/bring-in", async (req, res) => {
+  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
+  const b = req.body || {};
+  const r = await pyAccounts("bring-in", { account: SIGNED_IN.account, name: b.name, url: b.url });
+  if (r.ok) await cabinetReady();
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post("/api/account/retire-old", async (req, res) => {
+  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
+  const r = await pyAccounts("retire-old", { account: SIGNED_IN.account,
+                                            confirm: !!(req.body || {}).confirm });
+  res.status(r.ok ? 200 : 400).json(r);
+});
 // The two rooms, one page: /mail opens on the mail, /posts on the written pages.
 app.get("/mail", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
 app.get("/posts", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
@@ -398,6 +588,7 @@ const API_CAPABILITIES = [
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
+  "account",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {
@@ -502,11 +693,51 @@ function configPath(name) {
   return path.join(ACCOUNT_CONFIG.has(name) ? accountDir(a) : siteDir(a), "config", name);
 }
 const gscSaPath = () => configPath("gsc-service-account.local.json");
+
+// Sealed settings and files: lib/sealed.js, the same format as coordination/vault.py.
+const sealed = require("./lib/sealed");
+function accountOfFile(file) {
+  const root = path.resolve(DATA_ROOT, "accounts");
+  const rel = path.relative(root, path.resolve(file));
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  const parts = rel.split(path.sep);
+  return parts.length >= 2 ? { account: parts[0], where: parts.slice(1).join("/") } : null;
+}
+function accountEncrypted(id) {
+  try {
+    const a = JSON.parse(fs.readFileSync(path.join(DATA_ROOT, "accounts", id, "account.json"), "utf8"));
+    return !!(a && a.keys);
+  } catch (_) { return false; }
+}
+function masterFor(account) {
+  if (!SIGNED_IN || SIGNED_IN.account !== account) {
+    throw new Error("this account's settings are locked — sign in first");
+  }
+  return SIGNED_IN.key;
+}
+function readSecret(file) {
+  const data = fs.readFileSync(file);
+  if (!sealed.isSealed(data)) return data.toString("utf8");
+  const owner = accountOfFile(file);
+  if (!owner) throw new Error(path.basename(file) + " is sealed outside any account");
+  return sealed.unseal(masterFor(owner.account), data, owner.where);
+}
+function writeSecret(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const owner = accountOfFile(file);
+  const data = owner && accountEncrypted(owner.account)
+    ? sealed.seal(masterFor(owner.account), text, owner.where)
+    : Buffer.from(String(text), "utf8");
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, data, { mode: 0o600 });
+  try { fs.chmodSync(tmp, 0o600); } catch (_) {}
+  fs.renameSync(tmp, file);
+}
 // What Google said the last time it was actually asked (pipelines/seo_intel
 // gsc_note). "Connected" used to mean only that two fields were filled in.
 const gscStatusPath = () => configPath("gsc-status.local.json");
 function gscStatus() {
-  try { return JSON.parse(fs.readFileSync(gscStatusPath(), "utf8")); } catch (_) { return null; }
+  try { return JSON.parse(readSecret(gscStatusPath())); } catch (_) { return null; }
 }
 function gscLine(e) {
   const saved = !!(e.GSC_PROPERTY && String(e.GSC_PROPERTY).trim()) && fs.existsSync(gscSaPath());
@@ -560,7 +791,9 @@ function readEnvFile() {
   const map = {};
   for (const file of envFiles()) {
     if (!fs.existsSync(file)) continue;
-    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    let text = "";
+    try { text = readSecret(file); } catch (_) { continue; }   // locked: reads as empty
+    for (const line of text.split(/\r?\n/)) {
       const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
       if (m) map[m[1]] = m[2];
     }
@@ -606,9 +839,7 @@ function updateEnv(partial) {
       ...mine.map((k) => `${k}=${String(merged[k] == null ? "" : merged[k]).replace(/[\r\n]+/g, " ")}`),
       "",
     ].join("\n");
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, body, { mode: 0o600 });
-    try { fs.chmodSync(file, 0o600); } catch (_) {}
+    writeSecret(file, body);     // sealed when the account is encrypted
   }
 }
 
@@ -623,6 +854,8 @@ function dbBuilt() {
   if (!fs.existsSync(DB_PATH)) return false;
   try {
     const buf = fs.readFileSync(DB_PATH);
+    // An encrypted cabinet has no readable table names; Python built it.
+    if (!buf.subarray(0, 15).equals(Buffer.from("SQLite format 3"))) return buf.length > 0;
     return REQUIRED_TABLES.every((t) => buf.includes(t));
   } catch (_) { return false; }
 }
@@ -742,6 +975,9 @@ function shared(key, make) {
 // costs a few milliseconds and closes the hole permanently. Python's own
 // board._migrate does the same on its side; either route now heals a cabinet.
 function ensureDbSync() {
+  // Accounts exist and nobody is signed in: the cabinets are locked. Each one
+  // is built and upgraded when its owner signs in (see signInDone).
+  if (accountsExist() && !SIGNED_IN) return { built: true, ran: false, error: null };
   const py = resolvePython();
   if (!py) return { built: dbBuilt(), ran: false, error: NO_PY };
   try {
@@ -906,9 +1142,7 @@ app.post("/api/website", async (req, res) => {
     // A public URL is not a credential, so it lives in config/site.json and
     // travels with the repo. Secrets stay above, in .env, and only there.
     try {
-      const cfgDir = path.dirname(configPath("site.json"));
-      fs.mkdirSync(cfgDir, { recursive: true });
-      fs.writeFileSync(path.join(cfgDir, "site.json"),
+      writeSecret(configPath("site.json"),
         JSON.stringify({ url: siteUrl, mode, name: siteName }, null, 2) + "\n");
     } catch (e) {
       console.error("could not write config/site.json:", e.message);
@@ -1013,10 +1247,7 @@ app.post("/api/integration", async (req, res) => {
         try { JSON.parse(sa); } catch (_) {
           return res.status(400).json({ ok: false, error: "The service-account key must be the full JSON file (it isn't valid JSON)." });
         }
-        const saPath = gscSaPath();
-        fs.mkdirSync(path.dirname(saPath), { recursive: true });
-        fs.writeFileSync(saPath, sa, { mode: 0o600 });
-        try { fs.chmodSync(saPath, 0o600); } catch (_) {}
+        writeSecret(gscSaPath(), sa);      // sealed when the account is encrypted
       }
       return res.json({ ok: true });
     }

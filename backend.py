@@ -98,10 +98,11 @@ def _env_files():
 
 
 def read_env() -> dict:
+    from coordination import workspace
     out = {}
     for f in _env_files():
         if f.exists():
-            for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            for line in (workspace.read_secret(f, "") or "").splitlines():
                 if "=" in line and not line.lstrip().startswith("#"):
                     k, v = line.split("=", 1)
                     out[k.strip()] = v.strip()
@@ -118,8 +119,7 @@ def write_env(key, value):
     """
     from coordination import workspace
     env = ENV if workspace.legacy() else workspace.env_path_for(key)
-    lines = (env.read_text(encoding="utf-8", errors="replace").splitlines()
-             if env.exists() else [])
+    lines = (workspace.read_secret(env, "") or "").splitlines()
     out, done = [], False
     for line in lines:
         if line.split("=", 1)[0].strip() == key and not line.lstrip().startswith("#"):
@@ -130,12 +130,8 @@ def write_env(key, value):
             out.append(line)
     if value is not None and not done:
         out.append(f"{key}={value}")
-    env.parent.mkdir(parents=True, exist_ok=True)
-    env.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
-    try:
-        os.chmod(env, 0o600)                 # nobody else on the machine, either
-    except Exception:
-        pass
+    # sealed when the account is encrypted; owner-only on disk either way
+    workspace.write_secret(env, "\n".join(out).rstrip() + "\n")
 
 
 # ---------------------------------------------------------------------------

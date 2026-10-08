@@ -119,7 +119,7 @@ def _load() -> dict:
     if not STORE.exists():
         return json.loads(json.dumps(_EMPTY))
     try:
-        data = json.loads(STORE.read_text(encoding="utf-8") or "{}")
+        data = json.loads(_workspace.read_secret(STORE, "") or "{}")
     except Exception:
         return json.loads(json.dumps(_EMPTY))
     for k, v in _EMPTY.items():
@@ -128,10 +128,8 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
-    STORE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STORE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(STORE)
+    # sealed when the account is encrypted (coordination/workspace.write_secret)
+    _workspace.write_secret(STORE, json.dumps(data, indent=2))
     try:
         STORE.chmod(0o600)
     except Exception:
