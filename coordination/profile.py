@@ -45,6 +45,14 @@ FIELDS = ("starter", "business", "country", "place", "services", "service_order"
 
 _CACHE = {}
 
+# The languages the writers are asked to write in. English first, because the
+# agency's own instructions are English; the others are for the copy only.
+LANGUAGES = (("en-GB", "English (British)"), ("en-US", "English (American)"),
+             ("en-AU", "English (Australian)"), ("en-IN", "English (India)"),
+             ("ar", "Arabic"), ("de-DE", "German"), ("fr-FR", "French"),
+             ("es-ES", "Spanish"), ("it-IT", "Italian"), ("nl-NL", "Dutch"),
+             ("pt-PT", "Portuguese"), ("ur", "Urdu"), ("hi", "Hindi"))
+
 
 def _path():
     return workspace.config_path(FILE)
@@ -155,8 +163,8 @@ def spelling() -> str:
     named = _pick("spelling", "British English", "")
     if named:
         return named
-    return {"en-US": "American English", "en-GB": "British English"}.get(
-        lang, "the business's own language (" + lang + ")")
+    return dict(LANGUAGES).get(lang, "the business's own language (" + lang + ")") \
+        .replace("English (British)", "British English").replace("English (American)", "American English")
 
 
 def outreach() -> dict:
@@ -280,9 +288,20 @@ def main(argv=None) -> int:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--save", action="store_true", help="read a profile as JSON on stdin")
     ap.add_argument("--countries", action="store_true")
+    ap.add_argument("--options", action="store_true",
+                    help="what the Your business page offers: countries, customer types, languages")
     a = ap.parse_args(argv)
     if a.save:
         print(json.dumps(save(json.loads(sys.stdin.read() or "{}"))))
+        return 0
+    if a.options:
+        from pipelines import leads_sources
+        print(json.dumps({
+            "countries": [{"code": c, "name": n} for c, n in countries.all_countries()],
+            "catalogue": [{"key": k, **v} for k, v in leads_sources.CATALOGUE.items()],
+            "languages": [{"code": c, "name": n} for c, n in LANGUAGES],
+            "outreach": {c: countries.outreach_rule(c) for c in ("AE", "GB", "US", "DE", "AT")},
+        }, ensure_ascii=False))
         return 0
     if a.countries:
         print(json.dumps([{"code": c, "name": n} for c, n in countries.all_countries()]))

@@ -221,6 +221,16 @@ someone else's in read-only mode:
     checked everything came across.
   - Until you make an account, the program runs exactly as before.
 
+- **Phase 2 is built (8 October).**
+  - Each website has its own business profile: what it does, its country and
+    areas, what it sells, and who buys it.
+  - A **Your business** page sets the profile, and can draft it from the
+    business's own website.
+  - Lead collection, phone numbers, map searches, writing, SEO and email all
+    follow the profile.
+  - Outreach follows each country's email rule.
+  - Your website keeps exactly what it had.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

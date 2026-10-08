@@ -1095,6 +1095,7 @@ function renderSiteMenu(){
     $('#siteMenu').innerHTML = sites.map(s=>`<div class="site-item" onclick="openAccountSite('${escA(s.id)}')">`
         + `<span class="fav">${esc(siteFav(s.url||s.name))}</span><div style="flex:1;min-width:0"><b>${esc(s.name)}</b>`
         + `<small>${esc(s.id===ACCOUNT.open?'open now':(s.url||'switch to this website'))}</small></div></div>`).join('')
+      + `<a class="site-add" href="/business" style="display:block;text-decoration:none;border-style:solid">Your business — what you sell, where →</a>`
       + `<a class="site-add" href="/account" style="display:block;text-decoration:none">`
       + (sites.length < (ACCOUNT.maxSites||2) ? 'Add a website · manage →' : 'Manage websites and account →') + `</a>`
       + `<div class="site-add" style="border-style:solid;color:var(--muted)" onclick="signOutHere()">Sign out · ${esc(ACCOUNT.signedIn.name)}</div>`;

@@ -412,6 +412,15 @@ LOCAL_SEGMENTS = _profile.local_customers(GLASS_LOCAL)
 CATALOGUE = {k: {"label": v["why"].split(" — ")[0], "queries": list(v["queries"]),
                  "local": k in GLASS_LOCAL}
              for k, v in GLASS_SEGMENTS.items()}
+# Names that read as one country's, said so any business anywhere recognises them.
+for _k, _label in (("local_market", "Markets and small shopping centres"),
+                   ("food_stall", "Cafés, bakeries and takeaways"),
+                   ("villa_compound", "Residential compounds and staff accommodation"),
+                   ("facility_management", "Facility management firms"),
+                   ("laundry", "Laundries, tailors, key-cutters and other small shops"),
+                   ("builder", "Small builders and renovation contractors")):
+    if _k in CATALOGUE:
+        CATALOGUE[_k]["label"] = _label
 CATALOGUE.update({
     "care_home": {"label": "Care homes and nursing homes",
                   "queries": ["care home", "nursing home", "assisted living"], "local": False},

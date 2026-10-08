@@ -430,6 +430,32 @@ app.get("/setup", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.
 app.get("/status", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
 app.get("/review", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review.html")));
 app.get("/account", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "account.html")));
+app.get("/business", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "business.html")));
+
+/* ---- YOUR BUSINESS (coordination/profile.py) ------------------------------
+   What this website's business is, sells, who buys it and where. Read and
+   saved through Python, sealed like every other setting. The draft reads the
+   business's own website and saves NOTHING: the page shows it, he corrects it,
+   and only Save writes. */
+app.get("/api/business", async (_q, res) => {
+  res.json(await pyModule("coordination.profile", ["--json"], 60000));
+});
+app.get("/api/business/options", async (_q, res) => {
+  res.json(await pyModule("coordination.profile", ["--options"], 60000));
+});
+app.post("/api/business", async (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "coordination.profile", "--save"], {
+    cwd: __dirname, input: JSON.stringify(req.body || {}), timeout: 60000,
+  });
+  try { return res.json(JSON.parse(String(r.stdout || "").trim().split("\n").pop())); }
+  catch (_) { return res.json({ ok: false, error: "could not save: " + String(r.stderr || "").slice(-300) }); }
+});
+app.post("/api/business/draft", async (req, res) => {
+  const url = String((req.body || {}).url || "").trim();
+  res.json(await pyModule("pipelines.business_draft", url ? ["--url", url] : [], 300000));
+});
 
 /* ---- ACCOUNTS AND WEBSITES (coordination/accounts.py) ---------------------
    Passwords and recovery keys go to Python on stdin, never on a command line,
@@ -588,7 +614,7 @@ const API_CAPABILITIES = [
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
-  "account",
+  "account", "business",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {

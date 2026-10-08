@@ -193,6 +193,7 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
     <div class="sites" id="mgSites"></div>
     <div class="err" id="mgErr"></div>
     <a class="btn" href="/">Go to the office</a>
+    <a class="btn quiet" href="/business">Your business — what you sell, where</a>
 
     <div class="block" id="mgBring" style="display:none">
       <h2 id="mgBringTitle">Bring in your current website</h2>
@@ -347,7 +348,7 @@ async function addSite(e, p) {
   const j = await call('/api/account/add-site', {name: $('#' + p + 'Name').value, url: $('#' + p + 'Url').value});
   busy(p + 'Btn', false);
   if (!j.ok) return fail(p + 'Err', j.error || 'That did not work.');
-  if (p === 'af') return (location.href = '/setup');
+  if (p === 'af') return (location.href = '/business');      // a new website starts blank
   $('#adName').value = $('#adUrl').value = '';
   manage();
 }
