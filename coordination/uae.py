@@ -100,7 +100,8 @@ def _env(name, default=""):
         pass
     try:
         from pathlib import Path
-        p = Path(__file__).resolve().parent.parent / ".env"
+        from . import workspace
+        p = workspace.env_path_for(name)
         if p.exists():
             for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()

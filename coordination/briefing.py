@@ -27,8 +27,8 @@ import sqlite3
 import time
 from pathlib import Path
 
-DB = Path(__import__("os").environ.get("AGENCY_DB")
-          or Path(__file__).parent / "agency.db")     # the test run's own cabinet
+# the open website's cabinet; the test run's own when AGENCY_DB is set
+DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()
 
 # What each sector is for, and the command that makes it do a real cycle. The
 # commands are the honest bit: an agent can read this and know the sector is not

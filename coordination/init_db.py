@@ -2,8 +2,10 @@
 import sqlite3
 from pathlib import Path
 
+from coordination import workspace
+
 HERE = Path(__file__).parent
-DB = HERE / "agency.db"
+DB = workspace.db_path()            # the open website's cabinet
 SCHEMA = HERE / "schema.sql"
 
 def init():

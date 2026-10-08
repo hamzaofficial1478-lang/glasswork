@@ -288,7 +288,7 @@ def gsc_ready():
         return False, ("no GSC_PROPERTY set. Search Console is free and it is the "
                        "single best keyword source you own — add it on /setup → "
                        "Integrations.")
-    if not (root / GSC_SA).exists():
+    if not _sa_path().exists():
         return False, (f"GSC_PROPERTY is set but {GSC_SA} is missing. Upload the "
                        f"service-account JSON on /setup → Integrations, and share "
                        f"the property with that account's email in Search Console.")
@@ -309,7 +309,24 @@ GSC_STATUS = "config/gsc-status.local.json"
 def _gsc_status_path():
     from pathlib import Path
     p = Path(GSC_STATUS)
-    return p if p.is_absolute() else Path(__file__).parents[1] / p
+    if p.is_absolute():
+        return p
+    return _config_file(p)
+
+
+def _config_file(rel):
+    """A config/ file of the open website's (coordination/workspace.py), or the program's own."""
+    from pathlib import Path
+    from coordination import workspace
+    rel = Path(rel)
+    if workspace.legacy() or rel.parts[:1] != ("config",):
+        return Path(__file__).parents[1] / rel
+    return workspace.config_path(rel.name)
+
+
+def _sa_path():
+    """The Search Console key of the open website."""
+    return _config_file(GSC_SA)
 
 
 def gsc_note(ok, why, rows=0):
@@ -359,7 +376,7 @@ def _gsc_session(scope=GSC_SCOPE):
     prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
     try:
         creds = service_account.Credentials.from_service_account_file(
-            str(Path(__file__).parents[1] / GSC_SA), scopes=[scope])
+            str(_sa_path()), scopes=[scope])
         creds.refresh(google.auth.transport.requests.Request())
     except Exception as e:
         return None, prop, _login_failed(e)
@@ -454,7 +471,7 @@ def _service_account_email() -> str:
     try:
         import json as _json
         from pathlib import Path as _Path
-        p = _Path(__file__).parents[1] / GSC_SA
+        p = _sa_path()
         return (_json.loads(p.read_text(encoding="utf-8")).get("client_email")
                 or "") if p.exists() else ""
     except Exception:
@@ -465,7 +482,7 @@ def _project_id() -> str:
     """The Google Cloud project the service-account key belongs to."""
     try:
         from pathlib import Path as _Path
-        p = _Path(__file__).parents[1] / GSC_SA
+        p = _sa_path()
         return (json.loads(p.read_text(encoding="utf-8")).get("project_id") or "") \
             if p.exists() else ""
     except Exception:
@@ -653,7 +670,7 @@ def gsc_queries(days=90, limit=500):
     # does not change Google's mind.
     try:
         creds = service_account.Credentials.from_service_account_file(
-            str(root / GSC_SA), scopes=[GSC_SCOPE])
+            str(_sa_path()), scopes=[GSC_SCOPE])
     except Exception as e:
         return [], (f"the Search Console key file could not be read ({e}). Upload "
                     "the service-account JSON again on /setup → Integrations.")

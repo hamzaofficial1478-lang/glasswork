@@ -12,7 +12,7 @@ import sqlite3
 from . import uae
 from pathlib import Path
 
-DB = Path(__file__).parent / "agency.db"
+DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()   # the open website's
 
 # ---- the services this business actually sells -----------------------------
 SERVICES = [

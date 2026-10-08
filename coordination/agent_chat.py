@@ -36,8 +36,8 @@ import sys
 import time
 from pathlib import Path
 
-DB = Path(__import__("os").environ.get("AGENCY_DB")
-          or Path(__file__).parent / "agency.db")     # the test run's own cabinet
+# the open website's cabinet; the test run's own when AGENCY_DB is set
+DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()
 
 # Which sector a desk belongs to, and which routed brain answers for it. The
 # key is the agent-name prefix the pipelines already use (it-watcher, and so on).

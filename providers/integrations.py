@@ -45,8 +45,23 @@ import requests
 
 from . import auth
 
+# The original single settings file. Still the only one until an account is
+# open; after that, the person's settings and the open website's are two files
+# (coordination/workspace.py) and _files() reads both.
 ENV_PATH = Path(__file__).parents[1] / ".env"
+_ORIGINAL_ENV = ENV_PATH
 _TELEGRAM = "https://api.telegram.org"
+
+
+def _files(path=None) -> list:
+    """The settings files to read, the person's first and then the website's."""
+    if path:
+        return [Path(path)]
+    from coordination import workspace
+    # a test that points ENV_PATH at a file of its own means that file only
+    if ENV_PATH != _ORIGINAL_ENV or workspace.legacy():
+        return [ENV_PATH]
+    return list(workspace.env_paths())
 
 
 # The settings the agency reads by name. Used to decide which environment
@@ -121,15 +136,15 @@ def read_env(path=None) -> dict:
         return {k: str(v).strip() for k in ENV_KEYS
                 if (v := os.environ.get(k)) is not None and str(v).strip()}
 
-    p = Path(path) if path else ENV_PATH
-    try:
-        if p.exists():
-            for line in p.read_text(encoding="utf-8").splitlines():
-                m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
-                if m:
-                    env[m.group(1)] = m.group(2).strip()
-    except Exception:
-        env = {}
+    for p in _files(path):
+        try:
+            if p.exists():
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
+                    if m:
+                        env[m.group(1)] = m.group(2).strip()
+        except Exception:
+            pass
     # Only keys the file already knows about, plus the ones the agency reads by
     # name. Copying the WHOLE environment in would drag PATH, HOME and every
     # CI variable into a dict the office renders as the owner's settings.
@@ -152,7 +167,6 @@ def write_env(values: dict, path=None) -> dict:
 
     Mirrors server.js's updateEnv. Same file, same format, same key rule.
     """
-    p = Path(path) if path else ENV_PATH
     values = {k: str(v) for k, v in (values or {}).items()
               if k and str(v).strip()}
     if not values:
@@ -166,6 +180,28 @@ def write_env(values: dict, path=None) -> dict:
     for k, v in values.items():
         if "\n" in v or "\r" in v:
             return {"ok": False, "error": f"{k} cannot contain a line break"}
+    files = _files(path)
+    if len(files) == 1:
+        return _write_one(files[0], values)
+    # An account is open: each setting goes to the file it belongs in — the
+    # person's (notifications, map and AI keys, spending cap) or the website's.
+    from coordination import workspace
+    saved, where = [], []
+    for p in dict.fromkeys(files):
+        part = {k: v for k, v in values.items() if workspace.env_path_for(k) == p}
+        if not part:
+            continue
+        r = _write_one(p, part)
+        if not r.get("ok"):
+            return r
+        saved += r["saved"]
+        where.append(r["path"])
+    return {"ok": True, "saved": sorted(saved), "path": ", ".join(where)}
+
+
+def _write_one(p, values) -> dict:
+    """One settings file, with every other line exactly as it was."""
+    p = Path(p)
     try:
         lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
     except Exception as e:

@@ -91,13 +91,20 @@ def head(title):
 # .env, read and written a line at a time
 # ---------------------------------------------------------------------------
 
+def _env_files():
+    """.env — or, once an account is open, the person's file and the website's."""
+    from coordination import workspace
+    return [ENV] if workspace.legacy() else list(dict.fromkeys(workspace.env_paths()))
+
+
 def read_env() -> dict:
     out = {}
-    if ENV.exists():
-        for line in ENV.read_text(encoding="utf-8", errors="replace").splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                k, v = line.split("=", 1)
-                out[k.strip()] = v.strip()
+    for f in _env_files():
+        if f.exists():
+            for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip()
     return out
 
 
@@ -109,8 +116,10 @@ def write_env(key, value):
     everything, and this file is the one place the owner's secrets live — it
     should come back looking like he left it.
     """
-    lines = (ENV.read_text(encoding="utf-8", errors="replace").splitlines()
-             if ENV.exists() else [])
+    from coordination import workspace
+    env = ENV if workspace.legacy() else workspace.env_path_for(key)
+    lines = (env.read_text(encoding="utf-8", errors="replace").splitlines()
+             if env.exists() else [])
     out, done = [], False
     for line in lines:
         if line.split("=", 1)[0].strip() == key and not line.lstrip().startswith("#"):
@@ -121,9 +130,10 @@ def write_env(key, value):
             out.append(line)
     if value is not None and not done:
         out.append(f"{key}={value}")
-    ENV.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
     try:
-        os.chmod(ENV, 0o600)                 # nobody else on the machine, either
+        os.chmod(env, 0o600)                 # nobody else on the machine, either
     except Exception:
         pass
 
@@ -293,7 +303,8 @@ def where():
         + ("ON — your pages may be rendered and billed" if own
            else "off — your own site is read for free"))
 
-    store = ROOT / "config" / "providers.local.json"
+    from coordination import workspace
+    store = workspace.config_path("providers.local.json")
     say()
     say("  config/providers.local.json   (git-ignored)")
     if not store.exists():
@@ -309,7 +320,7 @@ def where():
         except Exception as ex:
             say(f"    could not be read: {ex}")
 
-    site = ROOT / "config" / "site.json"
+    site = workspace.config_path("site.json")
     say()
     say("  config/site.json              (git-ignored — an update cannot wipe it)")
     say(f"    {site.read_text(encoding='utf-8').strip() if site.exists() else 'not written yet'}")

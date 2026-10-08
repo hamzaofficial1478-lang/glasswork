@@ -8,6 +8,17 @@ website, so nothing is lost.
 
 ---
 
+## Decided (8 October)
+
+- **Customers install it on their own computer.** Their data stays with them,
+  and you run no servers.
+- **Foundations first:** accounts, two websites each, and encryption (phase 1).
+- **Any small business, anywhere, from launch.** So phase 2 has to cover
+  every trade and country (services, lead types, areas, phone formats,
+  languages, and each country's privacy law), not just Gulf trades.
+
+---
+
 ## What we are building
 
 A program anyone can install, which runs a small digital agency for their
@@ -206,7 +217,7 @@ keeps running throughout.
 | Phase | What gets built | You can then… |
 |---|---|---|
 | 1 | Accounts with passwords, an encrypted folder per user, up to 2 websites with the switcher. Your current data becomes your account's website 1. | Sign in, add a second website, switch between them |
-| 2 | The business profile, and every hard-coded "glass in the UAE" moved into it | Set up a website for a completely different trade or country |
+| 2 | The business profile, and every hard-coded "glass in the UAE" moved into it, for any trade in any country: areas from OpenStreetMap, phone numbers in each country's format, each country's privacy rules for outreach | Set up a website for a completely different trade or country |
 | 3 | AI engines: Anthropic, OpenAI and Gemini by API key (plus subscriptions wherever allowed), the first-run choice, spend tracking and the cap | Run the agency on GPT or Gemini instead of Claude |
 | 4 | The new design: prototype → your approval → the setup wizard and the main screens rebuilt in it, plus the easier website connection | Set up a new website in a few minutes |
 | 5 | Website Check: sector checks, scores, report, PDF | Hand a prospect a report on their website |

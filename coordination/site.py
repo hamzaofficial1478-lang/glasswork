@@ -51,7 +51,10 @@ import os
 import re
 from pathlib import Path
 
-CONFIG = Path(__file__).parents[1] / "config" / "site.json"
+from . import workspace as _workspace
+
+# The open website's (coordination/workspace.py); config/site.json before any account.
+CONFIG = _workspace.config_path("site.json")
 
 
 # The agency's own name. Not the client's — this is the firm running the work.

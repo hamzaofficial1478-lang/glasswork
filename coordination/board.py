@@ -24,9 +24,12 @@ import json
 from contextlib import contextmanager
 from pathlib import Path
 
-# AGENCY_DB is set by the test run only (run.py --tests), so no test can ever
-# write into his real cabinet — see run.py tests().
-DB = Path(os.environ.get("AGENCY_DB") or Path(__file__).parent / "agency.db")
+from . import workspace as _workspace
+
+# The open website's cabinet (coordination/workspace.py). AGENCY_DB, set by the
+# test run only (run.py --tests), always wins, so no test can ever write into
+# his real cabinet — see run.py tests().
+DB = _workspace.db_path()
 
 
 @contextmanager

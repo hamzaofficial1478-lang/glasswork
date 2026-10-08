@@ -209,7 +209,8 @@ def update():
 # ---------------------------------------------------------------------------
 
 def ensure_cabinet():
-    db = ROOT / "coordination" / "agency.db"
+    from coordination import workspace
+    db = workspace.db_path()            # the open website's cabinet
     if db.exists():
         return
     head("First run — building the filing cabinet")
@@ -400,6 +401,9 @@ def tests():
     con.commit()
     con.close()
     os.environ["AGENCY_DB"] = str(scratch)
+    # And never in HIS account either: an empty place for accounts of its own,
+    # so every suite sees the program's original layout unless it makes one.
+    os.environ["AGENCY_DATA"] = str(scratch.parent / "accounts-data")
     mods = ["coordination.cabinet_tests", "coordination.floor_tests",
             "coordination.targets_tests", "coordination.hook_tests",
             "coordination.faults_tests", "coordination.comms_tests",
@@ -418,6 +422,7 @@ def tests():
             "coordination.daygate_tests",
             "coordination.honest_tests",
             "coordination.orders_tests",
+            "coordination.workspace_tests",
             "coordination.clock_tests",
             "providers.tests", "providers.team_tests",
             "providers.local_tests",

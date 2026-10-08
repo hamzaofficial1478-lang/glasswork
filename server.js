@@ -451,17 +451,65 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // ---- helpers ---------------------------------------------------------------
-const ENV_PATH = path.join(__dirname, ".env");
-const DB_PATH = path.join(__dirname, "coordination", "agency.db");
-const GSC_SA_PATH = path.join(__dirname, "config", "gsc-service-account.local.json");
+// ---- whose agency, which website (mirrors coordination/workspace.py) -------
+// Until an account is open every path is the program's original one, so his
+// agency carries on exactly as before. Once one is open, the person's settings
+// and each website's settings, files and cabinet live under data/accounts/.
+const DATA_ROOT = process.env.AGENCY_DATA || path.join(__dirname, "data");
+// Settings that belong to the person, not to either website. Kept in step
+// with ACCOUNT_KEYS in coordination/workspace.py by coordination/workspace_tests.
+const ACCOUNT_KEYS = new Set([
+  "AGENCY_NAME", "ADMIN_NAME", "ADMIN_PASSWORD_HASH",
+  "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
+  "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+  "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
+  "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
+  "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
+  "PORT",
+]);
+const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json"]);
+const MACHINE_CONFIG = new Set(["claude_code.local.json"]);
+const LEGACY_ENV = path.join(__dirname, ".env");
+
+function activeSite() {
+  try {
+    const a = JSON.parse(fs.readFileSync(path.join(DATA_ROOT, "active.json"), "utf8"));
+    if (!a || !a.account || !a.site) return null;
+    const dir = path.join(DATA_ROOT, "accounts", a.account, "sites", a.site);
+    return fs.existsSync(dir) ? { account: a.account, site: a.site } : null;
+  } catch (_) { return null; }
+}
+function accountDir(a) { return path.join(DATA_ROOT, "accounts", a.account); }
+function siteDir(a) { return path.join(accountDir(a), "sites", a.site); }
+// [the person's settings file, the open website's] — or .env alone.
+function envFiles() {
+  const a = activeSite();
+  return a ? [path.join(accountDir(a), "account.env"), path.join(siteDir(a), "site.env")]
+           : [LEGACY_ENV];
+}
+function envFileFor(key) {
+  const files = envFiles();
+  return files.length === 1 ? files[0] : (ACCOUNT_KEYS.has(key) ? files[0] : files[1]);
+}
+function dbPath() {
+  if (process.env.AGENCY_DB) return process.env.AGENCY_DB;
+  const a = activeSite();
+  return a ? path.join(siteDir(a), "agency.db") : path.join(__dirname, "coordination", "agency.db");
+}
+function configPath(name) {
+  const a = activeSite();
+  if (!a || MACHINE_CONFIG.has(name)) return path.join(__dirname, "config", name);
+  return path.join(ACCOUNT_CONFIG.has(name) ? accountDir(a) : siteDir(a), "config", name);
+}
+const gscSaPath = () => configPath("gsc-service-account.local.json");
 // What Google said the last time it was actually asked (pipelines/seo_intel
 // gsc_note). "Connected" used to mean only that two fields were filled in.
-const GSC_STATUS_PATH = path.join(__dirname, "config", "gsc-status.local.json");
+const gscStatusPath = () => configPath("gsc-status.local.json");
 function gscStatus() {
-  try { return JSON.parse(fs.readFileSync(GSC_STATUS_PATH, "utf8")); } catch (_) { return null; }
+  try { return JSON.parse(fs.readFileSync(gscStatusPath(), "utf8")); } catch (_) { return null; }
 }
 function gscLine(e) {
-  const saved = !!(e.GSC_PROPERTY && String(e.GSC_PROPERTY).trim()) && fs.existsSync(GSC_SA_PATH);
+  const saved = !!(e.GSC_PROPERTY && String(e.GSC_PROPERTY).trim()) && fs.existsSync(gscSaPath());
   if (!saved) return { ok: false, text: "Not set — no owned-site search data" };
   const st = gscStatus();
   if (!st || (st.property && st.property !== String(e.GSC_PROPERTY).trim()))
@@ -510,8 +558,9 @@ const ENV_KEYS = new Set([
 // the owner presses Save on a completely unrelated section of /setup.
 function readEnvFile() {
   const map = {};
-  if (fs.existsSync(ENV_PATH)) {
-    for (const line of fs.readFileSync(ENV_PATH, "utf8").split(/\r?\n/)) {
+  for (const file of envFiles()) {
+    if (!fs.existsSync(file)) continue;
+    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
       const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
       if (m) map[m[1]] = m[2];
     }
@@ -547,13 +596,20 @@ function updateEnv(partial) {
   ];
   const keys = [...order.filter((k) => k in merged),
                 ...Object.keys(merged).filter((k) => !order.includes(k))];
-  const body = [
-    "# Written by the setup screen — secrets stored here only, never committed.",
-    ...keys.map((k) => `${k}=${String(merged[k] == null ? "" : merged[k]).replace(/[\r\n]+/g, " ")}`),
-    "",
-  ].join("\n");
-  fs.writeFileSync(ENV_PATH, body, { mode: 0o600 });
-  try { fs.chmodSync(ENV_PATH, 0o600); } catch (_) {}
+  // Once an account is open each setting goes to its own file: the person's
+  // or the open website's (see envFileFor).
+  for (const file of [...new Set(envFiles())]) {
+    const mine = keys.filter((k) => envFileFor(k) === file);
+    if (!mine.length && fs.existsSync(file)) continue;
+    const body = [
+      "# Written by the setup screen — secrets stored here only, never committed.",
+      ...mine.map((k) => `${k}=${String(merged[k] == null ? "" : merged[k]).replace(/[\r\n]+/g, " ")}`),
+      "",
+    ].join("\n");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body, { mode: 0o600 });
+    try { fs.chmodSync(file, 0o600); } catch (_) {}
+  }
 }
 
 // Every table the app expects. A cabinet built by an OLDER version is missing the
@@ -563,6 +619,7 @@ const REQUIRED_TABLES = ["tasks", "decisions", "keywords", "shelf_queue", "borro
                          "targets", "daily_orders"];
 
 function dbBuilt() {
+  const DB_PATH = dbPath();
   if (!fs.existsSync(DB_PATH)) return false;
   try {
     const buf = fs.readFileSync(DB_PATH);
@@ -849,7 +906,7 @@ app.post("/api/website", async (req, res) => {
     // A public URL is not a credential, so it lives in config/site.json and
     // travels with the repo. Secrets stay above, in .env, and only there.
     try {
-      const cfgDir = path.join(__dirname, "config");
+      const cfgDir = path.dirname(configPath("site.json"));
       fs.mkdirSync(cfgDir, { recursive: true });
       fs.writeFileSync(path.join(cfgDir, "site.json"),
         JSON.stringify({ url: siteUrl, mode, name: siteName }, null, 2) + "\n");
@@ -956,9 +1013,10 @@ app.post("/api/integration", async (req, res) => {
         try { JSON.parse(sa); } catch (_) {
           return res.status(400).json({ ok: false, error: "The service-account key must be the full JSON file (it isn't valid JSON)." });
         }
-        fs.mkdirSync(path.dirname(GSC_SA_PATH), { recursive: true });
-        fs.writeFileSync(GSC_SA_PATH, sa, { mode: 0o600 });
-        try { fs.chmodSync(GSC_SA_PATH, 0o600); } catch (_) {}
+        const saPath = gscSaPath();
+        fs.mkdirSync(path.dirname(saPath), { recursive: true });
+        fs.writeFileSync(saPath, sa, { mode: 0o600 });
+        try { fs.chmodSync(saPath, 0o600); } catch (_) {}
       }
       return res.json({ ok: true });
     }
@@ -1623,7 +1681,7 @@ app.get("/api/settings", async (_q, res) => {
     integrations: {
       email: { host: v("SMTP_HOST"), port: v("SMTP_PORT"), user: v("SMTP_USER"),
                from: v("MAIL_FROM"), fromName: v("MAIL_FROM_NAME"), passSet: set("SMTP_PASS") },
-      gsc: { property: v("GSC_PROPERTY"), serviceAccountSet: fs.existsSync(GSC_SA_PATH) },
+      gsc: { property: v("GSC_PROPERTY"), serviceAccountSet: fs.existsSync(gscSaPath()) },
       serp: { id: v("GOOGLE_CSE_ID"), keySet: set("GOOGLE_CSE_KEY") },
       tomtom: { keySet: set("TOMTOM_API_KEY") },
     },

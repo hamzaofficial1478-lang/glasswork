@@ -21,3 +21,6 @@ __pycache__/
 # his site. config/site.example.json travels instead; .env is what actually
 # survives an update.
 config/site.json
+
+# Accounts: each person's settings, keys and cabinets (coordination/workspace.py).
+data/

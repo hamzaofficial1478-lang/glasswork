@@ -3,6 +3,13 @@
 import sys, json, time, sqlite3
 from pathlib import Path
 DB = Path(__file__).parents[2] / "coordination" / "agency.db"
+try:
+    # The open website's cabinet, once accounts exist (coordination/workspace.py).
+    sys.path.insert(0, str(Path(__file__).parents[2]))
+    from coordination import workspace as _ws
+    DB = _ws.db_path()
+except Exception:
+    pass  # the program's original cabinet; the log is never skipped for this
 def main():
     ev = json.load(sys.stdin)
     try:

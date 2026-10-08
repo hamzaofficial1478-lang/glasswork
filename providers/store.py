@@ -24,7 +24,10 @@ from pathlib import Path
 
 from . import auth
 
-STORE = Path(__file__).parents[1] / "config" / "providers.local.json"
+from coordination import workspace as _workspace
+
+# The person's tool keys (coordination/workspace.py) — config/ before any account.
+STORE = _workspace.config_path("providers.local.json")
 # The owner's real file, remembered so the suite can tell it apart from a
 # temp store a test has pointed STORE at. See _load.
 _REAL_STORE = STORE

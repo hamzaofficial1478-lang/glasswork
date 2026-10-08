@@ -71,7 +71,10 @@ from pathlib import Path
 from . import local_cli
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "config" / "claude_team.local.json"
+from coordination import workspace as _workspace  # noqa: E402
+
+# The person's AI team (coordination/workspace.py) — config/ before any account.
+CONFIG = _workspace.config_path("claude_team.local.json")
 # His real file, remembered so the suite can tell it apart from a temp file a
 # test has pointed CONFIG at. See _saved.
 _REAL_CONFIG = CONFIG
