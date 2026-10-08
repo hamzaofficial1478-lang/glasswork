@@ -146,6 +146,26 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
           <div class="hint">Only for full access. The secret token your site checks before any change.</div></div>
       </div>
       <div class="btnrow"><button class="pbtn" id="saveWebsite">Save website</button><span class="inl dim" id="siteMsg"></span></div>
+
+      <div id="connectBox" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+        <span style="display:block;font-size:13px;font-weight:600;margin-bottom:6px">Connect it the easy way</span>
+        <p class="hint" id="connState" style="margin:0 0 10px">Checking how your website is connected…</p>
+        <div class="btnrow" style="flex-wrap:wrap;gap:8px">
+          <button class="pbtn" id="connZip" type="button">Download your connector</button>
+          <button class="mini" id="connCheck" type="button">Check</button>
+          <button class="mini" id="connRo" type="button">Use read-only</button>
+        </div>
+        <p class="hint" style="margin-top:8px">The download is made for your website, with its secret already inside.
+          Upload the zip into the folder your home page is in, choose <b>Extract</b>, then press <b>Check</b>.</p>
+        <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px">My website is WordPress</summary>
+          <p class="hint" style="margin:8px 0">In WordPress open <b>Users → Profile → Application Passwords</b>, type a name,
+            press <b>Add New</b>, and paste the password it shows here. No file to upload.</p>
+          <div class="field"><label for="wpUser">WordPress username</label><input id="wpUser" autocomplete="off"></div>
+          <div class="field"><label for="wpPass">Application password</label><input id="wpPass" type="password" autocomplete="off"></div>
+          <div class="btnrow"><button class="mini" id="connWp" type="button">Save and check</button></div>
+        </details>
+        <span class="inl dim" id="connMsg"></span>
+      </div>
     </div>
   </section>
 
@@ -467,6 +487,36 @@ $('#saveWebsite').onclick=async()=>{
   if(j.ok){ inl($('#siteMsg'),'ok','✓ Saved ('+(j.mode==='full'?'Full access':'Read-only')+', database '+(j.database||'ready')+')'); $('#siteApiToken').value=''; }
   else inl($('#siteMsg'),'err','✕ '+(j.error||'failed'));
 };
+
+/* ---- connect the website the easy way (pipelines/connect.py) ---- */
+function connLine(c){
+  if(!c || !c.ok) return 'Could not read the connection.';
+  if(c.kind==='wordpress') return c.connected ? '✓ Connected through WordPress as '+esc(c.wp_user)+'.'
+    : 'WordPress is chosen'+(c.wp_user?' ('+esc(c.wp_user)+')':'')+' — press Check.';
+  if(c.kind==='php' && c.connected) return '✓ Connected through your connector at '+esc(c.base)+'.';
+  if(c.kind==='php' && c.has_secret) return 'A connector is made for this website. Upload it, then press Check.';
+  return 'Read-only: the agency changes nothing on your website and hands each change to you.';
+}
+async function loadConn(){ const c=await api('GET','/api/connect'); $('#connState').innerHTML=connLine(c); }
+function connSay(j){ inl($('#connMsg'), j.ok?'ok':'err', (j.ok?'✓ ':'✕ ')+esc(j.head||j.error||'')); loadConn(); }
+$('#connZip').onclick=async()=>{
+  inl($('#connMsg'),'dim','Making your connector…');
+  const r=await fetch('/api/connect/connector.zip',{cache:'no-store'});
+  if(!r.ok || (r.headers.get('content-type')||'').includes('json')){
+    const j=await r.json().catch(()=>({})); inl($('#connMsg'),'err','✕ '+esc(j.error||'could not make it')); return; }
+  const blob=await r.blob(); const a=document.createElement('a');
+  const m=/filename="([^"]+)"/.exec(r.headers.get('content-disposition')||'');
+  a.href=URL.createObjectURL(blob); a.download=m?m[1]:'connector.zip'; document.body.appendChild(a); a.click(); a.remove();
+  inl($('#connMsg'),'ok','✓ Downloaded. Upload it, Extract it, then press Check.'); loadConn();
+};
+$('#connCheck').onclick=async()=>{ inl($('#connMsg'),'dim','Knocking on your website…'); connSay(await api('POST','/api/connect/check',{})); };
+$('#connRo').onclick=async()=>{ connSay(await api('POST','/api/connect/readonly',{})); };
+$('#connWp').onclick=async()=>{
+  inl($('#connMsg'),'dim','Checking with WordPress…');
+  const j=await api('POST','/api/connect/wordpress',{user:$('#wpUser').value.trim(),password:$('#wpPass').value,site:$('#siteUrl').value.trim()});
+  $('#wpPass').value=''; connSay(j);
+};
+loadConn();
 
 /* ---- the Claude team ---- */
 // One row per sector: the model it thinks with, saved on its own. Nothing

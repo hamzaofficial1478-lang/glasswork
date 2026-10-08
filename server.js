@@ -340,6 +340,8 @@ const SETUP_API = [
   // The Engine page: the AI keys and the spending cap. /api/engine-state (no
   // keys, just which engine and today's spend) is a different path, not gated.
   "/api/engine",
+  // The website connection: the connector download carries the website's secret.
+  "/api/connect",
 ];
 // The pages behind the same lock. Unlocking returns you to the one you asked for.
 const SETUP_PAGES = new Set(["/setup", "/setup.html", "/engine", "/engine.html"]);
@@ -484,6 +486,37 @@ app.post("/api/engine/test", async (req, res) =>
   res.json(await pyProvider("engine_test", req.body || {}, 600000)));
 // Cheap and key-free, for the office's top bar and the first-run check.
 app.get("/api/engine-state", async (_q, res) => res.json(await pyProvider("engine_brief", {}, 30000)));
+
+/* ---- THE WEBSITE CONNECTION (pipelines/connect.py) -------------------------
+   Your own connector (a zip made for this website, its secret inside), a
+   WordPress Application Password, or read-only. The password goes to Python
+   on stdin; nothing secret comes back except inside the zip itself. */
+async function pyConnect(args, payload, timeoutMs) {
+  const py = resolvePython();
+  if (!py) return { ok: false, error: NO_PY };
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", "pipelines.connect", ...args, "--json"], {
+    cwd: __dirname, input: payload ? JSON.stringify(payload) : "", timeout: timeoutMs || 120000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  try { return JSON.parse(String(r.stdout || "").trim().split("\n").pop()); }
+  catch (_) { return { ok: false, error: "could not read the answer: " + String(r.stderr || "").slice(-300) }; }
+}
+app.get("/api/connect", async (_q, res) => res.json(await pyConnect([], null, 60000)));
+app.get("/api/connect/connector.zip", async (req, res) => {
+  const r = await pyConnect(["--zip-json"].concat(req.query.new ? ["--new-secret"] : []), null, 60000);
+  if (!r.ok || !r.zip_b64) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
+  const name = String(r.filename || "connector.zip").replace(/[^A-Za-z0-9._-]/g, "_");
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+  res.setHeader("Cache-Control", "no-store");
+  res.send(Buffer.from(r.zip_b64, "base64"));
+});
+app.post("/api/connect/check", async (_q, res) => res.json(await pyConnect(["--check"], null, 120000)));
+app.post("/api/connect/wordpress", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyConnect(["--wordpress"], { user: b.user, password: b.password, site: b.site }, 120000));
+});
+app.post("/api/connect/readonly", async (_q, res) => res.json(await pyConnect(["--readonly"], null, 60000)));
 
 /* ---- ACCOUNTS AND WEBSITES (coordination/accounts.py) ---------------------
    Passwords and recovery keys go to Python on stdin, never on a command line,
@@ -643,7 +676,7 @@ const API_CAPABILITIES = [
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
-  "account", "business", "engine",
+  "account", "business", "engine", "connect",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 app.get("/api/ping", async (_q, res) => {

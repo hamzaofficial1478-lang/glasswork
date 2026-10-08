@@ -247,6 +247,24 @@ someone else's in read-only mode:
   - Not built: signing in with a ChatGPT or Gemini subscription. Their terms
     still have to be checked.
 
+- **Phase 4, first half (8 October).**
+  - **The new design is a clickable prototype, waiting for your approval:**
+    Today, Waiting on you, Your orders, Leads, Content, Website, On Google,
+    Website Check, Settings, the setup step that connects a website, dark
+    mode, and Today on a phone. No screen is rebuilt until you say yes.
+  - **Connecting a website is now a download.** Setup makes a zip for your
+    website with the connector and its secret already inside: upload it,
+    Extract it, press Check. Full access starts only when Check proves it
+    answers. Downloading it again keeps the same secret, so a connector
+    already on a website keeps working.
+  - **WordPress connects with an Application Password**, made inside
+    WordPress, with no file to upload. Pages, posts, structured data and undo
+    all go through WordPress's own API. A theme's header and footer cannot be
+    changed that way, so those changes are handed to the owner.
+  - **Read-only** is one press, for Wix, Shopify, Squarespace, or "not now".
+  - Second half, after your yes: the setup wizard and every main screen
+    rebuilt in the new design.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

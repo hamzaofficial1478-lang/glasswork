@@ -436,7 +436,7 @@ def tests():
             "pipelines.mailed_tests",
             "pipelines.osm_tests",
             "pipelines.offer_tests",
-            "pipelines.find_site_tests", "pipelines.site_api_tests",
+            "pipelines.find_site_tests", "pipelines.site_api_tests", "pipelines.connect_tests",
             "pipelines.secure_tests",
             "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.fix_tests",

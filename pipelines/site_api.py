@@ -80,10 +80,25 @@ def settings(env=None) -> dict:
     g = lambda k: (os.environ.get(k) or e.get(k) or "").strip()
     mode = (g("SITE_MODE") or "readonly").lower()
     base = g("SITE_API_BASE").rstrip("/")
+    # How the agency reaches the site (pipelines/connect.py): the connector
+    # file ("php", and what every website before this setting used), or a
+    # WordPress Application Password ("wordpress", pipelines/wp_bridge.py).
+    kind = (g("SITE_CONNECT") or "php").lower()
     return {"mode": "full" if mode == "full" else "readonly",
             "base": base,
             "token": g("SITE_API_TOKEN"),
-            "site": g("SITE_URL").rstrip("/")}
+            "site": g("SITE_URL").rstrip("/"),
+            "kind": "wordpress" if kind == "wordpress" else "php",
+            "wp_user": g("WP_USER"), "wp_pass": g("WP_APP_PASSWORD")}
+
+
+def _why_wordpress(s) -> str:
+    if not s.get("site"):
+        return "there is no website address saved"
+    if not (s.get("wp_user") and s.get("wp_pass")):
+        return ("WordPress is chosen but there is no username and Application Password "
+                "saved — make one in WordPress under Users → Profile → Application Passwords")
+    return ""
 
 
 def why_cannot_read(s=None) -> str:
@@ -100,6 +115,8 @@ def why_cannot_read(s=None) -> str:
     question it asked.
     """
     s = s or settings()
+    if s.get("kind") == "wordpress":
+        return _why_wordpress(s)
     if not s["base"]:
         return ("there is no Admin API address saved. It is your site plus "
                 "/agency-api, e.g. https://www.yoursite.com/agency-api")
@@ -114,6 +131,8 @@ def why_not_ready(s=None) -> str:
     if s["mode"] != "full":
         return ("the agency is in read-only mode — choose Full access on "
                 "/setup if you want agents to change the site themselves")
+    if s.get("kind") == "wordpress":
+        return _why_wordpress(s)
     if not s["base"]:
         return ("Full access is chosen but there is no Admin API address. It "
                 "is your site plus /agency-api, e.g. "
@@ -138,6 +157,9 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
     why = why_not_ready(s)
     if why:
         return {"ok": False, "error": why, "not_configured": True}
+    if s.get("kind") == "wordpress":
+        from . import wp_bridge
+        return wp_bridge.call(path, method, body, s=s)
     # index.php?do=health, NOT /agency-api/health.
     #
     # The pretty form needs mod_rewrite and an .htaccess. Apache without one
