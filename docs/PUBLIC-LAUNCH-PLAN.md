@@ -265,6 +265,20 @@ someone else's in read-only mode:
   - Second half, after your yes: the setup wizard and every main screen
     rebuilt in the new design.
 
+- **Phase 4, the new design goes live (8 October).** "the ui was still same
+  not as you showed here" — taken as the yes.
+  - The office now opens in the new design: Today, Waiting on you, Your
+    orders, Leads, Content, Website, On Google, Website Check and Settings,
+    with the website switcher, the AI and today's spend at the top. Light or
+    dark follows the computer, or the choice in Settings. On a phone it has a
+    bottom tab bar.
+  - Every screen shows the agency's real records, and the buttons are real:
+    yes/not now on approvals, saving today's order for a desk, Run today.
+  - The previous office is kept at /classic, with every panel, while the
+    remaining screens (Setup, the review page, Your business, the engine
+    page) move into the new design.
+  - Website Check shows what is coming; it is built in phase 5.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

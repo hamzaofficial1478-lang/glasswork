@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glasswork</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* THE NEW DESIGN — the prototype he approved, built on the agency's real data.
+   Light by default; dark follows the computer, or the choice in Settings. */
+:root{
+  --bg:#F3F5F5; --surface:#FFFFFF; --sunken:#F6F8F8; --hover:#EEF2F2;
+  --line:#D9E0E0; --line-soft:#EEF2F2; --line-strong:#BCC7C7;
+  --ink:#142022; --ink-2:#33464A; --muted:#4A5A5D; --faint:#5F7074;
+  --accent:#1F5F66; --accent-hover:#174C52; --accent-ink:#FFFFFF; --accent-soft:#E1EEEE; --nav-on:#123E43;
+  --done-bg:#E3F2EA; --done:#1E6642; --wait-bg:#FBEFD9; --wait:#7D4B00;
+  --work-bg:#E4ECFA; --work:#244C99; --stuck-bg:#F9E3E1; --stuck:#97241C;
+  --plain-bg:#EEF2F2; --plain:#4A5A5D; --ok-dot:#2E8A5B;
+  --note-bg:#FFF9EE; --note-line:#EFD9AE; --meter:#E6EBEB;
+  --site:#1F5F66;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1415; --surface:#151D1F; --sunken:#1B2527; --hover:#1B2527;
+    --line:#283436; --line-soft:#1F2A2B; --line-strong:#3A4A4D;
+    --ink:#E3EAEA; --ink-2:#C2CFD0; --muted:#A7B5B7; --faint:#93A3A5;
+    --accent:#7FC4C7; --accent-hover:#96D1D3; --accent-ink:#0B1213; --accent-soft:#1E3335; --nav-on:#C6E8E9;
+    --done-bg:#173A2A; --done:#8FDDB0; --wait-bg:#3D2E12; --wait:#F2C46D;
+    --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
+    --plain-bg:#1F2A2B; --plain:#B4C2C3; --ok-dot:#49B37B;
+    --note-bg:#2B2414; --note-line:#5A4A26; --meter:#26322F;
+    --site:#3E8F95;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1415; --surface:#151D1F; --sunken:#1B2527; --hover:#1B2527;
+  --line:#283436; --line-soft:#1F2A2B; --line-strong:#3A4A4D;
+  --ink:#E3EAEA; --ink-2:#C2CFD0; --muted:#A7B5B7; --faint:#93A3A5;
+  --accent:#7FC4C7; --accent-hover:#96D1D3; --accent-ink:#0B1213; --accent-soft:#1E3335; --nav-on:#C6E8E9;
+  --done-bg:#173A2A; --done:#8FDDB0; --wait-bg:#3D2E12; --wait:#F2C46D;
+  --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
+  --plain-bg:#1F2A2B; --plain:#B4C2C3; --ok-dot:#49B37B;
+  --note-bg:#2B2414; --note-line:#5A4A26; --meter:#26322F;
+  --site:#3E8F95;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+a{color:var(--accent)}a:hover{color:var(--accent-hover)}
+h1,h2,h3{text-wrap:balance}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* top bar */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px;padding:10px 24px;background:var(--surface);
+  border-top:4px solid var(--site);border-bottom:1px solid var(--line);position:relative;z-index:5}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.brand b{font-weight:700;font-size:17px;letter-spacing:-.01em}
+.switch{display:flex;align-items:center;gap:10px;min-height:44px;padding:4px 12px 4px 10px;border:1px solid var(--line);
+  border-radius:10px;background:var(--surface);color:var(--ink);cursor:pointer;text-align:left;max-width:100%}
+.switch:hover{border-color:var(--line-strong);background:var(--sunken)}
+.switch .sq{width:10px;height:10px;border-radius:3px;background:var(--site);flex:none}
+.switch .nm{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;display:block}
+.switch .sub{font-size:12px;color:var(--faint)}
+.menu{position:absolute;top:calc(100% + 6px);left:0;min-width:300px;background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;box-shadow:0 12px 32px rgba(10,20,22,.14);padding:6px;display:none}
+.menu.open{display:block}
+.menu a,.menu button{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:0;background:none;
+  color:var(--ink);text-decoration:none;cursor:pointer;text-align:left;font-size:14.5px;min-height:44px}
+.menu a:hover,.menu button:hover{background:var(--hover)}
+.menu .sep{height:1px;background:var(--line-soft);margin:6px 4px}
+.menu small{display:block;color:var(--faint);font-size:12.5px}
+.chip{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;border:1px solid var(--line);border-radius:999px;
+  font-size:13.5px;color:var(--ink-2);text-decoration:none;background:var(--surface);white-space:nowrap}
+.chip:hover{border-color:var(--line-strong);color:var(--ink)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok-dot);flex:none}
+.dot.off{background:var(--stuck)}
+.meter{display:block;height:6px;border-radius:99px;background:var(--meter);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.meter i.hot{background:var(--wait)} .meter i.over{background:var(--stuck)}
+
+/* layout */
+.wrap{display:flex;align-items:stretch;min-height:calc(100vh - 66px)}
+.nav{flex:0 0 232px;display:flex;flex-direction:column;gap:2px;padding:20px 14px;background:var(--surface);border-right:1px solid var(--line)}
+.nav a{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:var(--ink-2);
+  text-decoration:none;font-size:14.5px;font-weight:500;min-height:40px}
+.nav a:hover{background:var(--hover);color:var(--ink)}
+.nav a.on{background:var(--accent-soft);color:var(--nav-on);font-weight:600}
+.nav .rule{height:1px;background:var(--line-soft);margin:10px 4px}
+.count{font-family:'IBM Plex Mono',monospace;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--wait-bg);color:var(--wait)}
+main{flex:1;min-width:0;padding:28px 32px 96px}
+main:focus{outline:none}
+.page{max-width:1080px;display:flex;flex-direction:column;gap:20px}
+.page.narrow{max-width:900px}
+h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-.015em;line-height:1.2}
+.lead{margin:6px 0 0;color:var(--muted);max-width:64ch}
+.label{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.muted{color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.card-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line-soft)}
+.card-h h2{margin:0;font-size:17px;font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:10px 18px;padding:16px 20px;border-top:1px solid var(--line-soft);align-items:flex-start}
+.row:first-child{border-top:0}
+.row .grow{flex:1 1 380px;min-width:0;display:flex;flex-direction:column;gap:4px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+.tile{padding:18px 20px;text-decoration:none;color:var(--ink);display:flex;flex-direction:column;gap:6px}
+.tile .big{font-size:28px;font-weight:600;letter-spacing:-.01em}
+.two{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.two>.card{flex:1 1 420px;min-width:0}
+
+/* controls */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:8px;
+  border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600;font-size:15px;text-decoration:none;
+  cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--accent-hover);color:var(--accent-ink)}
+.btn.ghost{background:var(--surface);color:var(--accent);border-color:var(--line-strong)}
+.btn.ghost:hover{border-color:var(--accent);background:var(--sunken)}
+.btn.quiet{background:transparent;border-color:transparent;color:var(--muted)}
+.btn.quiet:hover{background:var(--hover);color:var(--ink)}
+.btn.small{min-height:36px;padding:0 12px;font-size:14px}
+.btn[disabled]{opacity:.6;cursor:progress}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.done{background:var(--done-bg);color:var(--done)} .wait{background:var(--wait-bg);color:var(--wait)}
+.work{background:var(--work-bg);color:var(--work)} .stuck{background:var(--stuck-bg);color:var(--stuck)}
+.plain{background:var(--plain-bg);color:var(--plain)}
+.seg{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;border:1px solid var(--line);border-radius:999px;
+  background:var(--surface);font-size:14px;color:var(--ink-2);cursor:pointer}
+.seg:hover{border-color:var(--line-strong)}
+.seg.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.seg .n{font-family:'IBM Plex Mono',monospace;font-size:12px;opacity:.75}
+textarea,input[type=text],input[type=url]{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;
+  background:var(--surface);color:var(--ink);font-size:16px}
+textarea{min-height:96px;resize:vertical;line-height:1.5}
+.say{padding:10px 12px;background:var(--sunken);border-radius:8px;font-size:14px}
+.note{padding:12px 14px;border-radius:10px;font-size:14px;background:var(--note-bg);border:1px solid var(--note-line)}
+.empty{padding:28px 20px;text-align:left;color:var(--muted)}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+table{border-collapse:collapse;width:100%;min-width:720px}
+th{text-align:left;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:12px 16px;
+  border-bottom:1px solid var(--line);white-space:nowrap;background:var(--sunken)}
+td{padding:12px 16px;border-bottom:1px solid var(--line-soft);vertical-align:top;font-size:14.5px}
+tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto}
+ol.feed{list-style:none;margin:0;padding:8px 20px 12px}
+ol.feed li{display:grid;grid-template-columns:52px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-soft)}
+ol.feed li:last-child{border-bottom:0}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:10px;
+  font-size:14px;max-width:min(560px,calc(100vw - 32px));z-index:20;display:none}
+.toast.show{display:block}
+
+/* phone */
+.tabs{display:none}
+@media (max-width:760px){
+  .top{padding:10px 16px;gap:10px}
+  .brand b{display:none}
+  .switch .nm{max-width:160px}
+  .switch .sub{display:none}
+  .chip.spend .txt{display:none}
+  .nav{display:none}
+  main{padding:20px 16px 110px}
+  h1{font-size:24px}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .tile{padding:14px 16px}
+  .tile .big{font-size:22px}
+  .tabs{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:0 4px 6px;z-index:10}
+  .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:56px;text-decoration:none;
+    color:var(--muted);font-size:11.5px;font-weight:600;position:relative}
+  .tabs a.on{color:var(--accent)}
+  .tabs .b{position:absolute;top:6px;left:calc(50% + 6px);font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:0 5px;
+    border-radius:999px;background:var(--wait-bg);color:var(--wait)}
+}
+@media (prefers-reduced-motion:no-preference){.btn,.nav a,.chip,.switch,.seg{transition:background .15s,border-color .15s,color .15s}}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#today" aria-label="Glasswork, back to Today">
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x="2" y="2" width="22" height="22" rx="5" stroke="var(--accent)" stroke-width="2"></rect><path d="M8 18 L18 8" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"></path><path d="M13 20 L20 13" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" opacity="0.4"></path></svg>
+    <b id="brandName">Glasswork</b>
+  </a>
+  <div style="position:relative;min-width:0">
+    <button class="switch" id="siteBtn" type="button" aria-haspopup="true" aria-expanded="false">
+      <span class="sq"></span>
+      <span style="display:flex;flex-direction:column;line-height:1.25;min-width:0">
+        <span class="nm" id="siteName">Your website</span>
+        <span class="sub" id="siteSub">switch</span>
+      </span>
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3.5 5.5 L7 9 L10.5 5.5" stroke="var(--faint)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    </button>
+    <div class="menu" id="siteMenu" role="menu"></div>
+  </div>
+  <div style="flex:1 1 auto"></div>
+  <a class="chip" id="engineChip" href="/engine"><span class="dot" id="engineDot"></span><span id="engineTxt">AI engine</span></a>
+  <a class="chip spend" id="spendChip" href="/engine" style="gap:10px"><span class="mono" id="spendNow">$0.00</span><span class="txt" style="color:var(--faint)" id="spendCap">today</span><span class="meter" style="width:56px"><i id="spendBar" style="width:0"></i></span></a>
+</header>
+
+<div class="wrap">
+  <nav class="nav" aria-label="Main" id="nav">
+    <a href="#today" data-r="today">Today</a>
+    <a href="#waiting" data-r="waiting">Waiting on you <span class="count" id="navCount" hidden>0</span></a>
+    <a href="#orders" data-r="orders">Your orders</a>
+    <a href="#leads" data-r="leads">Leads</a>
+    <a href="#content" data-r="content">Content</a>
+    <a href="#website" data-r="website">Website</a>
+    <a href="#google" data-r="google">On Google</a>
+    <div class="rule"></div>
+    <a href="#check" data-r="check">Website Check</a>
+    <a href="#settings" data-r="settings">Settings</a>
+  </nav>
+  <main id="main" tabindex="-1"><div class="page"><p class="muted">Opening your office…</p></div></main>
+</div>
+
+<nav class="tabs" aria-label="Main" id="tabs">
+  <a href="#today" data-r="today"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><path d="M3 10 L11 3 L19 10 V19 H3 Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></svg>Today</a>
+  <a href="#waiting" data-r="waiting"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.7"></circle><path d="M11 6.5 V11 L14 13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>Waiting<span class="b" id="tabCount" hidden>0</span></a>
+  <a href="#leads" data-r="leads"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3.5" stroke="currentColor" stroke-width="1.7"></circle><path d="M3 18 C3.8 14.5 6 13 9 13 C12 13 14.2 14.5 15 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>Leads</a>
+  <a href="#website" data-r="website"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><rect x="3" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.7"></rect><path d="M3 8 H19" stroke="currentColor" stroke-width="1.7"></path></svg>Website</a>
+  <a href="#more" data-r="more"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="5" cy="11" r="1.6" fill="currentColor"></circle><circle cx="11" cy="11" r="1.6" fill="currentColor"></circle><circle cx="17" cy="11" r="1.6" fill="currentColor"></circle></svg>More</a>
+</nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (q) => document.querySelector(q);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = (n) => '$' + Number(n || 0).toFixed(2);
+const S = {me: null, brand: null, engine: null, state: null, siteIdx: 0};
+const SITE_COLOURS = [['#1F5F66', '#3E8F95'], ['#7A4E8C', '#B58BC4']];
+
+/* ---- theme: the computer's, unless chosen in Settings ---- */
+function theme(t) {
+  try { if (t) localStorage.setItem('gw-theme', t); else t = localStorage.getItem('gw-theme') || 'system'; } catch (e) { t = t || 'system'; }
+  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  paintSite();
+  return t;
+}
+function dark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function paintSite() {
+  const c = SITE_COLOURS[S.siteIdx % SITE_COLOURS.length];
+  document.documentElement.style.setProperty('--site', dark() ? c[1] : c[0]);
+}
+
+/* ---- talking to the office ---- */
+async function api(url, body, method) {
+  try {
+    const r = await fetch(url, body === undefined && !method ? {cache: 'no-store'} :
+      {method: method || 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+    let j = {};
+    try { j = await r.json(); } catch (e) { j = {ok: false, error: 'The office answered in a way this screen cannot read.'}; }
+    if (r.status === 401 && j.signin) { location.href = '/account'; return {ok: false}; }
+    if (r.status === 409 && j.needsSite) { location.href = '/account'; return {ok: false}; }
+    return j;
+  } catch (e) { return {ok: false, error: 'The office did not answer. Is the agency window still open?'}; }
+}
+function toast(text) {
+  const t = $('#toast'); t.textContent = text; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 4200);
+}
+
+/* ---- the top bar ---- */
+async function loadShell() {
+  const [me, brand, engine] = await Promise.all([api('/api/account/me'), api('/api/brand'), api('/api/engine-state')]);
+  S.me = me; S.brand = brand; S.engine = engine;
+  if (engine && engine.ok && !engine.chosen && me && me.signedIn && me.open) { location.href = '/engine?first=1'; return; }
+  const name = (brand && brand.agencyName) || '';
+  if (name) { $('#brandName').textContent = name; document.title = name; }
+  let shown = '', sub = '';
+  if (me && me.signedIn) {
+    const sites = me.sites || [];
+    S.siteIdx = Math.max(0, sites.findIndex((x) => x.id === me.open));
+    const open = sites[S.siteIdx] || {};
+    shown = host(open.url) || open.name || 'Your website';
+    sub = `Website ${S.siteIdx + 1} of ${sites.length || 1} · switch`;
+  } else {
+    const w = (brand && brand.website) || {};
+    shown = w.siteHost || w.siteName || 'No website saved yet';
+    sub = 'your website';
+  }
+  $('#siteName').textContent = shown; $('#siteSub').textContent = sub;
+  paintSite(); buildSiteMenu(); paintEngine();
+}
+function host(u) { return String(u || '').replace(/^https?:\/\//, '').replace(/\/.*$/, ''); }
+function buildSiteMenu() {
+  const me = S.me || {}, m = $('#siteMenu');
+  let html = '';
+  if (me.signedIn) {
+    html += (me.sites || []).map((s, i) => `<button type="button" role="menuitem" data-site="${esc(s.id)}">
+      <span style="width:10px;height:10px;border-radius:3px;flex:none;background:${SITE_COLOURS[i % 2][dark() ? 1 : 0]}"></span>
+      <span><b style="font-weight:600">${esc(host(s.url) || s.name)}</b><small>${s.id === me.open ? 'open now' : 'switch to this website'}</small></span></button>`).join('');
+    html += `<div class="sep"></div><a role="menuitem" href="/account">${(me.sites || []).length < (me.maxSites || 2) ? 'Add a website, or manage them' : 'Manage websites and account'}</a>`;
+    html += `<button type="button" role="menuitem" data-signout="1">Sign out · ${esc((me.signedIn || {}).name || '')}</button>`;
+  } else {
+    html += `<a role="menuitem" href="/setup">Change this website<small>On the Setup screen</small></a>`;
+    html += `<a role="menuitem" href="/account">Make your account<small>Two websites, encrypted on this computer</small></a>`;
+  }
+  m.innerHTML = html;
+}
+$('#siteBtn').addEventListener('click', (e) => {
+  e.stopPropagation(); const m = $('#siteMenu'); const open = !m.classList.contains('open');
+  m.classList.toggle('open', open); $('#siteBtn').setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', () => { $('#siteMenu').classList.remove('open'); $('#siteBtn').setAttribute('aria-expanded', 'false'); });
+$('#siteMenu').addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.signout) { await api('/api/account/sign-out', {}); location.href = '/account'; return; }
+  if (b.dataset.site && b.dataset.site !== (S.me || {}).open) {
+    const j = await api('/api/account/open-site', {site: b.dataset.site});
+    if (!j.ok) { toast(j.error || 'Could not switch website.'); return; }
+    location.reload();
+  }
+});
+function paintEngine() {
+  const e = S.engine || {};
+  $('#engineTxt').textContent = e.chosen ? 'Thinks with ' + (e.name || 'AI').replace(' on this computer', '') : 'Choose your AI';
+  $('#engineDot').classList.toggle('off', !e.ready);
+  const cap = Number(e.cap || 0), all = Number(e.spent_all || 0);
+  $('#spendNow').textContent = money(all);
+  $('#spendCap').textContent = cap ? `of ${money(cap)} today` : 'today';
+  const pct = cap ? Math.min(100, all / cap * 100) : 0;
+  const bar = $('#spendBar'); bar.style.width = pct + '%'; bar.className = pct >= 100 ? 'over' : pct >= 75 ? 'hot' : '';
+}
+function setCount(n) {
+  for (const id of ['#navCount', '#tabCount']) { const el = $(id); el.textContent = n; el.hidden = !n; }
+}
+
+/* ---- shared bits ---- */
+function pill(kind, text) { return `<span class="pill ${kind}">${esc(text)}</span>`; }
+function head(title, lead, action) {
+  return `<div style="display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;justify-content:space-between">
+    <div><h1>${esc(title)}</h1>${lead ? `<p class="lead">${lead}</p>` : ''}</div>${action || ''}</div>`;
+}
+function empty(title, text) { return `<div class="empty"><b>${esc(title)}</b>${text}</div>`; }
+function deskOf(lvl) { return String(lvl || '').split('·').pop().trim() || 'The agency'; }
+/* "leads-hunter" and "it-watcher" are the program's names; he reads desks. */
+const DESK_NAMES = {md: 'Managing Director', 'managing-director': 'Managing Director', director: 'Managing Director',
+  critic: 'Critic', overseer: 'Overseer', reporter: 'Report', report: 'Report', leads: 'Leads', seo: 'SEO',
+  it: 'IT', content: 'Content', security: 'Security', owner: 'You'};
+function deskName(who) {
+  const w = String(who || '').trim(), k = w.toLowerCase();
+  return DESK_NAMES[k] || DESK_NAMES[k.split(/[-_ ]/)[0]] || (w ? w[0].toUpperCase() + w.slice(1) : 'The agency');
+}
+function sentence(t) { t = String(t || ''); return t ? t[0].toUpperCase() + t.slice(1) : ''; }
+function when(ts) {
+  if (!ts) return '';
+  const d = new Date(Number(ts) * 1000);
+  return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+async function state() { const s = await api('/api/state'); if (s && s.ok) { S.state = s; setCount((s.approvals || []).length); } return s; }
+
+/* ======================= TODAY ======================= */
+async function today(main) {
+  const [st, run, idx, leads] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all')]);
+  const appr = (st && st.approvals) || [];
+  const ev = ((st && st.activity) || {}).events || [];
+  const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
+  const hr = new Date().getHours();
+  const hello = hr < 12 ? 'Good morning.' : hr < 18 ? 'Good afternoon.' : 'Good evening.';
+  const r = (run && run.run) || null;
+  let runPill = pill('plain', 'Not run yet'), runLine = 'The agency has not been run today.';
+  if (r && r.running) { runPill = pill('work', 'Working'); runLine = run.head || 'Today’s run is going.'; }
+  else if (r) { runPill = r.status === 'done' ? pill('done', 'Done') : r.status === 'failed' ? pill('stuck', 'Stuck') : pill('plain', r.status || 'Stopped');
+    runLine = run.head || ''; }
+  const action = appr.length ? `<a class="btn" href="#waiting">Review the ${appr.length}</a>`
+    : (r && r.running) ? `<button class="btn ghost" type="button" id="stopRun">Stop the run</button>`
+    : `<button class="btn" type="button" id="runNow">Run today</button>`;
+  const pages = (idx && idx.pages) || [];
+  const onG = (idx && idx.on_google) || 0;
+  const date = new Date().toLocaleDateString('en-GB', {weekday: 'long', day: 'numeric', month: 'long'});
+  main.innerHTML = `<div class="page">
+    <div><div class="label">${esc(date)}</div>
+      <h1 style="margin-top:6px">${hello} ${appr.length ? (appr.length === 1 ? 'One thing needs your yes.' : appr.length + ' things need your yes.') : 'Nothing needs you right now.'}</h1></div>
+    <section class="card" style="padding:22px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px">
+      <div style="flex:1 1 420px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">${runPill}
+          <span class="muted" style="font-size:14px">${r && r.started_at ? 'Started at ' + esc(when(r.started_at)) : ''}</span></div>
+        <p style="margin:0;font-size:17px">${esc(runLine)}</p>
+        <div id="runSay" class="muted" style="font-size:14px"></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${action}
+        ${appr.length && !(r && r.running) ? '<button class="btn ghost" type="button" id="runNow">Run today</button>' : ''}</div>
+    </section>
+    <div class="tiles">
+      <a href="#leads" class="card tile"><span class="label">Leads waiting</span><span class="big mono">${esc((leads && leads.total) || 0)}</span>
+        <span class="muted" style="font-size:13.5px">${esc((leads && leads.today) || 0)} new today · ${esc((leads && leads.mailed) || 0)} written to</span></a>
+      <a href="#google" class="card tile"><span class="label">On Google</span>
+        <span class="big"><span class="mono">${onG}</span> <span style="font-size:16px;font-weight:500;color:var(--muted)">${pages.length ? 'of ' + pages.length + ' pages' : 'not asked yet'}</span></span>
+        <span class="meter"><i style="width:${pages.length ? Math.round(onG / pages.length * 100) : 0}%"></i></span></a>
+      <a href="#website" class="card tile"><span class="label">Website</span>
+        <span style="display:flex;align-items:center;gap:8px;font-size:20px;font-weight:600"><span class="dot${conn.on ? '' : ' off'}" style="width:10px;height:10px"></span>${conn.on ? (conn.mode === 'full' ? 'Connected' : 'Read-only') : 'Not saved'}</span>
+        <span class="muted" style="font-size:13.5px">${esc(conn.sub || '')}</span></a>
+      <a href="/engine" class="card tile"><span class="label">Spent today</span><span class="big mono">${money((S.engine || {}).spent_all)}</span>
+        <span class="muted" style="font-size:13.5px">${(S.engine || {}).cap ? 'of your ' + money(S.engine.cap) + ' daily limit' : ''}</span></a>
+    </div>
+    <div class="two">
+      <section class="card"><div class="card-h"><h2>Waiting on you</h2><a href="#waiting" style="font-size:14px;font-weight:500">See all</a></div>
+        <div>${appr.length ? appr.slice(0, 4).map((a) => `<div class="row"><div class="grow"><span style="font-weight:600">${esc(a.text)}</span>
+          <span class="muted" style="font-size:13.5px">${esc(deskOf(a.lvl))}</span></div><a class="btn ghost small" href="${a.link ? esc(a.link) : '#waiting'}">See it</a></div>`).join('')
+          : empty('All clear', 'Nothing is waiting for your yes. Anything that would leave the building shows up here first.')}</div></section>
+      <section class="card"><div class="card-h"><h2>What the agency did today</h2><span class="muted" style="font-size:13.5px">${esc(((st && st.activity) || {}).head || '')}</span></div>
+        ${ev.length ? `<ol class="feed">${ev.slice(0, 9).map((e) => `<li><span class="mono" style="font-size:13px;color:var(--faint);padding-top:2px">${esc(e.hhmm || '')}</span>
+          <span style="display:flex;flex-direction:column;gap:6px"><span><b style="font-weight:600">${esc(deskName(e.who))}</b> ${esc(e.what || '')}</span>
+          ${e.level === 'error' ? pill('stuck', 'Stuck') : ''}</span></li>`).join('')}</ol>`
+          : empty('Quiet so far', 'Press Run today and each desk’s work appears here as it happens.')}</section>
+    </div></div>`;
+  const rb = $('#runNow'); if (rb) rb.onclick = runToday;
+  const sb = $('#stopRun'); if (sb) sb.onclick = async () => { const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
+}
+async function runToday(force) {
+  const say = $('#runSay'); const b = $('#runNow'); if (b) b.disabled = true;
+  say.textContent = 'Checking every desk can work — this takes a minute…';
+  const c = await api('/api/run/check', {quick: true});
+  if (!c.ok && !c.blocking) { say.textContent = c.error || 'The check did not finish.'; if (b) b.disabled = false; return; }
+  if (c.ready === false && force !== true) {
+    say.innerHTML = `<span style="color:var(--stuck);font-weight:600">Not started:</span> ${esc((c.blocking || []).slice(0, 3).join('; '))}
+      <br><button class="btn small ghost" type="button" id="runForce" style="margin-top:8px">Run anyway</button>`;
+    $('#runForce').onclick = () => runToday(true); if (b) b.disabled = false; return;
+  }
+  const j = await api('/api/run/start', force === true ? {force: true} : {});
+  if (!j.ok) { say.textContent = (j.preflight && (j.preflight.blocking || []).join('; ')) || j.error || j.why || 'It did not start.'; if (b) b.disabled = false; return; }
+  toast('Running. Each desk’s work appears in today’s list as it happens.');
+  setTimeout(route, 1500);
+}
+
+/* ======================= WAITING ON YOU ======================= */
+async function waiting(main) {
+  const st = await state();
+  const appr = (st && st.approvals) || [];
+  main.innerHTML = `<div class="page narrow">${head('Waiting on you',
+    'Nothing here goes out, gets published or touches your website until you say yes. Each one says what happens next.')}
+    <div id="apprList" style="display:flex;flex-direction:column;gap:14px">${appr.length ? appr.map(card).join('')
+      : `<div class="card">${empty('All clear', 'Nothing is waiting for your yes.')}</div>`}</div></div>`;
+  main.querySelectorAll('[data-yes],[data-no]').forEach((b) => b.onclick = () => decide(b));
+  function card(a, i) {
+    const reads = a.link ? `<a class="btn" href="${esc(a.link)}">Read and decide${a.count ? ' (' + a.count + ')' : ''}</a>` :
+      `<button class="btn" type="button" data-yes="${i}">Yes, go ahead</button>
+       <button class="btn quiet" type="button" data-no="${i}">Not now</button>`;
+    return `<article class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px" id="ap${i}">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px"><span class="label">${esc(deskOf(a.lvl))}</span>
+        ${String(a.lvl || '').startsWith('red') ? pill('stuck', 'Needs you now') : pill('wait', 'Waiting for you')}</div>
+      <h2 style="margin:0;font-size:19px;font-weight:600;line-height:1.35">${esc(a.text)}</h2>
+      ${a.why ? `<div class="say">${esc(a.why)}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center" class="acts">${reads}<span class="muted msg" style="font-size:14px"></span></div>
+    </article>`;
+  }
+  async function decide(b) {
+    const i = Number(b.dataset.yes ?? b.dataset.no); const a = appr[i]; const yes = b.dataset.yes !== undefined;
+    const box = $('#ap' + i); box.querySelectorAll('button').forEach((x) => x.disabled = true);
+    box.querySelector('.msg').textContent = 'Saving…';
+    const j = await api('/api/approve', {kind: a.kind, id: a.id, decision: yes ? 'approved' : 'rejected'});
+    if (!j || !j.ok) { box.querySelectorAll('button').forEach((x) => x.disabled = false);
+      box.querySelector('.msg').textContent = 'Not saved — ' + ((j && (j.error || j.why)) || 'no answer'); return; }
+    box.querySelector('.acts').innerHTML = (yes ? pill('done', 'You said yes') : pill('plain', 'Not now'))
+      + `<span class="muted" style="font-size:14px">${esc(j.why || j.head || (yes ? 'Done.' : 'Left for now.'))}</span>`;
+    state();
+  }
+}
+
+/* ======================= YOUR ORDERS ======================= */
+const DESKS = [['Director', 'Managing Director'], ['Leads', 'Leads'], ['Content', 'Content'], ['SEO', 'SEO'], ['IT', 'IT'], ['Security', 'Security'], ['Report', 'Report']];
+const ORDER_LOOK = {'done': ['done', 'Done'], 'waiting for you': ['wait', 'Waiting for you'], 'stuck': ['stuck', 'Stuck'],
+  'not started': ['plain', 'Not started'], 'working': ['work', 'Working'], 'in progress': ['work', 'Working']};
+async function orders(main, desk) {
+  desk = desk || sessionStorage.getItem('gw-desk') || 'Director';
+  const o = await api('/api/orders');
+  const rows = (o && o.orders) || [];
+  const todayKey = new Date().toLocaleDateString('en-CA');   // YYYY-MM-DD, this computer's day
+  const mine = rows.find((r) => r.day === todayKey && r.sector === desk && r.origin === 'order box');
+  main.innerHTML = `<div class="page narrow">${head('Your orders',
+    'Tell a desk what you want today, in your own words. The Managing Director plans the day around your orders and asks you before anything goes out.')}
+    <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
+      <span style="font-weight:600">Which desk?</span>
+      <div role="group" aria-label="Desk" style="display:flex;flex-wrap:wrap;gap:8px">${DESKS.map(([k, n]) =>
+        `<button type="button" class="seg ${k === desk ? 'on' : ''}" aria-pressed="${k === desk}" data-desk="${k}">${esc(n)}</button>`).join('')}</div>
+      <label for="orderText" style="font-weight:600;margin-top:4px">Today’s order for ${esc((DESKS.find((d) => d[0] === desk) || [, desk])[1])}</label>
+      <textarea id="orderText" placeholder="${desk === 'Leads' ? 'For example: find 20 facilities firms in JLT and Al Quoz' : 'For example: focus on pergola work this week'}">${esc(mine ? mine.text : '')}</textarea>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+        <span class="muted" style="font-size:13.5px">Saved orders are read when the day runs. Saving again replaces today’s order for this desk.</span>
+        <button class="btn" type="button" id="saveOrder">Save the order</button></div>
+    </section>
+    <section style="display:flex;flex-direction:column;gap:10px"><h2 class="label" style="margin:0">This week</h2>
+      ${rows.length ? rows.map((r) => { const lk = ORDER_LOOK[r.state] || ['plain', r.state || '']; return `<article class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:flex-start">
+        <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:4px"><span class="label">${esc(deskName(r.sector))}</span><span style="font-weight:600;font-size:16px">“${esc(r.text)}”</span>
+          <span class="muted" style="font-size:14px">${esc(sentence((r.left || []).slice(0, 2).join(' · ')))}</span></div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">${pill(lk[0], lk[1])}<span class="mono muted" style="font-size:12.5px">${esc(r.day || '')}</span></div></article>`; }).join('')
+      : `<div class="card">${empty('No orders this week', 'Give one above. The agency also works without orders, from what it finds itself.')}</div>`}
+    </section></div>`;
+  main.querySelectorAll('[data-desk]').forEach((b) => b.onclick = () => { sessionStorage.setItem('gw-desk', b.dataset.desk); orders(main, b.dataset.desk); });
+  $('#saveOrder').onclick = async () => {
+    const t = $('#orderText').value.trim(); if (!t) { toast('Write the order first.'); return; }
+    $('#saveOrder').disabled = true;
+    const j = await api('/api/orders', {orders: {[desk]: t}});
+    $('#saveOrder').disabled = false;
+    toast(j.ok ? 'Saved. ' + 'The desk reads it when the day runs.' : (j.why || j.error || 'Not saved.'));
+    if (j.ok) orders(main, desk);
+  };
+}
+
+/* ======================= LEADS ======================= */
+async function leads(main, pick) {
+  pick = pick || 'all';
+  const d = await api('/api/leads?scope=all');
+  const all = (d && d.leads) || [];
+  const grp = (l) => l.needs_owner ? 'replied' : l.replied ? 'replied' : l.contacted ? 'contacted' : 'waiting';
+  const look = (l) => l.needs_owner ? ['wait', 'Replied — your turn'] : l.replied ? ['done', 'Replied'] : l.contacted ? ['plain', 'Contacted'] : ['work', 'Not contacted yet'];
+  const defs = [['all', 'All'], ['waiting', 'Not contacted yet'], ['contacted', 'Contacted'], ['replied', 'Replied']];
+  const rows = pick === 'all' ? all : all.filter((l) => grp(l) === pick);
+  main.innerHTML = `<div class="page">${head('Leads',
+    'Businesses that buy what you sell, found on maps and directories. Security checks every one before anyone writes to it, and nobody is written to twice.',
+    '<button class="btn" type="button" id="moreLeads">Find more leads</button>')}
+    <div class="tiles">
+      <div class="card tile"><span class="label">Waiting, with an email</span><span class="big mono">${esc(d.total || 0)}</span></div>
+      <div class="card tile"><span class="label">New today</span><span class="big mono">${esc(d.today || 0)}</span></div>
+      <div class="card tile"><span class="label">Written to</span><span class="big mono">${esc(d.mailed || 0)}</span></div>
+      <div class="card tile"><span class="label">No email found</span><span class="big mono">${esc(d.no_address || 0)}</span></div>
+    </div>
+    <div role="group" aria-label="Show" style="display:flex;flex-wrap:wrap;gap:8px">${defs.map(([k, n]) =>
+      `<button type="button" class="seg ${k === pick ? 'on' : ''}" aria-pressed="${k === pick}" data-pick="${k}">${esc(n)} <span class="n">${k === 'all' ? all.length : all.filter((l) => grp(l) === k).length}</span></button>`).join('')}</div>
+    <div class="card scroll">${rows.length ? `<table><thead><tr><th>Business</th><th>Area</th><th>Found on</th><th>Status</th><th>Next step</th></tr></thead><tbody>
+      ${rows.map((l) => { const lk = look(l); return `<tr><td><div style="font-weight:600">${esc(l.company)}</div><div class="muted" style="font-size:13px">${esc(l.segment || '')}</div>
+        ${l.email ? `<div class="mono muted" style="font-size:12.5px">${esc(l.email)}</div>` : ''}</td>
+        <td>${esc(l.area || '')}</td><td class="muted">${esc(l.source || '')}</td><td>${pill(lk[0], lk[1])}</td>
+        <td class="muted" style="max-width:320px">${esc(sentence(l.contacted ? (l.last ? 'last contact ' + l.last + ' ago' : 'written to') : (l.waiting_on || '')))}</td></tr>`; }).join('')}</tbody></table>`
+      : empty(all.length ? 'None in this list' : 'No leads yet', all.length ? 'Choose another filter above.' : 'Run the day, or give Leads an order, and the agency goes looking.')}</div>
+    <p class="muted" style="margin:0;font-size:13.5px">${esc(d.head || '')}</p></div>`;
+  main.querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => leads(main, b.dataset.pick));
+  $('#moreLeads').onclick = () => { sessionStorage.setItem('gw-desk', 'Leads'); location.hash = '#orders'; };
+}
+
+/* ======================= CONTENT ======================= */
+async function content(main) {
+  const r = await api('/api/review');
+  const p = (r && r.pages) || {};
+  const list = (items, empt, btn) => (items || []).length ? (items || []).map((x) => `<div class="row" style="flex-direction:column;gap:6px">
+      <span style="font-weight:600">${esc(x.title || x.file || 'Untitled')}</span>
+      ${x.why ? `<span class="muted" style="font-size:13.5px">${esc(x.why)}</span>` : ''}
+      ${btn ? `<a class="btn small ghost" href="/posts" style="align-self:flex-start">${btn}</a>` : ''}</div>`).join('')
+    : `<div class="row muted" style="font-size:14px">${empt}</div>`;
+  const waitingN = (p.waiting || []).length + (p.for_blog || []).length;
+  main.innerHTML = `<div class="page">${head('Content',
+    'Posts and pages for your website. Every piece passes the Auditor before you see it: no prices, no promises you have not made, nothing copied.',
+    '<a class="btn" href="/posts">Read what is waiting</a>')}
+    <section class="card" style="padding:22px 24px;display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center;background:var(--sunken)">
+      <div style="flex:1 1 420px;display:flex;flex-direction:column;gap:6px"><h2 style="margin:0;font-size:19px;font-weight:600">Your finished jobs win the most work</h2>
+        <p class="muted" style="margin:0;max-width:60ch">Tell Content about a job you finished — where, what, and a few photos — and it writes it up as a case study in your voice, for you to check before it goes up.</p></div>
+      <button class="btn ghost" type="button" id="jobOrder">Tell Content about a job</button></section>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:start">
+      <section class="card"><div class="card-h"><h2 style="font-size:16px">Being written</h2><span class="mono muted" style="font-size:13px">${(p.upcoming || []).length + (p.to_write || 0)}</span></div>
+        ${list(p.upcoming, p.writing ? 'Writing now…' : 'Nothing being written right now.')}</section>
+      <section class="card"><div class="card-h"><h2 style="font-size:16px">Waiting for you</h2><span class="mono muted" style="font-size:13px">${waitingN}</span></div>
+        ${list([].concat(p.waiting || [], p.for_blog || []), 'Nothing waiting for your yes.', 'Read and decide')}</section>
+      <section class="card"><div class="card-h"><h2 style="font-size:16px">Published</h2><span class="mono muted" style="font-size:13px">${esc(p.published || (p.on_blog || []).length || 0)}</span></div>
+        ${list((p.on_blog || []).concat(p.recent || []).slice(0, 6), 'Nothing published yet.')}</section>
+    </div>
+    ${(p.held || []).length ? `<div class="note">${(p.held || []).length} piece(s) held back by the checks. They are on the <a href="/posts">review page</a> with the reason.</div>` : ''}
+  </div>`;
+  $('#jobOrder').onclick = () => { sessionStorage.setItem('gw-desk', 'Content'); location.hash = '#orders'; };
+}
+
+/* ======================= WEBSITE ======================= */
+async function website(main) {
+  const [st, ch] = await Promise.all([state(), api('/api/site/changes')]);
+  const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
+  const pending = ((st && st.approvals) || []).filter((a) => a.kind === 'site_change' || a.kind === 'site_resting');
+  const changes = (ch && ch.changes) || [];
+  const failed = (ch && ch.not_done) || [];
+  const connLine = !conn.on ? '<b style="font-weight:600">No website saved yet.</b> <span class="muted">Add it in Settings.</span>'
+    : conn.mode === 'full' ? `<b style="font-weight:600">Connected — full access.</b> <span class="muted">${conn.kind === 'wordpress' ? 'Through WordPress.' : 'Through the connector on your website. Your admin and settings folders are never opened.'}</span>`
+    : '<b style="font-weight:600">Read-only.</b> <span class="muted">The agency changes nothing on your website; each change is handed to you.</span>';
+  main.innerHTML = `<div class="page">${head('Website',
+    'IT watches your website every day and fixes what it finds — always on a copy first. Only the Releaser puts a change live, after the tests pass.',
+    '<button class="btn" type="button" id="lookNow">Check it now</button>')}
+    <section class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between">
+      <div style="display:flex;gap:12px;align-items:center"><span class="dot${conn.on && conn.mode === 'full' ? '' : ' off'}" style="width:10px;height:10px"></span><span>${connLine}</span></div>
+      <a href="/setup" style="font-weight:500;font-size:14px">Connection settings</a></section>
+    <section class="card"><div class="card-h"><h2>Changes waiting for your yes</h2><span class="muted" style="font-size:13.5px">Found → fixed on a copy → tested → your yes → live</span></div>
+      ${pending.length ? pending.map((a) => `<div class="row"><div class="grow"><span style="font-weight:600">${esc(a.text)}</span><span class="muted" style="font-size:14px">${esc(a.why || '')}</span></div>
+        <div style="display:flex;gap:8px;align-items:center">${pill('wait', 'Waiting for you')}<a class="btn small" href="#waiting">Decide</a></div></div>`).join('')
+        : empty('Nothing waiting', 'When IT has a tested fix, it waits here for your yes.')}</section>
+    ${failed.length ? `<section class="card"><div class="card-h"><h2>Could not be done</h2></div>${failed.slice(0, 6).map((f) => `<div class="row"><div class="grow">
+      <span style="font-weight:600">${esc(f.what || f.title || f.kind || 'A change')}</span><span class="muted" style="font-size:14px">${esc(f.why || f.note || '')}</span></div>${pill('stuck', 'Stuck')}</div>`).join('')}</section>` : ''}
+    <section class="card"><div class="card-h"><h2>What changed on your website</h2><span class="muted" style="font-size:13.5px">${esc((ch && ch.head) || '')}</span></div>
+      ${changes.length ? changes.slice(0, 15).map((c) => `<div class="row"><div class="grow"><span style="font-weight:600">${esc(c.summary || c.action || 'A change')}</span>
+        <span class="muted" style="font-size:14px">${esc(c.page || '')} · ${esc(c.by || '')} · ${esc(c.when || '')}</span></div>${c.ok === 0 ? pill('stuck', 'Refused') : pill('done', 'Live')}</div>`).join('')
+        : empty('Nothing yet', 'Every change the agency makes, and anything changed by someone else, is listed here with a way back.')}</section>
+  </div>`;
+  $('#lookNow').onclick = async () => { $('#lookNow').disabled = true; toast('Looking at every page for changes…');
+    const j = await api('/api/site/look', {}); $('#lookNow').disabled = false; toast(j.head || j.error || 'Done.'); website(main); };
+}
+
+/* ======================= ON GOOGLE ======================= */
+async function google(main) {
+  const d = await api('/api/index-status');
+  const pages = (d && d.pages) || [];
+  const on = pages.filter((p) => p.on_google), seen = pages.filter((p) => !p.on_google && /crawled|discovered/i.test(p.coverage || '')),
+    rest = pages.filter((p) => !p.on_google && !/crawled|discovered/i.test(p.coverage || ''));
+  const next = pages.find((p) => !p.on_google);
+  const pct = (n) => pages.length ? Math.round(n / pages.length * 100) : 0;
+  main.innerHTML = `<div class="page">${head('On Google',
+    'Which of your pages Google lists, read from your Search Console every morning.',
+    '<button class="btn ghost" type="button" id="askAgain">Ask Google again</button>')}
+    ${d && d.mismatch ? `<div class="note">${esc(d.mismatch)}</div>` : ''}
+    <div class="two">
+      <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="mono" style="font-size:40px;font-weight:500;line-height:1">${on.length}</span>
+          <span style="font-size:17px;font-weight:600">${pages.length ? 'of your ' + pages.length + ' pages are on Google' : 'Google has not been asked yet'}</span></div>
+        <div style="display:flex;height:12px;border-radius:99px;overflow:hidden;background:var(--meter);gap:2px" role="img" aria-label="${on.length} on Google, ${seen.length} seen but not listed, ${rest.length} not seen">
+          <span style="width:${pct(on.length)}%;background:var(--done)"></span><span style="width:${pct(seen.length)}%;background:var(--work)"></span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 18px;font-size:14px">
+          <span>On Google <span class="mono">${on.length}</span></span><span>Seen, not listed yet <span class="mono">${seen.length}</span></span><span>Not seen yet <span class="mono">${rest.length}</span></span></div>
+        <p class="muted" style="margin:0;font-size:14px">${esc((d && d.head) || '')}</p></section>
+      ${next ? `<section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px;background:var(--note-bg);border-color:var(--note-line)">
+        <span class="label" style="color:var(--wait)">Only you can do this</span>
+        <h2 style="margin:0;font-size:18px;font-weight:600">Ask Google to look at this page</h2>
+        <p style="margin:0;font-size:14.5px">Google does not let a program press Request indexing for ordinary pages. Open Search Console, paste this address into the box at the top, and press Request indexing. One page a day is plenty.</p>
+        <div class="mono" style="padding:10px 12px;background:var(--surface);border:1px solid var(--note-line);border-radius:8px;overflow-wrap:anywhere">${esc(next.url)}</div>
+        <div><a class="btn" href="https://search.google.com/search-console" target="_blank" rel="noopener">Open Search Console</a></div></section>` : ''}
+    </div>
+    <section class="card scroll"><div class="card-h"><h2>Your pages</h2></div>
+      ${pages.length ? `<table><thead><tr><th>Page</th><th>On Google?</th><th>What Google says</th></tr></thead><tbody>${pages.map((p) => `<tr>
+        <td class="mono" style="font-size:13.5px;overflow-wrap:anywhere">${esc(String(p.url || '').replace(/^https?:\/\/[^/]+/, '') || '/')}</td>
+        <td>${p.on_google ? pill('done', 'On Google') : /crawled|discovered/i.test(p.coverage || '') ? pill('work', 'Seen, not listed yet') : pill('plain', 'Not seen yet')}</td>
+        <td class="muted">${esc(p.why || p.coverage || '')}</td></tr>`).join('')}</tbody></table>`
+        : empty('Not asked yet', 'This fills in once Search Console is connected and the day has run.')}</section></div>`;
+  $('#askAgain').onclick = async () => { $('#askAgain').disabled = true; toast('Asking Google about every page — this can take a few minutes…');
+    const j = await api('/api/index-check', {}); $('#askAgain').disabled = false; toast(j.head || j.error || 'Done.'); google(main); };
+}
+
+/* ======================= WEBSITE CHECK ======================= */
+function check(main) {
+  main.innerHTML = `<div class="page narrow">${head('Website Check',
+    'A report on any website — yours, a rival’s, or a prospect’s you want to win. It only reads what any visitor’s browser sees, and never changes or probes the site.')}
+    <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
+      <label for="checkUrl" style="font-weight:600">Website address</label>
+      <div style="display:flex;flex-wrap:wrap;gap:10px"><input id="checkUrl" type="url" placeholder="www.example.com" style="flex:1 1 300px;min-width:0" disabled>
+        <button class="btn" type="button" disabled>Check this website</button></div>
+      <div class="note">Coming next. The report — scores for every desk, the five fixes that matter most, and a PDF with your logo — is the next part being built.</div>
+    </section></div>`;
+}
+
+/* ======================= SETTINGS ======================= */
+function settings(main) {
+  const me = S.me || {}, e = S.engine || {};
+  const t = theme();
+  const row = (href, title, line) => `<a class="row" href="${href}" style="text-decoration:none;color:var(--ink);align-items:center">
+    <span class="grow"><b style="font-weight:600">${esc(title)}</b><span class="muted" style="font-size:14px">${esc(line)}</span></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Open</span></a>`;
+  main.innerHTML = `<div class="page narrow">${head('Settings',
+    'Everything is kept on this computer. Each website has its own settings; what is yours — the AI, your phone, your password — is shared by both.')}
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This website</h2><div class="card">
+      ${row('/business', 'Your business', 'What you do, where, what you sell and who buys it')}
+      ${row('/setup', 'Website and connection', 'Its address, and how the agency reaches it')}
+      ${row('/setup', 'Search Console, maps, email and alerts', 'The rest of the keys, on the Setup screen')}
+    </div></section>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">You</h2><div class="card">
+      ${row('/engine', 'How your agency thinks', e.chosen ? e.name + (e.ready ? ' · ready' : ' · not ready') : 'Not chosen yet')}
+      ${row('/engine', 'Daily spending limit', e.cap ? money(e.cap) + ' a day, for the AI and every paid tool, across both websites' : 'Set it on the engine page')}
+      ${row('/account', me.signedIn ? 'Websites, password and recovery key' : 'Make your account', me.signedIn ? ((me.sites || []).length + ' of ' + (me.maxSites || 2) + ' websites in use') : 'Two websites, encrypted on this computer')}
+    </div></section>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This screen</h2>
+      <div class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+        <span>Light or dark</span><div role="group" aria-label="Theme" style="display:flex;gap:8px">${[['system', 'Like this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) =>
+          `<button type="button" class="seg ${k === t ? 'on' : ''}" aria-pressed="${k === t}" data-theme-pick="${k}">${n}</button>`).join('')}</div></div>
+      <div class="card">${row('/classic', 'The classic office', 'The previous screens, with every panel, while the rest move across')}</div>
+    </section></div>`;
+  main.querySelectorAll('[data-theme-pick]').forEach((b) => b.onclick = () => { theme(b.dataset.themePick); buildSiteMenu(); settings(main); });
+}
+
+/* ======================= MORE (phone) ======================= */
+function more(main) {
+  const item = (href, t, s) => `<a class="row" href="${href}" style="text-decoration:none;color:var(--ink);align-items:center"><span class="grow"><b style="font-weight:600">${t}</b><span class="muted" style="font-size:14px">${s}</span></span></a>`;
+  main.innerHTML = `<div class="page narrow">${head('More')}<div class="card">
+    ${item('#orders', 'Your orders', 'Tell a desk what you want today')}${item('#content', 'Content', 'Posts and pages')}
+    ${item('#google', 'On Google', 'Which pages Google lists')}${item('#check', 'Website Check', 'A report on any website')}
+    ${item('#settings', 'Settings', 'Your business, the AI, your account')}</div></div>`;
+}
+
+/* ---- routing ---- */
+const ROUTES = {today, waiting, orders, leads, content, website, google, check, settings, more};
+let polling = null;
+async function route() {
+  const r = (location.hash || '#today').slice(1).split('?')[0];
+  const fn = ROUTES[r] || today;
+  document.querySelectorAll('[data-r]').forEach((a) => {
+    const on = a.dataset.r === r || (r === 'more' && a.dataset.r === 'more');
+    a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+  const main = $('#main');
+  await fn(main);
+  clearInterval(polling);
+  if (r === 'today' || r === 'waiting') polling = setInterval(() => { if (!document.hidden && !main.contains(document.activeElement)) fn(main); }, 30000);
+}
+window.addEventListener('hashchange', () => { route(); $('#main').focus({preventScroll: true}); window.scrollTo(0, 0); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite);
+(async function boot() {
+  theme();
+  await loadShell();
+  state();
+  route();
+  setInterval(async () => { const e = await api('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
+})();
+</script>
+</body>
+</html>

@@ -426,7 +426,7 @@ def tests():
             "coordination.daygate_tests",
             "coordination.honest_tests",
             "coordination.orders_tests",
-            "coordination.workspace_tests", "coordination.launch_tests",
+            "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",
@@ -607,7 +607,7 @@ def office():
     if not port:
         say("  " + note)
         return
-    url = f"http://localhost:{port}/office.html"
+    url = f"http://localhost:{port}/"
     if note == "running":
         say("  The office is already running from this folder, in another window.")
         say(f"  {url}")
@@ -658,7 +658,7 @@ def office():
             if not port or note == "running":
                 say("  " + (note if port else "No free port was found."))
                 return
-            url = f"http://localhost:{port}/office.html"
+            url = f"http://localhost:{port}/"
             say(f"  That port was taken a moment ago — trying {port}: {url}")
             continue
         if code != RESTART:

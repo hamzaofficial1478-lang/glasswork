@@ -441,7 +441,12 @@ app.post("/api/setup/unlock", express.urlencoded({ extended: false }), async (re
 // Past the gate, and only past it.
 app.use(express.static(path.join(__dirname, "ui")));
 
-app.get("/", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "office.html")));
+// THE NEW DESIGN IS THE FRONT DOOR (ui/app.html) — "the ui was still same not
+// as you showed here". The previous office keeps every panel at /classic while
+// the remaining screens move across.
+app.get("/", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "app.html")));
+app.get("/app", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "app.html")));
+app.get("/classic", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "office.html")));
 app.get("/control", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "agency.html")));
 app.get("/setup", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "setup.html")));
 app.get("/status", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "status.html")));
@@ -1181,7 +1186,10 @@ function readConnections() {
   const e = readEnv();
   const has = (k) => !!(e[k] && e[k].trim());
   return [
-    { ic: "◧", name: "Website", sub: e.SITE_URL || "not set", on: has("SITE_URL") },
+    { ic: "◧", name: "Website", sub: e.SITE_URL || "not set", on: has("SITE_URL"),
+      // Read-only or full access, and how — never the token or password.
+      mode: String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly",
+      kind: String(e.SITE_CONNECT || "").toLowerCase() === "wordpress" ? "wordpress" : "php" },
     { ic: "🔔", name: "ntfy", sub: has("NTFY_TOPIC") ? "topic set" : "not set", on: has("NTFY_TOPIC") },
     ...(has("TELEGRAM_BOT_TOKEN")
         ? [{ ic: "✈", name: "Telegram (legacy)", sub: "still configured — ntfy is the route now", on: true }]
