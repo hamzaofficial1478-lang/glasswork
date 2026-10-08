@@ -317,16 +317,22 @@ def test_the_office_does_not_wait_for_a_run():
     class _Proc:
         def wait(self):
             return codes.pop(0)
-    real = (_run.subprocess.Popen, _run.webbrowser.open, _run.time.sleep, _run.say)
+    real = (_run.subprocess.Popen, _run.webbrowser.open, _run.time.sleep, _run.say,
+            _run.choose_port, _run.wait_for_office)
     _run.subprocess.Popen = lambda cmd, **kw: launched.append(kw.get("env", {}).get(
         "OFFICE_SUPERVISED")) or _Proc()
     _run.webbrowser.open = lambda url: None
     _run.time.sleep = lambda s: None
     _run.say = lambda *a, **k: None
+    # Which port, and whether the office answered, are coordination/launch_tests'
+    # business; this is about starting it supervised and starting it again.
+    _run.choose_port = lambda preferred: (int(preferred), "")
+    _run.wait_for_office = lambda proc, port, seconds=45: True
     try:
         _run.office()
     finally:
-        (_run.subprocess.Popen, _run.webbrowser.open, _run.time.sleep, _run.say) = real
+        (_run.subprocess.Popen, _run.webbrowser.open, _run.time.sleep, _run.say,
+         _run.choose_port, _run.wait_for_office) = real
     check("run.py starts it supervised, and starts it again when it asks",
           launched, ["1", "1"])
 

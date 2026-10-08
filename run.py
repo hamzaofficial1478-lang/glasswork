@@ -32,10 +32,14 @@ turn, so the coordination layer — claims, locks, the red-line hooks — stays 
 the path exactly as it is when the agency runs itself.
 """
 import argparse
+import hashlib
+import json
 import os
+import socket
 import subprocess
 import sys
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -422,7 +426,7 @@ def tests():
             "coordination.daygate_tests",
             "coordination.honest_tests",
             "coordination.orders_tests",
-            "coordination.workspace_tests",
+            "coordination.workspace_tests", "coordination.launch_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",
@@ -494,12 +498,126 @@ def tests():
 # 4. THE OFFICE
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# WHICH PORT, AND IS IT REALLY THE OFFICE ANSWERING?
+#
+# "git pull the program into folder and run the program and shows this error
+#  {"error":"Page not found."}"
+#
+# Not the office's words. Another program on his computer had port 3000; the
+# office could not start there (or started on 127.0.0.1 while the other one
+# held the IPv6 side that "localhost" tries first), and the browser, opened
+# two seconds after launch whatever had happened, showed the other program.
+#
+# So: a port is used only when it is free on both sides of "localhost"; the
+# browser opens only once the office itself has answered — checked by the
+# HOME id in /api/ping, which only this folder's office gives; and a port
+# taken in the meantime (the server exits with PORT_TAKEN) moves to the next.
+# ---------------------------------------------------------------------------
+
+PORT_TAKEN = 76
+PORT_TRIES = 40
+
+
+def home_id() -> str:
+    """The id this folder's office reports in /api/ping (server.js HOME_ID)."""
+    return hashlib.sha256(str(ROOT).replace("\\", "/").lower().encode("utf-8")).hexdigest()[:16]
+
+
+def port_free(port) -> bool:
+    """Can this port be listened on, at 127.0.0.1 and (where there is IPv6) at ::1?"""
+    for family, host in ((socket.AF_INET, "127.0.0.1"), (getattr(socket, "AF_INET6", None), "::1")):
+        if family is None:
+            continue
+        try:
+            s = socket.socket(family, socket.SOCK_STREAM)
+        except OSError:
+            continue                              # no IPv6 here
+        try:
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                # Windows otherwise lets a second program share the port.
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                # Elsewhere a port the office let go of a moment ago lingers;
+                # Node ignores that, and so should this check. A port another
+                # program is listening on still refuses.
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, int(port)))
+        except OSError as e:
+            if family != socket.AF_INET and getattr(e, "errno", None) in (49, 99, 10049):
+                continue                          # ::1 not available: IPv4 only
+            return False
+        finally:
+            s.close()
+    return True
+
+
+def who_answers(port, timeout=2.0) -> dict:
+    """{'office': bool, 'mine': bool} for whatever answers /api/ping on this port, or {}."""
+    for host in ("127.0.0.1", "[::1]"):
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}/api/ping", timeout=timeout) as r:
+                d = json.loads(r.read().decode("utf-8", "replace") or "{}")
+        except Exception as e:
+            code = getattr(e, "code", None)
+            if code:                               # something answered, just not the office
+                return {"office": False, "mine": False}
+            continue
+        if isinstance(d, dict) and d.get("ok") and isinstance(d.get("api"), list):
+            return {"office": True, "mine": d.get("home") == home_id()}
+        return {"office": False, "mine": False}
+    return {}
+
+
+def choose_port(preferred) -> tuple:
+    """(port, what to tell him). An office of this folder already running: (port, 'running')."""
+    first = int(preferred)
+    if port_free(first):
+        return first, ""
+    who = who_answers(first)
+    if who.get("mine"):
+        return first, "running"
+    for p in range(first + 1, first + PORT_TRIES):
+        if port_free(p):
+            what = ("an older copy of the office, from another folder" if who.get("office")
+                    else "another program on this computer")
+            return p, f"Port {first} is in use by {what}, so the office is on port {p} instead."
+    return 0, (f"Ports {first} to {first + PORT_TRIES - 1} are all in use. Close some programs, "
+               "or set PORT to a free one, and run this again.")
+
+
+def wait_for_office(proc, port, seconds=45) -> bool:
+    """True once this folder's office answers on the port; False if it stopped first."""
+    end = time.time() + seconds
+    while time.time() < end:
+        if proc.poll() is not None:
+            return False
+        if who_answers(port, timeout=1.5).get("mine"):
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def office():
     head("Starting the office")
     if not (ROOT / "node_modules").exists():
         say("  Installing dependencies (first run only)...")
         npm_install(timeout=900)
-    url = f"http://localhost:{PORT}/office.html"
+    port, note = choose_port(PORT)
+    if not port:
+        say("  " + note)
+        return
+    url = f"http://localhost:{port}/office.html"
+    if note == "running":
+        say("  The office is already running from this folder, in another window.")
+        say(f"  {url}")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+        return
+    if note:
+        say("  " + note)
     say(f"  {url}")
     say("  Leave this window open. Press Ctrl+C to stop.")
     say()
@@ -508,21 +626,25 @@ def office():
     # version at once. Without it, a pulled update gave him new screens talking
     # to the old server — "unknown action" on a button that existed.
     RESTART = 75
-    env = {**os.environ, "OFFICE_SUPERVISED": "1"}
     opened = False
     while True:
+        env = {**os.environ, "OFFICE_SUPERVISED": "1", "PORT": str(port)}
         try:
             proc = subprocess.Popen(["node", "server.js"], cwd=ROOT, env=env)
         except FileNotFoundError:
             say("  Node.js is not installed. Get it from nodejs.org, then run this again.")
             return
         if not opened:
-            time.sleep(2)
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
-            opened = True
+            if wait_for_office(proc, port):
+                try:
+                    webbrowser.open(url)
+                except Exception:
+                    pass
+                opened = True
+            elif proc.poll() is None:
+                say(f"  The office has not answered on port {port} yet. When it says it is "
+                    f"running above, open {url}")
+                opened = True
         try:
             code = proc.wait()
         except KeyboardInterrupt:
@@ -530,7 +652,18 @@ def office():
             say("  Stopping.")
             proc.terminate()
             return
+        if code == PORT_TAKEN and not opened:
+            # Another program took the port between the check and the start.
+            port, note = choose_port(port + 1)
+            if not port or note == "running":
+                say("  " + (note if port else "No free port was found."))
+                return
+            url = f"http://localhost:{port}/office.html"
+            say(f"  That port was taken a moment ago — trying {port}: {url}")
+            continue
         if code != RESTART:
+            if not opened:
+                say("  The office stopped before it could start — the lines above say why.")
             return
         say("  The office was updated — started the new version. Refresh the page.")
 

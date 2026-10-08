@@ -13,6 +13,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const http = require("http");
 const { spawn, spawnSync } = require("child_process");
 const app = express();
 
@@ -679,9 +680,14 @@ const API_CAPABILITIES = [
   "account", "business", "engine", "connect",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
+// Which copy of the program this is, without saying where it lives: run.py
+// computes the same from its own folder, so it can tell this office from an
+// older copy in another folder, or from somebody else's program entirely.
+const HOME_ID = crypto.createHash("sha256")
+  .update(path.resolve(__dirname).replace(/\\/g, "/").toLowerCase()).digest("hex").slice(0, 16);
 app.get("/api/ping", async (_q, res) => {
   res.json({ ok: true, api: API_CAPABILITIES, started: SERVER_STARTED,
-             stale: codeIsNewer(), supervised: SUPERVISED });
+             stale: codeIsNewer(), supervised: SUPERVISED, office: true, home: HOME_ID });
 });
 
 /* THE BRAND, AND NOTHING ELSE.
@@ -2135,7 +2141,48 @@ const PORT = process.env.PORT || 3000;
 // behind a proxy — but it has to be asked for, in writing, and it says loudly
 // what it just did.
 const HOST = process.env.BIND_HOST || "127.0.0.1";
-app.listen(PORT, HOST, () => {
+
+// THE PORT IS SOMEBODY ELSE'S.
+//
+// "git pull the program into folder and run the program and shows this error
+//  {"error":"Page not found."}"
+//
+// That sentence is not this program's. Another program on his computer was
+// answering on port 3000. Two ways that happens, and both ended with his
+// browser talking to the other program while he was told the office was up:
+//
+//   1. The other program had 127.0.0.1:3000. This server could not listen,
+//      crashed with a stack trace, and run.py — which had already opened the
+//      browser — said nothing.
+//   2. The other program had [::1]:3000, the IPv6 side. Windows let this
+//      server take 127.0.0.1:3000 as well, but a browser asked for
+//      "localhost" tries ::1 first — and reached the other program.
+//
+// So a port that is taken is said in words and exits with PORT_TAKEN, which
+// run.py answers by moving to the next free port. And the office listens on
+// ::1 too, so "localhost" reaches it whichever way the browser asks; if
+// someone else already has ::1 at this port, that is PORT_TAKEN as well.
+const PORT_TAKEN = 76;
+function portTaken(where) {
+  console.error(`\n!! Port ${PORT} is already in use on this computer (${where}) by another ` +
+    "program, so the office cannot start there.\n   run.py moves to a free port by itself. " +
+    `Started by hand? Set another port first, e.g.  set PORT=${Number(PORT) + 1}  then start again.\n`);
+  process.exit(PORT_TAKEN);
+}
+const mainServer = http.createServer(app);
+mainServer.on("error", (e) => {
+  if (e && e.code === "EADDRINUSE") return portTaken(HOST);
+  throw e;
+});
+if (!process.env.BIND_HOST) {
+  const v6 = http.createServer(app);
+  v6.on("error", (e) => {
+    if (e && e.code === "EADDRINUSE") return portTaken("::1, which is what \"localhost\" often means");
+    // No IPv6 on this computer: nothing to do, 127.0.0.1 is the only way in.
+  });
+  v6.listen(PORT, "::1");
+}
+mainServer.listen(PORT, HOST, () => {
   // Upgrade the cabinet on boot. schema.sql is CREATE TABLE IF NOT EXISTS
   // throughout, so this is safe to run every time and adds any table a newer
   // version introduced — an existing database is never left half-upgraded.
