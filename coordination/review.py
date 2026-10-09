@@ -349,7 +349,8 @@ def _pages(c):
             for_blog.append(row)
         elif len(on_blog) < 12:
             on_blog.append({k: row[k] for k in ("id", "title", "url", "posted_at", "plain_page",
-                                                "moving", "on_backend", "backend_notes")})
+                                                "moving", "on_backend", "backend_notes", "keyword")}
+                           | {"seo_score": (row["seo"] or {}).get("score")})
 
     counts = {}
     for r in _rows(c, "SELECT status, count(*) n FROM content_queue GROUP BY status"):
@@ -1026,6 +1027,43 @@ def sent_delete(ids=None, everything=False) -> dict:
         "to, so none is listed or mailed again.")}
 
 
+def sent_mail(lead_id) -> dict:
+    """
+    "we cannot read the sent mails" — what one business was actually sent: the
+    subject, the words and the designed version, exactly as it went. A mail
+    deleted from the list has had its words wiped, and says so.
+    """
+    try:
+        lid = int(lead_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "which mail?"}
+    c = _conn()
+    try:
+        lead = (_rows(c, "SELECT id, company, name, email, area, mailed_at, sent_cleared_at"
+                         " FROM leads WHERE id=?", (lid,)) or [None])[0]
+        if not lead:
+            return {"ok": False, "error": "no such lead"}
+        q = (_rows(c, "SELECT subject, body, html, to_email, sent_at, note, bounced_at, bounce_reason,"
+                      " campaign_id FROM outreach_queue WHERE lead_id=? AND (status='sent'"
+                      " OR (status='rejected' AND bounced_at IS NOT NULL))"
+                      " ORDER BY COALESCE(sent_at, 0) DESC, id DESC LIMIT 1", (lid,)) or [None])[0]
+        log = (_rows(c, "SELECT body, at FROM outreach_log WHERE lead_id=? AND direction='sent'"
+                        " ORDER BY at DESC, id DESC LIMIT 1", (lid,)) or [None])[0]
+    finally:
+        c.close()
+    if not q and not log:
+        return {"ok": False, "error": "nothing was sent to that business"}
+    q, log = q or {}, log or {}
+    wiped = bool(lead.get("sent_cleared_at"))
+    return {"ok": True, "lead": lid, "company": lead.get("company") or lead.get("name") or "",
+            "to": q.get("to_email") or lead.get("email") or "", "area": lead.get("area") or "",
+            "subject": q.get("subject") or "", "body": q.get("body") or log.get("body") or "",
+            "html": q.get("html") or "", "sent_at": q.get("sent_at") or log.get("at") or lead.get("mailed_at") or 0,
+            "campaign": bool(q.get("campaign_id")), "note": q.get("note") or "",
+            "bounced": bool(q.get("bounced_at")), "bounce_reason": q.get("bounce_reason") or "",
+            "wiped": wiped}
+
+
 def _cell(v) -> str:
     """A spreadsheet cell that is only ever text — a scraped company name that
     starts with = must not become a formula on his computer."""
@@ -1078,6 +1116,7 @@ def main():
     ap.add_argument("--campaign-rewrite", action="store_true")
     ap.add_argument("--focus", default=None, help="with --campaign-rewrite: what to lead with")
     ap.add_argument("--sent-csv", action="store_true", help="every business mailed, as CSV")
+    ap.add_argument("--sent-mail", type=int, metavar="LEAD", help="what that business was sent")
     a = ap.parse_args()
     try:
         if a.act:
@@ -1093,6 +1132,8 @@ def main():
             out = publish_now()
         elif a.sent_csv:
             out = sent_csv()
+        elif a.sent_mail:
+            out = sent_mail(a.sent_mail)
         else:
             out = build()
     except Exception as e:

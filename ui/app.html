@@ -19,7 +19,7 @@
   --work-bg:#E4ECFA; --work:#244C99; --stuck-bg:#F9E3E1; --stuck:#97241C;
   --plain-bg:#EEF2F2; --plain:#4A5A5D; --ok-dot:#2E8A5B;
   --note-bg:#FFF9EE; --note-line:#EFD9AE; --meter:#E6EBEB;
-  --site:#1F5F66;
+  --site:#1F5F66; --idle:#B3BFBF;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
@@ -31,7 +31,7 @@
     --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
     --plain-bg:#1F2A2B; --plain:#B4C2C3; --ok-dot:#49B37B;
     --note-bg:#2B2414; --note-line:#5A4A26; --meter:#26322F;
-    --site:#3E8F95;
+    --site:#3E8F95; --idle:#62767A;
   }
 }
 :root[data-theme="dark"]{
@@ -43,7 +43,7 @@
   --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
   --plain-bg:#1F2A2B; --plain:#B4C2C3; --ok-dot:#49B37B;
   --note-bg:#2B2414; --note-line:#5A4A26; --meter:#26322F;
-  --site:#3E8F95;
+  --site:#3E8F95; --idle:#62767A;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -189,11 +189,11 @@ ol.feed li:last-child{border-bottom:0}
 .plan-card{padding:14px 16px 12px}
 .plan{display:block;width:100%;height:auto}
 .plan-room{cursor:pointer}
-.plan-room rect{fill:var(--sunken);stroke:var(--line);stroke-width:1.5}
-.plan-room:hover rect{stroke:var(--line-strong)}
+.plan-room>rect{fill:var(--sunken);stroke:var(--line);stroke-width:1.5}
+.plan-room:hover>rect{stroke:var(--line-strong)}
 .plan-room:focus{outline:none}
-.plan-room:focus-visible rect{stroke:var(--accent);stroke-width:2.5}
-.plan-room.bad rect{stroke:var(--stuck);stroke-width:2}
+.plan-room:focus-visible>rect{stroke:var(--accent);stroke-width:2.5}
+.plan-room.bad>rect{stroke:var(--stuck);stroke-width:2}
 .plan-room.off{opacity:.5}
 .plan-name{font:600 12px 'Instrument Sans',system-ui,sans-serif;letter-spacing:.08em;fill:var(--faint)}
 .plan-desk{cursor:pointer}
@@ -289,6 +289,93 @@ ol.feed.tight li{grid-template-columns:48px 1fr}
 details.more summary{cursor:pointer;color:var(--accent);font-weight:500;font-size:14px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:760px){.plan-card{display:none} .rooms{columns:1} .drawer{width:100vw;border-left:0} .fl-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* tabs, mail and the post editor */
+.tabbar{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line)}
+.tabbtn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;border:0;border-bottom:3px solid transparent;margin-bottom:-1px;
+  background:none;color:var(--muted);font:inherit;font-weight:600;cursor:pointer}
+.tabbtn:hover{color:var(--ink)}
+.tabbtn.on{color:var(--ink);border-bottom-color:var(--accent)}
+.tabbtn .n{font-size:12px;padding:1px 8px;border-radius:999px;background:var(--plain-bg);color:var(--plain)}
+.tabbtn .pill{font-size:11.5px;padding:1px 8px}
+.mailframe{width:100%;height:560px;border:1px solid var(--line);border-radius:10px;background:#FFFFFF}
+.drawer .mailframe{height:420px}
+.mailtext{white-space:pre-wrap;font-size:14.5px;line-height:1.6;background:var(--sunken);border-radius:8px;padding:12px 14px;overflow-wrap:anywhere}
+.pickrow input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:var(--accent)}
+.linkrow{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 280px}
+.linkrow:hover b{color:var(--accent)}
+.linkrow:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.topics{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:16px 20px}
+.topic{display:flex;flex-direction:column;gap:4px;text-align:left;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  color:var(--ink);font:inherit;cursor:pointer}
+.topic:hover{border-color:var(--line-strong);background:var(--sunken)}
+.topic.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
+.ed-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+.ed-main{display:flex;flex-direction:column;overflow:hidden}
+.ed-title{border:0;border-bottom:1px solid var(--line-soft);border-radius:0;font-size:24px;font-weight:600;padding:6px 20px 14px;min-height:56px;background:var(--surface);color:var(--ink)}
+.ed-title:focus{outline:none;border-bottom-color:var(--accent)}
+.toolbar{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line-soft);background:var(--sunken);position:sticky;top:0;z-index:2}
+.tb{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:34px;min-height:34px;padding:0 8px;border:1px solid transparent;border-radius:6px;
+  background:none;color:var(--ink-2);font:inherit;font-size:13.5px;cursor:pointer}
+.tb:hover{background:var(--surface);border-color:var(--line)}
+.tb.colour{position:relative;font-weight:700}
+.tb.colour input{width:22px;height:22px;padding:0;border:0;background:none;cursor:pointer}
+.toolbar select{min-height:34px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font-size:13.5px;padding:0 6px}
+.tsep{width:1px;height:22px;background:var(--line);margin:0 4px}
+.ed-body{min-height:420px;padding:20px 24px;font-size:16.5px;line-height:1.7;color:var(--ink);outline:none;overflow-wrap:anywhere}
+.ed-body:focus{box-shadow:inset 0 0 0 2px var(--accent-soft)}
+.ed-body h2{font-size:23px;margin:1.2em 0 .4em} .ed-body h3{font-size:19px;margin:1em 0 .3em}
+.ed-body img{max-width:100%;height:auto;border-radius:8px}
+.ed-body blockquote{margin:1em 0;padding:4px 16px;border-left:3px solid var(--line-strong);color:var(--ink-2)}
+.ed-body a{color:var(--accent)}
+.ed-side{display:flex;flex-direction:column;gap:14px;position:sticky;top:16px}
+.checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.checklist li{display:flex;gap:8px;align-items:baseline}
+.checklist li::before{content:"";flex:none;width:9px;height:9px;border-radius:50%;transform:translateY(-1px)}
+.checklist li.ok::before{background:var(--done)} .checklist li.no::before{background:var(--stuck)}
+.checklist li.no{color:var(--ink-2)}
+/* agents, not dots */
+.agent .ag-head,.agent .ag-body{fill:var(--idle)}
+.agent.work .ag-head,.agent.work .ag-body{fill:var(--work)}
+.agent.done .ag-head,.agent.done .ag-body{fill:var(--done)}
+.agent.stuck .ag-head,.agent.stuck .ag-body{fill:var(--stuck)}
+.agent.wait .ag-head,.agent.wait .ag-body{fill:var(--wait)}
+.agent.off{opacity:.45}
+.ag-screen{fill:var(--surface);stroke:var(--idle);stroke-width:1.4}
+.agent.work .ag-screen{fill:var(--work-bg);stroke:var(--work)}
+.agent.stuck .ag-screen{fill:var(--stuck-bg);stroke:var(--stuck)}
+.agent.done .ag-screen{stroke:var(--done)} .agent.wait .ag-screen{stroke:var(--wait)}
+.ag-desk{fill:var(--idle)}
+.ag-line{fill:var(--work)}
+.ag-alert{font:700 10px 'Instrument Sans',system-ui,sans-serif;fill:var(--stuck)}
+.ag-alert.wait{fill:var(--wait)}
+.ag-tick{fill:none;stroke:var(--done);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+@keyframes typing{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:no-preference){.ag-line.l1{animation:typing 1.1s ease-in-out infinite}.ag-line.l2{animation:typing 1.1s ease-in-out .35s infinite}
+  .ag-line.l3{animation:typing 1.1s ease-in-out .7s infinite}}
+.person{fill:var(--idle);flex:none}
+.person.work{fill:var(--work)} .person.done{fill:var(--done)} .person.stuck{fill:var(--stuck)} .person.wait{fill:var(--wait)}
+.av.work{background:var(--work-bg)} .av.done{background:var(--done-bg)} .av.stuck{background:var(--stuck-bg)} .av.wait{background:var(--wait-bg)}
+.av.plain{background:var(--plain-bg)}
+@media (prefers-reduced-motion:no-preference){.av.busy .person{animation:lampPulse 1.6s ease-in-out infinite}}
+/* the shelf button, glowing while a tool is in use */
+.fl-sep{width:1px;align-self:stretch;background:var(--line);margin:4px 4px}
+.shelf-btn{gap:8px;font-weight:600}
+.shelf-btn .n{opacity:1;font-size:12.5px}
+.shelf-btn.glow{color:var(--bg);border:2px solid transparent;
+  background:linear-gradient(var(--ink),var(--ink)) padding-box,
+    linear-gradient(90deg,#ff4d6d,#ffb020,#3ddc84,#2ea8ff,#a35cff,#ff4d6d) border-box;
+  background-size:100% 100%,300% 100%}
+.shelf-btn.glow .n{background:linear-gradient(90deg,#ff4d6d,#ffb020,#3ddc84,#2ea8ff,#a35cff);background-size:300% 100%;color:#0B1213;
+  padding:0 7px;border-radius:999px;font-weight:600}
+@keyframes rgbFlow{to{background-position:0 0,300% 0}}
+@keyframes rgbCount{to{background-position:300% 0}}
+@keyframes rgbGlow{0%{box-shadow:0 0 14px 1px rgba(255,77,109,.55)}25%{box-shadow:0 0 14px 1px rgba(255,176,32,.55)}
+  50%{box-shadow:0 0 14px 1px rgba(61,220,132,.55)}75%{box-shadow:0 0 14px 1px rgba(46,168,255,.55)}100%{box-shadow:0 0 14px 1px rgba(163,92,255,.55)}}
+@media (prefers-reduced-motion:no-preference){.shelf-btn.glow{animation:rgbFlow 2.6s linear infinite,rgbGlow 2.6s linear infinite alternate}
+  .shelf-btn.glow .n{animation:rgbCount 2.6s linear infinite}}
+@media (prefers-reduced-motion:reduce){.shelf-btn.glow{box-shadow:0 0 12px 1px rgba(46,168,255,.5)}}
+@media (max-width:900px){.ed-grid{grid-template-columns:1fr} .ed-side{position:static}}
+@media (max-width:760px){.mailframe{height:440px} .ed-body{padding:16px;min-height:320px} .ed-title{font-size:20px;padding:6px 16px 12px}}
 /* website check */
 .ck-hero{display:flex;flex-wrap:wrap;gap:20px 36px;align-items:center;padding:20px 22px}
 .ck-score{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:56px;line-height:1;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
@@ -659,26 +746,66 @@ async function orders(main, desk) {
   };
 }
 
-/* ======================= LEADS ======================= */
-async function leads(main, pick) {
-  pick = pick || 'all';
-  const d = await api('/api/leads?scope=all');
-  const all = (d && d.leads) || [];
+/* ======================= LEADS =======================
+   "in leads section there is no mail writing section, mail sending and mails
+    control section and we cannot read the sent mails"
+
+   Four tabs: the leads themselves; YOUR MAIL — one mail from the company for
+   every lead, built from the website, changed, tested and approved here; SEND
+   — tick who gets it; and SENT MAIL — every mail that went, readable in full,
+   deletable (the agency still remembers who was written to, so nobody is
+   mailed twice) and downloadable as a CSV. All of it is coordination/review.py
+   and pipelines/campaign.py, the same code the classic mail room used. */
+const LD = {tab: 'leads', pick: 'all', send: 'ready', recPick: new Set(), sentPick: new Set(), stuckPick: new Set(),
+  panel: null, timer: null};
+async function reviewAct(what, ids, data) {
+  const j = await api('/api/review/act', {do: what, ids: ids || [], data: data || {}});
+  if (j && !j.ok && j.error === 'unknown action') j.error = 'The office is older than this screen. Close it and open it again.';
+  return j || {ok: false};
+}
+async function leads(main) {
+  clearTimeout(LD.timer);
+  const want = new URLSearchParams(location.hash.split('?')[1] || '').get('tab');
+  if (want) LD.tab = want;
+  const [d, r] = await Promise.all([api('/api/leads?scope=all'), api('/api/review')]);
+  const m = (r && r.mails) || {};
+  const rec = m.recipients || [];
+  const g = {ready: rec.filter((x) => x.state === 'ready'), queued: rec.filter((x) => x.state === 'queued'),
+    sent: rec.filter((x) => x.state === 'sent' || x.state === 'bounced').sort((a, b) => (b.sent_at || 0) - (a.sent_at || 0)),
+    stuck: rec.filter((x) => x.state === 'stuck'), cant: rec.filter((x) => x.state === 'no')};
+  const c = m.campaign || {};
+  const campPill = !c.exists ? pill('plain', 'not written yet') : c.status === 'approved' ? pill('done', 'approved') : pill('wait', 'waiting for your OK');
+  const tabs = [['leads', 'Leads', (d && d.leads || []).length], ['mail', 'Your mail', ''], ['send', 'Send', g.ready.length],
+    ['sent', 'Sent mail', g.sent.length]];
+  main.innerHTML = `<div class="page">${head('Leads',
+    'Businesses that buy what you sell. Write one mail for all of them, send it to the ones you tick, and read every mail that went out. Security checks every lead first, and nobody is written to twice.',
+    '<button class="btn ghost" type="button" id="moreLeads">Find more leads</button>')}
+    <div class="tabbar" role="tablist" aria-label="Leads">${tabs.map(([k, n, count]) =>
+      `<button type="button" role="tab" class="tabbtn ${LD.tab === k ? 'on' : ''}" aria-selected="${LD.tab === k}" data-tab="${k}">${n}${
+        k === 'mail' ? ' ' + campPill : count !== '' ? ` <span class="n mono">${Number(count)}</span>` : ''}</button>`).join('')}</div>
+    <div id="ldBody"></div></div>`;
+  $('#moreLeads').onclick = () => { sessionStorage.setItem('gw-desk', 'Leads'); location.hash = '#orders'; };
+  main.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { LD.tab = b.dataset.tab; LD.panel = null; leads(main); });
+  const body = $('#ldBody');
+  if (LD.tab === 'mail') mailTab(body, m, main);
+  else if (LD.tab === 'send') sendTab(body, m, g, main);
+  else if (LD.tab === 'sent') sentTab(body, m, g, main);
+  else leadsTab(body, d || {}, main);
+  if ((m.preflight || {}).sending || m.writing) LD.timer = setTimeout(() => { if (location.hash.startsWith('#leads')) leads(main); }, 4000);
+}
+function leadsTab(body, d, main) {
+  const all = d.leads || [];
   const grp = (l) => l.needs_owner ? 'replied' : l.replied ? 'replied' : l.contacted ? 'contacted' : 'waiting';
   const look = (l) => l.needs_owner ? ['wait', 'Replied — your turn'] : l.replied ? ['done', 'Replied'] : l.contacted ? ['plain', 'Contacted'] : ['work', 'Not contacted yet'];
   const defs = [['all', 'All'], ['waiting', 'Not contacted yet'], ['contacted', 'Contacted'], ['replied', 'Replied']];
-  const rows = pick === 'all' ? all : all.filter((l) => grp(l) === pick);
-  main.innerHTML = `<div class="page">${head('Leads',
-    'Businesses that buy what you sell, found on maps and directories. Security checks every one before anyone writes to it, and nobody is written to twice.',
-    '<button class="btn" type="button" id="moreLeads">Find more leads</button>')}
-    <div class="tiles">
+  const rows = LD.pick === 'all' ? all : all.filter((l) => grp(l) === LD.pick);
+  body.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px"><div class="tiles">
       <div class="card tile"><span class="label">Waiting, with an email</span><span class="big mono">${esc(d.total || 0)}</span></div>
       <div class="card tile"><span class="label">New today</span><span class="big mono">${esc(d.today || 0)}</span></div>
       <div class="card tile"><span class="label">Written to</span><span class="big mono">${esc(d.mailed || 0)}</span></div>
-      <div class="card tile"><span class="label">No email found</span><span class="big mono">${esc(d.no_address || 0)}</span></div>
-    </div>
+      <div class="card tile"><span class="label">No email found</span><span class="big mono">${esc(d.no_address || 0)}</span></div></div>
     <div role="group" aria-label="Show" style="display:flex;flex-wrap:wrap;gap:8px">${defs.map(([k, n]) =>
-      `<button type="button" class="seg ${k === pick ? 'on' : ''}" aria-pressed="${k === pick}" data-pick="${k}">${esc(n)} <span class="n">${k === 'all' ? all.length : all.filter((l) => grp(l) === k).length}</span></button>`).join('')}</div>
+      `<button type="button" class="seg ${k === LD.pick ? 'on' : ''}" aria-pressed="${k === LD.pick}" data-pick="${k}">${esc(n)} <span class="n">${k === 'all' ? all.length : all.filter((l) => grp(l) === k).length}</span></button>`).join('')}</div>
     <div class="card scroll">${rows.length ? `<table><thead><tr><th>Business</th><th>Area</th><th>Found on</th><th>Status</th><th>Next step</th></tr></thead><tbody>
       ${rows.map((l) => { const lk = look(l); return `<tr><td><div style="font-weight:600">${esc(l.company)}</div><div class="muted" style="font-size:13px">${esc(l.segment || '')}</div>
         ${l.email ? `<div class="mono muted" style="font-size:12.5px">${esc(l.email)}</div>` : ''}</td>
@@ -686,38 +813,490 @@ async function leads(main, pick) {
         <td class="muted" style="max-width:320px">${esc(sentence(l.contacted ? (l.last ? 'last contact ' + l.last + ' ago' : 'written to') : (l.waiting_on || '')))}</td></tr>`; }).join('')}</tbody></table>`
       : empty(all.length ? 'None in this list' : 'No leads yet', all.length ? 'Choose another filter above.' : 'Run the day, or give Leads an order, and the agency goes looking.')}</div>
     <p class="muted" style="margin:0;font-size:13.5px">${esc(d.head || '')}</p></div>`;
-  main.querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => leads(main, b.dataset.pick));
-  $('#moreLeads').onclick = () => { sessionStorage.setItem('gw-desk', 'Leads'); location.hash = '#orders'; };
+  body.querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => { LD.pick = b.dataset.pick; leads(main); });
+}
+function mailTab(body, m, main) {
+  const c = m.campaign || {};
+  const chips = `<div style="display:flex;flex-wrap:wrap;gap:8px">${m.ready ? `<span class="chip">From <b class="mono" style="font-weight:500">${esc(m.from || '')}</b></span>`
+      : '<a class="chip" href="/setup" style="color:var(--stuck)">Your email is not set up — add it on Setup</a>'}
+    <span class="chip">Sent today <b class="mono" style="font-weight:500">${Number(m.sent_today || 0)} of ${Number(m.cap || 0)}</b></span></div>`;
+  if (!c.exists) {
+    body.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px">${chips}
+      <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
+        <h2 style="margin:0;font-size:18px">Write your mail</h2>
+        <p class="muted" style="margin:0;max-width:64ch">One mail from ${esc(c.business || 'your company')}, laid out with your services and photographs from your website, sent to every lead you tick — each greeted by name. Add an offer if you have one; it is shown word for word.</p>
+        ${c.error ? `<div class="note">${esc(c.error)}</div>` : ''}
+        <label for="bOffer" style="font-weight:600">Your offer (optional)</label><input id="bOffer" type="text" maxlength="160" placeholder="For example: free measuring visit this month">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+          <div style="display:flex;flex-direction:column;gap:6px"><label for="bUntil" style="font-weight:600">Valid until (optional)</label><input id="bUntil" type="text" maxlength="40" placeholder="For example: 31 October"></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><label for="bFocus" style="font-weight:600">Lead with (optional)</label><input id="bFocus" type="text" maxlength="160" placeholder="For example: repairs for property managers"></div></div>
+        <div><button class="btn" type="button" id="buildMail">Write my mail</button></div>
+      </section></div>`;
+    $('#buildMail').onclick = async () => {
+      const b = $('#buildMail'); b.disabled = true; b.textContent = 'Reading your website for photographs…';
+      const j = await reviewAct('campaign_create', [], {offer: $('#bOffer').value, offer_until: $('#bUntil').value, focus: $('#bFocus').value});
+      toast(j.head || j.error || 'Done.'); LD.panel = 'preview'; leads(main);
+    };
+    return;
+  }
+  const a = c.audit || {}, stops = a.blocking || [], notes = [...(a.warnings || []), ...(c.warnings || [])], cp = c.copy || {};
+  const approved = c.status === 'approved';
+  const panel = LD.panel === null ? (approved ? '' : 'preview') : LD.panel;
+  const fld = (id, label, v, max) => `<div style="display:flex;flex-direction:column;gap:6px"><label for="${id}" style="font-weight:600">${label}</label><input id="${id}" type="text" maxlength="${max}" value="${esc(v || '')}"></div>`;
+  const area = (id, label, v, rows) => `<div style="display:flex;flex-direction:column;gap:6px"><label for="${id}" style="font-weight:600">${label}</label><textarea id="${id}" rows="${rows}">${esc(v || '')}</textarea></div>`;
+  let inner = '';
+  if (panel === 'preview') inner = `<div class="row" style="flex-direction:column;align-items:stretch"><span class="muted" style="font-size:14px">Exactly as ${esc(c.for_name || 'a lead')} will see it — each lead is greeted by their own name.</span>
+    <iframe class="mailframe" sandbox title="Your mail" srcdoc="${esc(c.html || '')}"></iframe></div>`;
+  else if (panel === 'change') inner = `<div class="row" style="flex-direction:column;align-items:stretch;gap:12px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">${fld('cOffer', 'Your offer — word for word (empty for none)', c.offer, 160)}${fld('cUntil', 'Valid until', c.offer_until, 40)}
+      ${fld('cPhone', 'Phone', c.phone, 30)}${fld('cWhats', 'WhatsApp', c.whatsapp, 30)}</div>
+    ${fld('cSubject', 'Subject line', cp.subject, 70)}${fld('cHeadline', 'Headline', cp.headline, 80)}
+    ${area('cPre', 'Line under the headline', cp.preheader, 2)}${area('cIntro', 'Introduction (a blank line between paragraphs)', cp.intro, 6)}
+    ${area('cWhy', 'Why clients choose you (one per line)', (cp.why_us || []).join('\n'), 4)}${area('cCta', 'The invitation above the buttons', cp.cta, 3)}
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"><button class="btn" type="button" id="saveMail">Save changes</button>
+      <button class="btn quiet small" type="button" id="rewriteMail" ${m.writing ? 'disabled' : ''}>${m.writing ? 'The agency is rewriting it…' : 'Have the agency rewrite the wording'}</button>
+      <button class="btn quiet small" type="button" id="restartMail">Start again from your website</button></div>
+    ${approved ? '<span class="muted" style="font-size:14px">Saving a change puts it back to “waiting for your OK”, so you read it again before more goes out.</span>' : ''}
+    ${notes.length ? `<details class="more"><summary>Notes from the checks (${notes.length})</summary><ul class="plain-list">${notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}</div>`;
+  else if (panel === 'test') inner = `<div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
+    <span class="muted" style="font-size:14px">It arrives exactly as your leads get it. Try a personal address too — mail to your own address may never leave your mail server.</span>
+    <div style="display:flex;flex-wrap:wrap;gap:10px"><input id="cTest" type="text" inputmode="email" maxlength="120" value="${esc(m.from || '')}" style="flex:1 1 260px;min-width:0" aria-label="Send a test to">
+      <button class="btn" type="button" id="testMail" ${m.ready ? '' : 'disabled'}>Send the test</button></div></div>`;
+  body.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px">${chips}
+    <section class="card">
+      <div class="card-h" style="flex-wrap:wrap"><div style="display:flex;flex-direction:column;gap:4px;min-width:0"><h2>${esc(c.subject || 'Your mail')}</h2>
+        <span class="muted" style="font-size:14px">${c.offer ? 'Offer: <b style="font-weight:600;color:var(--ink)">' + esc(c.offer) + '</b>' + (c.offer_until ? ' · until ' + esc(c.offer_until) : '') : 'No offer'}${c.photos ? ` · ${Number(c.photos)} photograph${c.photos === 1 ? '' : 's'} of your work` : ''}</span></div>
+        <div style="display:flex;gap:8px;align-items:center">${approved ? pill('done', 'approved') : pill('wait', 'waiting for your OK')}
+          ${approved ? '' : `<button class="btn small" type="button" id="approveMail" ${stops.length ? 'disabled' : ''}>Approve it</button>`}</div></div>
+      ${stops.length ? `<div class="row" style="flex-direction:column;align-items:stretch;background:var(--stuck-bg)"><b class="bad-t">It cannot be approved yet:</b><ul class="plain-list">${stops.map((x) => `<li>${esc(x)}</li>`).join('')}</ul><span class="muted" style="font-size:14px">Press Change it to put this right.</span></div>` : ''}
+      <div class="row" style="gap:8px">${[['preview', 'Preview'], ['change', 'Change it'], ['test', 'Send me a test']].map(([k, n]) =>
+        `<button type="button" class="seg ${panel === k ? 'on' : ''}" aria-pressed="${panel === k}" data-panel="${k}">${n}</button>`).join('')}</div>
+      ${inner}
+    </section>
+    ${(m.waiting || []).length || (m.held || []).length ? `<details class="card" style="padding:14px 20px"><summary style="cursor:pointer;font-weight:600">One-off drafts from before the campaign (${(m.waiting || []).length + (m.held || []).length})</summary>
+      <p class="muted" style="font-size:14px">Mails written one lead at a time, before the campaign. Sending the campaign to a lead puts its draft away.</p>
+      ${(m.waiting || []).map((x) => `<div class="row" style="flex-direction:column;align-items:stretch"><b style="font-weight:600">${esc(x.company || x.to)}</b><span class="mono muted" style="font-size:12.5px">${esc(x.to)}</span>
+        <span><span class="muted">Subject:</span> ${esc(x.subject)}</span><div class="mailtext">${esc(x.body)}</div>
+        <div style="display:flex;gap:8px"><button class="btn small" type="button" data-old-send="${Number(x.id)}">Send this one</button><button class="btn quiet small" type="button" data-old-drop="${Number(x.id)}">Put it away</button></div></div>`).join('')}
+      ${(m.held || []).map((x) => `<div class="row" style="flex-direction:column;align-items:stretch;background:var(--stuck-bg)"><b style="font-weight:600">${esc(x.company || x.to)}</b><span class="bad-t" style="font-size:14px">${(x.why || []).map((w) => esc(w)).join('; ')}</span></div>`).join('')}
+      <div class="row"><button class="btn quiet small" type="button" id="oldAway">Put them all away</button></div></details>` : ''}
+  </div>`;
+  body.querySelectorAll('[data-panel]').forEach((b) => b.onclick = () => { LD.panel = panel === b.dataset.panel ? '' : b.dataset.panel; leads(main); });
+  const val = (id) => ($('#' + id) ? $('#' + id).value : undefined);
+  const save = async (quiet) => {
+    const data = {offer: val('cOffer'), offer_until: val('cUntil'), phone: val('cPhone'), whatsapp: val('cWhats'), subject: val('cSubject'),
+      headline: val('cHeadline'), preheader: val('cPre'), intro: val('cIntro'), why_us: val('cWhy'), cta: val('cCta')};
+    Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
+    const j = await reviewAct('campaign_save', [], data);
+    if (!quiet || !j.ok) toast(j.head || j.error || 'Saved.');
+    return j;
+  };
+  const on = (id, fn) => { const el = $('#' + id); if (el) el.onclick = fn; };
+  on('saveMail', async () => { const j = await save(false); if (j.ok) { LD.panel = 'preview'; leads(main); } });
+  on('approveMail', async () => {
+    if (!confirm('Approve this mail' + (c.offer ? ` — including your offer “${c.offer}”` : '') + '?\n\nNothing is sent yet: you tick who gets it on the Send tab.')) return;
+    const j = await reviewAct('campaign_approve'); toast(j.head || j.error || 'Done.'); if (j.ok) { LD.panel = ''; LD.tab = 'send'; } leads(main);
+  });
+  on('rewriteMail', async () => { const j = await api('/api/review/start/campaign-rewrite', {focus: ''}); toast(j.ok ? 'The agency is rewriting it — the new version appears in about a minute.' : (j.error || 'Could not start it.')); setTimeout(() => leads(main), 2500); });
+  on('restartMail', async () => {
+    if (!confirm('Start again from your website? The current wording is put away and a fresh mail is written. Your offer is kept.')) return;
+    const j = await reviewAct('campaign_create', [], {offer: c.offer || '', offer_until: c.offer_until || '', focus: (c.copy || {}).focus || ''});
+    toast(j.head || j.error || 'Done.'); LD.panel = 'preview'; leads(main);
+  });
+  on('testMail', async () => {
+    const to = (val('cTest') || '').trim(); if (!to) { toast('Type the address to send the test to.'); return; }
+    $('#testMail').disabled = true; const j = await reviewAct('campaign_test', [], {to}); toast(j.head || j.error || 'Done.'); $('#testMail').disabled = false;
+  });
+  on('oldAway', async () => { if (!confirm('Put away every one-off draft? None of them will be sent.')) return; const j = await reviewAct('discard_old'); toast(j.head || j.error || 'Done.'); leads(main); });
+  body.querySelectorAll('[data-old-send]').forEach((b) => b.onclick = async () => { if (!confirm('Send this mail now?')) return; const j = await reviewAct('send', [Number(b.dataset.oldSend)]); toast(j.head || j.error || 'Done.'); leads(main); });
+  body.querySelectorAll('[data-old-drop]').forEach((b) => b.onclick = async () => { const j = await reviewAct('discard', [Number(b.dataset.oldDrop)]); toast(j.head || j.error || 'Done.'); leads(main); });
+}
+function sendTab(body, m, g, main) {
+  const c = m.campaign || {}, pf = m.preflight || {ok: true, problems: []};
+  const live = new Set(g.ready.map((r) => r.id));
+  [...LD.recPick].forEach((id) => { if (!live.has(id)) LD.recPick.delete(id); });
+  const can = c.exists && c.status === 'approved' && m.ready && pf.ok;
+  const why = !c.exists ? 'Write your mail first' : c.status !== 'approved' ? 'Approve your mail first' : !m.ready ? 'Set up your email first' : !pf.ok ? 'Put the problem above right first' : '';
+  const left = Math.max(0, (m.cap || 0) - (m.sent_today || 0));
+  const who = (r) => `<span class="grow"><b style="font-weight:600">${esc(r.company || '(no name)')}</b><span class="muted" style="font-size:13.5px">${[r.area, (r.segment || '').replace(/_/g, ' ')].filter(Boolean).map((v) => esc(v)).join(' · ')}</span>
+    <span class="mono muted" style="font-size:12.5px">${esc(r.email || '')}</span></span>`;
+  const subs = [['ready', 'Ready to send', g.ready.length], ['stuck', 'Not sent yet', g.stuck.length + g.queued.length], ['cant', 'Can’t send', g.cant.length]];
+  let list = '';
+  if (LD.send === 'ready') {
+    list = g.ready.length ? `<div class="row" style="align-items:center"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="pickAllRec" ${g.ready.length && g.ready.every((r) => LD.recPick.has(r.id)) ? 'checked' : ''}> Tick all</label>
+        <span style="flex:1"></span>${LD.recPick.size > left ? `<span class="wait-t" style="font-size:14px">${left} go today, the rest tomorrow</span>` : ''}
+        <button class="btn" type="button" id="sendRec" ${can && LD.recPick.size ? '' : 'disabled'}>${!can ? esc(why) : LD.recPick.size ? `Send to ${LD.recPick.size}` : 'Tick who gets it'}</button></div>
+      ${g.ready.slice(0, 300).map((r) => `<label class="row pickrow" style="cursor:pointer;align-items:center"><input type="checkbox" data-rec="${Number(r.id)}" ${LD.recPick.has(r.id) ? 'checked' : ''}>${who(r)}${r.old_draft ? '<span class="muted" style="font-size:13px">replaces its one-off draft</span>' : ''}</label>`).join('')}`
+      : empty('Nobody waiting', 'Everyone with an address has been written to. New leads appear here when the Hunter finds them.');
+  } else if (LD.send === 'stuck') {
+    list = (g.stuck.length || g.queued.length) ? `${g.stuck.length ? `<div class="row" style="align-items:center"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="pickAllStuck" ${g.stuck.every((r) => LD.stuckPick.has(r.id)) ? 'checked' : ''}> Tick all</label><span style="flex:1"></span>
+        <button class="btn quiet small" type="button" id="dropStuck" ${LD.stuckPick.size ? '' : 'disabled'}>${LD.stuckPick.size ? `Delete ${LD.stuckPick.size}` : 'Tick to delete'}</button>
+        <button class="btn small" type="button" id="retryStuck" ${pf.ok && !pf.sending ? '' : 'disabled'}>${pf.sending ? 'Sending…' : 'Try again'}</button></div>` : ''}
+      ${g.stuck.map((r) => `<label class="row pickrow" style="cursor:pointer;align-items:center"><input type="checkbox" data-stuck="${Number(r.id)}" ${LD.stuckPick.has(r.id) ? 'checked' : ''}>${who(r)}<span class="bad-t" style="font-size:13.5px;max-width:320px">${esc(r.why || '')}</span></label>`).join('')}
+      ${g.queued.map((r) => `<div class="row" style="align-items:center"><span style="width:16px"></span>${who(r)}${/tomorrow/.test(r.why || '') ? pill('plain', 'goes tomorrow') : pill('work', 'sending now')}</div>`).join('')}`
+      : empty('Nothing waiting', 'Every approved mail has gone.');
+  } else {
+    list = g.cant.length ? g.cant.map((r) => `<div class="row" style="align-items:center"><span style="width:16px"></span>${who(r)}<span class="muted" style="font-size:13.5px;max-width:340px">${esc(r.why || '')}</span></div>`).join('')
+      : empty('None', 'Every lead with an address can be written to.');
+  }
+  const done = m.sent_today || 0;
+  body.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px">
+    ${!pf.ok ? `<div class="note"><b>Mail cannot go out yet.</b> ${(pf.problems || []).map(esc).join(' ')}
+      ${pf.fix_domain ? `<div style="margin-top:8px"><button class="btn small" type="button" id="fixDomain">Use ${esc(pf.fix_domain)} as my sending domain</button></div>` : ''}</div>` : ''}
+    ${pf.sending ? `<div class="card" style="padding:14px 18px;display:flex;flex-direction:column;gap:8px">${pill('work', 'Sending — one every few seconds')}
+      <span class="muted" style="font-size:14px">${g.queued.length} still to go. You can leave this screen.</span>
+      <span class="meter" style="height:8px"><i style="width:${Math.round(100 * done / Math.max(1, done + g.queued.length))}%"></i></span></div>` : ''}
+    <div role="group" aria-label="Which" style="display:flex;flex-wrap:wrap;gap:8px">${subs.map(([k, n, count]) =>
+      `<button type="button" class="seg ${LD.send === k ? 'on' : ''}" aria-pressed="${LD.send === k}" data-send="${k}">${n} <span class="n">${Number(count)}</span></button>`).join('')}</div>
+    <section class="card">${list}</section>
+    <p class="muted" style="margin:0;font-size:13.5px">Mails go one at a time, a few seconds apart, from your own email, up to ${Number(m.cap || 0)} a day. A business is only ever written to once.</p></div>`;
+  body.querySelectorAll('[data-send]').forEach((b) => b.onclick = () => { LD.send = b.dataset.send; leads(main); });
+  body.querySelectorAll('[data-rec]').forEach((x) => x.onchange = () => { x.checked ? LD.recPick.add(Number(x.dataset.rec)) : LD.recPick.delete(Number(x.dataset.rec)); sendTab(body, m, g, main); });
+  body.querySelectorAll('[data-stuck]').forEach((x) => x.onchange = () => { x.checked ? LD.stuckPick.add(Number(x.dataset.stuck)) : LD.stuckPick.delete(Number(x.dataset.stuck)); sendTab(body, m, g, main); });
+  const on = (id, fn) => { const el = $('#' + id); if (el) el.onclick = fn; };
+  const pa = $('#pickAllRec'); if (pa) pa.onchange = () => { g.ready.forEach((r) => pa.checked ? LD.recPick.add(r.id) : LD.recPick.delete(r.id)); sendTab(body, m, g, main); };
+  const ps = $('#pickAllStuck'); if (ps) ps.onchange = () => { g.stuck.forEach((r) => ps.checked ? LD.stuckPick.add(r.id) : LD.stuckPick.delete(r.id)); sendTab(body, m, g, main); };
+  on('sendRec', async () => {
+    const ids = [...LD.recPick]; if (!ids.length) return;
+    const names = g.ready.filter((r) => LD.recPick.has(r.id)).map((r) => r.company || r.email);
+    if (!confirm(`Send your mail to ${ids.length} lead${ids.length === 1 ? '' : 's'} from ${m.from}?\n\nThey go one at a time, a few seconds apart.\n\n${names.slice(0, 20).join('\n')}${names.length > 20 ? '\n…' : ''}`)) return;
+    $('#sendRec').disabled = true;
+    const j = await reviewAct('campaign_send', ids); toast(j.head || j.error || 'Done.'); LD.recPick.clear(); if (j.ok) LD.tab = 'sent'; leads(main);
+  });
+  on('retryStuck', async () => { const j = await reviewAct('campaign_retry', LD.stuckPick.size ? [...LD.stuckPick] : []); toast(j.head || j.error || 'Done.'); leads(main); });
+  on('dropStuck', async () => {
+    if (!confirm(`Delete ${LD.stuckPick.size} mail(s) that did not go? They will not be sent, and those businesses come off your lists (kept on file so they are not collected again).`)) return;
+    const j = await reviewAct('campaign_drop', [...LD.stuckPick]); toast(j.head || j.error || 'Done.'); if (j.ok) LD.stuckPick.clear(); leads(main);
+  });
+  on('fixDomain', async () => { if (!confirm(`Use ${pf.fix_domain} as your sending domain? Cold mail only ever goes out from it.`)) return; const j = await reviewAct('campaign_domain', [], {domain: pf.fix_domain}); toast(j.head || j.error || 'Done.'); leads(main); });
+}
+function sentTab(body, m, g, main) {
+  const ids = new Set(g.sent.map((r) => r.id));
+  [...LD.sentPick].forEach((id) => { if (!ids.has(id)) LD.sentPick.delete(id); });
+  const bounced = g.sent.filter((r) => r.state === 'bounced').length;
+  body.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px">
+    <section class="card">
+      <div class="row" style="align-items:center">${g.sent.length ? `<label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="pickAllSent" ${g.sent.every((r) => LD.sentPick.has(r.id)) ? 'checked' : ''}> Tick all</label>` : ''}
+        <span style="flex:1"></span>
+        <a class="btn ghost small" href="/api/mail/sent.csv" download>Download all as CSV</a>
+        <button class="btn ghost small" type="button" id="bounces">Check for bounces</button>
+        ${g.sent.length ? `<button class="btn quiet small" type="button" id="delSent" ${LD.sentPick.size ? '' : 'disabled'}>${LD.sentPick.size ? `Delete ${LD.sentPick.size}` : 'Tick to delete'}</button>
+          <button class="btn quiet small" type="button" id="delAllSent">Delete all</button>` : ''}</div>
+      ${g.sent.length ? g.sent.map((r) => `<div class="row pickrow" style="align-items:center">
+          <input type="checkbox" data-sent="${Number(r.id)}" ${LD.sentPick.has(r.id) ? 'checked' : ''} aria-label="Tick ${esc(r.company || r.email)}">
+          <button type="button" class="grow linkrow" data-read="${Number(r.id)}"><b style="font-weight:600">${esc(r.company || '(no name)')}</b>
+            <span class="mono muted" style="font-size:12.5px">${esc(r.email || '')}</span></button>
+          ${r.state === 'bounced' ? pill('stuck', 'came back') : pill('done', 'sent')}
+          <span class="muted mono" style="font-size:12.5px;min-width:96px;text-align:right">${r.sent_at ? esc(new Date(r.sent_at * 1000).toLocaleDateString([], {day: 'numeric', month: 'short'})) + ' ' + esc(when(r.sent_at)) : ''}</span>
+          <button class="btn quiet small" type="button" data-read="${Number(r.id)}">Read</button></div>`).join('')
+        : empty('Nothing sent yet', 'Mails you send appear here, every one readable in full.')}
+    </section>
+    <p class="muted" style="margin:0;font-size:13.5px">${m.copies_in_sent === true ? 'A copy of each is also in your mailbox’s Sent folder. ' : ''}${bounced ? bounced + ' came back — those addresses are wrong or closed, and are not written to again. ' : ''}Deleting a mail wipes its words from this list; the agency still remembers the business was written to, so it is never mailed twice. Download the CSV first if you want a copy.</p></div>`;
+  body.querySelectorAll('[data-sent]').forEach((x) => x.onchange = () => { x.checked ? LD.sentPick.add(Number(x.dataset.sent)) : LD.sentPick.delete(Number(x.dataset.sent)); sentTab(body, m, g, main); });
+  body.querySelectorAll('[data-read]').forEach((b) => b.onclick = () => readSent(Number(b.dataset.read)));
+  const pa = $('#pickAllSent'); if (pa) pa.onchange = () => { g.sent.forEach((r) => pa.checked ? LD.sentPick.add(r.id) : LD.sentPick.delete(r.id)); sentTab(body, m, g, main); };
+  const on = (id, fn) => { const el = $('#' + id); if (el) el.onclick = fn; };
+  on('bounces', async () => { $('#bounces').disabled = true; const j = await reviewAct('campaign_bounces'); toast(j.head || j.error || 'Done.'); leads(main); });
+  on('delSent', async () => {
+    const n = LD.sentPick.size;
+    if (!confirm(`Delete ${n} sent mail${n === 1 ? '' : 's'} from this list?\n\nTheir words are wiped. The agency still remembers these businesses were written to, so none is mailed again.`)) return;
+    const j = await reviewAct('sent_delete', [...LD.sentPick]); toast(j.head || j.error || 'Done.'); if (j.ok) LD.sentPick.clear(); leads(main);
+  });
+  on('delAllSent', async () => {
+    if (!confirm(`Delete ALL ${g.sent.length} sent mails from this list?\n\nTheir words are wiped. The agency still remembers every business that was written to, so none is mailed again. Download the CSV first if you want a copy.`)) return;
+    const j = await reviewAct('sent_delete_all'); toast(j.head || j.error || 'Done.'); if (j.ok) LD.sentPick.clear(); leads(main);
+  });
+}
+async function readSent(lead) {
+  openPanel(`${panelHead('A sent mail', 'Reading…')}<div class="dr-body"></div>`, 'A sent mail', 'mail', lead);
+  const j = await api(`/api/mail/sent/${Number(lead)}`);
+  if (!FL.open || FL.open.key !== lead) return;
+  if (!j.ok) { $('#drawer').querySelector('.dr-body').innerHTML = `<section class="dr-sec"><p>${esc(j.error || 'It could not be read.')}</p></section>`; return; }
+  const sent = j.sent_at ? new Date(j.sent_at * 1000).toLocaleString([], {day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}) : '';
+  openPanel(`${panelHead(j.subject || '(no subject)', 'To ' + (j.company || '') + ' · ' + sent)}
+    <div class="dr-body">
+      <section class="dr-sec"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">${j.bounced ? pill('stuck', 'came back') : pill('done', 'sent')}
+        <span class="mono muted" style="font-size:13px">${esc(j.to)}</span>${j.campaign ? '<span class="muted" style="font-size:13px">· your campaign mail</span>' : ''}</div>
+        ${j.bounced ? `<p class="bad-t">${esc(j.bounce_reason || 'It came back.')}</p>` : ''}
+        ${j.note ? `<p class="muted" style="font-size:13.5px">${esc(j.note)}</p>` : ''}</section>
+      ${j.wiped ? '<section class="dr-sec"><p class="muted">The words of this mail were deleted from the list.</p></section>' : `
+      ${j.html ? `<section class="dr-sec"><h3 class="label">As they saw it</h3><iframe class="mailframe" sandbox title="The mail as sent" srcdoc="${esc(j.html)}"></iframe></section>` : ''}
+      <section class="dr-sec"><h3 class="label">The words</h3><div class="mailtext">${esc(j.body || '(no text kept)')}</div></section>`}
+    </div>`, j.subject || 'A sent mail', 'mail', lead);
 }
 
-/* ======================= CONTENT ======================= */
+/* ======================= CONTENT =======================
+   "there is no delete button to delete the unwanted content and also in being
+    written section we cannot select that on which topic today user want to
+    write the post ... in the publish posts make two buttons 1 of delete from
+    website ... and 2nd of edit ... that will show the seo score of each post"
+
+   WHAT TO WRITE NEXT comes from SEO (coordination/posts.topics); the writer
+   then works with SEO's keyword plan and is checked for copying and for
+   reading like a person (pipelines/post_quality). Every post has Delete; a
+   post on the website has Edit and Delete from website, and both go through
+   the IT Releaser, tests first. */
+const CT = {pick: '', timer: null};
+function seoPill(score) {
+  if (score == null || score === '') return '';
+  const n = Number(score);
+  return pill(n >= 80 ? 'done' : n >= 55 ? 'wait' : 'stuck', 'SEO ' + n);
+}
 async function content(main) {
-  const r = await api('/api/review');
+  clearTimeout(CT.timer);
+  const [r, t] = await Promise.all([api('/api/review'), api('/api/content/topics')]);
   const p = (r && r.pages) || {};
-  const list = (items, empt, btn) => (items || []).length ? (items || []).map((x) => `<div class="row" style="flex-direction:column;gap:6px">
-      <span style="font-weight:600">${esc(x.title || x.file || 'Untitled')}</span>
-      ${x.why ? `<span class="muted" style="font-size:13.5px">${esc(x.why)}</span>` : ''}
-      ${btn ? `<a class="btn small ghost" href="/posts" style="align-self:flex-start">${btn}</a>` : ''}</div>`).join('')
-    : `<div class="row muted" style="font-size:14px">${empt}</div>`;
-  const waitingN = (p.waiting || []).length + (p.for_blog || []).length;
+  const topics = (t && t.topics) || [];
+  const waitingWrite = (t && t.waiting) || [];
+  const writing = !!(p.writing || (t && t.writing));
+  if (!topics.find((x) => x.key === CT.pick)) CT.pick = '';
+  const forBlog = p.for_blog || [], onBlog = p.on_blog || [], held = p.held || [], pages = p.waiting || [];
+  const moving = (x) => x.moving ? `<span class="muted" style="font-size:13.5px">${x.moving.status === 'failed' ? '<span class="bad-t">Did not go: ' + esc(x.moving.note || '') + '</span>'
+    : x.moving.what === 'removing' ? 'Being taken off your website…' : x.moving.what === 'reposting' ? 'Being updated on your website…' : 'Going on your website…'}</span>` : '';
   main.innerHTML = `<div class="page">${head('Content',
-    'Posts and pages for your website. Every piece passes the Auditor before you see it: no prices, no promises you have not made, nothing copied.',
-    '<a class="btn" href="/posts">Read what is waiting</a>')}
-    <section class="card" style="padding:22px 24px;display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center;background:var(--sunken)">
-      <div style="flex:1 1 420px;display:flex;flex-direction:column;gap:6px"><h2 style="margin:0;font-size:19px;font-weight:600">Your finished jobs win the most work</h2>
-        <p class="muted" style="margin:0;max-width:60ch">Tell Content about a job you finished — where, what, and a few photos — and it writes it up as a case study in your voice, for you to check before it goes up.</p></div>
-      <button class="btn ghost" type="button" id="jobOrder">Tell Content about a job</button></section>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:start">
-      <section class="card"><div class="card-h"><h2 style="font-size:16px">Being written</h2><span class="mono muted" style="font-size:13px">${(p.upcoming || []).length + (p.to_write || 0)}</span></div>
-        ${list(p.upcoming, p.writing ? 'Writing now…' : 'Nothing being written right now.')}</section>
-      <section class="card"><div class="card-h"><h2 style="font-size:16px">Waiting for you</h2><span class="mono muted" style="font-size:13px">${waitingN}</span></div>
-        ${list([].concat(p.waiting || [], p.for_blog || []), 'Nothing waiting for your yes.', 'Read and decide')}</section>
-      <section class="card"><div class="card-h"><h2 style="font-size:16px">Published</h2><span class="mono muted" style="font-size:13px">${esc(p.published || (p.on_blog || []).length || 0)}</span></div>
-        ${list((p.on_blog || []).concat(p.recent || []).slice(0, 6), 'Nothing published yet.')}</section>
-    </div>
-    ${(p.held || []).length ? `<div class="note">${(p.held || []).length} piece(s) held back by the checks. They are on the <a href="/posts">review page</a> with the reason.</div>` : ''}
+    'Posts for your website, written with SEO’s keyword plan, checked by the Auditor, and original. Choose today’s topic, read and edit every post, and decide what goes up.',
+    '<button class="btn ghost" type="button" id="jobOrder">Tell Content about a job</button>')}
+    <section class="card">
+      <div class="card-h" style="flex-wrap:wrap"><div><h2>What to write next</h2><span class="muted" style="font-size:14px">${esc((t && t.head) || '')}</span></div>
+        ${writing ? pill('work', 'Writing now') : ''}</div>
+      ${topics.length ? `<div class="topics" role="radiogroup" aria-label="SEO's suggested topics">${topics.map((x) => `<button type="button" role="radio" aria-checked="${CT.pick === x.key}"
+          class="topic ${CT.pick === x.key ? 'on' : ''}" data-topic="${esc(x.key)}">
+          <b style="font-weight:600">${esc(x.title)}</b><span class="mono" style="font-size:12.5px;color:var(--accent)">${esc(x.primary)}</span>
+          <span class="muted" style="font-size:13.5px">${esc(x.why)}</span>
+          ${x.phrases && x.phrases.length > 1 ? `<span class="muted" style="font-size:12.5px">Also: ${esc(x.phrases.slice(1, 4).join(', '))}</span>` : ''}</button>`).join('')}</div>` : ''}
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:8px">
+        <label for="ownTopic" style="font-weight:600">${topics.length ? 'Or type your own topic' : 'Type a topic'}</label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px"><input id="ownTopic" type="text" maxlength="120" placeholder="${esc(((t && t.services) || [])[0] ? 'For example: how long it takes to fit ' + t.services[0].toLowerCase() : 'For example: how long fitting takes')}" style="flex:1 1 320px;min-width:0">
+          <button class="btn" type="button" id="writeTopic" ${writing ? 'disabled' : ''}>${writing ? 'Content is writing…' : 'Write this post'}</button></div>
+        <span class="muted" style="font-size:13.5px">SEO plans the keywords for it, then the writer writes about 1,000 words in your voice. It takes a few minutes and is checked for copying before you see it.</span></div>
+      ${waitingWrite.length ? `<div class="row" style="flex-direction:column;align-items:stretch;gap:6px"><span class="label">Waiting to be written</span>
+        ${waitingWrite.map((w) => `<div class="bl" style="align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><b style="font-weight:600">${esc(w.title)}</b>
+          <span class="muted"> · ${w.held_for_seo ? 'waiting on SEO' : w.chosen_by_you ? 'your choice' : 'next in line'}</span></span>
+          <span style="display:flex;gap:6px"><button class="btn ghost small" type="button" data-write="${Number(w.id)}" ${writing ? 'disabled' : ''}>Write now</button>
+          <button class="btn quiet small" type="button" data-del="${Number(w.id)}" data-label="${esc(w.title)}">Delete</button></span></div>`).join('')}</div>` : ''}
+    </section>
+    <section class="card"><div class="card-h"><h2>Waiting for you</h2><span class="mono muted" style="font-size:13px">${forBlog.length + pages.length}</span></div>
+      ${forBlog.length ? forBlog.map((x) => `<div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">${esc(x.title)}</b>
+          <span class="muted" style="font-size:13.5px">${esc(x.keyword || '')}${x.warnings && x.warnings.length ? ' · ' + x.warnings.length + ' note(s) from the checks' : ''}</span>${moving(x)}</span>
+          ${seoPill((x.seo || {}).score)}
+          <span style="display:flex;gap:6px;flex-wrap:wrap"><a class="btn ghost small" href="#post?id=${Number(x.id)}">Read and edit</a>
+            <button class="btn small" type="button" data-publish="${Number(x.id)}" ${x.moving ? 'disabled' : ''}>Put it on my website</button>
+            <button class="btn quiet small" type="button" data-del="${Number(x.id)}" data-label="${esc(x.title)}">Delete</button></span></div>`).join('') : ''}
+      ${pages.map((x) => `<div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">${esc(x.title)}</b><span class="muted" style="font-size:13.5px">a page of its own · ${esc(x.file || '')}</span></span>
+          ${seoPill((x.seo || {}).score)}<span style="display:flex;gap:6px"><a class="btn ghost small" href="/posts">Read</a><button class="btn quiet small" type="button" data-reject="${Number(x.id)}">Delete</button></span></div>`).join('')}
+      ${!forBlog.length && !pages.length ? empty('Nothing waiting', writing ? 'Content is writing — it appears here when it passes the checks.' : 'Choose a topic above and the finished post waits here for your yes.') : ''}</section>
+    <section class="card"><div class="card-h"><h2>On your website</h2><span class="mono muted" style="font-size:13px">${onBlog.length}</span></div>
+      ${onBlog.length ? onBlog.map((x) => `<div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">${esc(x.title)}</b>
+          ${x.url ? `<a class="mono" style="font-size:12.5px;overflow-wrap:anywhere" href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.url)}</a>` : ''}${moving(x)}</span>
+          ${seoPill(x.seo_score)}
+          <span style="display:flex;gap:6px;flex-wrap:wrap">${x.on_backend ? `<a class="btn ghost small" href="#post?id=${Number(x.id)}">Edit</a>
+            <button class="btn quiet small" type="button" data-unpublish="${Number(x.id)}" data-label="${esc(x.title)}" ${x.moving ? 'disabled' : ''}>Delete from website</button>`
+            : '<span class="muted" style="font-size:13px">added by hand — change it in your own backend</span>'}</span></div>`).join('')
+        : empty('Nothing on your website yet', 'Posts you put up appear here, each with Edit and Delete from website.')}</section>
+    ${held.length ? `<section class="card"><div class="card-h"><h2>Held back by the checks</h2><span class="mono muted" style="font-size:13px">${held.length}</span></div>
+      ${held.map((x) => `<div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">${esc(x.title)}</b>
+          <span class="bad-t" style="font-size:13.5px">${esc((x.why || []).slice(0, 2).join('; '))}</span></span>
+          <span style="display:flex;gap:6px"><a class="btn ghost small" href="#post?id=${Number(x.id)}">Edit it</a><button class="btn quiet small" type="button" data-del="${Number(x.id)}" data-label="${esc(x.title)}">Delete</button></span></div>`).join('')}</section>` : ''}
   </div>`;
   $('#jobOrder').onclick = () => { sessionStorage.setItem('gw-desk', 'Content'); location.hash = '#orders'; };
+  main.querySelectorAll('[data-topic]').forEach((b) => b.onclick = () => { CT.pick = CT.pick === b.dataset.topic ? '' : b.dataset.topic; $('#ownTopic').value = '';
+    main.querySelectorAll('[data-topic]').forEach((x) => { const on = x.dataset.topic === CT.pick; x.classList.toggle('on', on); x.setAttribute('aria-checked', String(on)); }); });
+  $('#ownTopic').addEventListener('input', () => { if ($('#ownTopic').value.trim()) { CT.pick = ''; main.querySelectorAll('[data-topic]').forEach((x) => { x.classList.remove('on'); x.setAttribute('aria-checked', 'false'); }); } });
+  const startWriting = async (id, title) => {
+    const w = await api(`/api/content/write/${Number(id)}`, {});
+    toast(w.ok ? `Writing “${title}” — about five minutes. It appears under Waiting for you.` : (w.error || 'The writer did not start.'));
+    setTimeout(() => content(main), 1500);
+  };
+  $('#writeTopic').onclick = async () => {
+    const own = $('#ownTopic').value.trim();
+    if (!CT.pick && !own) { toast('Choose one of SEO’s topics, or type your own.'); return; }
+    $('#writeTopic').disabled = true;
+    const j = await api('/api/content/choose', own ? {topic: own} : {key: CT.pick});
+    if (!j.ok) { $('#writeTopic').disabled = false; toast(j.error || 'That topic could not be chosen.'); return; }
+    CT.pick = ''; startWriting(j.id, j.title);
+  };
+  main.querySelectorAll('[data-write]').forEach((b) => b.onclick = () => startWriting(b.dataset.write, b.closest('.bl').querySelector('b').textContent));
+  main.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    const label = b.getAttribute('data-label');
+    if (!confirm(`Delete “${label}”? It will not be offered again.`)) return;
+    const j = await api(`/api/content/post/${Number(b.dataset.del)}/delete`, {}); toast(j.head || j.error || 'Done.'); content(main);
+  });
+  main.querySelectorAll('[data-reject]').forEach((b) => b.onclick = async () => {
+    if (!confirm('Delete this page? It will not be published.')) return;
+    const j = await reviewAct('reject_page', [Number(b.dataset.reject)]); toast(j.head || j.error || 'Done.'); content(main);
+  });
+  main.querySelectorAll('[data-publish]').forEach((b) => b.onclick = async () => {
+    b.disabled = true; const j = await reviewAct('blog_publish', [Number(b.dataset.publish)]); toast(j.head || j.error || 'Done.'); content(main);
+  });
+  main.querySelectorAll('[data-unpublish]').forEach((b) => b.onclick = async () => {
+    const label = b.getAttribute('data-label');
+    if (!confirm(`Delete “${label}” from your website? IT takes it off after the tests; it comes back here, under Waiting for you, in case you want it again.`)) return;
+    b.disabled = true; const j = await reviewAct('blog_unpublish', [Number(b.dataset.unpublish)]); toast(j.head || j.error || 'Done.'); content(main);
+  });
+  if (writing || [...forBlog, ...onBlog].some((x) => x.moving && x.moving.status !== 'failed')) CT.timer = setTimeout(() => { if (location.hash.startsWith('#content')) content(main); }, 8000);
+}
+
+/* ======================= THE POST EDITOR =======================
+   Bold, italic, underline, headings, lists, links on any word, pictures, text
+   size, font and colour — and the SEO score, originality and "reads like a
+   person" re-marked as you type. The office cleans what is saved to an
+   allow-list (coordination/posts.clean_html), the Auditor checks it, and a live
+   post is updated on the website by the IT Releaser. */
+const ED = {id: 0, timer: null, dirty: false, data: null};
+const FONTS = [['', 'Font'], ['Georgia, serif', 'Georgia'], ['Arial, sans-serif', 'Arial'], ['Verdana, sans-serif', 'Verdana'],
+  ['Tahoma, sans-serif', 'Tahoma'], ['Times New Roman, serif', 'Times'], ['Courier New, monospace', 'Courier']];
+const SIZES = [['', 'Size'], ['2', 'Small'], ['3', 'Normal'], ['4', 'Large'], ['5', 'Larger'], ['6', 'Huge']];
+async function post(main) {
+  clearTimeout(ED.timer);
+  const id = Number(new URLSearchParams(location.hash.split('?')[1] || '').get('id')) || 0;
+  const d = id ? await api(`/api/content/post/${id}`) : {ok: false, error: 'Which post?'};
+  if (!d.ok) { main.innerHTML = `<div class="page narrow">${head('Edit a post')}<div class="card">${empty('It could not be opened', esc(d.error || ''))}</div><a href="#content">Back to Content</a></div>`; return; }
+  ED.id = id; ED.dirty = false; ED.data = d;
+  const tb = (cmd, label, title, extra) => `<button type="button" class="tb" data-cmd="${cmd}"${extra || ''} title="${esc(title)}" aria-label="${esc(title)}">${label}</button>`;
+  main.innerHTML = `<div class="page wide">
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+      <a href="#content" id="edBack" style="font-size:14px;font-weight:500">← Back to Content</a>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${d.on_website ? pill('done', 'On your website') : pill('wait', d.status === 'in_review' ? 'Held by the checks' : 'Not on your website yet')}
+        ${d.url ? `<a class="btn quiet small" href="${esc(d.url)}" target="_blank" rel="noopener">View it</a>` : ''}
+        ${d.on_website ? '<button class="btn quiet small" type="button" id="edUnpublish">Delete from website</button>' : ''}
+        <button class="btn" type="button" id="edSave">${d.on_website ? 'Save and update the website' : 'Save'}</button></div></div>
+    <div class="ed-grid">
+      <section class="card ed-main">
+        <label for="edTitle" class="label" style="padding:16px 20px 0">Title</label>
+        <input id="edTitle" class="ed-title" type="text" maxlength="120" value="${esc(d.title)}">
+        <div class="toolbar" role="toolbar" aria-label="Formatting">
+          ${tb('bold', '<b>B</b>', 'Bold')}${tb('italic', '<i>I</i>', 'Italic')}${tb('underline', '<u>U</u>', 'Underline')}${tb('strikeThrough', '<s>S</s>', 'Strike through')}
+          <span class="tsep"></span>${tb('h2', 'H2', 'Heading')}${tb('h3', 'H3', 'Subheading')}${tb('p', '¶', 'Normal text')}
+          <span class="tsep"></span>${tb('insertUnorderedList', '• List', 'Bulleted list')}${tb('insertOrderedList', '1. List', 'Numbered list')}${tb('blockquote', '“ ”', 'Quote')}
+          <span class="tsep"></span>${tb('link', 'Link', 'Link the selected words')}${tb('unlink', 'Unlink', 'Remove the link')}${tb('image', 'Picture', 'Add a picture from your computer')}${tb('imageUrl', 'Picture URL', 'Add a picture from a web address')}
+          <span class="tsep"></span><select id="edSize" aria-label="Text size">${SIZES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select>
+          <select id="edFont" aria-label="Font">${FONTS.map(([v, n]) => `<option value="${esc(v)}">${n}</option>`).join('')}</select>
+          <label class="tb colour" title="Text colour"><span aria-hidden="true">A</span><input id="edColour" type="color" value="#1f5f66" aria-label="Text colour"></label>
+          <label class="tb colour" title="Highlight"><span aria-hidden="true" style="background:#fff3a8;color:#142022;padding:0 3px;border-radius:3px">H</span><input id="edMark" type="color" value="#fff3a8" aria-label="Highlight colour"></label>
+          <span class="tsep"></span>${tb('justifyLeft', '⯇', 'Align left')}${tb('justifyCenter', '≡', 'Centre')}${tb('justifyRight', '⯈', 'Align right')}
+          <span class="tsep"></span>${tb('removeFormat', 'Clear', 'Clear formatting')}${tb('undo', '↶', 'Undo')}${tb('redo', '↷', 'Redo')}
+          <input id="edFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></div>
+        <div id="edBody" class="ed-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="The post">${d.html}</div>
+        <div class="row" style="flex-direction:column;align-items:stretch;gap:6px"><label for="edMeta" style="font-weight:600">Description for Google <span class="muted" style="font-weight:400">· the line under the link, up to 160 characters</span></label>
+          <textarea id="edMeta" maxlength="160" rows="2">${esc(d.meta)}</textarea></div>
+      </section>
+      <aside class="ed-side" id="edSide" aria-live="polite">${scorePanel(d.report, d.keyword)}</aside>
+    </div></div>`;
+  const body = $('#edBody');
+  try { document.execCommand('styleWithCSS', false, true); document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) { /* older browsers */ }
+  const changed = () => { ED.dirty = true; clearTimeout(ED.timer); ED.timer = setTimeout(rescore, 1500); };
+  body.addEventListener('input', changed);
+  $('#edTitle').addEventListener('input', changed);
+  $('#edMeta').addEventListener('input', changed);
+  main.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('mousedown', (e) => e.preventDefault()));
+  main.querySelectorAll('[data-cmd]').forEach((b) => b.onclick = () => edCommand(b.dataset.cmd));
+  $('#edSize').onchange = () => { if ($('#edSize').value) { body.focus(); document.execCommand('fontSize', false, $('#edSize').value); changed(); } $('#edSize').value = ''; };
+  $('#edFont').onchange = () => { if ($('#edFont').value) { body.focus(); document.execCommand('fontName', false, $('#edFont').value); changed(); } $('#edFont').value = ''; };
+  $('#edColour').oninput = () => { body.focus(); document.execCommand('foreColor', false, $('#edColour').value); changed(); };
+  $('#edMark').oninput = () => { body.focus(); document.execCommand('hiliteColor', false, $('#edMark').value); changed(); };
+  $('#edFile').onchange = async () => {
+    const f = $('#edFile').files[0]; $('#edFile').value = ''; if (!f) return;
+    try {
+      const src = await shrinkPicture(f);
+      const alt = prompt('Describe the picture in a few words (Google and screen readers read this):', '') || '';
+      edRestore(); document.execCommand('insertHTML', false, `<img src="${src}" alt="${esc(alt)}">`); changed();
+    } catch (err) { toast(err.message); }
+  };
+  $('#edSave').onclick = edSave;
+  $('#edBack').onclick = (e) => { if (ED.dirty && !confirm('Leave without saving your changes?')) e.preventDefault(); else ED.dirty = false; };
+  const un = $('#edUnpublish');
+  if (un) un.onclick = async () => {
+    const label = d.title;
+    if (!confirm(`Delete “${label}” from your website? IT takes it off after the tests.`)) return;
+    un.disabled = true; const j = await reviewAct('blog_unpublish', [id]); toast(j.head || j.error || 'Done.'); if (j.ok) location.hash = '#content';
+  };
+  body.addEventListener('keyup', edRemember); body.addEventListener('mouseup', edRemember);
+}
+function edRemember() { const s = getSelection(); if (s.rangeCount && $('#edBody') && $('#edBody').contains(s.anchorNode)) ED.range = s.getRangeAt(0).cloneRange(); }
+function edRestore() { const b = $('#edBody'); b.focus(); if (ED.range) { const s = getSelection(); s.removeAllRanges(); s.addRange(ED.range); } }
+function edCommand(cmd) {
+  const body = $('#edBody'); body.focus();
+  if (['h2', 'h3', 'p', 'blockquote'].includes(cmd)) document.execCommand('formatBlock', false, cmd === 'p' ? 'P' : cmd.toUpperCase());
+  else if (cmd === 'link') {
+    const sel = getSelection(); if (!sel || sel.isCollapsed) { toast('Select the words to link first.'); return; }
+    const range = sel.getRangeAt(0).cloneRange();
+    const url = prompt('Link to which address? (for example https://www.example.com/contact or /contact)', 'https://');
+    if (!url || url === 'https://') return;
+    if (!/^(https?:\/\/|\/|mailto:|tel:)/i.test(url.trim())) { toast('That is not a web address — start it with https:// or /'); return; }
+    sel.removeAllRanges(); sel.addRange(range); document.execCommand('createLink', false, url.trim());
+  } else if (cmd === 'image') { edRemember(); $('#edFile').click(); return; }
+  else if (cmd === 'imageUrl') {
+    edRemember();
+    const url = prompt('The picture’s web address (https://…):', 'https://'); if (!url || !/^https?:\/\//i.test(url)) return;
+    const alt = prompt('Describe the picture in a few words:', '') || '';
+    edRestore(); document.execCommand('insertHTML', false, `<img src="${esc(url.trim())}" alt="${esc(alt)}">`);
+  } else document.execCommand(cmd, false, null);
+  ED.dirty = true; clearTimeout(ED.timer); ED.timer = setTimeout(rescore, 1200);
+}
+function shrinkPicture(file) {
+  return new Promise((resolve, reject) => {
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) { reject(new Error('Choose a PNG, JPEG, WebP or GIF picture.')); return; }
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 1600 / img.width, 1600 / img.height);
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const g = c.getContext('2d'); g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That picture could not be read.')); };
+    img.src = url;
+  });
+}
+const FONT_SIZE = {1: 'x-small', 2: 'small', 3: 'medium', 4: 'large', 5: 'x-large', 6: 'xx-large', 7: 'xx-large'};
+function edNormalise() {
+  const body = $('#edBody'); if (!body) return;
+  body.querySelectorAll('font').forEach((f) => {
+    const span = document.createElement('span');
+    if (f.getAttribute('size')) span.style.fontSize = FONT_SIZE[f.getAttribute('size')] || 'medium';
+    if (f.getAttribute('color')) span.style.color = f.getAttribute('color');
+    if (f.getAttribute('face')) span.style.fontFamily = f.getAttribute('face');
+    while (f.firstChild) span.appendChild(f.firstChild);
+    f.replaceWith(span);
+  });
+}
+async function rescore() {
+  edNormalise();
+  if (!$('#edBody')) return;
+  const j = await api(`/api/content/post/${ED.id}/score`, {title: $('#edTitle').value, meta: $('#edMeta').value, html: $('#edBody').innerHTML});
+  if (j.ok && $('#edSide')) $('#edSide').innerHTML = scorePanel(j.report, (ED.data || {}).keyword);
+}
+async function edSave() {
+  edNormalise();
+  const b = $('#edSave'); b.disabled = true; const label = b.textContent; b.textContent = 'Saving…';
+  const j = await api(`/api/content/post/${ED.id}/save`, {title: $('#edTitle').value, meta: $('#edMeta').value, html: $('#edBody').innerHTML});
+  b.disabled = false; b.textContent = label;
+  if (!j.ok) { toast(j.error || 'Not saved.'); return; }
+  ED.dirty = false; toast(j.head || 'Saved.');
+  if (j.report && $('#edSide')) $('#edSide').innerHTML = scorePanel(j.report, (ED.data || {}).keyword);
+}
+function scorePanel(rep, keyword) {
+  rep = rep || {};
+  const seo = rep.seo || {}, o = rep.original || {}, h = rep.human || {};
+  const n = seo.score == null ? null : Number(seo.score);
+  const tone = n == null ? 'plain' : n >= 80 ? 'done' : n >= 55 ? 'wait' : 'stuck';
+  return `<section class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+      <span class="label">SEO score</span>
+      <div style="display:flex;align-items:baseline;gap:6px"><span class="ck-score" style="font-size:44px">${n == null ? '—' : n}</span><small class="muted">/100</small></div>
+      <span class="meter" style="height:8px"><i class="${tone === 'done' ? 'good' : tone === 'wait' ? 'mid' : 'low'}" style="width:${n || 0}%"></i></span>
+      ${keyword ? `<span class="muted" style="font-size:13.5px">Main keyword: <b class="mono" style="font-weight:500;color:var(--ink)">${esc(keyword)}</b></span>` : ''}
+      ${n == null ? '<span class="muted" style="font-size:13.5px">SEO has no keyword plan for this post yet, so it cannot be scored.</span>' : ''}
+      <ul class="checklist">${(seo.items || []).map((i) => `<li class="${i.ok ? 'ok' : 'no'}">${esc(sentence(i.what))}</li>`).join('')}</ul>
+      ${(seo.problems || []).length ? `<details class="more"><summary>How to raise it</summary><ul class="plain-list">${seo.problems.map((x) => `<li>${esc(sentence(x))}</li>`).join('')}</ul></details>` : ''}
+    </section>
+    <section class="card" style="padding:16px 20px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><b style="font-weight:600">Original</b>${o.ok === false ? pill('stuck', o.share + '% copied') : pill('done', 'Yes')}</div>
+      <span class="muted" style="font-size:13.5px">${o.ok === false ? 'Word for word from ' + esc(o.like || 'another page') + '. Say it in your own words.' : 'Nothing copied from your other posts or the pages Google ranks for it.'}</span>
+    </section>
+    <section class="card" style="padding:16px 20px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><b style="font-weight:600">Reads like a person</b>${h.ok === false ? pill('wait', (h.problems || []).length + ' to fix') : pill('done', 'Yes')}</div>
+      ${(h.problems || []).length ? `<ul class="plain-list">${h.problems.map((x) => `<li>${esc(sentence(x))}</li>`).join('')}</ul>` : '<span class="muted" style="font-size:13.5px">No machine-sounding phrases; sentences vary; headings and bold words in place.</span>'}
+    </section>
+    <p class="muted" style="margin:0;font-size:13px">Google does not mark a page down for being written with AI — it rewards pages that are original, useful and written for people. These three checks are about exactly that.</p>`;
 }
 
 /* ======================= WEBSITE ======================= */
@@ -1138,16 +1717,15 @@ async function agency(main) {
     <div role="group" aria-label="Show desks" class="fl-filter" style="display:flex;flex-wrap:wrap;gap:8px">
       ${[['all', 'Every desk'], ['working', 'Working'], ['problem', 'Failed or stuck'], ['you', 'Needs you'], ['done', 'Done'], ['quiet', 'Quiet']].map(([k, n]) =>
         `<button type="button" class="seg ${FL.filter === k ? 'on' : ''}" aria-pressed="${FL.filter === k}" data-filter="${k}">${n}</button>`).join('')}
+      ${shelfButton((FL.live.shelf) || [])}
     </div>
     <section class="card plan-card" aria-label="Floor plan">${planSvg(rooms)}</section>
     <div class="rooms">${rooms.map(roomHtml).join('')}</div>
-    <div class="two">
-      <section class="card" id="floor-shelf">${shelfHtml((FL.live.shelf) || [])}</section>
-      <section class="card" id="floor-traffic">${trafficHtml(threads)}</section>
-    </div>
+    <section class="card" id="floor-traffic">${trafficHtml(threads)}</section>
   </div>`;
   wireFloor(main);
   applyFilter(main);
+  if (FL.open && FL.open.kind === 'shelf') { const b = $('#drawer .dr-body'); if (b) b.innerHTML = shelfBody(); }
 }
 
 function roomHtml(r) {
@@ -1172,7 +1750,7 @@ function deskHtml(d) {
   const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
   const t = d.f && d.f.t && k !== 'idle' ? sentence(d.f.t) : '';
   return `<li><button type="button" class="desk st-${k}" data-agent="${esc(d.id)}" data-grp="${groupOf(k)}">
-    <span class="av" aria-hidden="true">${esc(d.n.slice(0, 2))}<i class="lamp ${lk[0]}${k === 'working' ? ' pulse' : ''}"></i></span>
+    <span class="av ${lk[0]}${k === 'working' ? ' busy' : ''}" aria-hidden="true">${personIcon(k, 22)}</span>
     <span class="who"><b>${esc(d.n)}</b><small>${esc(d.role)}</small></span>
     ${pill(lk[0], lk[1])}
     ${t ? `<span class="what">${esc(t)}</span>` : ''}
@@ -1192,6 +1770,26 @@ function planEdge(b, tx, ty) {
   const cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2, dx = tx - cx, dy = ty - cy;
   const s = Math.min(dx ? (b[2] / 2 + 2) / Math.abs(dx) : Infinity, dy ? (b[3] / 2 + 2) / Math.abs(dy) : Infinity);
   return [cx + dx * s, cy + dy * s];
+}
+/* An agent at a desk: a person behind a monitor. The person takes the desk's
+   colour — working, done, stopped, waiting on you, idle — and the screen says
+   the rest: typing while it works, an exclamation mark when it has stopped. */
+function agentFigure(cx, cy, k) {
+  const tone = (ST_LOOK[k] || ['plain'])[0];
+  const bad = PROBLEM.includes(k);
+  const screen = k === 'working' ? '<rect class="ag-line l1" x="-6" y="-2.5" width="9" height="1.6" rx=".8"></rect><rect class="ag-line l2" x="-6" y="0.6" width="12" height="1.6" rx=".8"></rect><rect class="ag-line l3" x="-6" y="3.7" width="7" height="1.6" rx=".8"></rect>'
+    : bad ? '<text class="ag-alert" x="0" y="4.2" text-anchor="middle">!</text>'
+    : k === 'done' ? '<path class="ag-tick" d="M-4 0.8 L-1.2 3.4 L4.2 -2.4"></path>'
+    : k === 'waiting' ? '<text class="ag-alert wait" x="0" y="4.2" text-anchor="middle">?</text>' : '';
+  return `<g class="agent ${tone}${k === 'off' ? ' off' : ''}" transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})">
+    <circle class="ag-head" cx="0" cy="-15.5" r="6.4"></circle>
+    <path class="ag-body" d="M-12 3 Q-12 -8.5 0 -8.5 Q12 -8.5 12 3 Z"></path>
+    <rect class="ag-screen" x="-9.5" y="-5.5" width="19" height="12.5" rx="2.2"></rect>${screen}
+    <rect class="ag-desk" x="-18" y="7" width="36" height="4" rx="2"></rect></g>`;
+}
+function personIcon(k, size) {
+  const tone = (ST_LOOK[k] || ['plain'])[0];
+  return `<svg class="person ${tone}" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4.2"></circle><path d="M3.8 21.5c0-4.6 3.7-7.6 8.2-7.6s8.2 3 8.2 7.6z"></path></svg>`;
 }
 function planSvg(rooms) {
   const beams = (((FL.comms || {}).beams) || []).filter((b) => PLAN[b.from_room] && PLAN[b.to_room] && b.from_room !== b.to_room
@@ -1218,8 +1816,8 @@ function planSvg(rooms) {
     const lamps = r.desks.map((d, i) => {
       const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
       const cx = x + step * (i + 0.5), cy = y + h * 0.56;
-      return `<g class="plan-desk" data-agent="${esc(d.id)}"><circle class="lamp-c ${lk[0]}${k === 'working' ? ' pulse' : ''}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9"></circle>
-        <text class="plan-desk-name" x="${cx.toFixed(1)}" y="${(cy + 27).toFixed(1)}" text-anchor="middle">${esc(d.n)}</text><title>${esc(d.n)} — ${esc(lk[1])}</title></g>`;
+      return `<g class="plan-desk" data-agent="${esc(d.id)}">${agentFigure(cx, cy, k)}
+        <text class="plan-desk-name" x="${cx.toFixed(1)}" y="${(cy + 29).toFixed(1)}" text-anchor="middle">${esc(d.n)}</text><title>${esc(d.n)} — ${esc(lk[1])}</title></g>`;
     }).join('');
     return `<g class="plan-room${bad ? ' bad' : ''}${off ? ' off' : ''}" data-sector="${esc(r.key)}" tabindex="0" role="button" aria-label="${esc(L.name || r.name)}: open the sector">
       <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12"></rect>
@@ -1230,6 +1828,26 @@ function planSvg(rooms) {
       `<span><span class="lamp ${c}"></span>${n}</span>`).join('')}<span><span class="beam-key"></span>a request between sectors</span></div>`;
 }
 
+/* "add the shelf button ... when the program will run and if any thing will be
+   used in shelf the shelf button will glow up like in rgb color animation and
+   will show how many shelfs are being used" */
+function shelfButton(sh) {
+  const busy = sh.filter((s) => s.holder).length;
+  return `<span class="fl-sep" aria-hidden="true"></span><button type="button" class="seg shelf-btn${busy ? ' glow' : ''}" id="shelfBtn"
+    aria-label="The shelf: ${busy ? busy + ' tool(s) in use' : 'no tool in use'}" title="The tools every desk shares">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke="currentColor" stroke-width="1.4"></rect><path d="M1.5 6h13M1.5 10.5h13" stroke="currentColor" stroke-width="1.4"></path></svg>
+    Shelf${busy ? ` <span class="n mono">${busy}</span>` : ''}</button>`;
+}
+function shelfBody() {
+  const sh = (FL.live && FL.live.shelf) || [];
+  return `<section class="dr-sec" style="padding:0">${shelfHtml(sh).replace(/^<div class="card-h">[\s\S]*?<\/div>/, '')}</section>`;
+}
+function openShelf() {
+  const sh = (FL.live && FL.live.shelf) || [];
+  const busy = sh.filter((s) => s.holder).length, stocked = sh.filter((s) => s.items).length;
+  openPanel(`${panelHead('The shelf', `${busy ? busy + ' in use · ' : ''}${stocked} of ${sh.length} stocked`)}
+    <div class="dr-body">${shelfBody()}</div>`, 'The shelf', 'shelf', 'shelf');
+}
 function shelfHtml(sh) {
   const stocked = sh.filter((s) => s.items).length, busy = sh.filter((s) => s.holder).length;
   const rows = sh.map((s) => {
@@ -1290,7 +1908,8 @@ function wireFloor(main) {
     }
     const a = e.target.closest('[data-agent]'); if (a) { openAgent(a.dataset.agent); return; }
     const s = e.target.closest('[data-sector]'); if (s) { openSector(s.dataset.sector); return; }
-    const t = e.target.closest('[data-thread]'); if (t) { openThread(t.dataset.thread); }
+    const t = e.target.closest('[data-thread]'); if (t) { openThread(t.dataset.thread); return; }
+    if (e.target.closest('#shelfBtn')) openShelf();
   };
   main.querySelectorAll('.plan-room').forEach((g) => g.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSector(g.dataset.sector); }
@@ -1346,7 +1965,7 @@ async function openAgent(id) {
   if (!d) return;
   const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
   const room = (roomLive(d.room) || {}).name || d.room;
-  const av = `<span class="av big" aria-hidden="true">${esc(d.n.slice(0, 2))}<i class="lamp ${lk[0]}${k === 'working' ? ' pulse' : ''}"></i></span>`;
+  const av = `<span class="av big ${lk[0]}${k === 'working' ? ' busy' : ''}" aria-hidden="true">${personIcon(k, 26)}</span>`;
   openPanel(`${panelHead(d.n, room + ' · ' + d.role, av)}
     <div class="dr-body" id="drBody">
       <section class="dr-sec"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${pill(lk[0], lk[1])}
@@ -1546,7 +2165,7 @@ function agencyStrip(st) {
       const bad = ks.filter((k) => PROBLEM.includes(k)).length, work = ks.filter((k) => k === 'working').length;
       const off = r.live && r.live.enabled === false;
       return `<a class="strip-room${bad ? ' bad' : ''}" href="#agency"><b style="font-weight:600">${esc((r.live && r.live.name) || r.name)}</b>
-        <span class="lamps">${ks.map((k) => `<span class="lamp ${(ST_LOOK[k] || ['plain'])[0]}${k === 'working' ? ' pulse' : ''}"></span>`).join('')}</span>
+        <span class="lamps">${ks.map((k) => personIcon(k, 15)).join('')}</span>
         <span class="muted" style="font-size:13px">${off ? 'switched off' : bad ? bad + ' failed or stuck' : work ? work + ' working' : 'quiet'}</span></a>`; }).join('')}</div></section>`;
 }
 
@@ -1649,13 +2268,13 @@ function more(main) {
 }
 
 /* ---- routing ---- */
-const ROUTES = {today, agency, waiting, orders, leads, content, website, google, activity, results, check, settings, more};
+const ROUTES = {today, agency, waiting, orders, leads, content, post, website, google, activity, results, check, settings, more};
 let polling = null;
 async function route() {
   const r = (location.hash || '#today').slice(1).split('?')[0];
   const fn = ROUTES[r] || today;
   document.querySelectorAll('[data-r]').forEach((a) => {
-    const on = a.dataset.r === r || (r === 'more' && a.dataset.r === 'more');
+    const on = a.dataset.r === r || (r === 'post' && a.dataset.r === 'content');
     a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
   const main = $('#main');

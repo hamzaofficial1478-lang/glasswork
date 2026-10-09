@@ -387,6 +387,35 @@ def blog_remove(s, post_id) -> dict:
             "note": "moved to the WordPress bin — restore it there if you change your mind"}
 
 
+def picture_add(s, data_b64, name="picture") -> dict:
+    """A picture for inside a post, into the WordPress Media Library."""
+    try:
+        raw = base64.b64decode(str(data_b64 or ""), validate=True)
+    except Exception:
+        return {"ok": False, "status": 400, "error": "the picture was damaged on the way"}
+    kinds = {b"\x89PNG": ("png", "image/png"), b"\xff\xd8\xff": ("jpg", "image/jpeg"),
+             b"RIFF": ("webp", "image/webp"), b"GIF8": ("gif", "image/gif")}
+    kind = next((v for k, v in kinds.items() if raw.startswith(k)), None)
+    if not kind:
+        return {"ok": False, "status": 400, "error": "that is not a picture"}
+    fname = (re.sub(r"[^a-z0-9]+", "-", str(name or "").lower()).strip("-") or "picture")[:50] + "." + kind[0]
+    req = urllib.request.Request(api_root(s["site"]) + "/media", data=raw, method="POST")
+    req.add_header("Authorization", _auth(s))
+    req.add_header("Content-Type", kind[1])
+    req.add_header("Content-Disposition", f'attachment; filename="{fname}"')
+    req.add_header("User-Agent", "Glasswork agency (WordPress connection)")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            out = json.loads(r.read().decode("utf-8", "replace") or "{}")
+    except urllib.error.HTTPError as e:
+        return _failed(e.code, f"HTTP {e.code} from your website")
+    except Exception as e:
+        return {"ok": False, "error": f"could not reach your website: {type(e).__name__}"}
+    url = (out or {}).get("source_url") or ""
+    return {"ok": bool(url), "url": url, "path": url, "id": (out or {}).get("id"),
+            **({} if url else {"error": "WordPress did not say where it saved the picture"})}
+
+
 def page_remove(s, page) -> dict:
     slug = _slug_of(page)
     if slug in HOME_SLUGS:
@@ -438,6 +467,8 @@ def call(path, method="GET", body=None, s=None) -> dict:
             return blog_remove(s, body.get("id") or "")
         if route == "/pages-remove":
             return page_remove(s, body.get("page") or "")
+        if route == "/picture" and method == "POST":
+            return picture_add(s, body.get("data") or "", body.get("name") or "picture")
         if route == "/contact":
             return {"ok": False, "status": 404, "error": (
                 "the contact-form test is not available on a WordPress connection — "

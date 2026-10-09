@@ -75,7 +75,10 @@ def test_every_address_it_asks_for_exists():
     for m in re.finditer(r"api\('(/api/[^'?]+)(?:\?[^']*)?'(\s*,\s*([^)]+))?\)", APP):
         method = "GET" if not m.group(2) else "POST"
         asked.add((method, m.group(1)))
-    missing = sorted(f"{m} {p}" for m, p in asked if (m, p) not in routes)
+    # A route with a parameter (/api/review/start/:job) answers every value of it.
+    patterns = [(m, re.compile("^" + re.sub(r":[a-zA-Z]+", "[^/]+", p) + "$")) for m, p in routes if ":" in p]
+    missing = sorted(f"{m} {p}" for m, p in asked if (m, p) not in routes
+                     and not any(m == pm and rx.match(p) for pm, rx in patterns))
     check("it asks for something", len(asked) >= 12, True)
     check("and the server answers all of it", missing, [])
 
@@ -102,8 +105,8 @@ def test_data_is_escaped():
     risky = []
     for m in re.finditer(r"\$\{([^{}]*?(?:\.(?:text|why|what|title|company|summary|url|email|area|head|name|segment|source|page)\b)[^{}]*)\}", APP):
         expr = m.group(1)
-        # row() and pill() escape what they are given themselves.
-        if not any(h in expr for h in ("esc(", "deskName(", "row(", "pill(")):
+        # row(), pill() and panelHead() escape what they are given themselves.
+        if not any(h in expr for h in ("esc(", "deskName(", "row(", "pill(", "panelHead(")):
             risky.append(expr.strip()[:60])
     check("every agency field inside the markup goes through esc()", risky, [])
 
@@ -147,6 +150,31 @@ def test_the_agency_floor():
         check(f"#{r} is a screen, and in the menu", r in routes and f'href="#{r}" data-r="{r}"' in APP, True)
 
 
+def test_mail_content_and_the_shelf():
+    print("\nLeads has its mail room, Content its topics and editor, the floor its agents and shelf:")
+    for tab in ("leads", "mail", "send", "sent"):
+        check(f"Leads has the {tab} tab", f"['{tab}', " in APP[APP.index("const tabs = [['leads'"):][:400], True)
+    check("a sent mail can be read in full", "api(`/api/mail/sent/${Number(lead)}`)" in APP, True)
+    check("sent mail can be downloaded as CSV", 'href="/api/mail/sent.csv" download' in APP, True)
+    check("  and deleted, ticked or all", "reviewAct('sent_delete'," in APP and "reviewAct('sent_delete_all')" in APP, True)
+    check("today's topic is chosen from SEO's list or typed",
+          "api('/api/content/choose', own ? {topic: own} : {key: CT.pick})" in APP, True)
+    check("every post has Delete, a live one Delete from website", "/delete`, {})" in APP and "reviewAct('blog_unpublish'" in APP, True)
+    tools = APP[APP.index('role="toolbar" aria-label="Formatting"'):APP.index('id="edBody"')]
+    for cmd in ("bold", "italic", "underline", "link", "image", "h2", "insertUnorderedList"):
+        check(f"the editor can {cmd}", f'"{cmd}"' in tools or f"'{cmd}'" in tools, True)
+    for ctl in ("edSize", "edFont", "edColour"):
+        check(f"  and change text with {ctl}", f'id="{ctl}"' in tools, True)
+    check("each post shows its SEO score, originality and voice",
+          all(w in APP for w in ("SEO score", "Original", "Reads like a person")), True)
+    check("the floor draws agents, not dots", "agentFigure(cx, cy, k)" in APP and 'class="lamp-c' not in APP, True)
+    sb = APP[APP.index("function shelfButton"):APP.index("function shelfBody")]
+    check("the shelf is a button that glows while a tool is in use, with the count",
+          "busy ? ' glow' : ''" in sb and '<span class="n mono">${busy}</span>' in sb, True)
+    check("  and the glow rests when someone prefers less motion", "@media (prefers-reduced-motion:reduce){.shelf-btn.glow" in APP, True)
+    check("the shelf is no longer a card on the floor", 'id="floor-shelf"' not in APP, True)
+
+
 def main():
     test_the_front_door()
     test_every_address_it_asks_for_exists()
@@ -155,6 +183,7 @@ def main():
     test_data_is_escaped()
     test_the_connection_summary()
     test_the_agency_floor()
+    test_mail_content_and_the_shelf()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: " + ", ".join(_fail))

@@ -2177,6 +2177,31 @@ def remove_page(page, go_to="", agent=AGENT, s=None) -> dict:
                       undo_cmd=f"python -m pipelines.site_api --undo {page}")
 
 
+def upload_picture(data_b64, name="picture", agent=AGENT, s=None) -> dict:
+    """
+    One picture for inside a post, saved on his website. The Releaser's job, and
+    nobody else's: it carries the pictures added in the post editor when it puts
+    the post up (blog_backend._upload_pending). The connector saves it into
+    agency-pictures/ and nowhere else; WordPress into its Media Library.
+    """
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    s = s or settings()
+    r = call("/picture", "POST", {"data": data_b64, "name": str(name or "picture")[:60]}, s=s, timeout=90)
+    if not r.get("ok"):
+        if r.get("old_connector") or r.get("status") == 404:
+            return {"ok": False, "old_connector": True, "error": (
+                "your connector file is the older one, which cannot save pictures inside a post — "
+                "download it again from Setup and upload it to your website, then save the post again")}
+        return r
+    path = str(r.get("url") or r.get("path") or "")
+    site = (s.get("site") or "").rstrip("/")
+    url = path if re.match(r"https?://", path, re.I) else f"{site}/{path.lstrip('/')}"
+    _log_blog("picture", path, agent, r, f"saved a picture for a post at {path}")
+    return {"ok": True, "path": path, "url": url}
+
+
 def remove_blog_post(post_id, slug="", agent=AGENT, s=None, title="") -> dict:
     """Take away a post the agency added. The connector refuses any other."""
     refused = _may_write(agent)

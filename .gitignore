@@ -32,3 +32,6 @@ data/
 Start *.bat
 Start *.command
 updates/
+
+# Pictures added in the post editor, waiting for the IT Releaser (coordination/posts.py).
+pictures-pending/

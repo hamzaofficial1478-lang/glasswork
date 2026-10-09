@@ -64,7 +64,7 @@ import sys
 import time
 
 from coordination import auditor, board, deskwork, uae
-from . import site_api
+from . import post_quality, site_api
 
 AGENT = "content-writer"
 
@@ -972,15 +972,20 @@ def _write(agent, dry_run, only_id, limit, job=None):
             # ONE SECOND GO, TOLD WHY: too short, phrases that read as
             # machine-written, or something the Critic needs. Kept only if it
             # is better than the first.
+            # ORIGINAL, AND READING LIKE A PERSON: nothing lifted word for word
+            # from his other posts or from the pages Google ranks for the same
+            # search, and sentences of different lengths (post_quality).
+            not_this = post_quality.others(con, row["id"], pack)
             first = (voice_problems(page, kind) + critic_check(page, brief, facts)[1]
-                     + seo_check(page)["problems"])
+                     + seo_check(page)["problems"] + post_quality.extra(page, not_this))
             if first:
                 again = _ask_the_writer(brief, facts, kind=kind, images=images,
                                         fix=first, previous=page, pack=pack)
                 if again.get("ok"):
                     second = (voice_problems(again["page"], kind)
                               + critic_check(again["page"], brief, facts)[1]
-                              + seo_check(again["page"])["problems"])
+                              + seo_check(again["page"])["problems"]
+                              + post_quality.extra(again["page"], not_this))
                     if len(second) < len(first) or (
                             len(second) == len(first)
                             and words_in(again["page"]) > words_in(page)):
@@ -989,6 +994,10 @@ def _write(agent, dry_run, only_id, limit, job=None):
             short = [v for v in voice_problems(page, kind) if v.startswith("it is ")]
             if short and kind == "blog":
                 ok, reasons = False, reasons + short
+            copied = post_quality.originality(page.get("html"), not_this)
+            if not copied["ok"]:
+                ok, reasons = False, reasons + [
+                    f"{copied['share']}% of it is word for word from {copied['like'] or 'another page'}"]
             if not ok:
                 held.append({"id": row["id"], "title": row["title"],
                              "why": "the Critic rejected it: " + "; ".join(reasons)})

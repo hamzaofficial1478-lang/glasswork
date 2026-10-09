@@ -306,6 +306,14 @@ def test_the_zip_on_a_real_php_server():
             check("Check knocks, and the connector answers", (got["ok"], got["kind"]), (True, "php"))
             check("  so full access is switched on", p.env().get("SITE_MODE"), "full")
             check("  and the office says it is connected", connect.status()["connected"], True)
+            png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+            pic = site_api.upload_picture(base64.b64encode(png).decode(), name="Shower screen", agent=site_api.AGENT)
+            saved = list((web / "agency-pictures").glob("*.png")) if (web / "agency-pictures").exists() else []
+            check("a picture for inside a post is saved into agency-pictures/, and its address comes back",
+                  (pic.get("ok"), len(saved), pic.get("path", "").startswith("agency-pictures/shower-screen-")), (True, 1, True))
+            check("  byte for byte", saved[0].read_bytes() == png if saved else False, True)
+            check("  and no other desk may do it", site_api.upload_picture(base64.b64encode(png).decode(),
+                                                                          agent="content-writer")["ok"], False)
             (web / "agency-api" / "token.php").write_text("<?php\nreturn 'someone-else-entirely-0000000000';\n",
                                                             encoding="utf-8")
             bad = connect.check()

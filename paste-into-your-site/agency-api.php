@@ -362,7 +362,7 @@ if ($route === '/health' && $method === 'GET') {
            'site_root' => SITE_ROOT, 'php' => PHP_VERSION,
            'writable' => is_writable(SITE_ROOT),
            'mode' => 'full-access', 'warnings' => $warn,
-           'connector' => 6, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove']]);
+           'connector' => 7, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove', 'pictures']]);
 }
 
 // --- what pages are there --------------------------------------------------
@@ -1003,6 +1003,16 @@ function save_picture(array $img): array {
     return [($dir === '' ? '' : $dir . '/') . $file, ''];
 }
 
+// --- a picture for inside a post ----------------------------------------------
+// POST ?do=picture {data, name}: one picture added in the post editor, saved
+// into agency-pictures/ beside your pages (made once) and nowhere else.
+if ($route === '/picture' && $method === 'POST') {
+    [$path, $why] = save_picture(['dir' => 'agency-pictures', 'data' => (string)($body['data'] ?? ''),
+                                  'name' => (string)($body['name'] ?? 'picture')]);
+    if ($path === '') { fail(422, $why ?: 'the picture could not be saved'); }
+    reply(['ok' => true, 'path' => $path]);
+}
+
 if (in_array($route, ['/blog', '/blog-remove'], true)) {
     $db = blog_db();
     try {
@@ -1106,7 +1116,7 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
                     }
                 }
             }
-            reply(['ok' => true, 'connector' => 6, 'image_home' => $home,
+            reply(['ok' => true, 'connector' => 7, 'image_home' => $home,
                    'table' => $table, 'columns' => $cols, 'key' => $pk, 'slug_column' => $slugc,
                    'category_column' => $catc, 'categories' => $cats, 'title_column' => $titlec,
                    'recent' => $recent,

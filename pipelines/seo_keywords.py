@@ -202,6 +202,14 @@ def page_facts(html) -> dict:
                    or sum(1 for x in heads if x.endswith("?")) >= 2}
 
 
+def _fingerprint(text) -> list:
+    try:
+        from .post_quality import fingerprint
+        return fingerprint(text)
+    except Exception:
+        return []
+
+
 def _phrases(text, n):
     toks = [w for w in re.findall(r"[a-z][a-z\-]+", text) if len(w) > 2]
     out = {}
@@ -421,7 +429,10 @@ def build(brief, kind="blog", site="", suggest=None, serp=None, fetch=None,
         "headings_to_cover": covered[:12],
         "competitors": [{"position": p["position"], "domain": p["domain"], "url": p["url"],
                          "title": p.get("title") or "", "words": p.get("words") or 0,
-                         "faq": bool(p.get("faq")), "headings": (p.get("headings") or [])[:8]}
+                         "faq": bool(p.get("faq")), "headings": (p.get("headings") or [])[:8],
+                         # a sample of its eight-word passages as numbers, never its
+                         # text — so a post can be checked for copying (post_quality)
+                         "fp": _fingerprint(p.get("text") or "")}
                         for p in pages],
         "ranking": [{"position": r["position"], "domain": r["domain"], "title": r["title"]}
                     for r in ranked[:10]],

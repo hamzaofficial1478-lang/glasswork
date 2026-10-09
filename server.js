@@ -84,7 +84,10 @@ if (SUPERVISED) {
 // a picture, may be a few hundred KB. Only that path gets the larger limit.
 const JSON_BODY = express.json();
 const JSON_LOGO = express.json({ limit: "1mb" });
-app.use((req, res, next) => (req.path === "/api/check/brand" ? JSON_LOGO : JSON_BODY)(req, res, next));
+// A post saved from the editor carries the pictures added to it.
+const JSON_POST = express.json({ limit: "16mb" });
+app.use((req, res, next) => (req.path === "/api/check/brand" ? JSON_LOGO
+  : /^\/api\/content\/post\/\d+\/(save|score)$/.test(req.path) ? JSON_POST : JSON_BODY)(req, res, next));
 // NOTE: express.static is mounted AFTER the front-door middleware below, not
 // here. Mounted first it serves ui/setup.html at /setup.html to anybody, gate
 // or no gate — the lock would be on the door and the window left open.
@@ -552,6 +555,78 @@ app.post("/api/update/apply", async (_q, res) =>
 app.post("/api/update/rollback", async (_q, res) =>
   res.json(await pyModule("coordination.updates", ["--rollback", "--json"], 120000)));
 app.get("/api/diagnostics", async (_q, res) => res.json(await pyModule("coordination.diagnostics", ["--json"], 90000)));
+
+/* ---- READING A SENT MAIL, AND THE CONTENT SCREEN'S CONTROLS -------------------
+   "we cannot read the sent mails" — coordination/review.py --sent-mail.
+   Today's topic, delete, open, edit and score a post — coordination/posts.py.
+   Nothing here writes to the website: a live post's edit is handed to the IT
+   Releaser, tests first, like every other change. */
+async function pyStdin(mod, args, payload, timeoutMs) {
+  const py = resolvePython();
+  if (!py) return { ok: false, error: NO_PY };
+  const r = await spawnAsync(py.cmd, [...py.prefix, "-m", mod, ...args], {
+    cwd: __dirname, input: JSON.stringify(payload || {}), timeout: timeoutMs || 120000,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  try { return JSON.parse(String(r.stdout || "").trim().split("\n").pop()); }
+  catch (_) { return { ok: false, error: "could not read the answer: " + String(r.stderr || "").slice(-300) }; }
+}
+const numId = (v) => (/^\d{1,9}$/.test(String(v || "")) ? String(v) : "");
+app.get("/api/mail/sent/:lead", async (req, res) => {
+  const id = numId(req.params.lead);
+  if (!id) return res.status(404).json({ ok: false, error: "which mail?" });
+  res.json(await pyModule("coordination.review", ["--sent-mail", id], 30000));
+});
+app.get("/api/content/topics", async (_q, res) => res.json(await pyModule("coordination.posts", ["--topics"], 60000)));
+app.post("/api/content/choose", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.posts", ["--choose"],
+    { key: String(b.key || "").slice(0, 120), topic: String(b.topic || "").slice(0, 120) }, 60000));
+});
+app.post("/api/content/write/:id", async (req, res) => {
+  const id = numId(req.params.id);
+  const py = resolvePython();
+  if (!id) return res.status(404).json({ ok: false, error: "which post?" });
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  try {
+    const child = spawn(py.cmd, [...py.prefix, "-m", "coordination.posts", "--write", id], {
+      cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,
+    });
+    child.on("error", () => {});
+    child.unref();
+  } catch (e) {
+    return res.json({ ok: false, error: "Could not start the writer: " + e.message });
+  }
+  res.json({ ok: true, started: true, id });
+});
+app.get("/api/content/post/:id", async (req, res) => {
+  const id = numId(req.params.id);
+  if (!id) return res.status(404).json({ ok: false, error: "which post?" });
+  res.json(await pyModule("coordination.posts", ["--get", id], 60000));
+});
+for (const what of ["save", "score"]) {
+  app.post(`/api/content/post/:id/${what}`, async (req, res) => {
+    const id = numId(req.params.id);
+    if (!id) return res.status(404).json({ ok: false, error: "which post?" });
+    const b = req.body || {};
+    res.json(await pyStdin("coordination.posts", [`--${what}`, id],
+      { title: String(b.title || ""), meta: String(b.meta || ""), html: String(b.html || "") }, 120000));
+  });
+}
+app.post("/api/content/post/:id/delete", async (req, res) => {
+  const id = numId(req.params.id);
+  if (!id) return res.status(404).json({ ok: false, error: "which post?" });
+  res.json(await pyModule("coordination.posts", ["--delete", id], 60000));
+});
+// A picture added in the editor, shown in the editor until the Releaser takes it up.
+app.get("/api/content/pending/:name", async (req, res) => {
+  const name = String(req.params.name || "");
+  if (!/^[a-f0-9]{16,40}\.(jpg|png|webp|gif)$/.test(name)) return res.status(404).end();
+  const r = await pyModule("coordination.posts", ["--pending-path", name], 30000);
+  if (!r || !r.ok || !r.path) return res.status(404).end();
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.sendFile(r.path);
+});
 
 /* ---- WEBSITE CHECK (pipelines/website_check.py) ----------------------------
    A report on any website, every desk's view of it. Starting one makes its

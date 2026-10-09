@@ -343,6 +343,30 @@ someone else's in read-only mode:
   - Not built yet: a signed .exe and .dmg installer (needs a code-signing
     certificate and a build computer for each system), and a download page.
 
+- **Mail, posts and the floor, refined (9 October).**
+  - **Leads has its mail room:** *Your mail* (write one mail for every lead,
+    preview, change, send yourself a test, approve), *Send* (tick who gets it;
+    retry or delete what did not go), and *Sent mail*: every mail that went,
+    readable in full as the lead saw it, deletable one by one or all at once,
+    and downloadable as a CSV. A deleted mail's words are wiped, but the agency
+    still remembers the business was written to, so nobody is mailed twice.
+  - **Content:** choose today's topic from SEO's suggestions (best first, with
+    why) or type your own; the writer works with SEO's keyword plan, and every
+    post is checked for copying (against your other posts and the pages Google
+    ranks for it) and for reading like a person. Every post has Delete.
+  - **The post editor:** bold, italic, underline, headings, lists, links on any
+    word, pictures, text size, font, colour and highlight, with the SEO score,
+    "Original" and "Reads like a person" re-marked as you type. A post on your
+    website has Edit and Delete from website; both go through the IT Releaser,
+    tests first. Pictures added in the editor wait on your computer until the
+    Releaser takes them up with the post.
+  - **The floor** draws each agent at a desk instead of a dot, and the shelf is
+    now a button beside the filters that glows in moving colours, with the
+    number of tools in use, while any tool is being used.
+  - The connector file is now version 7 (it can save pictures inside a post).
+    Download it again from Setup and upload it once; WordPress sites need
+    nothing new.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

@@ -446,11 +446,47 @@ def _site(s=None):
     return ((s or site_api.settings()).get("site") or "").rstrip("/")
 
 
+def _upload_pending(content_id, draft, blog, agent, s=None):
+    """
+    Pictures added in the post editor wait on this computer (coordination/posts)
+    until now: the Releaser, the one door to his site, saves each one there and
+    the post points at it. None, or {ok: False, error} if one cannot go.
+    """
+    import base64
+    from coordination import posts
+    html = str(blog.get("html") or "")
+    names = sorted(set(re.findall(re.escape(posts.PENDING) + r"([a-f0-9]{16,40}\.(?:jpg|png|webp|gif))", html)))
+    if not names:
+        return None
+    for name in names:
+        data = posts.pending_bytes(name)
+        if not data:
+            return {"ok": False, "error": f"a picture added in the editor ({name}) is no longer on this computer — "
+                                          "add it again in the editor"}
+        r = site_api.upload_picture(base64.b64encode(data).decode("ascii"),
+                                    name=blog.get("slug") or "post-picture", agent=agent, s=s)
+        if not r.get("ok"):
+            return {"ok": False, "error": "a picture added in the editor could not be saved on your website: "
+                                          + str(r.get("error") or "no reason given")}
+        html = html.replace(posts.PENDING + name, r["url"])
+    blog["html"] = html
+    draft["_for_blog"] = blog
+    if isinstance(draft.get("html"), str):
+        draft["html"] = html
+    with board._conn() as c:
+        board._migrate(c)
+        c.execute("UPDATE content_queue SET draft=? WHERE id=?", (json.dumps(draft, indent=2), int(content_id)))
+    return None
+
+
 def publish(content_id, agent=site_api.AGENT, s=None) -> dict:
     """Put one post on his blog. {ok, url, id, head} or {ok: False, error}."""
     draft, blog, status = _load(content_id)
     if not blog:
         return {"ok": False, "error": f"post #{content_id} is not ready for your blog any more"}
+    stopped = _upload_pending(content_id, draft, blog, agent, s)
+    if stopped:
+        return stopped
     back = blog.get("backend") or {}
     if status == "published" and back.get("id"):
         return {"ok": True, "url": blog.get("posted_url"), "id": back["id"], "already": True,
