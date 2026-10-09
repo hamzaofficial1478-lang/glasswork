@@ -72,29 +72,42 @@ double-click the file, and follow the steps:
 Nothing else needs installing: the program carries its own Python and Node,
 and needs no administrator password.
 
-**The blue "Windows protected your PC" box.** The first time, Windows warns
-about a program from a publisher it does not recognise. People choose **More
-info → Run anyway**; the download page says so. To make the warning go away,
-the installer has to be signed with a code-signing certificate:
+**The blue "Windows protected your PC" box — no subscription needed.** The
+installer is not signed with a paid certificate, by choice. The first time,
+Windows says it does not recognise the publisher; people click **More info →
+Run anyway** and the installer opens as normal. Your download page shows these
+steps right under the button. Because every version is a new file to Windows,
+the box can appear again for each new Setup.exe — but updates installed from
+inside the program never show it, only a fresh download does.
 
-- *Microsoft Trusted Signing* — about $10 a month; needs a company or a
-  verified identity.
-- *A certificate from a company such as Certum, Sectigo or DigiCert* — roughly
-  $100 to $400 a year.
+## 4. Your users and their issues
 
-Tell Claude which you have and it adds the signing step to the build.
+**Your users** appears in your menu once your Home is set up. It has two tabs.
 
-## 4. Reports
+**People** — every copy of the program in use:
 
-**Reports from users** appears in your menu once your Home is set up. Open one
-to read what they wrote, the version they have and (if they ticked it) their
+- Each copy has a random number of its own. When it looks for updates it tells
+  your Home that number, its version and the kind of computer — nothing else.
+  That is how you see how many copies are in use, which version each has, and
+  when each was last opened. (A person can switch this off in their *Help and
+  reports* screen.)
+- Their **name, business, email, phone, website and country** appear only if
+  they choose **Register your copy** (offered once on their Today screen, and
+  always in *Help and reports*). They can change it or withdraw it at any time.
+- Filters: everyone, registered, with open issues, on an older version. Open
+  someone to see their details (email and phone are clickable), their copy, and
+  every issue they sent. *Remove this person* deletes their details from your Home.
+- The tiles at the top: copies in use this week, registered, open issues, and
+  how many are on the newest version.
+
+**Issues** — every problem report, newest first, with who sent it. Open one to
+read what they wrote, the version they have and (if they ticked it) their
 support report — which has every key, password, email, web address and phone
-number taken out before it leaves their computer.
-
-Choose where it stands (*Read*, *Being worked on*, *Fixed*, *Not changing*),
-write an answer, and if it is fixed say in which version. They see your answer
-in their *Help and reports* screen, and if the fix is in a newer version than
-theirs they are told to update.
+number taken out before it leaves their computer. Choose where it stands
+(*Read*, *Being worked on*, *Fixed*, *Not changing*), write an answer, and if
+it is fixed say in which version. They see your answer in their *Help and
+reports* screen, and if the fix is in a newer version than theirs they are told
+to update. A new report is also emailed to you, if you gave an email.
 
 ## 5. What each person sets up themselves
 

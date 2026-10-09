@@ -129,7 +129,15 @@ def check(fetch=_fetch) -> dict:
         out["why"] = "No update address is set for this copy, so it cannot look for updates."
         return out
     try:
-        m = json.loads(fetch(url, 1024 * 1024).decode("utf-8"))
+        # A Glasswork Home also hears this copy's random number and version, so
+        # the publisher can see how many copies are in use — never anything
+        # else, and not at all when the person has switched it off.
+        try:
+            from . import support
+            asked = support.with_copy(url)
+        except Exception:
+            asked = url
+        m = json.loads(fetch(asked, 1024 * 1024).decode("utf-8"))
     except Exception as e:
         return {**out, "ok": False, "error": f"could not reach the update address ({type(e).__name__})"}
     newer = product.parse_version(m.get("version")) > product.parse_version(here)

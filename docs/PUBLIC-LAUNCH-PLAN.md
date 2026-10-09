@@ -410,8 +410,13 @@ someone else's in read-only mode:
     Website screen shows how quickly the site answers and offers the new
     connector to sites still on an older one. WordPress needs no upload and
     gets the same quiet retries.
-  - Still to do for a wider launch: a code-signing certificate (so Windows stops
-    warning about an unknown publisher), and a Mac installer.
+  - **No code-signing subscription (decided).** People click *More info → Run
+    anyway* the first time; the download page shows how.
+  - **Your users room.** Every copy in use (by a random number, its version and
+    when it was last opened — switchable off by the person), the name and
+    details of anyone who chose to register, and each person's issues. The
+    privacy page and the terms say exactly this.
+  - Still to do for a wider launch: a Mac installer.
 
 ## The order to build it in
 

@@ -160,6 +160,8 @@ ol.feed li:last-child{border-bottom:0}
 .upd-banner{position:fixed;right:20px;bottom:20px;z-index:40;max-width:420px;background:var(--surface);border:1px solid var(--line-strong);
   border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.14);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
 .upd-banner[hidden],body.drawer-open .upd-banner{display:none}
+.reg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 16px}
+.reg-grid input{font-weight:400}
 @media (max-width:760px){.upd-banner{left:12px;right:12px;bottom:84px;max-width:none}}
 
 /* phone */
@@ -457,7 +459,7 @@ details.ck .row{padding-left:40px}
     <a href="#check" data-r="check">Website Check</a>
     <a href="#settings" data-r="settings">Settings</a>
     <a href="#help" data-r="help">Help and reports</a>
-    <a href="#reports" data-r="reports" id="navReports" hidden>Reports from users <span class="count" id="navRep" hidden>0</span></a>
+    <a href="#reports" data-r="reports" id="navReports" hidden>Your users <span class="count" id="navRep" hidden title="new issues">0</span></a>
   </nav>
   <main id="main" tabindex="-1"><div class="page"><p class="muted">Opening your office…</p></div></main>
 </div>
@@ -653,7 +655,9 @@ async function state() {
 
 /* ======================= TODAY ======================= */
 async function today(main) {
-  const [st, run, idx, leads] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all')]);
+  const [st, run, idx, leads, reg] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all'), api('/api/support/registration')]);
+  let regLater = false; try { regLater = localStorage.getItem('gw-reg-later') === '1'; } catch (e) { /* private window */ }
+  const askReg = reg && reg.ok && reg.home && !reg.registered && !reg.publisher && !regLater;
   const appr = (st && st.approvals) || [];
   const ev = ((st && st.activity) || {}).events || [];
   const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
@@ -683,6 +687,9 @@ async function today(main) {
       <div style="display:flex;gap:10px;flex-wrap:wrap">${action}
         ${appr.length && !(r && r.running) ? '<button class="btn ghost" type="button" id="runNow">Run today</button>' : ''}</div>
     </section>
+    ${askReg ? `<section class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between">
+      <span><b style="font-weight:600">Register your copy?</b> <span class="muted">So the people who make this program know who you are when you ask for help. It takes a minute, and you can withdraw it later.</span></span>
+      <span style="display:flex;gap:8px"><a class="btn small" href="#help">Register</a><button class="btn quiet small" type="button" id="regLater">Not now</button></span></section>` : ''}
     ${agencyStrip(st)}
     <div class="tiles">
       <a href="#leads" class="card tile"><span class="label">Leads waiting</span><span class="big mono">${esc((leads && leads.total) || 0)}</span>
@@ -708,6 +715,7 @@ async function today(main) {
           : empty('Quiet so far', 'Press Run today and each desk’s work appears here as it happens.')}</section>
     </div></div>`;
   const rb = $('#runNow'); if (rb) rb.onclick = runToday; wireRunSay();
+  const rl = $('#regLater'); if (rl) rl.onclick = () => { try { localStorage.setItem('gw-reg-later', '1'); } catch (e) { /* fine */ } rl.closest('section').remove(); };
   const sb = $('#stopRun'); if (sb) sb.onclick = async () => { const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
 }
 /* "with out any order the program will not start the day" — Run asks the
@@ -2004,6 +2012,7 @@ function applyFilter(main) {
 }
 function wireFloor(main) {
   const rb = $('#runNow'); if (rb) rb.onclick = runToday; wireRunSay();
+  const rl = $('#regLater'); if (rl) rl.onclick = () => { try { localStorage.setItem('gw-reg-later', '1'); } catch (e) { /* fine */ } rl.closest('section').remove(); };
   const sb = $('#stopRun'); if (sb) sb.onclick = async () => { sb.disabled = true; const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
   const tu = $('#tidyUp'); if (tu) tu.onclick = async () => {
     tu.disabled = true; const j = await api('/api/leftovers/tidy', {});
@@ -2276,13 +2285,34 @@ async function activity(main, local) {
    "i want the report section where user will be able to submit the report and
     those reports will get over to me" — a report goes to the publisher's own
    Glasswork Home and nowhere else; his answer comes back here. */
-const HELP = {sent: null};
+const HELP = {sent: null, editing: false};
 const REP_LOOK = {new: ['plain', 'Sent'], seen: ['plain', 'Read'], working: ['work', 'Being worked on'], fixed: ['done', 'Fixed'], 'wont-fix': ['plain', 'Not changing']};
 async function help(main) {
-  const m = await api('/api/support/mine');
+  const [m, reg] = await Promise.all([api('/api/support/mine'), api('/api/support/registration')]);
   const mine = (m && m.reports) || [];
+  const R = (reg && reg.ok) ? reg : {}, me = R.person || {};
+  const pre = {name: me.name || ((S.me && S.me.name) || ''), business: me.business || ((S.brand && S.brand.agencyName) || ''),
+    email: me.email || '', phone: me.phone || '', website: me.website || (((S.brand || {}).website || {}).siteUrl || ''), country: me.country || ''};
+  const regCard = !R.home || R.publisher ? '' : R.registered && !HELP.editing
+    ? `<section class="card" style="padding:18px 22px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between">
+        <span><b style="font-weight:600">Registered</b> <span class="muted">as ${esc([me.name, me.business].filter(Boolean).join(' · ') || me.email)}</span></span>
+        <span style="display:flex;gap:8px"><button class="btn quiet small" type="button" id="regEdit">Change</button><button class="btn quiet small" type="button" id="regWithdraw">Withdraw</button></span></section>`
+    : `<section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:10px" id="regCard">
+        <h2 style="margin:0;font-size:18px">Register your copy</h2>
+        <p class="muted" style="margin:0;font-size:14px">Tell the people who make this program who you are, so they know who a problem report is from and can help you sooner. Only what you type here is sent — nothing about your leads, customers, keys or websites' content — and you can withdraw it at any time.</p>
+        <div class="reg-grid">
+          ${[['regName', 'Your name', 'name', 'text'], ['regBiz', 'Your business', 'business', 'text'], ['regMail', 'Email', 'email', 'email'],
+            ['regPhone', 'Phone', 'phone', 'text'], ['regSite', 'Website', 'website', 'text'], ['regCountry', 'Country', 'country', 'text']].map(([id, l, k, t]) =>
+            `<label for="${id}" style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px">${l}<input id="${id}" type="${t}" maxlength="300" value="${esc(pre[k])}"></label>`).join('')}
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" type="button" id="regGo">Register</button>${HELP.editing ? '<button class="btn quiet" type="button" id="regCancel">Cancel</button>' : ''}<span class="muted" id="regSay" style="font-size:14px"></span></div>
+      </section>`;
+  const countCard = !R.home || R.publisher ? '' : `<label class="card" style="padding:14px 22px;display:flex;gap:12px;align-items:flex-start;cursor:pointer">
+      <input type="checkbox" id="regCount" ${R.counting ? 'checked' : ''} style="margin-top:4px">
+      <span><b style="font-weight:600">Say this copy is in use</b><br><span class="muted" style="font-size:14px">When it looks for updates, it tells the makers a random number for this copy, its version and the kind of computer — nothing else. It still looks for updates if you switch this off.</span></span></label>`;
   main.innerHTML = `<div class="page narrow">${head('Help and reports',
     'Something not working? Tell the people who make this program. Your report goes to them directly, and their answer appears below.')}
+    ${regCard}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <h2 style="margin:0;font-size:18px">Report a problem</h2>
       ${m && m.home === false ? `<div class="note">This copy cannot send reports by itself yet. Write it below and press Send — you will get a support report to copy into an email instead.</div>` : ''}
@@ -2307,7 +2337,24 @@ async function help(main) {
           ${r.update_needed ? `<div class="note">Fixed in version ${esc(r.fixed_in)}. <a href="#settings">Get the update in Settings</a>.</div>` : (r.fixed_in && r.status === 'fixed' ? `<span class="muted" style="font-size:13.5px">Fixed in version ${esc(r.fixed_in)} — you have it.</span>` : '')}
         </article>`; }).join('')
         : `<div class="card">${empty('None yet', 'Reports you send from here are listed with their answers.')}</div>`}
-    </section></div>`;
+    </section>
+    ${countCard}</div>`;
+  const val = (id) => ($('#' + id) || {}).value || '';
+  const go = $('#regGo'); if (go) go.onclick = async () => {
+    go.disabled = true; $('#regSay').textContent = 'Registering…';
+    const j = await api('/api/support/register', {name: val('regName').trim(), business: val('regBiz').trim(), email: val('regMail').trim(),
+      phone: val('regPhone').trim(), website: val('regSite').trim(), country: val('regCountry').trim()});
+    go.disabled = false;
+    if (j.ok) { HELP.editing = false; VIEW.dirty = false; toast(j.head || 'Registered.'); help(main); return; }
+    $('#regSay').textContent = j.error || 'Not registered.';
+  };
+  const cancel = $('#regCancel'); if (cancel) cancel.onclick = () => { HELP.editing = false; VIEW.dirty = false; help(main); };
+  const edit = $('#regEdit'); if (edit) edit.onclick = () => { HELP.editing = true; help(main); };
+  const wd = $('#regWithdraw'); if (wd) wd.onclick = async () => {
+    if (!confirm('Withdraw your registration? The makers will no longer have your name or details.')) return;
+    const j = await api('/api/support/register', {withdraw: true}); toast(j.head || j.error || 'Done.'); help(main);
+  };
+  const ct = $('#regCount'); if (ct) ct.onchange = async () => { const j = await api('/api/support/counting', {on: ct.checked}); toast(j.head || j.error || 'Saved.'); };
   $('#repPeek').onclick = async (e) => {
     e.preventDefault();
     const pre = $('#repPreview'); pre.hidden = !pre.hidden; if (pre.hidden) return;
@@ -2326,7 +2373,7 @@ async function help(main) {
   };
 }
 
-const PUB = {filter: 'open', list: null};
+const PUB = {filter: 'open', list: null, tab: 'people', who: 'all'};
 async function publisherNav() {
   const p = await api('/api/publisher');
   S.publisher = !!(p && p.ok && p.publisher);
@@ -2336,28 +2383,97 @@ async function publisherNav() {
   const n = Number((inb && inb.new) || 0), c = $('#navRep');
   if (c) { c.textContent = n; c.hidden = !n; }
 }
+/* YOUR USERS — "where i will get the user details and their issues? like
+   will i have any of my room where i will be able to manage the my users their
+   issues?" Every copy in use (by its random number, its version and when it
+   last looked for updates), who it belongs to if they chose to register, and
+   each person's issues. Read from his Glasswork Home. */
+function seen(ts) {
+  if (!ts) return 'never';
+  const d = Math.floor((Date.now() / 1000 - Number(ts)) / 86400);
+  return d <= 0 ? 'today ' + when(ts) : d === 1 ? 'yesterday' : d < 30 ? d + ' days ago'
+    : new Date(Number(ts) * 1000).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
+}
+function who(u) {
+  const p = (u && u.person) || null;
+  return p ? (p.name || p.business || p.email) : 'Not registered';
+}
 async function reports(main) {
   const p = await api('/api/publisher');
   if (!(p && p.publisher)) {
-    main.innerHTML = `<div class="page narrow">${head('Reports from users')}<div class="card">${empty('Not set up on this copy',
-      'Reports from the people using your program come to your Glasswork Home. Set it up in Settings → Publisher.')}</div></div>`;
+    main.innerHTML = `<div class="page narrow">${head('Your users')}<div class="card">${empty('Not set up on this copy',
+      'The people using your program, and their issues, come to your Glasswork Home. Set it up in Settings → Publisher.')}</div></div>`;
     return;
   }
-  const inb = await api('/api/publisher/inbox');
+  PUB.tab = PUB.tab || 'people';
+  const [us, inb] = await Promise.all([api('/api/publisher/users'), api('/api/publisher/inbox')]);
+  const users = (us && us.users) || [], c = (us && us.counts) || {};
+  const byCopy = Object.fromEntries(users.map((u) => [u.id, u]));
   const all = (inb && inb.reports) || [];
-  const shown = all.filter((r) => PUB.filter === 'all' || (PUB.filter === 'open' ? !['fixed', 'wont-fix'].includes(r.status) : r.status === PUB.filter));
-  main.innerHTML = `<div class="page">${head('Reports from users',
-    'What people using your program sent you. Answer one and they see your answer in their Help screen; mark it fixed in a version and they are told to update.',
-    `<div role="group" aria-label="Which reports" style="display:flex;gap:8px;flex-wrap:wrap">${[['open', 'Still open'], ['new', 'New'], ['fixed', 'Fixed'], ['all', 'All']].map(([k, n]) =>
-      `<button type="button" class="seg ${PUB.filter === k ? 'on' : ''}" aria-pressed="${PUB.filter === k}" data-pf="${k}">${n}</button>`).join('')}</div>`)}
-    ${inb && inb.ok === false ? `<div class="note">${esc(inb.error || 'Your Home did not answer.')}</div>` : ''}
-    <section class="card">${shown.length ? shown.map((r) => { const lk = REP_LOOK[r.status] || ['plain', r.status];
-      return `<button type="button" class="row" data-rep="${esc(r.id)}" style="width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line-soft);cursor:pointer;color:var(--ink)">
-        <span class="grow"><b style="font-weight:600">${esc(r.title)}</b><span class="muted" style="font-size:14px">${esc(r.text || '')}</span>
-        <span class="muted mono" style="font-size:12.5px">${esc(r.id)} · ${esc(when(r.at))} · version ${esc(r.version || '?')}${r.contact ? ' · has an email' : ''}${r.has_support ? ' · support report' : ''}</span></span>
-        ${pill(lk[0], lk[1])}</button>`; }).join('') : empty('Nothing here', all.length ? 'No report matches this filter.' : 'When someone sends a report, it appears here — and in your email, if you gave one.')}</section></div>`;
+  const issues = all.filter((r) => PUB.filter === 'all' || (PUB.filter === 'open' ? !['fixed', 'wont-fix'].includes(r.status) : r.status === PUB.filter));
+  const people = users.filter((u) => PUB.who === 'registered' ? !!u.person : PUB.who === 'issues' ? (u.reports || {}).open > 0 : PUB.who === 'old' ? u.old_version : true);
+  const tile = (label, n, sub) => `<div class="card tile"><span class="label">${label}</span><span class="big mono">${Number(n || 0)}</span><span class="muted" style="font-size:13.5px">${sub}</span></div>`;
+  main.innerHTML = `<div class="page">${head('Your users',
+    'Everyone using your program, and what they asked you. Names and details appear only for people who chose to register; everyone else is counted by a random number for their copy.',
+    `<div role="group" aria-label="Show" style="display:flex;gap:8px;flex-wrap:wrap">${[['people', 'People'], ['issues', 'Issues' + (Number((inb && inb.new) || 0) ? ' · ' + Number(inb.new) + ' new' : '')]].map(([k, n]) =>
+      `<button type="button" class="seg ${PUB.tab === k ? 'on' : ''}" aria-pressed="${PUB.tab === k}" data-ptab="${k}">${esc(n)}</button>`).join('')}</div>`)}
+    ${(us && us.ok === false) || (inb && inb.ok === false) ? `<div class="note">${esc((us && us.error) || (inb && inb.error) || 'Your Home did not answer.')}</div>` : ''}
+    <div class="tiles">${tile('Copies in use', c.this_week, `seen this week · ${Number(c.copies || 0)} ever`)}${tile('Registered', c.registered, 'gave their name and details')}
+      ${tile('Open issues', c.open_issues, 'not fixed yet')}${tile('On the newest version', c.on_latest, us && us.latest ? 'version ' + esc(us.latest) : 'nothing put out yet')}</div>
+    ${PUB.tab === 'people' ? `<div role="group" aria-label="Which people" style="display:flex;gap:8px;flex-wrap:wrap">${[['all', 'Everyone'], ['registered', 'Registered'], ['issues', 'With open issues'], ['old', 'On an older version']].map(([k, n]) =>
+        `<button type="button" class="seg ${(PUB.who || 'all') === k ? 'on' : ''}" aria-pressed="${(PUB.who || 'all') === k}" data-pwho="${k}">${n}</button>`).join('')}</div>
+      <section class="card">${people.length ? people.map((u) => { const r = u.reports || {}, pr = u.person || {};
+        return `<button type="button" class="row" data-user="${esc(u.id)}" style="width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line-soft);cursor:pointer;color:var(--ink)">
+          <span class="grow"><b style="font-weight:600">${esc(who(u))}</b>
+            <span class="muted" style="font-size:14px">${esc([pr.business && pr.business !== pr.name ? pr.business : '', pr.email, pr.country].filter(Boolean).join(' · ') || 'copy ' + u.id.slice(0, 8))}</span>
+            <span class="muted mono" style="font-size:12.5px">version ${esc(u.version || '?')} · last seen ${esc(seen(u.last))} · ${esc(u.system || '')}</span></span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">${r.open ? pill('wait', r.open + ' open') : r.all ? pill('done', 'No open issues') : ''}${u.old_version ? pill('plain', 'Older version') : ''}</span></button>`; }).join('')
+        : empty('Nobody yet', users.length ? 'Nobody matches this filter.' : 'A copy appears here the first time it looks for updates — when someone opens the program after installing it.')}</section>`
+    : `<div role="group" aria-label="Which issues" style="display:flex;gap:8px;flex-wrap:wrap">${[['open', 'Still open'], ['new', 'New'], ['fixed', 'Fixed'], ['all', 'All']].map(([k, n]) =>
+        `<button type="button" class="seg ${PUB.filter === k ? 'on' : ''}" aria-pressed="${PUB.filter === k}" data-pf="${k}">${n}</button>`).join('')}</div>
+      <section class="card">${issues.length ? issues.map((r) => { const lk = REP_LOOK[r.status] || ['plain', r.status]; const u = byCopy[r.copy];
+        return `<button type="button" class="row" data-rep="${esc(r.id)}" style="width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line-soft);cursor:pointer;color:var(--ink)">
+          <span class="grow"><b style="font-weight:600">${esc(r.title)}</b><span class="muted" style="font-size:14px">${esc(r.text || '')}</span>
+          <span class="muted mono" style="font-size:12.5px">${esc(u ? who(u) : (r.contact || 'someone'))} · ${esc(seen(r.at))} · version ${esc(r.version || '?')}${r.has_support ? ' · support report' : ''}</span></span>
+          ${pill(lk[0], lk[1])}</button>`; }).join('') : empty('Nothing here', all.length ? 'No issue matches this filter.' : 'When someone sends a report, it appears here — and in your email, if you gave one.')}</section>`}
+  </div>`;
+  main.querySelectorAll('[data-ptab]').forEach((b) => b.onclick = () => { PUB.tab = b.dataset.ptab; reports(main); });
+  main.querySelectorAll('[data-pwho]').forEach((b) => b.onclick = () => { PUB.who = b.dataset.pwho; reports(main); });
   main.querySelectorAll('[data-pf]').forEach((b) => b.onclick = () => { PUB.filter = b.dataset.pf; reports(main); });
   main.querySelectorAll('[data-rep]').forEach((b) => b.onclick = () => openReport(b.dataset.rep, main));
+  main.querySelectorAll('[data-user]').forEach((b) => b.onclick = () => openUser(b.dataset.user, main));
+}
+async function openUser(id, main) {
+  openPanel(`${panelHead('A person', 'copy ' + id.slice(0, 8))}<div class="dr-body"><section class="dr-sec"><p class="muted">Opening…</p></section></div>`, 'A person', 'user', id);
+  const j = await api('/api/publisher/user/' + encodeURIComponent(id));
+  const body = $('#drawer .dr-body'); if (!body) return;
+  if (!(j && j.ok)) { body.innerHTML = `<section class="dr-sec"><p>${esc((j && j.error) || 'It could not be read.')}</p></section>`; return; }
+  const u = j.user || {}, p = u.person || {}, reps = j.reports || [];
+  const line = (k, v, link) => v ? `<div style="display:flex;gap:12px"><span class="muted" style="min-width:96px">${k}</span><span style="min-width:0;overflow-wrap:anywhere">${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</span></div>` : '';
+  const site = p.website ? (/^https?:\/\//i.test(p.website) ? p.website : 'https://' + p.website) : '';
+  const details = [['Business', p.business], ['Email', p.email, p.email ? 'mailto:' + p.email : ''],
+    ['Phone', p.phone, p.phone ? 'tel:' + String(p.phone).replace(/[^+\d]/g, '') : ''], ['Website', p.website, site],
+    ['Country', p.country], ['Registered', seen(p.at)]].map((x) => line(...x)).join('');
+  const copyLines = [['Version', u.version], ['Computer', u.system], ['First seen', seen(u.first)], ['Last seen', seen(u.last)]].map((x) => line(...x)).join('');
+  body.innerHTML = `<section class="dr-sec"><h3 style="font-size:18px">${esc(who(u))}</h3>
+      ${u.person ? details
+      : '<p class="muted">They have not registered, so only their copy is known. They can register in their Help and reports screen.</p>'}</section>
+    <section class="dr-sec"><b style="font-weight:600">Their copy</b>${copyLines}
+      <span class="muted mono" style="font-size:12px">${esc(u.id)}</span></section>
+    <section class="dr-sec"><b style="font-weight:600">Their issues</b>
+      ${reps.length ? reps.map((r) => { const lk = REP_LOOK[r.status] || ['plain', r.status];
+        return `<button type="button" class="row" data-urep="${esc(r.id)}" style="width:100%;text-align:left;background:none;border:0;padding:8px 0;cursor:pointer;color:var(--ink)"><span class="grow"><b style="font-weight:600">${esc(r.title)}</b>
+          <span class="muted" style="font-size:13px">${esc(seen(r.at))} · version ${esc(r.version || '?')}</span></span>${pill(lk[0], lk[1])}</button>`; }).join('') : '<p class="muted">None.</p>'}</section>
+    <section class="dr-sec"><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn quiet small" type="button" id="userForget">Remove this person</button></div>
+      <p class="muted" style="font-size:13px">Removes their details and copy from your Home. If their program is still in use it appears again, by its number, the next time it looks for updates.</p></section>`;
+  body.querySelectorAll('[data-urep]').forEach((b) => b.onclick = () => openReport(b.dataset.urep, main));
+  $('#userForget').onclick = async () => {
+    if (!confirm('Remove this person from your Home? Their details are deleted.')) return;
+    const also = reps.length ? confirm(`Also delete their ${reps.length} issue(s)? Choose Cancel to keep them.`) : false;
+    const x = await api('/api/publisher/forget', {id, reports: also});
+    toast(x.ok ? 'Removed.' : (x.error || 'Not removed.'));
+    if (x.ok) { closePanel(); reports(main); }
+  };
 }
 async function openReport(id, main) {
   openPanel(`${panelHead('A report', id)}<div class="dr-body"><section class="dr-sec"><p class="muted">Opening…</p></section></div>`, 'A report', 'report', id);
@@ -2619,7 +2735,7 @@ function more(main) {
     ${item('#google', 'On Google', 'Which pages Google lists')}${item('#check', 'Website Check', 'A report on any website')}
     ${item('#settings', 'Settings', 'Your business, the AI, your account')}
     ${item('#help', 'Help and reports', 'Tell us about a problem, and see the answers')}
-    ${S.publisher ? item('#reports', 'Reports from users', 'What people using your program sent you') : ''}</div></div>`;
+    ${S.publisher ? item('#reports', 'Your users', 'Who uses your program, and their issues') : ''}</div></div>`;
 }
 
 /* ---- routing ----

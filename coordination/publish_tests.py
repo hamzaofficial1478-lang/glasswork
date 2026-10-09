@@ -151,6 +151,47 @@ def test_nobody_else_gets_in():
         check("eight in an hour, then it asks them to wait", sent, [True] * 8 + [False])
 
 
+def test_your_users():
+    """
+    "where i will get the user details and their issues? like will i have any
+     of my room where i will be able to manage the my users their issues?"
+    """
+    print("\nHis Users room: every copy in use, who registered, and their issues:")
+    with Home() as h:
+        latest = support.home_url() + "/index.php?do=latest"
+        asked = support.with_copy(latest)
+        check("the update check carries this copy's number and version, and nothing else",
+              ("copy=" + support.install_id()) in asked and "v=" in asked and "name" not in asked, True)
+        urllib.request.urlopen(asked, timeout=10).read()
+        us = support.users()
+        check("the copy is counted", (us["counts"]["copies"], us["users"][0]["id"]), (1, support.install_id()))
+        check("  but nobody's name is known until they register", us["users"][0].get("person"), None)
+        r = support.register({"name": "Aisha Khan", "business": "Khan Glazing", "email": "aisha@example.com",
+                              "phone": "+971 4 000 0000", "website": "khanglazing.ae", "country": "UAE"})
+        check("a person registers", r.get("ok"), True)
+        support.send("Leads will not open", "It spins.", "", False)
+        us = support.users()
+        person = us["users"][0]
+        check("and he sees who they are", ((person.get("person") or {}).get("name"), (person.get("person") or {}).get("email")),
+              ("Aisha Khan", "aisha@example.com"))
+        check("  with their open issue counted against them", person["reports"], {"all": 1, "open": 1})
+        one = support.user(person["id"])
+        check("opening them shows their issues", [x["title"] for x in one["reports"]], ["Leads will not open"])
+        check("the tiles add up", (us["counts"]["registered"], us["counts"]["open_issues"]), (1, 1))
+        code, _body = h.raw("/glasswork-home/index.php?do=users")
+        check("nobody without his key sees the list", code, 401)
+        w = support.register({"withdraw": True})
+        check("a person can withdraw", (w.get("ok"), support.users()["users"][0].get("person")), (True, None))
+        check("  and their copy says it is not registered any more", support.registration()["registered"], False)
+        support.set_counting(False)
+        check("with counting switched off, the update check says nothing about the copy",
+              support.with_copy(latest), latest)
+        support.set_counting(True)
+        f = support.forget(person["id"], with_reports=True)
+        check("he can remove someone, and their issues", (f.get("ok"), f.get("reports_removed"),
+                                                           support.users()["counts"]["copies"]), (True, 1, 0))
+
+
 def test_putting_a_version_out():
     print("\nA version put out is signed, knows his Home, and cannot go out twice:")
     if not (ROOT / ".git").exists():
@@ -181,7 +222,7 @@ def main():
     if not shutil.which("php"):
         print("SKIPPED: PHP is not installed here, so the Home cannot be run.")
         return 0
-    for t in (test_a_report_and_its_answer, test_nobody_else_gets_in, test_putting_a_version_out):
+    for t in (test_a_report_and_its_answer, test_nobody_else_gets_in, test_your_users, test_putting_a_version_out):
         t()
     print()
     if _fail:

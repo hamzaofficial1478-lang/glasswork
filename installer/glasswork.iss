@@ -32,6 +32,15 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppName}
+; Not signed, by choice: no certificate subscription. Windows shows "Windows
+; protected your PC" the first time; More info → Run anyway installs it. These
+; lines at least give the file its own name and version in that box and in
+; the file's Properties.
+VersionInfoVersion={#AppVersion}
+VersionInfoCompany={#AppName}
+VersionInfoDescription={#AppName} Setup
+VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes

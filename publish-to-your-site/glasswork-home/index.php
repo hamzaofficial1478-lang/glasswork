@@ -6,7 +6,9 @@
  *   ...?do=report     (anyone)  a person using the program sends you a problem
  *   ...?do=status     (anyone)  they see your answer, with the key they were given
  *   ...?do=latest     (anyone)  their program asks whether there is a new version
+ *   ...?do=register   (anyone)  a person chooses to tell you who they are
  *   ...?do=inbox / read / answer / remove   (you only)  the reports, and your replies
+ *   ...?do=users / user / forget            (you only)  the people using your program
  *   ...?do=upload / release                 (you only)  putting a new version out
  *
  * WHAT TO DO WITH IT
@@ -16,6 +18,12 @@
  *   website's main folder, next to your home page. That is all.
  *
  * WHAT IT KEEPS, AND WHERE
+ *
+ *   Each copy of the program has a random number of its own. When it asks for
+ *   the newest version it says that number, its version and the kind of
+ *   computer — nothing else, and the person can switch it off — so you can see
+ *   how many copies are in use. Name, business, email and website arrive only
+ *   if the person chooses to register, and they can take them back.
  *
  *   Reports are kept in private/ as files no browser can read: each one starts
  *   with a line of PHP that stops anyone who asks for it by address, and the
@@ -34,7 +42,7 @@ declare(strict_types=1);
 @ini_set('display_errors', '0');
 ob_start();
 
-const HOME_VERSION = 1;
+const HOME_VERSION = 2;
 const REPORT_MAX = 400 * 1024;            // one report, with its support file
 const CHUNK_MAX = 6 * 1024 * 1024;        // one piece of an upload
 const PER_ADDRESS_HOUR = 8;               // reports from one address in an hour
@@ -112,6 +120,28 @@ function kept(string $path): ?array {
     return is_array($d) ? $d : null;
 }
 
+function copy_id($v): string {
+    $v = strtolower(trim((string)$v));
+    return preg_match('/^[a-f0-9]{16,40}$/', $v) ? $v : '';
+}
+
+function copy_path(string $id): string {
+    return private_dir('copies') . '/' . $id . '.php';
+}
+
+/** A copy said hello: when it was first and last seen, and on which version. */
+function note_copy(string $id, string $version, string $system): void {
+    $p = copy_path($id);
+    $c = kept($p) ?? ['id' => $id, 'first' => time(), 'last' => 0, 'version' => '', 'system' => '', 'person' => null];
+    $now = time();
+    $changed = $c['version'] !== $version || $c['system'] !== $system;
+    if (!$changed && $now - (int)$c['last'] < 3600) { return; }      // once an hour is plenty
+    $c['last'] = $now;
+    $c['version'] = $version;
+    $c['system'] = $system;
+    keep($p, $c);
+}
+
 function report_path(string $id): string {
     $id = preg_replace('/[^a-z0-9-]/', '', strtolower($id));
     if ($id === '' || strlen($id) > 40) { refuse(400, 'which report?'); }
@@ -157,7 +187,9 @@ if ($do === '' && $method === 'GET') {
        . "p.m{color:#5b6762;font-size:14px}</style><main><h1 style=\"margin:0 0 6px\">$name</h1>"
        . ($exe ? "<p>Version $ver for Windows. Download it, double-click it, and follow the steps — it installs everything it needs.</p>"
                  . "<a class=\"b\" href=\"$exe\">Download for Windows</a>"
-                 . "<p class=\"m\">Windows may say it does not recognise the publisher the first time. Choose <b>More info</b> then <b>Run anyway</b>.</p>"
+                 . "<ol class=\"m\"><li>Open the file you downloaded.</li><li>If a blue box says <b>Windows protected your PC</b>, "
+               . "click <b>More info</b>, then <b>Run anyway</b>. It says that for any new program from a small maker.</li>"
+               . "<li>Follow the steps: choose where to install it and where to keep your work. That is all.</li></ol>"
                : "<p>The first version is on its way. Please check back soon.</p>")
        . "</main>";
     exit;
@@ -173,6 +205,11 @@ if ($do === 'ping' && $method === 'GET') {
 // The addresses of the files are made whole here, so the program can fetch
 // them wherever this folder lives.
 if ($do === 'latest' && $method === 'GET') {
+    $cid = copy_id($_GET['copy'] ?? '');
+    if ($cid !== '') {
+        note_copy($cid, substr(preg_replace('/[^0-9A-Za-z.\-]/', '', (string)($_GET['v'] ?? '')), 0, 40),
+                  substr(preg_replace('/[^0-9A-Za-z .\-_()]/', '', (string)($_GET['os'] ?? '')), 0, 120));
+    }
     $m = manifest();
     if (!$m) { answer(['ok' => true, 'version' => '', 'notes' => 'nothing published yet']); }
     foreach (['zip', 'installer'] as $k) {
@@ -210,7 +247,7 @@ if ($do === 'report' && $method === 'POST') {
             'contact' => text($body, 'contact', 200), 'product' => text($body, 'product', 60),
             'version' => text($body, 'version', 40), 'system' => text($body, 'system', 160),
             'support' => text($body, 'support', 300000), 'status' => 'new', 'reply' => '', 'fixed_in' => '',
-            'updated' => $now];
+            'updated' => $now, 'copy' => copy_id($body['copy'] ?? '')];
     if (!keep(report_path($id), $rep)) { refuse(500, 'the report could not be saved on the website'); }
     $c = config();
     if (!empty($c['owner_email']) && filter_var($c['owner_email'], FILTER_VALIDATE_EMAIL)) {
@@ -220,6 +257,31 @@ if ($do === 'report' && $method === 'POST') {
               'From: no-reply@' . preg_replace('/[^a-z0-9.-]/i', '', (string)($_SERVER['HTTP_HOST'] ?? 'localhost')));
     }
     answer(['ok' => true, 'id' => $id, 'key' => $key]);
+}
+
+// --- a person chooses to tell you who they are ---------------------------------
+// Only what they type, only if they press Register, and Withdraw takes it all
+// back again (the copy stays counted, by its number alone).
+if ($do === 'register' && $method === 'POST') {
+    $cid = copy_id($body['copy'] ?? '');
+    if ($cid === '') { refuse(400, 'which copy?'); }
+    $p = copy_path($cid);
+    $c = kept($p) ?? ['id' => $cid, 'first' => time(), 'last' => time(), 'version' => text($body, 'version', 40),
+                      'system' => text($body, 'system', 120), 'person' => null];
+    if (!empty($body['withdraw'])) {
+        $c['person'] = null;
+        keep($p, $c);
+        answer(['ok' => true, 'withdrawn' => true]);
+    }
+    $email = text($body, 'email', 200);
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) { refuse(400, 'that email address does not look right'); }
+    $person = ['name' => text($body, 'name', 120), 'business' => text($body, 'business', 160), 'email' => $email,
+               'phone' => text($body, 'phone', 60), 'website' => text($body, 'website', 300),
+               'country' => text($body, 'country', 80), 'at' => time()];
+    if ($person['name'] === '' && $person['business'] === '' && $email === '') { refuse(400, 'give at least a name, a business or an email'); }
+    $c['person'] = $person;
+    if (!keep($p, $c)) { refuse(500, 'could not save it on the website'); }
+    answer(['ok' => true, 'registered' => true]);
 }
 
 // --- they see your answer ------------------------------------------------------
@@ -242,16 +304,7 @@ if ($do === 'status' && $method === 'POST') {
 // --- you: the reports ----------------------------------------------------------
 if ($do === 'inbox' && $method === 'GET') {
     owner_only();
-    $list = [];
-    foreach ((array)glob(private_dir('reports') . '/*.php') as $f) {
-        $rep = kept($f);
-        if (!$rep) { continue; }
-        $list[] = ['id' => $rep['id'], 'at' => $rep['at'], 'title' => $rep['title'],
-                   'text' => function_exists('mb_substr') ? mb_substr((string)$rep['text'], 0, 240) : substr((string)$rep['text'], 0, 240),
-                   'contact' => $rep['contact'], 'version' => $rep['version'], 'status' => $rep['status'],
-                   'fixed_in' => $rep['fixed_in'], 'replied' => $rep['reply'] !== '', 'has_support' => $rep['support'] !== ''];
-    }
-    usort($list, fn($a, $b) => $b['at'] <=> $a['at']);
+    $list = array_map('report_row', all_reports());
     answer(['ok' => true, 'reports' => array_slice($list, 0, 500), 'new' => count(array_filter($list, fn($x) => $x['status'] === 'new'))]);
 }
 
@@ -285,6 +338,77 @@ if ($do === 'remove' && $method === 'POST') {
     $p = report_path((string)($body['id'] ?? ''));
     if (is_file($p)) { @unlink($p); }
     answer(['ok' => true]);
+}
+
+// --- you: the people using your program ---------------------------------------
+function all_reports(): array {
+    $out = [];
+    foreach ((array)glob(private_dir('reports') . '/*.php') as $f) {
+        $rep = kept($f);
+        if ($rep) { $out[] = $rep; }
+    }
+    usort($out, fn($a, $b) => $b['at'] <=> $a['at']);
+    return $out;
+}
+
+function report_row(array $rep): array {
+    return ['id' => $rep['id'], 'at' => $rep['at'], 'title' => $rep['title'],
+            'text' => function_exists('mb_substr') ? mb_substr((string)$rep['text'], 0, 240) : substr((string)$rep['text'], 0, 240),
+            'contact' => $rep['contact'], 'version' => $rep['version'], 'status' => $rep['status'],
+            'fixed_in' => $rep['fixed_in'], 'replied' => $rep['reply'] !== '', 'has_support' => $rep['support'] !== '',
+            'copy' => $rep['copy'] ?? ''];
+}
+
+if ($do === 'users' && $method === 'GET') {
+    owner_only();
+    $reports = all_reports();
+    $by = [];
+    foreach ($reports as $rep) {
+        $k = (string)($rep['copy'] ?? '');
+        if ($k === '') { continue; }
+        $by[$k] = $by[$k] ?? ['all' => 0, 'open' => 0];
+        $by[$k]['all']++;
+        if (!in_array($rep['status'], ['fixed', 'wont-fix'], true)) { $by[$k]['open']++; }
+    }
+    $list = [];
+    foreach ((array)glob(private_dir('copies') . '/*.php') as $f) {
+        $c = kept($f);
+        if (!$c) { continue; }
+        $c['reports'] = $by[$c['id']] ?? ['all' => 0, 'open' => 0];
+        $list[] = $c;
+    }
+    usort($list, fn($a, $b) => $b['last'] <=> $a['last']);
+    $m = manifest();
+    $week = time() - 7 * 86400;
+    answer(['ok' => true, 'users' => array_slice($list, 0, 2000), 'latest' => $m['version'] ?? '',
+            'counts' => ['copies' => count($list),
+                         'this_week' => count(array_filter($list, fn($c) => $c['last'] >= $week)),
+                         'registered' => count(array_filter($list, fn($c) => !empty($c['person']))),
+                         'open_issues' => count(array_filter($reports, fn($r) => !in_array($r['status'], ['fixed', 'wont-fix'], true))),
+                         'on_latest' => $m ? count(array_filter($list, fn($c) => $c['version'] === ($m['version'] ?? ''))) : 0]]);
+}
+
+if ($do === 'user' && $method === 'GET') {
+    owner_only();
+    $cid = copy_id($_GET['id'] ?? '');
+    $c = $cid !== '' ? kept(copy_path($cid)) : null;
+    if (!$c) { refuse(404, 'no such copy'); }
+    $mine = array_values(array_filter(all_reports(), fn($r) => ($r['copy'] ?? '') === $cid));
+    answer(['ok' => true, 'user' => $c, 'reports' => array_map('report_row', $mine)]);
+}
+
+if ($do === 'forget' && $method === 'POST') {
+    owner_only();
+    $cid = copy_id($body['id'] ?? '');
+    if ($cid === '') { refuse(400, 'which copy?'); }
+    @unlink(copy_path($cid));
+    $gone = 0;
+    if (!empty($body['reports'])) {
+        foreach (all_reports() as $rep) {
+            if (($rep['copy'] ?? '') === $cid) { @unlink(report_path($rep['id'])); $gone++; }
+        }
+    }
+    answer(['ok' => true, 'reports_removed' => $gone]);
 }
 
 // --- you: putting a new version out ----------------------------------------------

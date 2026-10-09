@@ -14,9 +14,16 @@ YOUR DATA STAYS WITH YOU
 Your account, your websites and everything the agency records are kept on your
 computer, encrypted with your password. The publisher does not receive them.
 Keep your recovery key safe: without your password and your recovery key, your
-data cannot be opened again by anyone. If you send a problem report, it carries
-only what you wrote and, if you tick the box, a support report with every key,
-password, address and number taken out first.
+data cannot be opened again by anyone.
+
+WHAT THE PUBLISHER DOES RECEIVE
+- When the program looks for updates: a random number for your copy, its
+  version and the kind of computer, so copies in use can be counted. You can
+  switch this off in Help and reports; updates are still looked for.
+- Only if you choose to register: the name, business, email, phone, website
+  and country you type. You can withdraw it at any time.
+- Only if you send a problem report: what you wrote and, if you tick the box,
+  a support report with every key, password, address and number taken out.
 
 SERVICES YOU CONNECT
 The AI company, Google, maps, email and your website are reached with your own

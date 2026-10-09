@@ -659,7 +659,31 @@ app.post("/api/support/send", async (req, res) => {
   res.json(await pyStdin("coordination.support", ["--send"], { title: textField(b.title, 200),
     text: textField(b.text, 20000), contact: textField(b.contact, 200), attach: b.attach !== false }, 120000));
 });
+// Telling the makers who uses this copy: only if they press Register, and
+// Withdraw takes it back. Counting (a random number and the version, with the
+// update check) can be switched off.
+app.get("/api/support/registration", async (_q, res) =>
+  res.json(await pyModule("coordination.support", ["--registration"], 30000)));
+app.post("/api/support/register", async (req, res) => {
+  const b = req.body || {};
+  const body = b.withdraw === true ? { withdraw: true } : {
+    name: textField(b.name, 120), business: textField(b.business, 160), email: textField(b.email, 200),
+    phone: textField(b.phone, 60), website: textField(b.website, 300), country: textField(b.country, 80) };
+  res.json(await pyStdin("coordination.support", ["--register"], body, 60000));
+});
+app.post("/api/support/counting", async (req, res) =>
+  res.json(await pyModule("coordination.support", ["--counting", (req.body || {}).on === false ? "off" : "on"], 30000)));
 app.get("/api/publisher", async (_q, res) => res.json(await pyModule("coordination.support", ["--publisher"], 30000)));
+app.get("/api/publisher/users", async (_q, res) => res.json(await pyModule("coordination.support", ["--users"], 60000)));
+app.get("/api/publisher/user/:id", async (req, res) => {
+  const id = String(req.params.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
+  res.json(await pyModule("coordination.support", ["--user", id], 60000));
+});
+app.post("/api/publisher/forget", async (req, res) => {
+  const b = req.body || {};
+  const id = String(b.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
+  res.json(await pyModule("coordination.support", ["--forget", id].concat(b.reports === true ? ["--with-reports"] : []), 60000));
+});
 app.post("/api/publisher/setup", async (req, res) => {
   const b = req.body || {};
   res.json(await pyStdin("coordination.support", ["--setup"], { site: textField(b.site, 300),
