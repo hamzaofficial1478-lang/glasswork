@@ -150,7 +150,9 @@ const ACCOUNT_COOKIE = "glasswork_account";
 const ACCOUNT_SESSIONS = new Set();
 let SIGNED_IN = null;                // { account, name, key: Buffer } while signed in
 const ACCOUNT_OPEN = new Set(["/account", "/api/account/list", "/api/account/sign-in",
-  "/api/account/sign-up", "/api/account/recover", "/api/ping"]);
+  "/api/account/sign-up", "/api/account/recover", "/api/ping",
+  // Read before an account exists: the terms are agreed at sign-up.
+  "/terms", "/privacy", "/api/product"]);
 
 function accountsExist() {
   try {
@@ -459,6 +461,8 @@ app.get("/review", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "revie
 app.get("/account", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "account.html")));
 app.get("/business", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "business.html")));
 app.get("/engine", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "engine.html")));
+app.get("/terms", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "terms.html")));
+app.get("/privacy", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "privacy.html")));
 
 /* ---- YOUR BUSINESS (coordination/profile.py) ------------------------------
    What this website's business is, sells, who buys it and where. Read and
@@ -528,6 +532,26 @@ app.post("/api/connect/wordpress", async (req, res) => {
   res.json(await pyConnect(["--wordpress"], { user: b.user, password: b.password, site: b.site }, 120000));
 });
 app.post("/api/connect/readonly", async (_q, res) => res.json(await pyConnect(["--readonly"], null, 60000)));
+
+/* ---- THE PRODUCT, ITS UPDATES, AND A REPORT FOR SUPPORT -------------------
+   What the program is called and which version this is (config/product.json);
+   signed updates for a copy that has no git (coordination/updates.py); and a
+   support report with nothing private in it (coordination/diagnostics.py). */
+function productInfo() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, "config", "product.json"), "utf8")) || {}; }
+  catch (_) { return {}; }
+}
+app.get("/api/product", async (_q, res) => {
+  const p = productInfo();
+  res.json({ ok: true, name: p.name || "Glasswork", version: p.version || "", tagline: p.tagline || "",
+             support_email: p.support_email || "" });
+});
+app.get("/api/update", async (_q, res) => res.json(await pyModule("coordination.updates", ["--check", "--json"], 60000)));
+app.post("/api/update/apply", async (_q, res) =>
+  res.json(await pyModule("coordination.updates", ["--apply", "--json"], 900000)));
+app.post("/api/update/rollback", async (_q, res) =>
+  res.json(await pyModule("coordination.updates", ["--rollback", "--json"], 120000)));
+app.get("/api/diagnostics", async (_q, res) => res.json(await pyModule("coordination.diagnostics", ["--json"], 90000)));
 
 /* ---- WEBSITE CHECK (pipelines/website_check.py) ----------------------------
    A report on any website, every desk's view of it. Starting one makes its
@@ -777,7 +801,7 @@ const API_CAPABILITIES = [
   "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
-  "account", "business", "engine", "connect", "check",
+  "account", "business", "engine", "connect", "check", "product", "update", "diagnostics",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 // Which copy of the program this is, without saying where it lives: run.py
@@ -787,7 +811,8 @@ const HOME_ID = crypto.createHash("sha256")
   .update(path.resolve(__dirname).replace(/\\/g, "/").toLowerCase()).digest("hex").slice(0, 16);
 app.get("/api/ping", async (_q, res) => {
   res.json({ ok: true, api: API_CAPABILITIES, started: SERVER_STARTED,
-             stale: codeIsNewer(), supervised: SUPERVISED, office: true, home: HOME_ID });
+             stale: codeIsNewer(), supervised: SUPERVISED, office: true, home: HOME_ID,
+             version: productInfo().version || "" });
 });
 
 /* THE BRAND, AND NOTHING ELSE.
@@ -797,8 +822,9 @@ app.get("/api/ping", async (_q, res) => {
    password now. A front-of-house screen should not be asking for the key
    cupboard to learn what the firm is called, so it asks for exactly this. */
 app.get("/api/brand", async (_q, res) => {
+  const p = productInfo();
   res.json({ ok: true, agencyName: (readEnv().AGENCY_NAME || "").trim(),
-             website: await siteLabel() });
+             website: await siteLabel(), product: p.name || "Glasswork", version: p.version || "" });
 });
 
 // STATE — the Control Room's snapshot. Reads the filing cabinet via Python

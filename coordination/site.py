@@ -74,7 +74,22 @@ def agency_name() -> str:
         v = (integrations.read_env().get("AGENCY_NAME") or "").strip()
     except Exception:
         v = ""
-    return v or DEFAULT_AGENCY
+    if v:
+        return v
+    # NOT HIS NAME ON SOMEBODY ELSE'S COPY. The default is his agency's, which is
+    # right on his own copy (before any account, or the account it was brought
+    # into) and wrong everywhere else: a customer's new account, or a fresh copy
+    # nobody has set up yet, shows the product's name until they give their own.
+    try:
+        a = _workspace.active()
+        fresh = (a and not _workspace.account(a["account"]).get("brought_in")) or \
+            (not a and not _workspace.legacy_present())
+        if fresh:
+            from . import product
+            return product.name()
+    except Exception:
+        pass
+    return DEFAULT_AGENCY
 
 
 def load() -> dict:

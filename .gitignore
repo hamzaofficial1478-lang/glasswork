@@ -24,3 +24,11 @@ config/site.json
 
 # Accounts: each person's settings, keys and cabinets (coordination/workspace.py).
 data/
+
+# Made on each computer by install/: the program's own Python folder and the
+# start shortcuts. And the copies coordination/updates.py keeps of every file
+# an update replaced, so an update can be undone.
+.venv/
+Start *.bat
+Start *.command
+updates/

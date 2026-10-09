@@ -59,7 +59,7 @@ def agency_banner() -> str:
         from coordination import site
         return site.agency_name().upper()
     except Exception:
-        return "WORLD DEAL TECHNICAL AGENCY"
+        return "GLASSWORK"
 
 
 def head(title):
@@ -173,7 +173,19 @@ def update():
     head("Checking for updates")
     code, out = sh(["git", "rev-parse", "--is-inside-work-tree"])
     if code != 0:
-        say("  Not a git checkout — skipping the update.")
+        # A downloaded copy: no git, so it asks its update address instead, and
+        # says what it found. Installing is a button in Settings, never a
+        # surprise at start-up — see coordination/updates.py.
+        try:
+            sys.path.insert(0, str(ROOT))
+            from coordination import updates
+            u = updates.check()
+        except Exception as e:
+            u = {"ok": False, "error": type(e).__name__}
+        if u.get("available"):
+            say(f"  Version {u.get('latest')} is out. Install it from Settings → This program.")
+        else:
+            say("  " + (u.get("why") or u.get("error") or "Not a git checkout — skipping the update."))
         return
 
     code, dirty = sh(["git", "status", "--porcelain"])
@@ -427,6 +439,7 @@ def tests():
             "coordination.honest_tests",
             "coordination.orders_tests",
             "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
+            "coordination.launch_kit_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",
@@ -669,7 +682,32 @@ def office():
         say("  The office was updated — started the new version. Refresh the page.")
 
 
+def use_venv():
+    """
+    Run inside the program's own Python folder when the installer made one.
+
+    install/ puts every library in .venv so nothing else on the computer
+    changes. Double-clicking run.py starts the computer's Python instead, which
+    has none of them — so this hands over to the .venv one, once.
+    """
+    venv = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if not venv.exists() or os.environ.get("GLASSWORK_IN_VENV") == "1":
+        return
+    try:
+        if Path(sys.prefix).resolve() == (ROOT / ".venv").resolve():
+            return
+    except Exception:
+        return
+    try:
+        code = subprocess.call([str(venv), str(Path(__file__).resolve())] + sys.argv[1:],
+                               env={**os.environ, "GLASSWORK_IN_VENV": "1"})
+    except KeyboardInterrupt:
+        code = 130
+    sys.exit(code)
+
+
 def main():
+    use_venv()
     ap = argparse.ArgumentParser(description="Run the agency.")
     ap.add_argument("--day", action="store_true", help="run a full day's cycle")
     ap.add_argument("--check", action="store_true", help="what is configured")

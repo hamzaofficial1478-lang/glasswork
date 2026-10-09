@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms of use</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F3F5F5;--surface:#FFFFFF;--line:#D9E0E0;--ink:#142022;--ink-2:#33464A;--muted:#4A5A5D;--accent:#1F5F66;--note-bg:#FFF9EE;--note-line:#EFD9AE}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0E1415;--surface:#151D1F;--line:#283436;--ink:#E3EAEA;--ink-2:#C2CFD0;--muted:#A7B5B7;--accent:#7FC4C7;--note-bg:#2B2414;--note-line:#5A4A26}}
+:root[data-theme="dark"]{--bg:#0E1415;--surface:#151D1F;--line:#283436;--ink:#E3EAEA;--ink-2:#C2CFD0;--muted:#A7B5B7;--accent:#7FC4C7;--note-bg:#2B2414;--note-line:#5A4A26}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.65}
+.wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px}
+a{color:var(--accent)}
+h1{font-size:32px;line-height:1.2;margin:0 0 6px;letter-spacing:-.015em;text-wrap:balance}
+h2{font-size:19px;margin:34px 0 8px;text-wrap:balance}
+p,li{color:var(--ink-2)} ul{padding-left:22px}
+.muted{color:var(--muted);font-size:14.5px}
+.note{padding:14px 16px;border-radius:10px;background:var(--note-bg);border:1px solid var(--note-line);margin:22px 0;font-size:15px}
+nav{display:flex;gap:18px;flex-wrap:wrap;font-size:15px;margin-bottom:28px}
+</style>
+</head>
+<body><div class="wrap">
+<nav><a href="/">Back to the program</a><a href="/privacy">Privacy</a></nav>
+<h1>Terms of use</h1>
+<p class="muted"><span class="pname">Glasswork</span> · version <span class="pver"></span></p>
+<div class="note"><b>Draft for review.</b> These terms have not yet been checked by a lawyer. They say plainly how the program works and what it expects of you; the publisher’s name, contact details and the country whose law applies are filled in before public launch.</div>
+
+<h2>What this is</h2>
+<p><span class="pname">Glasswork</span> is a program you install and run on your own computer. It runs the online growth of your business with a team of AI agents — finding leads, writing pages and posts, looking after your website and your place on Google — and asks you before anything leaves your computer.</p>
+
+<h2>Your account and your data</h2>
+<ul>
+<li>Your account, your websites and everything the agency records are kept on your computer, encrypted with your password. The publisher does not receive them.</li>
+<li>Keep your recovery key safe. If you lose both your password and your recovery key, your data cannot be opened again — by you or by anyone else.</li>
+<li>Back up your computer. The program keeps its own records, not copies of your computer.</li>
+</ul>
+
+<h2>Services you connect</h2>
+<p>The program works with services you choose and connect with your own keys: an AI company (Anthropic, OpenAI or Google), Google Search Console, maps and business directories, your email provider and your website. Their own terms and prices apply to what you send them, and you pay them directly. The daily spending limit stops the program’s own calls once it is reached; it is a safeguard, not a promise about any company’s bill.</p>
+
+<h2>What you agree not to do</h2>
+<ul>
+<li>Send messages that break the law where you or the people you write to are — for example the UAE’s data protection law, the UK’s and the EU’s GDPR and e-privacy rules, or the US CAN-SPAM Act. The program follows each country’s rules as it knows them and caps how many messages go out, but you are the sender.</li>
+<li>Collect information from places that do not allow it, or keep contacting someone who has asked you to stop.</li>
+<li>Use Website Check, or anything else in the program, to probe websites you do not own for weaknesses. Website Check only reads what any visitor’s browser sees, and it must stay that way.</li>
+<li>Publish content that is false, misleading, copied from someone else, or pretends to be another business.</li>
+<li>Use the program for anything illegal.</li>
+</ul>
+
+<h2>You approve what goes out</h2>
+<p>Anything that leaves the building — an email to a lead, a published page, a change to your website, an offer or a price — waits for your yes. Read it before you approve it: once you have approved something, it is yours.</p>
+
+<h2>Your website</h2>
+<p>When you connect your website, the program can change it only through the connection you set up, only after its checks pass and, for anything risky, only after you agree. It keeps a copy of every page it changes so the change can be undone. Keep your own backups too.</p>
+
+<h2>AI makes mistakes</h2>
+<p>The agents’ work is written with AI. It can be wrong, out of date or badly judged. The program checks the work before it reaches you; checking it before it reaches anyone else is your part.</p>
+
+<h2>Updates</h2>
+<p>Updates are signed by the publisher, and the program installs only an update whose signature matches. Each update keeps the files it replaced, so you can go back to the previous version from Settings.</p>
+
+<h2>The licence</h2>
+<p>The program’s code is released under the GNU General Public Licence, version 3, which comes with the program. It is provided as it is, without any warranty, to the extent the law allows.</p>
+
+<h2>Responsibility</h2>
+<p>To the extent the law allows, the publisher is not responsible for indirect losses, lost profits or lost data arising from using the program, or for what third-party services do with what you send them. Nothing here limits responsibility that the law does not allow to be limited.</p>
+
+<h2>Changes and contact</h2>
+<p>If these terms change, the program says so before the new terms apply. Questions: <span class="pmail">the publisher’s address is added before launch</span>.</p>
+</div>
+<script>
+fetch('/api/product').then((r) => r.json()).then((p) => {
+  if (!p || !p.ok) return;
+  document.querySelectorAll('.pname').forEach((e) => { e.textContent = p.name; });
+  document.querySelectorAll('.pver').forEach((e) => { e.textContent = p.version; });
+  if (p.support_email) document.querySelectorAll('.pmail').forEach((e) => { e.textContent = p.support_email; });
+  document.title = 'Terms of use — ' + p.name;
+}).catch(() => {});
+</script>
+</body>
+</html>

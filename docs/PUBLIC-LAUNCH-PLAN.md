@@ -303,6 +303,46 @@ someone else's in read-only mode:
     which one visit cannot measure. Speed is the server's answer time, not a
     full phone speed test.
 
+- **Phase 6, the agency floor (9 October).** "make sure the dashboard should
+  have a full control ui like it was before the sectors and agents"
+  - **Your agency** brings the classic office's floor into the new design: a
+    plan of the seven rooms with a lamp for every desk and an arrow for every
+    open request between sectors, a card per room listing each desk with its
+    state and what it is doing, the shelf, and the requests between desks.
+  - A desk that stopped turns red and names the problem: **failed** (its run
+    raised an error), **stalled** (it started and never came back), or **stuck
+    on a job** (holding work nobody is doing). Counts and filters show at a
+    glance what is working, failed or stuck, waiting on you, done or quiet.
+  - **Click a desk:** what it is doing or why it stopped, its work today, its
+    jobs, a button to put a stuck job back, and a chat with that desk.
+  - **Click a room:** switch the sector on or off, whether it can work and
+    why, why it scores what it does, today's order for it, its board, its
+    requests, its faults and what it made today.
+  - **Activity** and **Results** are in the new design too, and the floor has
+    Run today, Stop, Pick up where it left off and Clear up.
+
+- **Phase 6, ready for other people (9 October).**
+  - **Installers.** Windows: double-click `install\Install-Windows.bat`. Mac:
+    `install/Install-Mac.command`. Linux: `bash install/install.sh`. Each
+    installs Python and Node if missing (asking first, for this user only),
+    keeps the program's libraries in its own folder, and puts it on the
+    desktop.
+  - **Updates without git.** A downloaded copy checks an update address and
+    installs a new version only if your signature matches. People's data,
+    keys and settings are never touched, and an update can be undone from
+    Settings. Your own git copy keeps updating as it always has.
+  - **Terms of use and privacy policy**, written in plain English and marked
+    as drafts for a lawyer to check. Sign-up links to them.
+  - **The product's name** lives in one place, `config/product.json`
+    ("Glasswork" for now, your choice). A customer's account shows that name,
+    never yours.
+  - **Help and feedback:** a support report to copy and send, with nothing
+    private in it.
+  - **docs/BETA-TESTING.md:** who to ask, what to give them, what to watch,
+    and how to send them an update.
+  - Not built yet: a signed .exe and .dmg installer (needs a code-signing
+    certificate and a build computer for each system), and a download page.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

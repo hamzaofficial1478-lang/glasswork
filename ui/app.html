@@ -1573,8 +1573,68 @@ function settings(main) {
         <span>Light or dark</span><div role="group" aria-label="Theme" style="display:flex;gap:8px">${[['system', 'Like this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) =>
           `<button type="button" class="seg ${k === t ? 'on' : ''}" aria-pressed="${k === t}" data-theme-pick="${k}">${n}</button>`).join('')}</div></div>
       <div class="card">${row('/classic', 'The classic office', 'The previous screens, with every panel, while the rest move across')}</div>
+    </section>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This program</h2>
+      <div class="card">
+        <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600" id="prodName">${esc((S.brand && S.brand.product) || 'Glasswork')}</b>
+          <span class="muted" style="font-size:14px" id="prodVer">Version ${esc((S.brand && S.brand.version) || '')}</span></span>
+          <button class="btn ghost small" type="button" id="updCheck">Check for updates</button></div>
+        <div class="row" id="updRow" hidden><span class="grow" id="updSay"></span><span style="display:flex;gap:8px;flex-wrap:wrap" id="updBtns"></span></div>
+      </div>
+      <div class="card">
+        <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">Help and feedback</b>
+          <span class="muted" style="font-size:14px">A report of what is failing, to send to whoever helps you — with no keys, passwords, email addresses or lead details in it.</span></span>
+          <button class="btn ghost small" type="button" id="diagMake">Make a support report</button></div>
+        <div class="row" id="diagRow" hidden style="flex-direction:column;align-items:stretch">
+          <pre id="diagText" class="mono" style="margin:0;white-space:pre-wrap;font-size:13px;background:var(--sunken);padding:12px 14px;border-radius:8px;max-height:320px;overflow:auto"></pre>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="diagCopy">Copy the report</button>
+            <span class="muted" style="font-size:14px" id="diagTo"></span></div></div>
+        <a class="row" href="/terms" target="_blank" rel="noopener" style="text-decoration:none;color:var(--ink)"><span class="grow"><b style="font-weight:600">Terms of use</b></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Read</span></a>
+        <a class="row" href="/privacy" target="_blank" rel="noopener" style="text-decoration:none;color:var(--ink)"><span class="grow"><b style="font-weight:600">Privacy</b></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Read</span></a>
+      </div>
     </section></div>`;
   main.querySelectorAll('[data-theme-pick]').forEach((b) => b.onclick = () => { theme(b.dataset.themePick); buildSiteMenu(); settings(main); });
+  $('#updCheck').onclick = () => checkUpdate();
+  $('#diagMake').onclick = async () => {
+    const b = $('#diagMake'); b.disabled = true;
+    const [d, p] = await Promise.all([api('/api/diagnostics'), api('/api/product')]);
+    b.disabled = false;
+    if (!d.ok) { toast(d.error || 'The report could not be made.'); return; }
+    $('#diagText').textContent = d.text || ''; $('#diagRow').hidden = false;
+    $('#diagTo').textContent = p && p.support_email ? 'Send it to ' + p.support_email : 'Paste it into an email or a message to whoever helps you.';
+  };
+  $('#diagCopy').onclick = async () => {
+    const text = $('#diagText').textContent;
+    try { await navigator.clipboard.writeText(text); toast('Copied. Paste it into your email or message.'); }
+    catch (e) { const r = document.createRange(); r.selectNodeContents($('#diagText')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected — press Ctrl+C (or ⌘C) to copy it.'); }
+  };
+}
+async function checkUpdate() {
+  const b = $('#updCheck'); b.disabled = true; $('#updRow').hidden = false; $('#updSay').textContent = 'Looking…'; $('#updBtns').innerHTML = '';
+  const u = await api('/api/update');
+  b.disabled = false;
+  $('#updSay').innerHTML = u.ok
+    ? (u.available ? `<b style="font-weight:600">Version ${esc(u.latest)} is out.</b> ${u.notes ? `<span class="muted">${esc(u.notes)}</span>` : ''}${u.can_install ? '' : `<br><span class="muted">${esc(u.why || '')}</span>`}` : esc(u.why || 'You have the latest version.'))
+    : esc(u.error || 'Could not look for updates.');
+  if (u.can_install) {
+    $('#updBtns').innerHTML = `<button class="btn small" type="button" id="updGo">Install version ${esc(u.latest)}</button>`;
+    $('#updGo').onclick = async () => {
+      if (!confirm(`Install version ${u.latest}? Your data and settings are not touched, and you can go back afterwards.`)) return;
+      $('#updGo').disabled = true; $('#updSay').textContent = 'Downloading, checking the signature and installing — this takes a minute or two…';
+      const j = await api('/api/update/apply', {});
+      $('#updSay').textContent = j.why || j.error || (j.ok ? 'Installed.' : 'It was not installed.');
+      $('#updBtns').innerHTML = j.ok && j.installed ? '<button class="btn quiet small" type="button" id="updBack">Go back to the previous version</button>' : '';
+      const back = $('#updBack'); if (back) back.onclick = undoUpdate;
+    };
+  } else if (!u.git && u.ok) {
+    $('#updBtns').innerHTML = '<button class="btn quiet small" type="button" id="updBack">Go back to the previous version</button>';
+    $('#updBack').onclick = undoUpdate;
+  }
+}
+async function undoUpdate() {
+  if (!confirm('Go back to the version before the last update?')) return;
+  const j = await api('/api/update/rollback', {});
+  toast(j.why || j.error || (j.ok ? 'Done.' : 'Nothing to go back to.'));
 }
 
 /* ======================= MORE (phone) ======================= */
