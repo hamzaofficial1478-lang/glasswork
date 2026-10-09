@@ -312,7 +312,10 @@ def test_the_connector_saves_only_into_its_folder():
     block = php[php.index("if ($route === '/picture'"):php.index("if (in_array($route, ['/blog', '/blog-remove']")]
     check("one folder, named in the file, never taken from the request",
           "'dir' => 'agency-pictures'" in block and "$body['dir']" not in block, True)
-    check("it says it can, so the office knows", "'connector' => 7" in php and "'pictures'" in php, True)
+    import re
+    ver = re.search(r"const CONNECTOR = (\d+);", php)
+    check("it says it can, so the office knows",
+          bool(ver) and int(ver.group(1)) >= 7 and "'connector' => CONNECTOR" in php and "'pictures'" in php, True)
 
 
 def main():

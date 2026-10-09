@@ -1,6 +1,6 @@
 <?php
 /**
- * agency-api.php — FULL ACCESS for worlddealtechnicalservices.com
+ * agency-api.php — FULL ACCESS for worlddealtechnicalservices.com  (version 8)
  *
  * This is the door. Put this ONE file on your server and the agency can read
  * and edit your pages itself, instead of handing you homework.
@@ -61,6 +61,26 @@ declare(strict_types=1);
 header('Content-Type: application/json');
 header('X-Content-Type-Options: nosniff');
 header('X-Robots-Tag: noindex, nofollow');   // never let Google index the door
+
+// Version 8. The program reads this from /health and uses what each version
+// can do — an older copy of this file still works, just without the newer parts.
+const CONNECTOR = 8;
+
+// CLEAN ANSWERS, EVEN ON A NOISY HOST. Shared hosting often prints PHP notices
+// and warnings straight into the page, and one line of that above the JSON
+// means the agency cannot read the answer at all. Everything PHP prints by
+// itself is caught here and thrown away, and a crash still answers in JSON.
+@ini_set('display_errors', '0');
+ob_start();
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        while (ob_get_level() > 0) { ob_end_clean(); }
+        if (!headers_sent()) { http_response_code(500); header('Content-Type: application/json'); }
+        echo json_encode(['ok' => false, 'error' => 'your website hit a PHP error: '
+                          . substr((string)$e['message'], 0, 300)]);
+    }
+});
 
 // ---------------------------------------------------------------------------
 // WHERE YOUR PAGES ARE
@@ -140,8 +160,15 @@ function is_forbidden(string $rel): bool {
 }
 
 function reply(array $data, int $code = 200): void {
+    while (ob_get_level() > 0) { ob_end_clean(); }
     http_response_code($code);
-    echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    // A page saved in an old encoding (not UTF-8) made json_encode give back
+    // nothing at all, and the agency saw an empty answer. Odd bytes are shown
+    // as a placeholder instead, and the page says it is not clean text
+    // ('text_ok'), so the agency reads it but never rewrites it.
+    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+           | (defined('JSON_INVALID_UTF8_SUBSTITUTE') ? JSON_INVALID_UTF8_SUBSTITUTE : 0);
+    echo json_encode($data, $flags);
     exit;
 }
 
@@ -254,7 +281,7 @@ if (!hash_equals($expected, $sent)) {
 // This is the part that matters. Without it, a "page name" of
 // ../../../../etc/passwd would turn the token into a key to the whole server.
 // ---------------------------------------------------------------------------
-function resolve_page(string $raw): string {
+function page_or_why(string $raw): array {
     $rel = ltrim(trim($raw), '/');
     if ($rel === '' || $rel === '/') {
         $rel = 'index.php';
@@ -262,20 +289,26 @@ function resolve_page(string $raw): string {
     // No traversal, no null bytes, no backslashes, no absolute paths.
     if (strpos($rel, "\0") !== false || strpos($rel, '..') !== false
         || strpos($rel, '\\') !== false || preg_match('#^[a-zA-Z]:#', $rel)) {
-        fail(400, 'bad page name');
+        return ['', 400, 'bad page name'];
     }
-    if (is_forbidden($rel)) { fail(403, "$rel is off limits"); }
+    if (is_forbidden($rel)) { return ['', 403, "$rel is off limits"]; }
     $ext = strtolower(pathinfo($rel, PATHINFO_EXTENSION));
     if (!in_array($ext, ALLOWED_EXT, true)) {
-        fail(400, 'only .php, .html and .htm pages — nothing else');
+        return ['', 400, 'only .php, .html and .htm pages — nothing else'];
     }
     $full = SITE_ROOT . '/' . $rel;
     $real = realpath($full);
     // For a NEW file realpath() is false, so check the parent folder instead.
     $check = $real !== false ? $real : realpath(dirname($full));
     if ($check === false || strpos($check, SITE_ROOT) !== 0) {
-        fail(403, 'that is outside your website folder');
+        return ['', 403, 'that is outside your website folder'];
     }
+    return [$full, 200, ''];
+}
+
+function resolve_page(string $raw): string {
+    [$full, $code, $why] = page_or_why($raw);
+    if ($full === '') { fail($code, $why); }
     return $full;
 }
 
@@ -297,16 +330,57 @@ function back_up(string $full): string {
     if (!is_file($full)) {
         return '';                                   // nothing to preserve yet
     }
-    if (!is_dir(BACKUP_DIR)) {
-        @mkdir(BACKUP_DIR, 0755, true);
-        @file_put_contents(BACKUP_DIR . '/.htaccess',
-                           "Require all denied\nDeny from all\n");
-    }
+    ensure_backup_dir();
     $name = str_replace('/', '__', relative_to_site($full))
           . '.' . date('Ymd-His') . '-' . bin2hex(random_bytes(3)) . '.bak';
     @copy($full, BACKUP_DIR . '/' . $name);
     return $name;
 }
+
+function ensure_backup_dir(): void {
+    if (!is_dir(BACKUP_DIR)) {
+        @mkdir(BACKUP_DIR, 0755, true);
+        @file_put_contents(BACKUP_DIR . '/.htaccess',
+                           "Require all denied\nDeny from all\n");
+    }
+}
+
+/**
+ * ONE CHANGE TO A PAGE AT A TIME. Two of the agency's tasks changing the same
+ * page together each read it, each changed their copy, and the second write
+ * quietly threw the first one's change away. Every change now holds the page
+ * until it is finished; the other waits its turn. Let go when the answer is
+ * sent.
+ */
+function hold_page(string $full) {
+    ensure_backup_dir();
+    $h = @fopen(BACKUP_DIR . '/.hold-' . md5($full), 'c');
+    if ($h) { @flock($h, LOCK_EX); }
+    return $h;
+}
+
+/**
+ * WRITE THE WHOLE PAGE OR NONE OF IT. A write cut off half-way — a timeout, a
+ * full disk, the host stopping the script — used to leave half a page on the
+ * live site. The new page is written beside it first and swapped in whole, so
+ * a visitor sees the old page or the new one, never a broken one.
+ */
+function write_whole(string $full, string $data): bool {
+    $tmp = dirname($full) . '/.agency-' . bin2hex(random_bytes(4)) . '.tmp';
+    if (@file_put_contents($tmp, $data, LOCK_EX) !== strlen($data)) {
+        @unlink($tmp);
+        return false;
+    }
+    @chmod($tmp, is_file($full) ? (fileperms($full) & 0777) : 0644);
+    if (@rename($tmp, $full)) { return true; }
+    // A few Windows hosts will not swap over an existing file.
+    @unlink($tmp);
+    return @file_put_contents($full, $data, LOCK_EX) === strlen($data);
+}
+
+// What a page's text is, as a fingerprint: the agency compares it with the one
+// it read, so it can tell a page has changed under it before writing.
+function fingerprint(string $s): string { return hash('sha256', $s); }
 
 // ---------------------------------------------------------------------------
 // ROUTING
@@ -327,7 +401,17 @@ function back_up(string $full): string {
 // agency uses. The tidy path form still works where rewriting is available.
 //
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-$body   = json_decode((string)file_get_contents('php://input') ?: '{}', true) ?: [];
+// A body larger than the host allows reaches PHP as nothing at all, which used
+// to surface as a baffling "which page?". Said plainly now, with the limit.
+$raw_body = (string)file_get_contents('php://input');
+if ($method === 'POST' && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0 && $raw_body === '') {
+    fail(413, 'that was more than your host lets a website receive in one go (post_max_size is '
+            . ini_get('post_max_size') . ') — nothing was changed');
+}
+$body = $raw_body === '' ? [] : json_decode($raw_body, true);
+if (!is_array($body)) {
+    fail(400, 'the request arrived incomplete (it was not whole JSON) — nothing was changed');
+}
 
 $do = trim((string)($_GET['do'] ?? ''), '/');
 if ($do !== '') {
@@ -358,11 +442,20 @@ if ($route === '/health' && $method === 'GET') {
         $warn[] = 'No .htaccess in the agency-api folder, so the folder may be '
                 . 'browsable. Not urgent if you use token.php.';
     }
+    // A half-written page left by a script the host stopped mid-way.
+    foreach (array_merge((array)glob(SITE_ROOT . '/.agency-*.tmp'), (array)glob(SITE_ROOT . '/*/.agency-*.tmp')) as $t) {
+        if (is_file($t) && filemtime($t) < time() - 3600) { @unlink($t); }
+    }
     reply(['ok' => true, 'status' => 'up', 'time' => time(),
            'site_root' => SITE_ROOT, 'php' => PHP_VERSION,
            'writable' => is_writable(SITE_ROOT),
            'mode' => 'full-access', 'warnings' => $warn,
-           'connector' => 7, 'can' => ['pages', 'head', 'rollback', 'blog', 'remove', 'pictures']]);
+           'connector' => CONNECTOR,
+           'can' => ['pages', 'head', 'rollback', 'blog', 'remove', 'pictures', 'batch', 'safe-write', 'fingerprint'],
+           'limits' => ['post_max_size' => (string)ini_get('post_max_size'),
+                        'upload_max_filesize' => (string)ini_get('upload_max_filesize'),
+                        'memory_limit' => (string)ini_get('memory_limit'),
+                        'max_execution_time' => (int)ini_get('max_execution_time')]]);
 }
 
 // --- what pages are there --------------------------------------------------
@@ -437,6 +530,7 @@ if ($route === '/pages-remove' && $method === 'POST') {
     if (!is_file($full)) {
         reply(['ok' => true, 'page' => $rel, 'action' => 'already gone', 'backup' => '']);
     }
+    $hold = hold_page($full);
     $backup = back_up($full);
     if ($backup === '' || !is_file(BACKUP_DIR . '/' . $backup)) {
         fail(500, 'could not keep a copy first, so the page was left where it is');
@@ -450,10 +544,40 @@ if ($route === '/pages-remove' && $method === 'POST') {
 if (preg_match('#^/pages/(.+)$#', $route, $m) && $method === 'GET') {
     $full = resolve_page(urldecode($m[1]));
     if (!is_file($full)) { fail(404, 'no such page'); }
+    $html = (string)file_get_contents($full);
     reply(['ok' => true, 'page' => relative_to_site($full),
-           'html' => (string)file_get_contents($full),
+           'html' => $html, 'sha256' => fingerprint($html),
+           'text_ok' => preg_match('//u', $html) === 1,
            'bytes' => filesize($full),
            'changed' => date('c', (int)filemtime($full))]);
+}
+
+// --- read many pages in one go ----------------------------------------------
+//
+// Reading forty pages one request at a time was forty knocks on the door, one
+// a second, and every other task queued behind them — and forty knocks is what
+// a host's firewall counts. One request now carries up to sixty pages, as much
+// as fits in a few megabytes; what did not fit comes back named, for the next.
+const MANY_MAX = 60;
+const MANY_BYTES = 6 * 1024 * 1024;
+if ($route === '/pages-many' && $method === 'POST') {
+    $names = array_slice(array_values(array_filter((array)($body['pages'] ?? []), 'is_string')), 0, 200);
+    $out = [];
+    $more = [];
+    $total = 0;
+    foreach ($names as $i => $name) {
+        if (count($out) >= MANY_MAX || $total >= MANY_BYTES) { $more = array_slice($names, $i); break; }
+        [$full, $code, $why] = page_or_why($name);
+        if ($full === '') { $out[] = ['page' => $name, 'ok' => false, 'status' => $code, 'error' => $why]; continue; }
+        if (!is_file($full)) { $out[] = ['page' => $name, 'ok' => false, 'status' => 404, 'error' => 'no such page']; continue; }
+        $html = (string)file_get_contents($full);
+        $total += strlen($html);
+        $out[] = ['page' => relative_to_site($full), 'asked' => $name, 'ok' => true, 'html' => $html,
+                  'sha256' => fingerprint($html), 'bytes' => strlen($html),
+                  'text_ok' => preg_match('//u', $html) === 1,
+                  'changed' => date('c', (int)filemtime($full))];
+    }
+    reply(['ok' => true, 'pages' => $out, 'more' => $more]);
 }
 
 // --- write one page (the old one is always kept) ---------------------------
@@ -463,19 +587,31 @@ if ($route === '/pages' && $method === 'POST') {
     if ($name === '') { fail(400, 'which page?'); }
     if (trim($html) === '') { fail(400, 'refusing to write an empty page'); }
     $full = resolve_page($name);
+    $hold = hold_page($full);
+    $now = is_file($full) ? (string)file_get_contents($full) : null;
     // Writing the same bytes back is not a change. Skipping it keeps the
     // backup folder honest: one entry per real edit, not one per nightly run.
-    if (is_file($full) && (string)file_get_contents($full) === $html) {
+    if ($now !== null && $now === $html) {
         reply(['ok' => true, 'page' => relative_to_site($full),
-               'action' => 'unchanged', 'backup' => '',
+               'action' => 'unchanged', 'backup' => '', 'sha256' => fingerprint($html),
                'note' => 'already exactly this — nothing written']);
     }
+    // CHANGED SINCE IT WAS READ? The agency sends the fingerprint of the page
+    // it based this change on. If the page is no longer that — you edited it,
+    // or another task did — it is left alone rather than overwritten.
+    $expect = strtolower(trim((string)($body['expect_sha'] ?? '')));
+    if ($expect !== '' && $now !== null && fingerprint($now) !== $expect) {
+        reply(['ok' => false, 'changed' => true, 'page' => relative_to_site($full),
+               'sha256' => fingerprint($now),
+               'error' => 'the page changed on your website after the agency read it, so it was '
+                        . 'left exactly as it is — the agency reads it again before changing it'], 409);
+    }
     $backup = back_up($full);
-    if (@file_put_contents($full, $html) === false) {
+    if (!write_whole($full, $html)) {
         fail(500, 'could not write the file — check folder permissions in cPanel');
     }
     reply(['ok' => true, 'page' => relative_to_site($full),
-           'bytes' => strlen($html), 'backup' => $backup,
+           'bytes' => strlen($html), 'backup' => $backup, 'sha256' => fingerprint($html),
            'note' => $backup ? 'previous version kept — /rollback restores it'
                              : 'new page, nothing to keep']);
 }
@@ -499,6 +635,7 @@ if ($route === '/head' && $method === 'POST') {
     }
     $full = resolve_page($name);
     if (!is_file($full)) { fail(404, 'no such page'); }
+    $hold = hold_page($full);
     $src = (string)file_get_contents($full);
 
     $open  = "<!-- agency:$mark -->";
@@ -520,15 +657,15 @@ if ($route === '/head' && $method === 'POST') {
     // check it would leave a year of identical backups behind it.
     if ($new === $src) {
         reply(['ok' => true, 'page' => relative_to_site($full), 'id' => $mark,
-               'action' => 'unchanged', 'backup' => '',
+               'action' => 'unchanged', 'backup' => '', 'sha256' => fingerprint($src),
                'note' => 'the block was already there and identical']);
     }
     $backup = back_up($full);
-    if (@file_put_contents($full, $new) === false) {
+    if (!write_whole($full, $new)) {
         fail(500, 'could not write the file');
     }
     reply(['ok' => true, 'page' => relative_to_site($full), 'id' => $mark,
-           'action' => $what, 'backup' => $backup]);
+           'action' => $what, 'backup' => $backup, 'sha256' => fingerprint($new)]);
 }
 
 // --- what backups exist ----------------------------------------------------
@@ -569,10 +706,12 @@ if ($route === '/rollback' && $method === 'POST') {
     $stem = preg_replace('/\.\d{8}-\d{6}(-[0-9a-f]{6})?\.bak$/', '', $which);
     $page = str_replace('__', '/', (string)$stem);
     $full = resolve_page($page);
+    $hold = hold_page($full);
     back_up($full);                          // keep the bad one too, just in case
-    if (!@copy($src, $full)) { fail(500, 'could not restore'); }
+    $old = (string)file_get_contents($src);
+    if (!write_whole($full, $old)) { fail(500, 'could not restore'); }
     reply(['ok' => true, 'page' => relative_to_site($full),
-           'restored_from' => $which]);
+           'restored_from' => $which, 'sha256' => fingerprint($old)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,7 +1255,7 @@ if (in_array($route, ['/blog', '/blog-remove'], true)) {
                     }
                 }
             }
-            reply(['ok' => true, 'connector' => 7, 'image_home' => $home,
+            reply(['ok' => true, 'connector' => CONNECTOR, 'image_home' => $home,
                    'table' => $table, 'columns' => $cols, 'key' => $pk, 'slug_column' => $slugc,
                    'category_column' => $catc, 'categories' => $cats, 'title_column' => $titlec,
                    'recent' => $recent,

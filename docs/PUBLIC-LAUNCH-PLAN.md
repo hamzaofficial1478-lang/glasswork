@@ -387,6 +387,32 @@ someone else's in read-only mode:
     under a second instead of eight. Measured here: going back to a section
     takes 3–30 ms (was 0.1–2.4 s); a first visit to Leads 0.15 s (was 1.25 s).
 
+- **Software you install, updates you send, reports you receive (version 0.7.0).**
+  - **One-click Setup.exe for Windows.** It carries its own Python and Node and
+    every library, asks where to install the program and where to keep the
+    person's work, needs no administrator, makes the shortcuts and opens the
+    program — with no console window. It closes from Settings. Removing it never
+    deletes the person's work without a yes. Built and tested on a real Windows
+    machine by `.github/workflows/windows-installer.yml` (build, silent install,
+    open, check, remove) before anyone gets it.
+  - **Glasswork Home** on your own website (`publish-to-your-site/glasswork-home`):
+    reports from people using the program arrive there (and by email); you
+    answer them in *Reports from users* and they read the answer in *Help and
+    reports*; every version you put out is kept there, signed; and it is the
+    download page for new people. See `docs/RELEASING.md`.
+  - **Update message.** Every installed copy asks your Home once a day and
+    shows *"Version x is ready — Update now"*.
+  - **A stronger website connection (connector version 8).** Changes are written
+    whole or not at all; a page edited after the agency read it is never
+    overwritten; two changes to one page both land; many pages are read in one
+    request; noisy hosts and old-encoding pages no longer break answers; a
+    dropped line is tried again quietly instead of pausing every desk. The
+    Website screen shows how quickly the site answers and offers the new
+    connector to sites still on an older one. WordPress needs no upload and
+    gets the same quiet retries.
+  - Still to do for a wider launch: a code-signing certificate (so Windows stops
+    warning about an unknown publisher), and a Mac installer.
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

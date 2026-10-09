@@ -1,0 +1,99 @@
+# Builds the one-click Windows installer on a real Windows machine, installs it
+# the way a new person would (silently here), opens the program and checks it
+# answers — so a Setup.exe that does not work never reaches anybody.
+#
+# The installer it builds is kept for two weeks under this run's "Artifacts".
+# Putting a version out to the people using the program is done from the
+# publisher's own copy (Settings → Publisher), not from here.
+name: windows-installer
+on:
+  push:
+    paths:
+      - "installer/**"
+      - "launch.pyw"
+      - "run.py"
+      - "requirements.txt"
+      - "package.json"
+      - "package-lock.json"
+      - "config/product.json"
+      - ".github/workflows/windows-installer.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Build Setup.exe
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python installer/build_windows.py --out build
+          if ($LASTEXITCODE -ne 0) { throw "the build failed" }
+          Get-ChildItem build\*-setup.exe | Format-Table Name, Length
+
+      - name: Install it the way a new person would
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem build\*-setup.exe | Select-Object -First 1
+          Start-Process -FilePath $exe.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/DIR=C:\gw-test','/DATADIR=C:\gw-data' -Wait
+          if (-not (Test-Path C:\gw-test\runtime\python\pythonw.exe)) { throw "the program was not installed" }
+          if (-not (Test-Path C:\gw-test\runtime\node\node.exe)) { throw "Node was not installed" }
+          Get-Content C:\gw-test\install.json
+          if (-not (Test-Path C:\gw-data)) { throw "the data folder was not made" }
+
+      - name: Its own Python has everything it needs
+        shell: pwsh
+        working-directory: C:\gw-test
+        run: |
+          & .\runtime\python\python.exe -c "import cryptography, sqlcipher3, phonenumbers, requests, anthropic, google.auth; print('libraries ok')"
+          if ($LASTEXITCODE -ne 0) { throw "a library is missing" }
+          & .\runtime\python\python.exe -c "from pipelines import day_run; r = day_run.check_pipelines(); bad = [p for p in r if not p['ok']]; print(len(r), 'steps load'); assert not bad, bad"
+          if ($LASTEXITCODE -ne 0) { throw "a step of the day does not load" }
+
+      - name: Open it and check it answers
+        shell: pwsh
+        working-directory: C:\gw-test
+        run: |
+          $env:PORT = "3917"
+          $p = Start-Process -FilePath .\runtime\python\python.exe -ArgumentList 'run.py','--no-update' -WorkingDirectory C:\gw-test -PassThru -RedirectStandardOutput C:\gw-out.txt -RedirectStandardError C:\gw-err.txt
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) { Start-Sleep 2; try { $r = Invoke-RestMethod http://127.0.0.1:3917/api/ping; if ($r.ok) { $ok = $true; break } } catch {} }
+          Get-Content C:\gw-out.txt -Tail 25
+          if (-not $ok) { Get-Content C:\gw-err.txt -Tail 40; throw "the office did not answer" }
+          $prod = Invoke-RestMethod http://127.0.0.1:3917/api/product
+          "version $($prod.version), installed: $($prod.installed)"
+          if (-not $prod.installed) { throw "the office does not know it was installed" }
+          $st = Invoke-RestMethod http://127.0.0.1:3917/api/state
+          if (-not $st.ok) { throw "the office could not read its records" }
+          "the office answers and reads its records"
+          Invoke-RestMethod -Method Post http://127.0.0.1:3917/api/quit -ContentType 'application/json' -Body '{}'
+          Start-Sleep 3
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+
+      - name: Remove it again
+        shell: pwsh
+        run: |
+          Start-Process -FilePath C:\gw-test\unins000.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait
+          Start-Sleep 3
+          if (Test-Path C:\gw-test\runtime) { throw "the program was not removed" }
+          if (-not (Test-Path C:\gw-data)) { throw "removing the program took the person's data with it" }
+          "removed; the person's data folder is still there"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glasswork-setup
+          path: build/*-setup.exe
+          retention-days: 14

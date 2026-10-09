@@ -382,14 +382,15 @@ def test_a_website_that_is_down_is_a_tuesday_not_a_crash():
     print("\nEvery failure comes back as an answer, never an exception:")
     def dead(url, **kw):
         raise OSError("connection refused")
-    real = S.urllib.request.urlopen
-    S.urllib.request.urlopen = dead
+    real, waits = S.urllib.request.urlopen, S.RETRY_WAITS
+    S.urllib.request.urlopen, S.RETRY_WAITS = dead, (0, 0)
     try:
         r = S.call("/health", s=FULL)
     finally:
-        S.urllib.request.urlopen = real
+        S.urllib.request.urlopen, S.RETRY_WAITS = real, waits
     check("not ok", r["ok"], False)
     check("and it says what happened", "connection refused" in r["error"], True)
+    check("having tried three times before saying so", r.get("tries"), 3)
 
     print("\n...a wrong token is explained, not just '401':")
     import urllib.error

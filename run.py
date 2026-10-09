@@ -48,6 +48,50 @@ PY = sys.executable or "python3"
 PORT = os.environ.get("PORT", "3000")
 
 
+# ---------------------------------------------------------------------------
+# A COPY INSTALLED BY Setup.exe
+# ---------------------------------------------------------------------------
+#
+# "the program asks user to where user want to place the content" — the
+# installer writes install.json beside this file with the folder he chose for
+# his data, and carries its own Python and Node in runtime/, so nothing else
+# needs to be on the computer. A git copy or a hand-made install has neither,
+# and everything below leaves it exactly as it was.
+
+def installed() -> dict:
+    try:
+        d = json.loads((ROOT / "install.json").read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def use_install():
+    inst = installed()
+    data = str(inst.get("data") or "").strip()
+    if data and not os.environ.get("AGENCY_DATA"):
+        Path(data).mkdir(parents=True, exist_ok=True)
+        os.environ["AGENCY_DATA"] = data
+    node_dir = ROOT / "runtime" / "node"
+    if node_dir.is_dir():
+        os.environ["PATH"] = str(node_dir) + os.pathsep + os.environ.get("PATH", "")
+    if inst:
+        os.environ["GLASSWORK_INSTALLED"] = "1"
+
+
+def node_exe() -> str:
+    """The installer's own Node if there is one, else whichever the computer has."""
+    mine = ROOT / "runtime" / "node" / ("node.exe" if os.name == "nt" else "bin/node")
+    return str(mine) if mine.exists() else "node"
+
+
+def no_window() -> dict:
+    """Started without a console (the installed shortcut): no black windows either."""
+    if os.name == "nt" and (sys.stdout is None or not getattr(sys.stdout, "isatty", lambda: False)()):
+        return {"creationflags": 0x08000000}          # CREATE_NO_WINDOW
+    return {}
+
+
 def say(line=""):
     print(line, flush=True)
 
@@ -440,7 +484,8 @@ def tests():
             "coordination.orders_tests",
             "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
             "coordination.launch_kit_tests", "coordination.posts_tests",
-            "coordination.speed_tests",
+            "coordination.speed_tests", "pipelines.connector_tests",
+            "coordination.publish_tests", "coordination.installer_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",
@@ -643,9 +688,12 @@ def office():
     RESTART = 75
     opened = False
     while True:
-        env = {**os.environ, "OFFICE_SUPERVISED": "1", "PORT": str(port)}
+        # PYTHON_BIN: the server runs every agent with THIS Python — the
+        # program's own (the installer's runtime, or .venv) — not whichever
+        # Python the computer happens to have, which lacks the libraries.
+        env = {**os.environ, "OFFICE_SUPERVISED": "1", "PORT": str(port), "PYTHON_BIN": PY}
         try:
-            proc = subprocess.Popen(["node", "server.js"], cwd=ROOT, env=env)
+            proc = subprocess.Popen([node_exe(), "server.js"], cwd=ROOT, env=env, **no_window())
         except FileNotFoundError:
             say("  Node.js is not installed. Get it from nodejs.org, then run this again.")
             return
@@ -708,6 +756,7 @@ def use_venv():
 
 
 def main():
+    use_install()
     use_venv()
     ap = argparse.ArgumentParser(description="Run the agency.")
     ap.add_argument("--day", action="store_true", help="run a full day's cycle")
@@ -771,5 +820,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         say("\nStopped.")
-    if os.name == "nt" and not sys.stdin.isatty():
+    if os.name == "nt" and sys.stdin is not None and not sys.stdin.isatty():
         input("\nPress Enter to close...")

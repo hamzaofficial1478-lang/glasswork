@@ -170,9 +170,11 @@ def check() -> dict:
         return {"ok": True, "kind": "readonly", "mode": "readonly",
                 "head": "Read-only: the agency changes nothing on your website."}
     trial = dict(s, mode="full", kind="wordpress" if kind == "wordpress" else "php")
+    t0 = time.time()
     r = site_api.call("/health", s=trial)
+    took = int((time.time() - t0) * 1000)
     if not r.get("ok"):
-        _save_state(kind=kind, checked_at=int(time.time()), checked_ok=False)
+        _save_state(kind=kind, checked_at=int(time.time()), checked_ok=False, latency_ms=took)
         why = r.get("error") or "your website did not answer"
         if kind == "php" and r.get("status") == 404:
             why = ("nothing answered at " + (s["base"] or "your website") + ". Check that the "
@@ -180,10 +182,17 @@ def check() -> dict:
                    "and token.php inside it.")
         return {"ok": False, "kind": kind, "error": why}
     saved = _write({"SITE_MODE": "full", "SITE_CONNECT": "wordpress" if kind == "wordpress" else "php"})
+    try:
+        version = int(r.get("connector") or 0) if kind == "php" else 0
+    except (TypeError, ValueError):
+        version = 0
     _save_state(kind=kind, checked_at=int(time.time()), checked_ok=True,
-                can=list(r.get("can") or []))
+                can=list(r.get("can") or []), connector=version, latency_ms=took,
+                limits=r.get("limits") if isinstance(r.get("limits"), dict) else {})
     who = f" as {r['user']}" if r.get("user") else ""
     return {"ok": bool(saved.get("ok")), "kind": kind, "mode": "full",
+            "connector": version, "newest": site_api.CONNECTOR_NEWEST, "latency_ms": took,
+            "old_connector": kind == "php" and version < site_api.CONNECTOR_NEWEST,
             "can": list(r.get("can") or []), "warnings": list(r.get("warnings") or []),
             "head": (f"Connected{who}. IT can now fix what it finds — on a copy first, and only "
                      "after your yes for anything that matters.")}
@@ -228,7 +237,11 @@ def status() -> dict:
             "site": s["site"], "base": s["base"] if kind == "php" else "",
             "has_secret": bool(s["token"]), "wp_user": s["wp_user"] if kind == "wordpress" else "",
             "has_wp_password": bool(s["wp_pass"]), "checked_at": st.get("checked_at"),
-            "checked_ok": bool(st.get("checked_ok")), "can": st.get("can") or []}
+            "checked_ok": bool(st.get("checked_ok")), "can": st.get("can") or [],
+            "connector": st.get("connector") or 0, "newest": site_api.CONNECTOR_NEWEST,
+            "latency_ms": st.get("latency_ms"),
+            "old_connector": kind == "php" and bool(st.get("checked_ok"))
+                             and int(st.get("connector") or 0) < site_api.CONNECTOR_NEWEST}
 
 
 def main(argv=None) -> int:

@@ -138,7 +138,7 @@ h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-.015em;line-height:1.
 .act-rooms{display:flex;flex-wrap:wrap;gap:8px}
 .act-shown{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;font-size:14px;color:var(--muted);
   padding:8px 8px 8px 14px;border:1px dashed var(--line-strong);border-radius:10px}
-textarea,input[type=text],input[type=url]{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;
+textarea,input[type=text],input[type=url],input[type=email],input:not([type]),.dr-sec select{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;
   background:var(--surface);color:var(--ink);font-size:16px}
 textarea{min-height:96px;resize:vertical;line-height:1.5}
 .say{padding:10px 12px;background:var(--sunken);border-radius:8px;font-size:14px}
@@ -157,6 +157,10 @@ ol.feed li:last-child{border-bottom:0}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:10px;
   font-size:14px;max-width:min(560px,calc(100vw - 32px));z-index:20;display:none}
 .toast.show{display:block}
+.upd-banner{position:fixed;right:20px;bottom:20px;z-index:40;max-width:420px;background:var(--surface);border:1px solid var(--line-strong);
+  border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.14);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.upd-banner[hidden],body.drawer-open .upd-banner{display:none}
+@media (max-width:760px){.upd-banner{left:12px;right:12px;bottom:84px;max-width:none}}
 
 /* phone */
 .tabs{display:none}
@@ -452,6 +456,8 @@ details.ck .row{padding-left:40px}
     <div class="rule"></div>
     <a href="#check" data-r="check">Website Check</a>
     <a href="#settings" data-r="settings">Settings</a>
+    <a href="#help" data-r="help">Help and reports</a>
+    <a href="#reports" data-r="reports" id="navReports" hidden>Reports from users <span class="count" id="navRep" hidden>0</span></a>
   </nav>
   <main id="main" tabindex="-1"><div class="page"><p class="muted">Opening your office…</p></div></main>
 </div>
@@ -466,6 +472,7 @@ details.ck .row{padding-left:40px}
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Details"></aside>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<aside class="upd-banner" id="updBanner" hidden aria-live="polite"></aside>
 
 <script>
 const $ = (q) => document.querySelector(q);
@@ -1390,8 +1397,9 @@ function scorePanel(rep, keyword) {
 
 /* ======================= WEBSITE ======================= */
 async function website(main) {
-  const [st, ch] = await Promise.all([state(), api('/api/site/changes')]);
+  const [st, ch, cx] = await Promise.all([state(), api('/api/site/changes'), api('/api/connect')]);
   const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
+  const link = (cx && cx.ok) ? cx : {};
   const pending = ((st && st.approvals) || []).filter((a) => a.kind === 'site_change' || a.kind === 'site_resting');
   const changes = (ch && ch.changes) || [];
   const failed = (ch && ch.not_done) || [];
@@ -1403,7 +1411,12 @@ async function website(main) {
     '<button class="btn" type="button" id="lookNow">Check it now</button>')}
     <section class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between">
       <div style="display:flex;gap:12px;align-items:center"><span class="dot${conn.on && conn.mode === 'full' ? '' : ' off'}" style="width:10px;height:10px"></span><span>${connLine}</span></div>
-      <a href="/setup" style="font-weight:500;font-size:14px">Connection settings</a></section>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${link.kind && link.kind !== 'readonly' ? '<button class="btn quiet small" type="button" id="testLink">Test the connection</button>' : ''}
+        <a href="/setup" style="font-weight:500;font-size:14px">Connection settings</a></div>
+      ${link.kind && link.kind !== 'readonly' ? `<div class="muted" id="linkSay" style="flex-basis:100%;font-size:13.5px">${linkLine(link)}</div>` : ''}
+      ${link.old_connector ? `<div class="note" style="flex-basis:100%">Your website has connector version ${Number(link.connector) || 'an older one'}. Version ${Number(link.newest)} is safer and faster: a change is written whole or not at all, a page you edited is never overwritten, and many pages are read in one go.
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><a class="btn small" href="/setup#connectBox">Get the new connector</a>
+        <span class="muted" style="font-size:13.5px">In Connection settings, press Download your connector, then put the agency-api folder from it on your website in place of the old one. Your secret stays the same.</span></div></div>` : ''}</section>
     <section class="card"><div class="card-h"><h2>Changes waiting for your yes</h2><span class="muted" style="font-size:13.5px">Found → fixed on a copy → tested → your yes → live</span></div>
       ${pending.length ? pending.map((a) => `<div class="row"><div class="grow"><span style="font-weight:600">${esc(a.text)}</span><span class="muted" style="font-size:14px">${esc(a.why || '')}</span></div>
         <div style="display:flex;gap:8px;align-items:center">${pill('wait', 'Waiting for you')}<a class="btn small" href="#waiting">Decide</a></div></div>`).join('')
@@ -1415,8 +1428,22 @@ async function website(main) {
         <span class="muted" style="font-size:14px">${esc(c.page || '')} · ${esc(c.by || '')} · ${esc(c.when || '')}</span></div>${c.ok === 0 ? pill('stuck', 'Refused') : pill('done', 'Live')}</div>`).join('')
         : empty('Nothing yet', 'Every change the agency makes, and anything changed by someone else, is listed here with a way back.')}</section>
   </div>`;
+  const tl = $('#testLink'); if (tl) tl.onclick = async () => {
+    tl.disabled = true; $('#linkSay').textContent = 'Knocking on your website…';
+    const j = await api('/api/connect/check', {}); tl.disabled = false;
+    $('#linkSay').innerHTML = j.ok ? esc(sentence(j.head || 'Connected.')) + ' ' + linkLine(j) : '<span class="bad-t">' + esc(sentence(j.error || 'It did not answer.')) + '</span>';
+  };
   $('#lookNow').onclick = async () => { $('#lookNow').disabled = true; toast('Looking at every page for changes…');
     const j = await api('/api/site/look', {}); $('#lookNow').disabled = false; toast(j.head || j.error || 'Done.'); website(main); };
+}
+
+function linkLine(l) {
+  const bits = [];
+  if (l.latency_ms != null) bits.push(`answers in ${Number(l.latency_ms) < 1000 ? Number(l.latency_ms) + ' ms' : (Number(l.latency_ms) / 1000).toFixed(1) + ' s'}`);
+  if (l.kind === 'php' && l.connector) bits.push(`connector version ${Number(l.connector)}`);
+  if (l.kind === 'wordpress') bits.push('through WordPress');
+  if (l.checked_at) bits.push('last tested ' + when(l.checked_at));
+  return esc(sentence(bits.join(' · ')));
 }
 
 /* ======================= ON GOOGLE ======================= */
@@ -2245,6 +2272,124 @@ async function activity(main, local) {
   const all = $('#actAll'); if (all) all.onclick = async () => { await api('/api/activity/seen', {showAll: true}); activity(main); };
 }
 
+/* ======================= HELP AND REPORTS =======================
+   "i want the report section where user will be able to submit the report and
+    those reports will get over to me" — a report goes to the publisher's own
+   Glasswork Home and nowhere else; his answer comes back here. */
+const HELP = {sent: null};
+const REP_LOOK = {new: ['plain', 'Sent'], seen: ['plain', 'Read'], working: ['work', 'Being worked on'], fixed: ['done', 'Fixed'], 'wont-fix': ['plain', 'Not changing']};
+async function help(main) {
+  const m = await api('/api/support/mine');
+  const mine = (m && m.reports) || [];
+  main.innerHTML = `<div class="page narrow">${head('Help and reports',
+    'Something not working? Tell the people who make this program. Your report goes to them directly, and their answer appears below.')}
+    <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
+      <h2 style="margin:0;font-size:18px">Report a problem</h2>
+      ${m && m.home === false ? `<div class="note">This copy cannot send reports by itself yet. Write it below and press Send — you will get a support report to copy into an email instead.</div>` : ''}
+      <label for="repTitle" style="font-weight:600">What went wrong, in a line</label>
+      <input id="repTitle" maxlength="200" placeholder="For example: the Leads screen will not open">
+      <label for="repText" style="font-weight:600">What were you doing, and what happened?</label>
+      <textarea id="repText" maxlength="20000" style="min-height:130px" placeholder="The more you say, the quicker it is fixed. Which screen, which button, and what you saw."></textarea>
+      <label for="repContact" style="font-weight:600">Your email, if you would like a reply by email too <span class="muted" style="font-weight:400">(optional)</span></label>
+      <input id="repContact" type="email" maxlength="200" placeholder="you@example.com">
+      <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="repAttach" checked style="margin-top:4px">
+        <span>Send a support report with it <span class="muted">— which desks failed and why, the version and the kind of computer. No keys, passwords, email addresses, web addresses or lead details.</span>
+        <button type="button" class="btn quiet small" id="repPeek">See exactly what is in it</button></span></label>
+      <pre id="repPreview" class="mono" hidden style="margin:0;white-space:pre-wrap;font-size:12.5px;background:var(--sunken);padding:12px 14px;border-radius:8px;max-height:260px;overflow:auto"></pre>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button class="btn" type="button" id="repSend">Send the report</button><span class="muted" id="repSay" style="font-size:14px"></span></div>
+    </section>
+    <section style="display:flex;flex-direction:column;gap:10px"><h2 class="label" style="margin:0">Your reports</h2>
+      ${mine.length ? mine.map((r) => { const lk = REP_LOOK[r.status] || ['plain', r.status_words || r.status];
+        return `<article class="card" style="padding:16px 20px;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between"><b style="font-weight:600">${esc(r.title || 'A problem')}</b>${pill(lk[0], lk[1])}</div>
+          <span class="muted mono" style="font-size:12.5px">${esc(r.id || '')} · sent ${esc(when(r.at))} · version ${esc(r.version || '')}</span>
+          ${r.reply ? `<div class="say"><b style="font-weight:600">Their answer:</b> ${esc(r.reply)}</div>` : ''}
+          ${r.update_needed ? `<div class="note">Fixed in version ${esc(r.fixed_in)}. <a href="#settings">Get the update in Settings</a>.</div>` : (r.fixed_in && r.status === 'fixed' ? `<span class="muted" style="font-size:13.5px">Fixed in version ${esc(r.fixed_in)} — you have it.</span>` : '')}
+        </article>`; }).join('')
+        : `<div class="card">${empty('None yet', 'Reports you send from here are listed with their answers.')}</div>`}
+    </section></div>`;
+  $('#repPeek').onclick = async (e) => {
+    e.preventDefault();
+    const pre = $('#repPreview'); pre.hidden = !pre.hidden; if (pre.hidden) return;
+    pre.textContent = 'Making it…'; const p = await api('/api/support/preview');
+    pre.textContent = (p && p.support) || 'Nothing could be gathered.';
+  };
+  $('#repSend').onclick = async () => {
+    const title = $('#repTitle').value.trim(), text = $('#repText').value.trim();
+    if (!title && !text) { toast('Say what went wrong first.'); return; }
+    const b = $('#repSend'); b.disabled = true; $('#repSay').textContent = 'Sending…';
+    const j = await api('/api/support/send', {title, text, contact: $('#repContact').value.trim(), attach: $('#repAttach').checked});
+    b.disabled = false;
+    if (j.ok) { VIEW.dirty = false; toast(j.head || 'Sent.'); help(main); return; }
+    $('#repSay').textContent = j.error || 'Not sent.';
+    if (j.support) { const pre = $('#repPreview'); pre.hidden = false; pre.textContent = j.support; }
+  };
+}
+
+const PUB = {filter: 'open', list: null};
+async function publisherNav() {
+  const p = await api('/api/publisher');
+  S.publisher = !!(p && p.ok && p.publisher);
+  const nav = $('#navReports'); if (nav) nav.hidden = !S.publisher;
+  if (!S.publisher) return;
+  const inb = await api('/api/publisher/inbox');
+  const n = Number((inb && inb.new) || 0), c = $('#navRep');
+  if (c) { c.textContent = n; c.hidden = !n; }
+}
+async function reports(main) {
+  const p = await api('/api/publisher');
+  if (!(p && p.publisher)) {
+    main.innerHTML = `<div class="page narrow">${head('Reports from users')}<div class="card">${empty('Not set up on this copy',
+      'Reports from the people using your program come to your Glasswork Home. Set it up in Settings → Publisher.')}</div></div>`;
+    return;
+  }
+  const inb = await api('/api/publisher/inbox');
+  const all = (inb && inb.reports) || [];
+  const shown = all.filter((r) => PUB.filter === 'all' || (PUB.filter === 'open' ? !['fixed', 'wont-fix'].includes(r.status) : r.status === PUB.filter));
+  main.innerHTML = `<div class="page">${head('Reports from users',
+    'What people using your program sent you. Answer one and they see your answer in their Help screen; mark it fixed in a version and they are told to update.',
+    `<div role="group" aria-label="Which reports" style="display:flex;gap:8px;flex-wrap:wrap">${[['open', 'Still open'], ['new', 'New'], ['fixed', 'Fixed'], ['all', 'All']].map(([k, n]) =>
+      `<button type="button" class="seg ${PUB.filter === k ? 'on' : ''}" aria-pressed="${PUB.filter === k}" data-pf="${k}">${n}</button>`).join('')}</div>`)}
+    ${inb && inb.ok === false ? `<div class="note">${esc(inb.error || 'Your Home did not answer.')}</div>` : ''}
+    <section class="card">${shown.length ? shown.map((r) => { const lk = REP_LOOK[r.status] || ['plain', r.status];
+      return `<button type="button" class="row" data-rep="${esc(r.id)}" style="width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line-soft);cursor:pointer;color:var(--ink)">
+        <span class="grow"><b style="font-weight:600">${esc(r.title)}</b><span class="muted" style="font-size:14px">${esc(r.text || '')}</span>
+        <span class="muted mono" style="font-size:12.5px">${esc(r.id)} · ${esc(when(r.at))} · version ${esc(r.version || '?')}${r.contact ? ' · has an email' : ''}${r.has_support ? ' · support report' : ''}</span></span>
+        ${pill(lk[0], lk[1])}</button>`; }).join('') : empty('Nothing here', all.length ? 'No report matches this filter.' : 'When someone sends a report, it appears here — and in your email, if you gave one.')}</section></div>`;
+  main.querySelectorAll('[data-pf]').forEach((b) => b.onclick = () => { PUB.filter = b.dataset.pf; reports(main); });
+  main.querySelectorAll('[data-rep]').forEach((b) => b.onclick = () => openReport(b.dataset.rep, main));
+}
+async function openReport(id, main) {
+  openPanel(`${panelHead('A report', id)}<div class="dr-body"><section class="dr-sec"><p class="muted">Opening…</p></section></div>`, 'A report', 'report', id);
+  const j = await api('/api/publisher/read/' + encodeURIComponent(id));
+  const r = (j && j.report) || null;
+  const body = $('#drawer .dr-body'); if (!body) return;
+  if (!r) { body.innerHTML = `<section class="dr-sec"><p>${esc((j && j.error) || 'It could not be read.')}</p></section>`; return; }
+  body.innerHTML = `<section class="dr-sec"><h3 style="font-size:17px">${esc(r.title)}</h3>
+      <span class="muted mono" style="font-size:12.5px">${esc(when(r.at))} · version ${esc(r.version || '?')} · ${esc(r.system || '')}</span>
+      <p style="white-space:pre-wrap">${esc(r.text || '(no words)')}</p>
+      ${r.contact ? `<p>Reply by email: <a href="mailto:${esc(r.contact)}">${esc(r.contact)}</a></p>` : ''}</section>
+    ${r.support ? `<section class="dr-sec"><b style="font-weight:600">Their support report</b><pre class="mono" style="margin:0;white-space:pre-wrap;font-size:12.5px;background:var(--sunken);padding:10px 12px;border-radius:8px;max-height:280px;overflow:auto">${esc(r.support)}</pre></section>` : ''}
+    <section class="dr-sec"><label for="ansStatus" style="font-weight:600">Where it stands</label>
+      <select id="ansStatus">${Object.entries(REP_LOOK).map(([k, v]) => `<option value="${k}" ${r.status === k ? 'selected' : ''}>${esc(v[1])}</option>`).join('')}</select>
+      <label for="ansFixed" style="font-weight:600">Fixed in version <span class="muted" style="font-weight:400">(they are told to update to it)</span></label>
+      <input id="ansFixed" maxlength="40" value="${esc(r.fixed_in || '')}" placeholder="${esc((S.brand && S.brand.version) || '0.8.0')}">
+      <label for="ansReply" style="font-weight:600">Your answer — they read it in their Help screen</label>
+      <textarea id="ansReply" maxlength="5000" style="min-height:110px">${esc(r.reply || '')}</textarea>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="button" id="ansSave">Save the answer</button>
+        <button class="btn quiet" type="button" id="ansDel">Delete the report</button></div></section>`;
+  $('#ansSave').onclick = async () => {
+    const x = await api('/api/publisher/answer', {id, status: $('#ansStatus').value, reply: $('#ansReply').value, fixed_in: $('#ansFixed').value.trim()});
+    toast(x.ok ? 'Saved. They see it next time they open Help.' : (x.error || 'Not saved.'));
+    if (x.ok) { closePanel(); reports(main); publisherNav(); }
+  };
+  $('#ansDel').onclick = async () => {
+    if (!confirm('Delete this report? It cannot be brought back.')) return;
+    const x = await api('/api/publisher/remove', {id}); toast(x.ok ? 'Deleted.' : (x.error || 'Not deleted.'));
+    if (x.ok) { closePanel(); reports(main); publisherNav(); }
+  };
+}
+
 /* ======================= RESULTS ======================= */
 const RES = {days: 0};
 async function results(main) {
@@ -2313,10 +2458,14 @@ function settings(main) {
       <div class="card">
         <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600" id="prodName">${esc((S.brand && S.brand.product) || 'Glasswork')}</b>
           <span class="muted" style="font-size:14px" id="prodVer">Version ${esc((S.brand && S.brand.version) || '')}</span></span>
-          <button class="btn ghost small" type="button" id="updCheck">Check for updates</button></div>
+          <button class="btn ghost small" type="button" id="updCheck">Check for updates</button>
+          <button class="btn quiet small" type="button" id="quitApp" hidden>Close the program</button></div>
         <div class="row" id="updRow" hidden><span class="grow" id="updSay"></span><span style="display:flex;gap:8px;flex-wrap:wrap" id="updBtns"></span></div>
       </div>
       <div class="card">
+        <a class="row" href="#help" style="text-decoration:none;color:var(--ink);align-items:center"><span class="grow"><b style="font-weight:600">Report a problem</b>
+          <span class="muted" style="font-size:14px">Tell the people who make this program what went wrong, and read their answer here.</span></span>
+          <span style="font-size:14px;font-weight:500;color:var(--accent)">Open</span></a>
         <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">Help and feedback</b>
           <span class="muted" style="font-size:14px">A report of what is failing, to send to whoever helps you — with no keys, passwords, email addresses or lead details in it.</span></span>
           <button class="btn ghost small" type="button" id="diagMake">Make a support report</button></div>
@@ -2327,7 +2476,13 @@ function settings(main) {
         <a class="row" href="/terms" target="_blank" rel="noopener" style="text-decoration:none;color:var(--ink)"><span class="grow"><b style="font-weight:600">Terms of use</b></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Read</span></a>
         <a class="row" href="/privacy" target="_blank" rel="noopener" style="text-decoration:none;color:var(--ink)"><span class="grow"><b style="font-weight:600">Privacy</b></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Read</span></a>
       </div>
-    </section></div>`;
+    </section>
+    <section id="pubBox" hidden style="display:flex;flex-direction:column;gap:8px"></section></div>`;
+  publisherCard();
+  ask('/api/product').then((p) => { const q = $('#quitApp'); if (!q || !(p && p.installed)) return; q.hidden = false;
+    q.onclick = async () => { if (!confirm('Close the program? Nothing is lost — open it again from the Start menu or the desktop.')) return;
+      const j = await api('/api/quit', {}); toast(j.why || j.error || 'Closing.');
+      if (j.ok) setTimeout(() => { document.body.innerHTML = '<main style="max-width:520px;margin:20vh auto;font:17px system-ui;padding:0 16px">The program is closed. You can close this tab.</main>'; }, 800); }; });
   main.querySelectorAll('[data-theme-pick]').forEach((b) => b.onclick = () => { theme(b.dataset.themePick); buildSiteMenu(); settings(main); });
   $('#updCheck').onclick = () => checkUpdate();
   $('#diagMake').onclick = async () => {
@@ -2366,6 +2521,88 @@ async function checkUpdate() {
     $('#updBack').onclick = undoUpdate;
   }
 }
+/* THE PUBLISHER — only on the copy the program is made from (a git copy) or
+   one already set up. "when ever i will update the program here the users will
+   get the update message" — his Glasswork Home holds the versions and the
+   reports; this card makes it, checks it, and puts a version out. */
+async function publisherCard() {
+  const box = $('#pubBox'); if (!box) return;
+  const p = await api('/api/publisher');
+  if (!(p && p.ok && (p.publisher || p.can_publish))) return;
+  box.hidden = false;
+  box.innerHTML = `<h2 class="label" style="margin:0">Publisher — for whoever makes this program</h2>
+    <div class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+      ${p.publisher ? `<div><b style="font-weight:600">Your Glasswork Home</b> <span class="muted mono" style="font-size:13px">${esc(p.home_url)}</span></div>
+        <p class="muted" style="margin:0;font-size:14px">Reports from the people using your program arrive there, and every version you put out goes there for them to update to. A download page for new people is at that address too.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn ghost small" type="button" id="pubCheck">Check it</button>
+          <a class="btn quiet small" href="/api/publisher/home.zip">Download it again</a><a class="btn quiet small" href="#reports">Read the reports</a>
+          <span class="muted" id="pubSay" style="font-size:14px"></span></div>
+        <div style="border-top:1px solid var(--line-soft);padding-top:12px;display:flex;flex-direction:column;gap:10px">
+          <b style="font-weight:600">Put out version ${esc(p.version)}</b>
+          <label for="pubNotes" class="muted" style="font-size:14px">What is new, in a line or two — people read this in the update message</label>
+          <textarea id="pubNotes" maxlength="2000" style="min-height:70px" placeholder="Faster screens, and a stronger connection to your website."></textarea>
+          <label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" id="pubExe"> Build the Windows installer too (on a Windows computer, a few minutes)</label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="pubGo">Put it out</button><span class="muted" id="pubJob" style="font-size:14px"></span></div>
+        </div>`
+      : `<p style="margin:0">Put your program's updates and its problem reports on your own website — nowhere else. One folder, uploaded once.</p>
+        <label for="pubSite" style="font-weight:600">Your website</label><input id="pubSite" placeholder="https://www.yourwebsite.com">
+        <label for="pubMail" style="font-weight:600">Email a new report to <span class="muted" style="font-weight:400">(optional)</span></label><input id="pubMail" type="email" placeholder="you@yourwebsite.com">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="pubMake">Make my Glasswork Home</button><span class="muted" id="pubSay" style="font-size:14px"></span></div>`}
+    </div>`;
+  const say = (t) => { const x = $('#pubSay'); if (x) x.textContent = t; };
+  const mk = $('#pubMake'); if (mk) mk.onclick = async () => {
+    mk.disabled = true; say('Making it…');
+    const j = await api('/api/publisher/setup', {site: $('#pubSite').value.trim(), email: $('#pubMail').value.trim()});
+    mk.disabled = false;
+    if (j.needsSetupUnlock) { say('This is behind your Setup password — open Setup once, then come back.'); return; }
+    if (!j.ok) { say(j.error || 'Not made.'); return; }
+    toast('Made. Download it, unzip it and upload the glasswork-home folder to your website.');
+    location.href = '/api/publisher/home.zip';
+    setTimeout(publisherCard, 800);
+  };
+  const ck = $('#pubCheck'); if (ck) ck.onclick = async () => { ck.disabled = true; say('Knocking…'); const j = await api('/api/publisher/check', {}); ck.disabled = false; say(j.ok ? j.head : (j.error || 'It did not answer.')); };
+  const go = $('#pubGo'); if (go) go.onclick = async () => {
+    const exe = $('#pubExe').checked;
+    if (!confirm(`Put out version ${p.version}${exe ? ', with the Windows installer' : ''}? Everyone using the program is told the next time it opens.`)) return;
+    go.disabled = true;
+    const j = await api('/api/publisher/publish', {notes: $('#pubNotes').value.trim(), installer: exe});
+    if (!j.ok) { go.disabled = false; $('#pubJob').textContent = j.needsSetupUnlock ? 'This is behind your Setup password — open Setup once, then come back.' : (j.error || 'It did not start.'); return; }
+    VIEW.dirty = false;
+    const tick = async () => {
+      const s = await ask('/api/publisher/job');
+      if (s && s.running) { $('#pubJob').textContent = (s.stage || 'Working') + (s.of ? ` (${s.part} of ${s.of})` : '') + '…'; setTimeout(tick, 1500); return; }
+      go.disabled = false;
+      const r = (s && s.result) || {};
+      $('#pubJob').textContent = r.ok ? r.why : (r.error || 'It stopped.');
+      if (r.ok) toast(r.why);
+    };
+    tick();
+  };
+}
+
+/* "when ever i will update the program here the users will get the update
+   message on their program" — asked when the program opens and every six
+   hours; a copy that updates itself from git never shows it. */
+async function updateBanner() {
+  const u = await ask('/api/update');
+  const b = $('#updBanner'); if (!b) return;
+  if (!(u && u.ok && u.available && u.can_install)) { b.hidden = true; return; }
+  try { if (localStorage.getItem('gw-upd-later') === u.latest) return; } catch (e) { /* private window */ }
+  b.innerHTML = `<b style="font-weight:600">Version ${esc(u.latest)} is ready</b>
+    ${u.notes ? `<span class="muted" style="font-size:14px">${esc(u.notes)}</span>` : ''}
+    <span class="muted" style="font-size:13.5px">Your data, websites and settings are not touched, and you can go back afterwards.</span>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="updNow">Update now</button>
+      <button class="btn quiet small" type="button" id="updLater">Later</button><span class="muted" id="updNowSay" style="font-size:13.5px"></span></div>`;
+  b.hidden = false;
+  $('#updLater').onclick = () => { try { localStorage.setItem('gw-upd-later', u.latest); } catch (e) { /* fine */ } b.hidden = true; };
+  $('#updNow').onclick = async () => {
+    $('#updNow').disabled = true; $('#updNowSay').textContent = 'Downloading, checking its signature and installing…';
+    const j = await api('/api/update/apply', {});
+    $('#updNowSay').textContent = j.ok ? (j.why || 'Installed.') + ' The page reloads in a moment.' : (j.error || 'It was not installed.');
+    if (j.ok && j.installed) setTimeout(() => location.reload(), 6000); else $('#updNow').disabled = false;
+  };
+}
+
 async function undoUpdate() {
   if (!confirm('Go back to the version before the last update?')) return;
   const j = await api('/api/update/rollback', {});
@@ -2380,7 +2617,9 @@ function more(main) {
     ${item('#website', 'Website', 'What changed on your website')}${item('#activity', 'Activity', 'Everything every desk did today')}
     ${item('#results', 'Results', 'What each sector actually produced')}
     ${item('#google', 'On Google', 'Which pages Google lists')}${item('#check', 'Website Check', 'A report on any website')}
-    ${item('#settings', 'Settings', 'Your business, the AI, your account')}</div></div>`;
+    ${item('#settings', 'Settings', 'Your business, the AI, your account')}
+    ${item('#help', 'Help and reports', 'Tell us about a problem, and see the answers')}
+    ${S.publisher ? item('#reports', 'Reports from users', 'What people using your program sent you') : ''}</div></div>`;
 }
 
 /* ---- routing ----
@@ -2388,9 +2627,9 @@ function more(main) {
    before its answer came back can no longer paint over the one now showing —
    which, with clicks faster than the office, is what made the app look stuck
    on the wrong section. */
-const ROUTES = {today, agency, waiting, orders, leads, content, post, website, google, activity, results, check, settings, more};
+const ROUTES = {today, agency, waiting, orders, leads, content, post, website, google, activity, results, check, settings, more, help, reports};
 const VIEW = {gen: 0, r: '', urls: new Set(), view: null, dirty: false};
-const NO_REDRAW = new Set(['post', 'check', 'settings', 'more']);
+const NO_REDRAW = new Set(['post', 'check', 'settings', 'more', 'help', 'reports']);
 let polling = null, redrawT = null;
 function viewFor(gen) {
   const el = $('#main');
@@ -2452,6 +2691,9 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   await loadShell();
   state();
   route();
+  publisherNav();
+  updateBanner();
+  setInterval(updateBanner, 6 * 3600 * 1000);
   setInterval(async () => { const e = await ask('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
 })();
 </script>

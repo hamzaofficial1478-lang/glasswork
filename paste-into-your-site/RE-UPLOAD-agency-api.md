@@ -1,3 +1,30 @@
+# Version 8 of the connector (October) — worth the three minutes
+
+The program now tells you on the Website screen when your site has an older
+connector. Version 8 changes nothing about what the agency may touch; it makes
+every visit safer and quicker:
+
+- **A change is written whole or not at all.** A write cut off half-way (a
+  timeout, the host stopping the script) used to be able to leave half a page
+  live. Now the new page is written beside the old one and swapped in whole.
+- **Your edits are never overwritten.** If you change a page after the agency
+  read it, the agency's change is refused and it reads the page again first.
+- **Two changes to one page at the same moment both land**, one after the
+  other, instead of the second quietly undoing the first.
+- **Many pages in one request.** The daily read of your site is one or two
+  knocks on the door instead of forty — quicker, and far less likely to make
+  your host's firewall think it is a bot.
+- **Clean answers on noisy hosts.** PHP notices your host prints no longer
+  break the agency's reading of the reply, and a page saved in an old text
+  encoding is read safely and never garbled.
+
+**How:** Website screen → *Get the new connector* (or Settings → Connection →
+*Download your connector*), unzip, and upload the `agency-api` folder over the
+old one in File Manager. Your secret (`token.php`) is the same, so nothing else
+changes. Then press *Test the connection*: it should say connector version 8.
+
+---
+
 # Re-uploading `agency-api.php` — the same three minutes, one more time
 
 Sorry. You did this last week and it worked; you have to do it again, and it is

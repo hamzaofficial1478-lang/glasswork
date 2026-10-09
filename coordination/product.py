@@ -12,13 +12,33 @@ in its profile and settings (coordination/site.py); the product name is what
 the program itself is called on the install, the terms and the update notice.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / "config" / "product.json"
+# THE PUBLISHER'S OWN COPY. Where his Glasswork Home is and the public half of
+# his signing key are written here, on his computer, and not into product.json:
+# his copy updates itself from git, and a changed tracked file would stop that.
+# A release carries them inside its own product.json (coordination/updates).
+PUBLISHER = ROOT / "config" / "publisher.local.json"
+
+
+def publisher_file() -> Path:
+    """Where the publisher's settings are (the tests point it at a temp file)."""
+    return Path(os.environ.get("GLASSWORK_PUBLISHER_FILE") or PUBLISHER)
+PUBLIC_KEYS = ("home_url", "update_url", "update_key", "support_email")
 DEFAULTS = {"name": "Glasswork", "version": "0.0.0", "tagline": "", "support_email": "",
-            "update_url": "", "update_key": ""}
+            "update_url": "", "update_key": "", "home_url": ""}
+
+
+def publisher() -> dict:
+    try:
+        d = json.loads(publisher_file().read_text(encoding="utf-8"))
+    except Exception:
+        d = {}
+    return d if isinstance(d, dict) else {}
 
 
 def info() -> dict:
@@ -26,7 +46,10 @@ def info() -> dict:
         d = json.loads(FILE.read_text(encoding="utf-8"))
     except Exception:
         d = {}
-    return {**DEFAULTS, **{k: v for k, v in (d if isinstance(d, dict) else {}).items() if v is not None}}
+    out = {**DEFAULTS, **{k: v for k, v in (d if isinstance(d, dict) else {}).items() if v is not None}}
+    mine = publisher().get("public") or {}
+    out.update({k: mine[k] for k in PUBLIC_KEYS if mine.get(k)})
+    return out
 
 
 def name() -> str:

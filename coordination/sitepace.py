@@ -51,6 +51,17 @@ PAUSE = 30 * 60            # the longest rest: his site keeps closing the door
 # many requests") is the site saying it in words, and gets fifteen at once.
 REST_STEPS = (2 * 60, 10 * 60, PAUSE)
 STRIKE_MEMORY = 60 * 60    # a clean hour and earlier drops are forgotten
+# ONE DROP IS A BLIP, TWO IN A ROW IS A DOOR.
+#
+# "i want that thing to be more strong more fast more reliable errors free ...
+#  so the user will not face the error while he will be doing the multiple
+#  tasks with webiste" — a single dropped line used to pause every desk for two
+#  minutes, and whatever he had just pressed failed with it. A firewall that has
+#  shut the door shuts it on every request, so the first drop is now only noted:
+#  the request is tried again a moment later (pipelines/site_api), and only a
+#  second drop inside this window rests the agency. A request that gets through
+#  in between wipes the note — that was the line, not a firewall.
+WARN_WINDOW = 90
 THROTTLED = 15 * 60
 BLOCK_STATUSES = {429, 503}
 # What a firewall shutting the door looks like from this side.
@@ -113,7 +124,7 @@ def _db():
     c = sqlite3.connect(board.DB, timeout=30, isolation_level=None)
     c.execute("CREATE TABLE IF NOT EXISTS site_pace (id INTEGER PRIMARY KEY CHECK (id=1),"
               " next_at REAL DEFAULT 0, resting_until REAL DEFAULT 0, why TEXT)")
-    for col in ("strikes INTEGER DEFAULT 0", "last_strike REAL DEFAULT 0"):
+    for col in ("strikes INTEGER DEFAULT 0", "last_strike REAL DEFAULT 0", "warned_at REAL DEFAULT 0"):
         try:
             c.execute("ALTER TABLE site_pace ADD COLUMN " + col)
         except sqlite3.OperationalError:
@@ -193,9 +204,19 @@ def told_to_stop(url, status=None, error=None) -> bool:
     if error is not None:
         why += f" ({type(error).__name__})"
     now = time.time()
+    global _noted
     try:
         c = _db()
         try:
+            if status != 429:
+                w = c.execute("SELECT warned_at FROM site_pace WHERE id=1").fetchone()
+                if not w or now - (w[0] or 0) > WARN_WINDOW:
+                    c.execute("INSERT INTO site_pace(id, next_at, resting_until, why, warned_at)"
+                              " VALUES(1,0,0,'',?) ON CONFLICT(id) DO UPDATE SET warned_at=excluded.warned_at",
+                              (now,))
+                    _noted = True
+                    return True
+            c.execute("UPDATE site_pace SET warned_at=0 WHERE id=1")
             r = c.execute("SELECT strikes, last_strike FROM site_pace WHERE id=1").fetchone()
             strikes, last = (r or (0, 0))
             strikes = (strikes or 0) + 1 if (now - (last or 0)) < STRIKE_MEMORY else 1
@@ -215,12 +236,44 @@ def told_to_stop(url, status=None, error=None) -> bool:
     return True
 
 
+_noted = False
+
+
+def warned() -> bool:
+    """A first drop is on record and the window for a second is still open."""
+    try:
+        c = _db()
+        try:
+            r = c.execute("SELECT warned_at FROM site_pace WHERE id=1").fetchone()
+        finally:
+            c.close()
+    except Exception:
+        return False
+    return bool(r and r[0] and time.time() - r[0] <= WARN_WINDOW)
+
+
+def got_through(url):
+    """A request to his site was answered: a drop noted by this process was a blip."""
+    global _noted
+    if not _noted or not _active() or not _is_his(url):
+        return
+    _noted = False
+    try:
+        c = _db()
+        try:
+            c.execute("UPDATE site_pace SET warned_at=0 WHERE id=1")
+        finally:
+            c.close()
+    except Exception:
+        pass
+
+
 def clear():
     """He has unblocked his address: let the agency read the site again now."""
     try:
         c = _db()
         try:
-            c.execute("UPDATE site_pace SET resting_until=0, why='', strikes=0 WHERE id=1")
+            c.execute("UPDATE site_pace SET resting_until=0, why='', strikes=0, warned_at=0 WHERE id=1")
         finally:
             c.close()
     except Exception:
@@ -245,6 +298,7 @@ def _pace_urllib(mod):
         except Exception as e:
             told_to_stop(target, status=getattr(e, "code", None), error=e)
             raise
+        got_through(target)
         return r
 
     urlopen.paced = True
@@ -261,7 +315,8 @@ def _pace_requests(mod):
         except Exception as e:
             told_to_stop(url, error=e)
             raise
-        told_to_stop(url, status=getattr(r, "status_code", None))
+        if not told_to_stop(url, status=getattr(r, "status_code", None)):
+            got_through(url)
         return r
 
     request.paced = True

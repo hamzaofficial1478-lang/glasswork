@@ -38,9 +38,12 @@ delete anything, refuses to touch a file that is not a page, refuses anything
 outside the website folder, and copies the old file before every change. See
 that file for the whole list.
 """
+import hashlib
 import json
 import os
 import re
+import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -50,6 +53,19 @@ from coordination import board
 AGENT = "it-releaser"          # the only one allowed to write. Red line 1.
 SECTOR = "IT"
 TIMEOUT = 25
+# The newest connector file, and what each version added. 8: whole-page writes
+# (never half a page), one change to a page at a time, fingerprints so a page
+# changed under the agency is never overwritten, and many pages in one request.
+CONNECTOR_NEWEST = 8
+# "more strong more fast more reliable errors free" — a request that fails for
+# a reason that passes (a dropped line, a host briefly overloaded) is tried
+# again after these pauses, instead of failing whatever he had just pressed.
+RETRY_WAITS = (2, 5)
+# What a host says when it is busy for a moment, rather than "no".
+PASSING = {408, 429, 502, 503, 504, 508, 520, 521, 522, 523, 524}
+# Requests that are safe to send twice: reading, and the writes the connector
+# makes harmless to repeat — the same page or block again is "unchanged".
+REPEATABLE_POSTS = {"pages", "head", "pages-many", "picture"}
 OLD_CONNECTOR = ("the connector file on your website is the older one, which cannot add "
                  "blog posts. Upload paste-into-your-site/agency-api.php from the agency "
                  "folder to your site as agency-api/index.php, replacing the old one "
@@ -179,11 +195,32 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
     target = root if root.lower().endswith(".php") else root + "/index.php"
     url = target + "?" + urllib.parse.urlencode(q)
     data = json.dumps(body).encode() if body is not None else None
+    repeatable = method == "GET" or bits[0] in REPEATABLE_POSTS
+    out = {}
+    for n in range(len(RETRY_WAITS) + 1):
+        out = _send(url, data, method, s["token"], timeout)
+        again = out.pop("_passing", False)
+        sure_unsent = out.pop("_unsent", False)
+        if out.get("ok") or out.get("resting") or not again or n == len(RETRY_WAITS):
+            break
+        if not (repeatable or sure_unsent):
+            # It may have arrived. A post or a removal sent twice could happen
+            # twice, so it is not repeated blind — the caller checks and decides.
+            out["maybe_done"] = True
+            break
+        time.sleep(RETRY_WAITS[n])
+    if n:
+        out["tries"] = n + 1
+    return out
+
+
+def _send(url, data, method, token, timeout) -> dict:
+    """One attempt. Marks an answer that may well be different a moment later."""
     req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", "Bearer " + s["token"])
+    req.add_header("Authorization", "Bearer " + token)
     # Some Apache setups drop Authorization before PHP sees it. The endpoint
     # accepts either, so send both and stop caring which host this is.
-    req.add_header("X-Agency-Token", s["token"])
+    req.add_header("X-Agency-Token", token)
     req.add_header("Accept", "application/json")
     if data is not None:
         req.add_header("Content-Type", "application/json")
@@ -215,9 +252,20 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
             out["old_connector"] = True
             out["error"] = OLD_CONNECTOR
         elif e.code == 404:
-            out["error"] = (f"nothing answered at {url}. Check the Admin API "
+            out["error"] = (f"nothing answered at {url.split('?')[0]}. Check the Admin API "
                             "address, and that agency-api/index.php really is "
                             "on the server.")
+        elif e.code == 413:
+            out["too_big"] = True
+            said = str(out.get("error") or "")
+            out["error"] = (said if "post_max_size" in said else
+                            "that was more than your website's host accepts in one go, so nothing "
+                            "was changed. Ask your host to raise the upload limit (post_max_size), "
+                            "or make the page or picture smaller")
+        elif e.code in PASSING:
+            out["_passing"] = True
+            out["error"] = (f"your website's host was busy (HTTP {e.code}) — "
+                            + str(out.get("error") or "it asked for a moment"))
         return out
     except Exception as e:
         # NOT AN ANSWER — THE SITE WAS NOT THERE TO GIVE ONE. Marked, so the
@@ -226,7 +274,12 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
         # away (pipelines/it_release, _wait_for_site).
         from coordination import sitepace
         resting = isinstance(e, sitepace.SiteResting)
+        inner = getattr(e, "reason", e)
         return {"ok": False, "unreachable": True, "resting": resting,
+                "_passing": not resting,
+                # Refused outright, or the name did not resolve: the request
+                # never left this computer, so sending it again is always safe.
+                "_unsent": isinstance(inner, (ConnectionRefusedError, socket.gaierror)),
                 "error": (str(e) if resting else
                           f"could not reach your site: {type(e).__name__}: {e}")}
     try:
@@ -334,7 +387,95 @@ def read_page(page, s=None) -> dict:
     why = not_ours(page)
     if why:
         return {"ok": False, "page": page, "error": why}
-    return call("/pages/" + urllib.parse.quote(page.lstrip("/")), s=s)
+    got = call("/pages/" + urllib.parse.quote(page.lstrip("/")), s=s)
+    _remember(page, got, s)
+    return got
+
+
+# WHAT EACH PAGE WAS WHEN THIS PROGRAM LAST READ IT. A change is written with
+# the fingerprint of the page it was made from, and the connector refuses it if
+# the page is no longer that — so a page he edited, or another task changed,
+# in between is never quietly overwritten. Per program, never stored.
+_SEEN = {}
+
+
+def _fp(text) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def _key(page, s=None):
+    s = s or settings()
+    return (s.get("base") or s.get("site") or "", str(page or "").lstrip("/"))
+
+
+def _remember(page, got, s=None):
+    if isinstance(got, dict) and got.get("ok") and isinstance(got.get("html"), str):
+        _SEEN[_key(page, s)] = {"sha": str(got.get("sha256") or ""), "local": _fp(got["html"]),
+                                "text_ok": got.get("text_ok") is not False}
+
+
+def _expected(page, before, s=None) -> str:
+    """The fingerprint of the page this change was made from, if it is known."""
+    seen = _SEEN.get(_key(page, s)) or {}
+    if before is not None:
+        mine = _fp(before)
+        return seen.get("sha") if seen.get("local") == mine and seen.get("sha") else mine
+    return seen.get("sha") or ""
+
+
+_VERSION = {}
+
+
+def connector_version(s=None) -> int:
+    """Which connector file is on the site (0 if it cannot be told). Asked once."""
+    s = s or settings()
+    if s.get("kind") == "wordpress":
+        return 0
+    k = s.get("base") or ""
+    if k not in _VERSION:
+        h = health(s=s)
+        if not h.get("ok"):
+            return 0
+        try:
+            _VERSION[k] = int(h.get("connector") or 0)
+        except (TypeError, ValueError):
+            _VERSION[k] = 0
+    return _VERSION[k]
+
+
+def read_pages(names, s=None) -> dict:
+    """
+    {page: answer} for many pages at once.
+
+    A version-8 connector answers up to sixty pages in one request; an older
+    one, or WordPress, is asked one page at a time exactly as before. Either
+    way each answer is what read_page would have given.
+    """
+    s = s or settings()
+    out, todo = {}, []
+    for n in names:
+        if n in out or n in todo:
+            continue
+        why = not_ours(n)
+        if why:
+            out[n] = {"ok": False, "page": n, "error": why}
+        else:
+            todo.append(n)
+    if todo and connector_version(s) >= 8:
+        while todo:
+            r = call("/pages-many", "POST", {"pages": todo}, s=s)
+            if not r.get("ok") or not r.get("pages"):
+                break
+            for got in r["pages"]:
+                asked = got.get("asked") or got.get("page")
+                if asked in todo:
+                    out[asked] = got
+                    _remember(asked, got, s)
+            todo = [n for n in (r.get("more") or []) if n not in out]
+    for n in names:
+        if n not in out:
+            out[n] = read_page(n, s=s)
+    return out
 
 
 def backups(s=None) -> dict:
@@ -545,7 +686,19 @@ def put_page(page, html, agent=AGENT, s=None, _action="page", _block="",
         return _log_write(_action, page, agent,
                           {"ok": False, "queued": cid, "error": refused},
                           block_id=_block)
-    r = call("/pages", "POST", {"page": page, "html": html}, s=s)
+    if (_SEEN.get(_key(page, s)) or {}).get("text_ok") is False:
+        return _log_write(_action, page, agent, {"ok": False, "error": (
+            f"{page} is not saved as plain UTF-8 text, so some of its characters cannot be "
+            "carried safely — it was left exactly as it is rather than garbled. Re-save it "
+            "as UTF-8 (most editors have this under Save As) and the agency can change it.")},
+            block_id=_block)
+    body = {"page": page, "html": html}
+    expect = _expected(page, before, s)
+    if expect:
+        body["expect_sha"] = expect
+    r = call("/pages", "POST", body, s=s)
+    if r.get("ok"):
+        _SEEN[_key(page, s)] = {"sha": str(r.get("sha256") or ""), "local": _fp(html)}
     return _log_write(_action, page, agent, r, html=html, block_id=_block,
                       undo_cmd=f"python -m pipelines.site_api --undo {page}",
                       before=before, summary=summary)
@@ -978,13 +1131,14 @@ def _walk(s=None, unread=None):
         return
     listed = [x["page"] for x in (p.get("pages") or [])]
     todo = list(listed) + [n for n in LIKELY_INCLUDES + FOOTER_GUESSES if n not in listed]
+    ahead = read_pages(todo, s=s)          # the known ones in one go; includes found later one by one
     seen = set()
     while todo:
         name = todo.pop(0)
         if name in seen:
             continue
         seen.add(name)
-        got = read_page(name, s=s)
+        got = ahead.get(name) or read_page(name, s=s)
         if not got.get("ok"):
             if got.get("unreachable"):
                 yield None, got

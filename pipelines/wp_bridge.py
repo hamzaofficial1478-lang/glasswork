@@ -44,6 +44,8 @@ else — never in an address, never in a log line.
 import base64
 import json
 import re
+import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -75,8 +77,25 @@ def normalise_password(p) -> str:
     return re.sub(r"\s+", "", str(p or ""))
 
 
+# A WordPress host that is busy for a moment, or a line that drops, is asked
+# again after these pauses — reads always, and changes only when the request
+# never left this computer (a page saved twice is harmless; a post is not).
+RETRY_WAITS = (2, 5)
+PASSING = {408, 429, 502, 503, 504, 508, 520, 521, 522, 523, 524}
+
+
 def _req(s, path, method="GET", body=None, query=None, timeout=TIMEOUT):
     """(status, json or None, error text). Never raises."""
+    for n in range(len(RETRY_WAITS) + 1):
+        status, out, err, unsent = _req_once(s, path, method, body, query, timeout)
+        passing = status == 0 or status in PASSING
+        if not passing or n == len(RETRY_WAITS) or not (method == "GET" or unsent):
+            return status, out, err
+        time.sleep(RETRY_WAITS[n])
+    return status, out, err
+
+
+def _req_once(s, path, method, body, query, timeout):
     url = api_root(s["site"]) + path
     if query:
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(query)
@@ -95,15 +114,17 @@ def _req(s, path, method="GET", body=None, query=None, timeout=TIMEOUT):
         raw = (e.read() or b"").decode("utf-8", "replace")
         status = e.code
     except Exception as e:
-        return 0, None, f"could not reach your website: {type(e).__name__}: {e}"
+        inner = getattr(e, "reason", e)
+        return (0, None, f"could not reach your website: {type(e).__name__}: {e}",
+                isinstance(inner, (ConnectionRefusedError, socket.gaierror)))
     try:
         out = json.loads(raw) if raw.strip() else None
     except ValueError:
         out = None
     if 200 <= status < 300:
-        return status, out, ""
+        return status, out, "", False
     msg = (out or {}).get("message") if isinstance(out, dict) else ""
-    return status, out, msg or f"HTTP {status} from your website"
+    return status, out, msg or f"HTTP {status} from your website", False
 
 
 def _failed(status, err) -> dict:

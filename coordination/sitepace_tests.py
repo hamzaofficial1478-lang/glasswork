@@ -8,7 +8,8 @@ His site was up; his own address had been shut out by his host's firewall,
 because the agency read the site from three desks at once. What has to hold:
 
   every desk's requests to HIS site go one at a time, in turn
-  the first time the site shuts the door, the agency stops asking
+  one dropped line is a blip and is tried again; the second time in a row the
+  site shuts the door, the agency stops asking
   other websites are not held up by any of it
   he can see it, and tell the agency the door is open again
 
@@ -102,12 +103,16 @@ def test_the_first_closed_door_stops_every_desk():
         os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
         srv, port = _slamming_server()
         try:
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5)
-                slammed = False
-            except Exception:
-                slammed = True
-            check("the fake firewall hung up", slammed, True)
+            def knock():
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5)
+                    return False
+                except Exception:
+                    return True
+            check("the fake firewall hung up", knock(), True)
+            check("once is a blip: noted, and nobody is stopped",
+                  (bool(sitepace.resting()), sitepace.warned()), (False, True))
+            check("it hung up again", knock(), True)
             rest = sitepace.resting()
             check("the agency noticed and is leaving the site alone", bool(rest), True)
             check("and says why", "closed the connection" in rest.get("why", ""), True)
@@ -147,8 +152,9 @@ def test_the_first_closed_door_stops_every_desk():
 def test_he_sees_it_and_can_open_it_again():
     print("\nHe sees it in 'Waiting on you', and his yes lets the agency back in:")
     with _Cabinet():
-        sitepace.told_to_stop("https://127.0.0.1/", error=ConnectionResetError(
-            "An existing connection was forcibly closed by the remote host"))
+        for _ in range(2):
+            sitepace.told_to_stop("https://127.0.0.1/", error=ConnectionResetError(
+                "An existing connection was forcibly closed by the remote host"))
         from . import state
         items = [a for a in state.build().get("approvals") or []
                  if a.get("kind") == "site_resting"]
@@ -165,20 +171,32 @@ def test_one_drop_is_a_short_pause_and_repeats_grow():
     — one closed connection stopped every desk for thirty minutes, and his blog
     was refused inside the pause.
     """
-    print("\nOne dropped connection is a short pause; only repeats grow it:")
+    print("\nOne dropped connection is a blip, tried again — nothing waits for it:")
     import time as _t
+    with _Cabinet():
+        sitepace.told_to_stop("https://127.0.0.1/a.html", error=ConnectionResetError("reset"))
+        check("no desk is stopped", sitepace.resting(), {})
+        check("but it is noted", sitepace.warned(), True)
+        sitepace.got_through("https://127.0.0.1/a.html")
+        check("and the next request getting through wipes the note", sitepace.warned(), False)
+        sitepace.told_to_stop("https://127.0.0.1/a.html", error=ConnectionResetError("reset"))
+        check("so a drop after a good answer is a blip again", sitepace.resting(), {})
+
+    print("\nTwo in a row is a short pause; only repeats grow it:")
     with _Cabinet():
         rests = []
         for n in range(3):
-            sitepace.told_to_stop("https://127.0.0.1/blog-x.html",
-                                  error=ConnectionResetError("forcibly closed"))
+            for _ in range(2):
+                sitepace.told_to_stop("https://127.0.0.1/blog-x.html",
+                                      error=ConnectionResetError("forcibly closed"))
             rests.append(round((sitepace.resting()["until"] - _t.time()) / 60))
         check("two minutes, then ten, then thirty", rests, [2, 10, 30])
         why = sitepace.resting()["why"]
         check("it says which page and what came back",
               "/blog-x.html" in why and "ConnectionResetError" in why, True)
         sitepace.clear()
-        sitepace.told_to_stop("https://127.0.0.1/", error=ConnectionResetError("reset"))
+        for _ in range(2):
+            sitepace.told_to_stop("https://127.0.0.1/", error=ConnectionResetError("reset"))
         check("his 'the site is fine' starts the count again",
               round((sitepace.resting()["until"] - _t.time()) / 60), 2)
     with _Cabinet():

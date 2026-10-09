@@ -367,7 +367,13 @@ const SETUP_API = [
   "/api/engine",
   // The website connection: the connector download carries the website's secret.
   "/api/connect",
+  // The publisher's Home: making it and its download carry his key.
+  "/api/publisher/setup", "/api/publisher/home.zip", "/api/publisher/publish",
 ];
+// Two connection calls carry no secret — how the website is connected, and a
+// knock to test it — so the Website screen may use them without the lock. The
+// connector download, which holds the secret, stays behind it.
+const SETUP_OPEN = new Set(["GET /api/connect", "POST /api/connect/check"]);
 // The pages behind the same lock. Unlocking returns you to the one you asked for.
 const SETUP_PAGES = new Set(["/setup", "/setup.html", "/engine", "/engine.html"]);
 
@@ -428,7 +434,8 @@ function unlockPage(err, next) {
 app.use((req, res, next) => {
   if (!adminHash() && !accountsExist()) return next();   // no password: nothing to ask
   const isPage = req.method === "GET" && SETUP_PAGES.has(req.path);
-  const isApi = SETUP_API.some((p) => req.path === p || req.path.startsWith(p + "/"));
+  const isApi = SETUP_API.some((p) => req.path === p || req.path.startsWith(p + "/"))
+    && !SETUP_OPEN.has(req.method + " " + req.path);
   if (!isPage && !isApi) return next();
   if (req.path === "/api/setup/unlock") return next();
 
@@ -620,7 +627,18 @@ function productInfo() {
 app.get("/api/product", async (_q, res) => {
   const p = productInfo();
   res.json({ ok: true, name: p.name || "Glasswork", version: p.version || "", tagline: p.tagline || "",
-             support_email: p.support_email || "" });
+             support_email: p.support_email || "", installed: process.env.GLASSWORK_INSTALLED === "1" });
+});
+// CLOSE THE PROGRAM. An installed copy runs with no window to close, so the
+// office closes itself: it answers, then stops; the launcher stops with it.
+// Never while a day is running — stopping the office would orphan its work.
+app.post("/api/quit", async (_q, res) => {
+  const st = await pyModule("pipelines.day_run", ["--status", "--json"], 60000);
+  if (st && st.run && st.run.running) {
+    return res.json({ ok: false, error: "A day is running. Stop it first (Today → Stop the run), then close the program." });
+  }
+  res.json({ ok: true, why: "Closing. Open it again from the Start menu or the desktop whenever you like." });
+  setTimeout(() => process.exit(0), 400);
 });
 app.get("/api/update", async (_q, res) => res.json(await pyModule("coordination.updates", ["--check", "--json"], 60000)));
 app.post("/api/update/apply", async (_q, res) =>
@@ -628,6 +646,82 @@ app.post("/api/update/apply", async (_q, res) =>
 app.post("/api/update/rollback", async (_q, res) =>
   res.json(await pyModule("coordination.updates", ["--rollback", "--json"], 120000)));
 app.get("/api/diagnostics", async (_q, res) => res.json(await pyModule("coordination.diagnostics", ["--json"], 90000)));
+
+/* ---- PROBLEMS REPORTED, AND THE ANSWERS (coordination/support.py) -------------
+   "i want the report section where user will be able to submit the report and
+    those reports will get over to me" — sent to the publisher's own Glasswork
+   Home on his website, nowhere else. The publisher's side is below it. */
+const textField = (v, n) => String(v || "").slice(0, n);
+app.get("/api/support/mine", async (_q, res) => res.json(await pyModule("coordination.support", ["--mine"], 60000)));
+app.get("/api/support/preview", async (_q, res) => res.json(await pyModule("coordination.support", ["--preview"], 90000)));
+app.post("/api/support/send", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.support", ["--send"], { title: textField(b.title, 200),
+    text: textField(b.text, 20000), contact: textField(b.contact, 200), attach: b.attach !== false }, 120000));
+});
+app.get("/api/publisher", async (_q, res) => res.json(await pyModule("coordination.support", ["--publisher"], 30000)));
+app.post("/api/publisher/setup", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.support", ["--setup"], { site: textField(b.site, 300),
+    email: textField(b.email, 200) }, 60000));
+});
+app.get("/api/publisher/home.zip", async (_q, res) => {
+  const r = await pyModule("coordination.support", ["--home-zip"], 60000);
+  if (!r.ok || !r.zip) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", 'attachment; filename="glasswork-home.zip"');
+  res.setHeader("Cache-Control", "no-store");
+  res.send(Buffer.from(r.zip, "base64"));
+});
+app.post("/api/publisher/check", async (_q, res) => res.json(await pyModule("coordination.support", ["--check-home"], 60000)));
+app.get("/api/publisher/inbox", async (_q, res) => res.json(await pyModule("coordination.support", ["--inbox"], 60000)));
+app.get("/api/publisher/read/:id", async (req, res) => {
+  const id = String(req.params.id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
+  res.json(await pyModule("coordination.support", ["--read", id], 60000));
+});
+app.post("/api/publisher/answer", async (req, res) => {
+  const b = req.body || {};
+  const body = { id: String(b.id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40) };
+  if (typeof b.status === "string") body.status = b.status.slice(0, 20);
+  if (typeof b.reply === "string") body.reply = b.reply.slice(0, 5000);
+  if (typeof b.fixed_in === "string") body.fixed_in = b.fixed_in.slice(0, 40);
+  res.json(await pyStdin("coordination.support", ["--answer"], body, 60000));
+});
+// PUTTING A VERSION OUT takes minutes when the installer is built, longer than
+// a request may be held open — so it runs on its own and leaves its progress in
+// a file this route reads.
+const publishJob = () => path.join(DATA_ROOT, "publish-job.local.json");
+app.post("/api/publisher/publish", async (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  try {
+    const now = JSON.parse(fs.readFileSync(publishJob(), "utf8"));
+    if (now && now.running && Date.now() / 1000 - (now.at || 0) < 1800)
+      return res.json({ ok: false, busy: true, error: "A version is being put out already — " + (now.stage || "working") });
+  } catch (_) { /* no job yet */ }
+  const b = req.body || {};
+  const args = [...py.prefix, "-m", "coordination.updates", "--publish", "--job", publishJob(),
+    "--notes", String(b.notes || "").slice(0, 2000)];
+  if (b.installer === true) args.push("--installer");
+  try {
+    fs.mkdirSync(path.dirname(publishJob()), { recursive: true });
+    fs.writeFileSync(publishJob(), JSON.stringify({ running: true, stage: "Starting", at: Math.floor(Date.now() / 1000) }));
+    const child = spawn(py.cmd, args, { cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => {});
+    child.unref();
+  } catch (e) {
+    return res.json({ ok: false, error: "Could not start: " + e.message });
+  }
+  res.json({ ok: true, started: true });
+});
+app.get("/api/publisher/job", async (_q, res) => {
+  try { res.json({ ok: true, ...JSON.parse(fs.readFileSync(publishJob(), "utf8")) }); }
+  catch (_) { res.json({ ok: true, running: false, none: true }); }
+});
+app.post("/api/publisher/remove", async (req, res) => {
+  const id = String((req.body || {}).id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
+  res.json(await pyModule("coordination.support", ["--remove", id], 60000));
+});
 
 /* ---- READING A SENT MAIL, AND THE CONTENT SCREEN'S CONTROLS -------------------
    "we cannot read the sent mails" — coordination/review.py --sent-mail.
@@ -950,6 +1044,7 @@ const API_CAPABILITIES = [
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
   "account", "business", "engine", "connect", "check", "product", "update", "diagnostics",
+  "support", "publisher", "quit",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 // Which copy of the program this is, without saying where it lives: run.py
@@ -1893,7 +1988,7 @@ app.post("/api/run/start", async (req, res) => {
   let child;
   try {
     child = spawn(py.cmd, [...py.prefix, "-m", "pipelines.day_run", "--stdin", "--json"], {
-      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"],
+      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
     });
   } catch (e) {
     return res.json({ ok: false, error: "Could not start the run: " + e.message });
@@ -1945,7 +2040,7 @@ app.post("/api/run/resume", async (_req, res) => {
                                    orders: {}, only: [] });
   try {
     const child = spawn(py.cmd, [...py.prefix, "-m", "pipelines.day_run", "--stdin", "--json"], {
-      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"],
+      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
     });
     child.on("error", () => {});
     try { child.stdin.end(payload); } catch (_) {}

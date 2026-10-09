@@ -86,9 +86,12 @@ def look(s=None) -> dict:
     # it exists, we have seen it, and it must be treated like any other
     # watched page rather than silently dropped when a read fails.
     already_known = set(changelog.fingerprints())
+    # Every page in as few requests as the connector allows (sixty a time on
+    # version 8, one a time before it) — fewer knocks on his host's door.
+    read = site_api.read_pages(names, s=s)
     for name in names:
         row = rows[name]
-        got = site_api.read_page(name, s=s)
+        got = read.get(name) or {"ok": False, "error": "not read"}
         if got.get("ok"):
             seen.append({"page": name, "bytes": row.get("bytes"),
                          "changed": row.get("changed"), "html": got.get("html") or ""})
