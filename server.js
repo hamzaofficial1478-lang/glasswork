@@ -72,6 +72,20 @@ app.use((req, res, next) => {
   res.on("finish", end); res.on("close", end);
   next();
 });
+// ANY WRITE MAKES EVERY KEPT ANSWER OLD (see ANSWERS KEPT below). Mounted this
+// early so it sees every route, the account and setup ones included. Bumped
+// when the write starts, so a read already under way cannot keep what it read
+// before it; and again when it ends, so a read that ran during it cannot either.
+let KEPT_GEN = 0;
+const READS_BY_POST = [/^\/api\/content\/post\/\d+\/score$/, /^\/api\/run\/check$/];
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD" && req.path.startsWith("/api/")
+      && !READS_BY_POST.some((r) => r.test(req.path))) {
+    KEPT_GEN++;
+    res.on("finish", () => { KEPT_GEN++; });
+  }
+  next();
+});
 if (SUPERVISED) {
   setInterval(() => {
     if (ACTIVE > 0 || !codeIsNewer()) return;
@@ -450,6 +464,65 @@ app.post("/api/setup/unlock", express.urlencoded({ extended: false }), async (re
 
 // Past the gate, and only past it.
 app.use(express.static(path.join(__dirname, "ui")));
+
+/* ---- ANSWERS KEPT, WHILE THEY ARE STILL TRUE ---------------------------------
+   "the program lags while changing sections or buttons it should be fast"
+
+   Every screen is a Python program started for the asking, and on Windows
+   starting one is the slow part. Most of the time nothing has changed since the
+   last time the same screen asked — so the answer is kept, and given again at
+   once, for as long as it is provably the same answer:
+
+     - the cabinet file has not changed (its size and time, read each time —
+       any agent writing anything changes them),
+     - nothing has been saved, approved or pressed since (any POST, above),
+     - and it is younger than its limit, because some lines are about time
+       ("2 min ago", a run that went quiet) rather than about the cabinet.
+
+   Only answers that worked are kept; an error is always asked again. */
+const KEEP = [
+  ["/api/state", 15000], ["/api/activity", 15000], ["/api/run/status", 8000],
+  ["/api/review", 20000], ["/api/leads", 30000], ["/api/content/topics", 60000],
+  ["/api/comms", 20000], ["/api/leftovers", 20000], ["/api/index-status", 60000],
+  ["/api/orders", 30000], ["/api/results", 30000], ["/api/site/changes", 30000],
+  ["/api/check/list", 15000], ["/api/brand", 60000], ["/api/engine-state", 20000],
+  ["/api/sectors", 30000], ["/api/readiness", 30000], ["/api/faults", 30000],
+  ["/api/sector/", 20000], ["/api/mail/sent/", 60000], ["/api/content/post/", 30000],
+];
+const KEPT = new Map();
+function keepFor(p) {
+  for (const [k, ms] of KEEP) if (k.endsWith("/") ? p.startsWith(k) && p.length > k.length : p === k) return ms;
+  return 0;
+}
+function cabinetStamp() {
+  const db = dbPath();
+  let stamp = db;
+  for (const f of [db, db + "-wal"]) {
+    try { const st = fs.statSync(f); stamp += `|${st.mtimeMs}|${st.size}`; } catch (_) { stamp += "|-"; }
+  }
+  return stamp;
+}
+app.use((req, res, next) => {
+  if (req.method !== "GET") return next();
+  const ms = keepFor(req.path);
+  if (!ms) return next();
+  const key = req.originalUrl, at = Date.now(), gen = KEPT_GEN, stamp = cabinetStamp();
+  const hit = KEPT.get(key);
+  if (hit && hit.gen === gen && hit.stamp === stamp && at - hit.at < ms) {
+    res.set("X-Kept", "1");
+    return res.json(hit.body);
+  }
+  const send = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode < 300 && body && typeof body === "object" && body.ok !== false
+        && gen === KEPT_GEN) {
+      if (KEPT.size > 300) for (const [k, v] of KEPT) if (v.gen !== KEPT_GEN) KEPT.delete(k);
+      KEPT.set(key, { at, gen, stamp, body });
+    }
+    return send(body);
+  };
+  next();
+});
 
 // THE NEW DESIGN IS THE FRONT DOOR (ui/app.html) — "the ui was still same not
 // as you showed here". The previous office keeps every panel at /classic while
@@ -1783,18 +1856,38 @@ app.post("/api/run/start", async (req, res) => {
   const only = Array.isArray(b.only)
     ? b.only.filter((x) => typeof x === "string").map((x) => x.slice(0, 20)).slice(0, 10)
     : [];
+
+  // NO ORDERS, NO DAY. "with out any order the program will not start the
+  // day" — nothing saved for today and nothing in this press means the check
+  // runs instead: every sector and desk, and nothing starts. The same rule is
+  // in day_run.start for the terminal; it is asked here as well because the
+  // day runs detached, and an answer given there would never reach him.
+  const gate = await pyStdin("pipelines.day_run", ["--gate"], { orders }, 300000);
+  if (gate && gate.no_orders) {
+    return res.json({ ok: false, started: false, no_orders: true, check: gate.check,
+      why: gate.why || "No orders for today, so the day was not started." });
+  }
+  // The quick check (config and loading, no model calls) here too, so a
+  // refusal reaches him instead of dying quietly in the background.
+  const strict = b.force === true;
+  const pre = await pyModule("pipelines.day_run", ["--check", "--quick", "--json"], 300000);
+  if (pre && pre.ok && !pre.ready && !strict) {
+    return res.json({ ok: false, refused: true, preflight: pre,
+      blocking: pre.blocking || [],
+      why: "Not started. " + (pre.blocking || []).slice(0, 3).join("; ")
+         + ". Fix these, or press Run anyway." });
+  }
   const payload = JSON.stringify({
     orders,
     only,
     note: String(b.note || "").slice(0, 4000),
     // Strictly true, not merely truthy. force overrides a check that said a
     // sector cannot run, so the string "no" must not be enough to trip it.
-    force: b.force === true,
-    // The owner just watched the full sweep finish in /api/run/check, so the
-    // re-check here is the cheap one: it catches a key deleted while the form
-    // was open without paying for every model call a second time.
+    force: strict,
     quick: true,
-    skip_check: false,
+    // Checked a moment ago, just above — once is enough. A forced run checks
+    // again so the run row records, in writing, that it was forced.
+    skip_check: !!(pre && pre.ok && pre.ready),
   });
 
   let child;

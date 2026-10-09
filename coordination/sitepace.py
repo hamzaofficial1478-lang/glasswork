@@ -234,15 +234,8 @@ def clear():
 _installed = False
 
 
-def install():
-    """Wrap requests and urllib so every desk is paced without being edited."""
-    global _installed
-    if _installed:
-        return
-    _installed = True
-
-    import urllib.request
-    real_urlopen = urllib.request.urlopen
+def _pace_urllib(mod):
+    real_urlopen = mod.urlopen
 
     def urlopen(url, *a, **kw):
         target = getattr(url, "full_url", url)
@@ -254,13 +247,12 @@ def install():
             raise
         return r
 
-    urllib.request.urlopen = urlopen
+    urlopen.paced = True
+    mod.urlopen = urlopen
 
-    try:
-        import requests
-    except Exception:
-        return
-    real_request = requests.sessions.Session.request
+
+def _pace_requests(mod):
+    real_request = mod.sessions.Session.request
 
     def request(self, method, url, *a, **kw):
         before(url)
@@ -272,4 +264,74 @@ def install():
         told_to_stop(url, status=getattr(r, "status_code", None))
         return r
 
-    requests.sessions.Session.request = request
+    request.paced = True
+    mod.sessions.Session.request = request
+
+
+# WRAPPED WHEN FIRST LOADED, not loaded in order to be wrapped. Importing
+# requests and urllib.request just to put the wrapper on was most of the start-up
+# time of every program the screens run — a tenth of a second here, far more on
+# Windows — and most of those programs never make a web request at all. So a
+# finder waits for either library to be imported and wraps it the moment it has
+# loaded, before whoever asked for it gets it: same wrapper, same door, paid for
+# only by the programs that actually read a website.
+class _WrapWhenLoaded:
+    def __init__(self, patches):
+        self.patches = dict(patches)        # module name -> wrap(module)
+        self.looking = set()
+
+    def find_spec(self, name, path=None, target=None):
+        wrap = self.patches.get(name)
+        if wrap is None or name in self.looking:
+            return None
+        self.looking.add(name)
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec(name)
+        except Exception:
+            spec = None
+        finally:
+            self.looking.discard(name)
+        if spec is None or spec.loader is None or not hasattr(spec.loader, "exec_module"):
+            return None
+        spec.loader = _Loader(spec.loader, wrap, lambda: self.patches.pop(name, None))
+        return spec
+
+
+class _Loader:
+    def __init__(self, real, wrap, done):
+        self.real, self.wrap, self.done = real, wrap, done
+
+    def create_module(self, spec):
+        return self.real.create_module(spec)
+
+    def exec_module(self, module):
+        self.real.exec_module(module)
+        self.done()
+        try:
+            self.wrap(module)
+        except Exception:                                   # pragma: no cover
+            pass
+
+    def __getattr__(self, name):                            # anything else is the real one's
+        return getattr(self.real, name)
+
+
+def install():
+    """Pace every desk's requests to his site, without editing any desk."""
+    global _installed
+    if _installed:
+        return
+    _installed = True
+    import sys
+    waiting = {}
+    for name, wrap in (("urllib.request", _pace_urllib), ("requests", _pace_requests)):
+        if name in sys.modules:
+            try:
+                wrap(sys.modules[name])
+            except Exception:                               # pragma: no cover
+                pass
+        else:
+            waiting[name] = wrap
+    if waiting:
+        sys.meta_path.insert(0, _WrapWhenLoaded(waiting))

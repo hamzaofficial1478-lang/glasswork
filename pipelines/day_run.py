@@ -439,6 +439,31 @@ def check_pipelines() -> list:
     module with a side effect at import time — one that opens the cabinet, or
     posts something — do it during a check the owner thinks is read-only.
     """
+    # ONE child for every module, not one each. Twenty-odd Python start-ups
+    # made the Run button's check take eight seconds; one start-up that tries
+    # each import in turn and reports them all takes one or two, and is still
+    # a separate process. A child that dies outright falls back to one each.
+    mods = [m for _l, m, _r, _ln in STEPS]
+    code = ("import importlib,json,sys\n"
+            "out={}\n"
+            "for m in json.loads(sys.argv[1]):\n"
+            "    try:\n"
+            "        importlib.import_module(m); out[m]=''\n"
+            "    except BaseException as e:\n"
+            "        out[m]=(type(e).__name__+': '+str(e)).strip()[:200]\n"
+            "print('\\n'+json.dumps(out))\n")
+    try:
+        p = subprocess.run([PY, "-c", code, json.dumps(sorted(set(mods)))],
+                           cwd=str(ROOT), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=180)
+        said = json.loads((p.stdout or "").strip().splitlines()[-1])
+    except Exception:
+        said = None
+    if isinstance(said, dict) and all(m in said for m in mods):
+        return [{"name": label, "module": mod, "room": room, "ok": not said[mod],
+                 "says": "loads" if not said[mod] else said[mod]}
+                for label, mod, room, _lane in STEPS]
+
     out = []
     for label, mod, room, _lane in STEPS:
         code = f"import importlib,sys; importlib.import_module({mod!r})"
@@ -1426,6 +1451,133 @@ def _ctrl_c_is_a_stop(stop):
     return lambda: signal.signal(signal.SIGINT, old)
 
 
+# ---------------------------------------------------------------------------
+# NO ORDERS, NO DAY
+# ---------------------------------------------------------------------------
+#
+# "make sure with out any order the program will only check that each sector
+#  and each agent is working — with out any order the program will not start
+#  the day"
+#
+# A day nobody ordered is the agency spending his allowance on work he did not
+# ask for. So Run with nothing ordered for today is a CHECK, not a day: every
+# sector's light, every desk's tools, and any agent stuck right now — and
+# nothing starts. Orders count from the order boxes (saved for today) and from
+# the press itself. Resume is not gated: it only finishes work that was already
+# ordered, and stopping that half-way is what leaves jobs hanging.
+
+def todays_orders(extra=None) -> dict:
+    """{sector: text} he has ordered for today — saved, plus this press."""
+    have = {}
+    try:
+        have.update(proposals.orders())
+    except Exception:
+        pass
+    for sec, text in (extra or {}).items():
+        canon = proposals.canonical_sector(str(sec))
+        if canon and str(text or "").strip():
+            have[canon] = str(text).strip()
+    return have
+
+
+# What a desk's state means, in the words the screen shows.
+DESK_LOOK = {"ready": "can work", "off": "switched off", "broken": "will not load",
+             "blocked": "cannot work", "stuck": "stuck right now"}
+
+
+def desk_check(pre=None, quick=True) -> dict:
+    """
+    Every sector and every desk looked at, and nothing started.
+
+    Reuses a preflight that has just run rather than paying for a second one;
+    otherwise runs the quick one (config and loading only — no model calls).
+    """
+    if not (pre and isinstance(pre.get("sectors"), dict) and "pipelines" in pre):
+        pre = preflight(quick=quick)
+    lights = {s.get("room"): s for s in (pre.get("sectors") or {}).get("sectors") or []}
+    loads = {p.get("module"): p for p in pre.get("pipelines") or [] if p.get("module")}
+    # Who is stuck at this moment, from the same reading the floor draws.
+    try:
+        from coordination import state as _state
+        rooms = {r.get("key"): r for r in (_state.build().get("rooms") or [])}
+    except Exception:
+        rooms = {}
+    from coordination import desks as _desks
+
+    sectors, total, fine = [], 0, 0
+    for _key, room, label in readiness.SECTORS:
+        light = lights.get(room) or {}
+        on = board.sector_enabled(room)
+        now = (rooms.get(room) or {}).get("agents") or []
+        rows = []
+        for d in _desks.sector_desks(room):
+            slot = d.rsplit("-", 1)[-1]
+            mods = DESK_STEPS.get(d, ())
+            broken = [loads[m] for m in mods if m in loads and not loads[m].get("ok")]
+            stuck = next((a for a in now if a.get("slot") == slot
+                          and a.get("s") == "blocked"), None)
+            if not on:
+                st, says = "off", "you switched this sector off"
+            elif broken:
+                st, says = "broken", f"{broken[0]['name']} will not load: {broken[0]['says']}"
+            elif light.get("state") == readiness.BLOCKED:
+                st, says = "blocked", light.get("says") or "this sector cannot run"
+            elif stuck:
+                st, says = "stuck", stuck.get("t") or "stopped part-way"
+            else:
+                st, says = "ready", _desks.DESKS.get(d, {}).get("job", "")
+            total += 1
+            fine += st in ("ready", "off")
+            rows.append({"desk": d, "state": st, "look": DESK_LOOK[st], "says": says})
+        bad = [r for r in rows if r["state"] in ("broken", "blocked", "stuck")]
+        if not on:
+            sst, says = "off", "switched off — its desks do nothing until you turn it on"
+        elif light.get("state") == readiness.BLOCKED or any(r["state"] in ("broken", "blocked") for r in rows):
+            sst = "blocked"
+            says = light.get("says") if light.get("state") == readiness.BLOCKED else bad[0]["says"]
+        elif bad:
+            sst, says = "stuck", f"{len(bad)} desk{'s' if len(bad) > 1 else ''} stuck right now"
+        else:
+            sst = "ready"
+            says = light.get("says") or "every desk can work"
+            if light.get("state") in (readiness.THIN, readiness.UNCHECKED):
+                sst = light["state"]
+        sectors.append({"room": room, "label": label, "state": sst, "says": says,
+                        "desks": rows})
+
+    cannot = [s["label"] for s in sectors if s["state"] in ("blocked", "stuck")]
+    if not cannot:
+        head = f"{fine} of {total} desks can work — every sector is ready"
+    elif len(cannot) <= 2:
+        head = (f"{fine} of {total} desks can work; {' and '.join(cannot)} "
+                f"need{'s' if len(cannot) == 1 else ''} you")
+    else:
+        head = (f"{fine} of {total} desks can work; {len(cannot)} sectors need you — "
+                "each one says why")
+    return {"ok": True, "at": _now(), "head": head, "sectors": sectors,
+            "desks": total, "fine": fine, "cannot": cannot,
+            "blocking": list(pre.get("blocking") or []),
+            "warnings": list(pre.get("warnings") or []),
+            "took_ms": pre.get("took_ms")}
+
+
+def no_orders(pre=None, quick=True) -> dict:
+    """The answer to Run with nothing ordered: the check, and why nothing started."""
+    chk = desk_check(pre, quick=quick)
+    return {"ok": True, "ran": False, "no_orders": True, "check": chk,
+            "why": ("No orders for today, so the day was not started. Every desk was "
+                    f"checked instead: {chk['head']}. Give a desk an order on Your "
+                    "orders, then press Run today.")}
+
+
+def gate(orders=None, quick=True) -> dict:
+    """What the Run button asks first: are there orders? If not, the check."""
+    have = todays_orders(orders)
+    if have:
+        return {"ok": True, "orders": have}
+    return no_orders(quick=quick)
+
+
 def start(orders=None, note="", force=False, quick=False, skip_check=False,
           only=None, resume=False) -> dict:
     """
@@ -1465,6 +1617,13 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
                               "nothing is running, clear it with: "
                               "python -m pipelines.day_run --unlock"),
                     "run_id": live}
+
+    # NO ORDERS, NO DAY — see todays_orders. After the lock on purpose, so a
+    # second press while a day runs still hears "already running"; and before
+    # the clear-up, because a check means nothing on the board moves.
+    if not resume and not todays_orders(orders):
+        board.release_lock(LOCK, LOCK_HOLDER)
+        return no_orders(pre, quick=True)
 
     # CLEAR UP FIRST. Dead claims back on the board, copies folded, chases and
     # hand-offs answered, orphans closed — all without a model, and before any
@@ -1942,6 +2101,13 @@ def _print_check(p):
             print("  ! " + w)
 
 
+def _is_terminal():
+    try:
+        return bool(sys.stdin) and sys.stdin.isatty()
+    except Exception:
+        return True
+
+
 def main():
     ap = argparse.ArgumentParser(description="Check everything, then run the day.")
     ap.add_argument("--check", action="store_true", help="preflight only, run nothing")
@@ -1965,13 +2131,18 @@ def main():
     ap.add_argument("--resume", action="store_true",
                     help="start from where the last run left off: clear up, then "
                          "run only what did not finish and what is waiting")
+    ap.add_argument("--gate", action="store_true",
+                    help="are there orders for today? if not, check every desk "
+                         "and start nothing (reads {orders} on stdin)")
+    ap.add_argument("--desk-check", action="store_true",
+                    help="check every sector and desk, start nothing")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--stdin", action="store_true",
                     help="read {orders, note, force, quick, only, resume} as JSON on stdin")
     a = ap.parse_args()
 
     body = {}
-    if a.stdin:
+    if a.stdin or (a.gate and not _is_terminal()):
         try:
             body = json.loads(sys.stdin.read() or "{}")
         except Exception as e:
@@ -1991,6 +2162,14 @@ def main():
 
     if a.status:
         print(json.dumps(status()) if a.json else json.dumps(status(), indent=2))
+        return 0
+    if a.gate:
+        raw = body.get("orders")
+        print(json.dumps(gate(raw if isinstance(raw, dict) else {})))
+        return 0
+    if a.desk_check:
+        r = desk_check(quick=True)
+        print(json.dumps(r) if a.json else r["head"])
         return 0
     if a.check and not a.start:
         p = preflight(quick=a.quick or bool(body.get("quick")))

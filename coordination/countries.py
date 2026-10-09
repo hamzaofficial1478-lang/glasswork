@@ -29,9 +29,23 @@ import re
 
 try:
     import phonenumbers as _pn
-    from phonenumbers import geocoder as _geo
 except Exception:                                   # pragma: no cover — optional
-    _pn = _geo = None
+    _pn = None
+
+# The place-name tables are most of the library's weight (a quarter of a
+# second here, far more on a Windows laptop), and nearly every program that
+# imports this file never asks for a country's name. So they load on first use.
+_GEO = []
+
+
+def _geo():
+    if not _GEO:
+        try:
+            from phonenumbers import geocoder
+            _GEO.append(geocoder)
+        except Exception:                           # pragma: no cover — optional
+            _GEO.append(None)
+    return _GEO[0]
 
 # The common ones, for a computer without the library. (name, dialling code)
 _FALLBACK = {
@@ -89,10 +103,14 @@ _RULES = {
 
 def name(cc) -> str:
     cc = (cc or "").upper()
+    # The common ones are named the same here as in the library (a test holds
+    # them to it), and answering from this list spares loading its tables.
+    if cc in _FALLBACK:
+        return _FALLBACK[cc][0]
     if _pn:
         ex = _pn.example_number(cc)
-        if ex:
-            n = _geo.country_name_for_number(ex, "en")
+        if ex and _geo():
+            n = _geo().country_name_for_number(ex, "en")
             if n:
                 return n
     return _FALLBACK.get(cc, ("", ""))[0]

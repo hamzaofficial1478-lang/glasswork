@@ -41,9 +41,21 @@ import smtplib
 import socket
 from pathlib import Path
 
-import requests
-
 from . import auth
+
+
+class _OnFirstUse:
+    """`requests`, loaded the first time this file actually sends something.
+    Almost every program that reads a setting from here never does, and
+    loading it was half the start-up time of the screens' programs."""
+
+    def __getattr__(self, name):
+        import requests as real
+        globals()["requests"] = real
+        return getattr(real, name)
+
+
+requests = _OnFirstUse()
 
 # The original single settings file. Still the only one until an account is
 # open; after that, the person's settings and the open website's are two files

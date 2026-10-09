@@ -318,8 +318,28 @@ def test_his_website_keeps_its_starter_when_brought_in():
     check("  with all his services", got.get("n"), 20)
 
 
+def test_country_names_are_quick_and_the_same():
+    print("\nCountry names come from the short list, and it agrees with the library:")
+    from . import countries
+    try:
+        import phonenumbers as pn
+        from phonenumbers import geocoder
+    except Exception:
+        pn = None
+    if pn:
+        differ = [cc for cc, (nm, _code) in countries._FALLBACK.items()
+                  if pn.example_number(cc) and geocoder.country_name_for_number(pn.example_number(cc), "en") != nm]
+        check("every listed country is named as the library names it", differ, [])
+    code = ("import sys; from coordination import countries; countries.name('AE'); "
+            "print('phonenumbers.geocoder' in sys.modules)")
+    r = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8")
+    check("naming the UAE does not load the place-name tables", r.stdout.strip(), "False")
+    check("a country off the list is still named", bool(countries.name("JP")) if pn else True, True)
+
+
 def main():
-    for t in (test_his_website_is_unchanged, test_a_new_website_starts_blank,
+    for t in (test_country_names_are_quick_and_the_same,
+              test_his_website_is_unchanged, test_a_new_website_starts_blank,
               test_a_plumber_in_manchester, test_a_bakery_in_munich_is_never_written_to_first,
               test_elsewhere_waits_for_his_word, test_the_draft_keeps_only_what_is_real,
               test_his_website_keeps_its_starter_when_brought_in):

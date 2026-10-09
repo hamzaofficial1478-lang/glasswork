@@ -440,6 +440,7 @@ def tests():
             "coordination.orders_tests",
             "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
             "coordination.launch_kit_tests", "coordination.posts_tests",
+            "coordination.speed_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",

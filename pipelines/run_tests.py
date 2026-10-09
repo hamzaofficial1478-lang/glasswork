@@ -726,7 +726,7 @@ def _lane_tests(day_run):
         print("\n...but the owner is the tie-breaker:")
         real_steps, day_run.STEPS = day_run.STEPS, []
         try:
-            r = day_run.start(force=True)
+            r = day_run.start(force=True, orders={"Leads": "fitout only"})
             check("--force runs it anyway", r.get("ran"), True)
             con = sqlite3.connect(board.DB)
             forced = con.execute("SELECT forced FROM day_runs WHERE id=?",
@@ -824,6 +824,78 @@ def _lane_tests(day_run):
         check("in the sentence the owner reads", "went nowhere" in r["why"], True)
     finally:
         day_run.preflight, day_run.STEPS = real_pre, real_steps
+
+    _no_orders_tests(day_run, proposals)
+
+
+def _no_orders_tests(day_run, proposals):
+    """
+    "with out any order the program will only check that each sector and each
+     agent is working — with out any order the program will not start the day"
+    """
+    def clear_orders():
+        con = sqlite3.connect(board.DB)
+        con.execute("DELETE FROM sector_orders")
+        con.commit()
+        con.close()
+
+    print("\nNo orders, no day — Run with nothing ordered only checks the desks:")
+    clear_orders()
+    fake = {"ok": True, "ready": True, "blocking": [], "warnings": [], "took_ms": 1,
+            "sectors": {"sectors": [{"room": "Leads", "state": "blocked",
+                                     "says": "SMTP_HOST is not set — outreach has no way to send"}]},
+            "pipelines": [{"name": "Leads collects", "module": "pipelines.leads_hunt",
+                           "room": "Leads", "ok": False, "says": "ImportError: boom"}]}
+    real_pre, real_steps = day_run.preflight, day_run.STEPS
+    day_run.preflight = lambda quick=False: fake
+    day_run.STEPS = [("Leads collects", "pipelines._never", "Leads", "leads")]
+    try:
+        before = _rows("SELECT count(*) FROM day_runs")[0][0]
+        r = day_run.start()
+        check("nothing ran", r.get("ran"), False)
+        check("and it says the orders were missing", r.get("no_orders"), True)
+        check("no day was written down", _rows("SELECT count(*) FROM day_runs")[0][0], before)
+        check("the day's door is free again",
+              board.acquire_lock(day_run.LOCK, "someone-else", wait=False, ttl=60), True)
+        board.release_lock(day_run.LOCK, "someone-else")
+        chk = r["check"]
+        check("every sector is in the check", len(chk["sectors"]), len(readiness.SECTORS))
+        leads = next(x for x in chk["sectors"] if x["room"] == "Leads")
+        hunter = next(d for d in leads["desks"] if d["desk"] == "leads-hunter")
+        check("a desk whose work will not load says so", hunter["state"], "broken")
+        check("with the reason", "boom" in hunter["says"], True)
+        check("and its sector reads as cannot work", leads["state"], "blocked")
+        check("every desk in the roster is looked at", chk["desks"] > 10, True)
+        check("he is told what to do about it", "Your orders" in r["why"], True)
+
+        print("\n...what counts as an order:")
+        check("a blank box is not one", day_run.todays_orders({"SEO": "   "}), {})
+        check("nor is one for a sector that does not exist",
+              day_run.todays_orders({"Marketing": "sell more"}), {})
+        check("the button asks first, and is told there are none",
+              day_run.gate({}).get("no_orders"), True)
+        check("one given with the press is enough",
+              day_run.gate({"seo": "pergola pages"}).get("orders"), {"SEO": "pergola pages"})
+        proposals.set_orders("Content", "write about pergolas")
+        check("and so is one saved in the order box",
+              day_run.todays_orders(), {"Content": "write about pergolas"})
+        day_run.STEPS = []
+        r = day_run.start()
+        check("with an order saved, the day runs", r.get("ran"), True)
+    finally:
+        day_run.preflight, day_run.STEPS = real_pre, real_steps
+        clear_orders()
+
+    print("\nThe check loads every step in one go, and still names a broken one:")
+    day_run.STEPS = [("IT checks the site", "pipelines.it_health", "IT", "it"),
+                     ("A step that is not there", "pipelines._no_such_step", "IT", "it")]
+    try:
+        loads = {x["module"]: x for x in day_run.check_pipelines()}
+    finally:
+        day_run.STEPS = real_steps
+    check("a real step loads", loads["pipelines.it_health"]["ok"], True)
+    check("a missing one does not", loads["pipelines._no_such_step"]["ok"], False)
+    check("and says why", "_no_such_step" in loads["pipelines._no_such_step"]["says"], True)
 
 
 def _stop_button_tests(day_run):
@@ -1079,7 +1151,7 @@ def _stop_button_tests(day_run):
         lambda quick=False: {"ready": True, "blocking": [], "warnings": []})
     real_steps, day_run.STEPS = day_run.STEPS, []
     try:
-        r = day_run.start()
+        r = day_run.start(orders={"Leads": "fitout only"})
         check("the next run starts anyway", r.get("ran"), True)
         check("and is not born stopped", r.get("stopped"), None)
         check("the stale flag is gone", board.stop_requested(day_run.LOCK), None)

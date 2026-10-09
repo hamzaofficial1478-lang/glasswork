@@ -31,6 +31,12 @@ def main():
         sys.exit("This morning runner drives Claude Code itself, and this account "
                  f"thinks with {engines.NAME.get(engines.engine(), 'no engine yet')}. "
                  "Start the day from the office instead (Run today).")
+    # No order, no day — the same rule as the Run button (pipelines/day_run).
+    # The clock still checks every desk, so a morning with nothing ordered
+    # leaves a record of whether the agency COULD have worked.
+    from pipelines import day_run
+    if not day_run.todays_orders():
+        sys.exit(day_run.no_orders()["why"])
     ready, why = local_cli.available()
     if not ready:
         sys.exit("Claude Code is not ready on this machine, so the MD cannot "

@@ -144,7 +144,8 @@ def test_the_agency_floor():
     check("the side panel is a dialog", 'id="drawer" role="dialog" aria-modal="true"' in APP, True)
     check("  that Escape closes", "e.key === 'Escape' && FL.open" in APP, True)
     check("the floor refreshes itself, but not while something is typed on it",
-          "if (r === 'agency') polling = setInterval" in APP and "/^(INPUT|TEXTAREA|SELECT)$/" in APP, True)
+          "agency: 10000" in APP and "polling = setInterval(poll, every)" in APP
+          and "/^(INPUT|TEXTAREA|SELECT)$/" in APP, True)
     routes = APP[APP.index("const ROUTES = {"):].split("}", 1)[0]
     for r in ("agency", "activity", "results"):
         check(f"#{r} is a screen, and in the menu", r in routes and f'href="#{r}" data-r="{r}"' in APP, True)

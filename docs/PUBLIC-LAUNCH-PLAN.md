@@ -367,6 +367,26 @@ someone else's in read-only mode:
     Download it again from Setup and upload it once; WordPress sites need
     nothing new.
 
+- **Activity, orders and speed (9 October).**
+  - **Activity was never stuck: it was filtered.** "Problems only" stayed on
+    between visits and hid every line on a day nothing had failed. It is now
+    its own switch, off each time the screen opens; a filter that hides lines
+    says "Showing 2 of 27" with *Show everything*; the buttons filter what is
+    already on screen (no wait), and the list refreshes itself every 15 seconds.
+  - **No order, no day.** Run today with nothing ordered for today (in Your
+    orders, or with the press) starts nothing: it checks every sector and every
+    desk instead and shows which can work and why not. The same rule holds from
+    the terminal and the morning clock. *Pick up where it left off* still
+    finishes work that was already ordered.
+  - **Faster everywhere.** The office keeps each screen's answer while the
+    cabinet has not changed and nothing has been saved, and the app shows the
+    last answer at once and refreshes it quietly, redrawing only if something
+    changed and never over words being typed. Each screen's own program also
+    starts two to three times faster (the web libraries and the phone-number
+    place tables now load only when used), and the Run button's check takes
+    under a second instead of eight. Measured here: going back to a section
+    takes 3–30 ms (was 0.1–2.4 s); a first visit to Leads 0.15 s (was 1.25 s).
+
 ## The order to build it in
 
 Each phase ends with something working that you can use. Your current agency

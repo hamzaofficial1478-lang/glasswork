@@ -133,6 +133,11 @@ h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-.015em;line-height:1.
 .seg:hover{border-color:var(--line-strong)}
 .seg.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
 .seg .n{font-family:'IBM Plex Mono',monospace;font-size:12px;opacity:.75}
+.seg.tog{cursor:pointer;user-select:none}.seg.tog input{margin:0;width:16px;height:16px;accent-color:var(--site)}
+.act-bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.act-rooms{display:flex;flex-wrap:wrap;gap:8px}
+.act-shown{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;font-size:14px;color:var(--muted);
+  padding:8px 8px 8px 14px;border:1px dashed var(--line-strong);border-radius:10px}
 textarea,input[type=text],input[type=url]{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;
   background:var(--surface);color:var(--ink);font-size:16px}
 textarea{min-height:96px;resize:vertical;line-height:1.5}
@@ -266,6 +271,12 @@ body.drawer-open{overflow:hidden}
 .dr-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;overscroll-behavior:contain}
 .dr-sec{padding:16px 20px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:10px}
 .dr-sec p,.dr-sec h3{margin:0}
+#main.busy{position:relative}
+#main.busy::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-radius:3px;background:var(--site);opacity:.8;transform-origin:left}
+@media (prefers-reduced-motion:no-preference){#main.busy::before{animation:busyBar 1s ease-in-out infinite}#main.busy>*{opacity:.6;transition:opacity .2s}}
+@keyframes busyBar{0%{transform:scaleX(.1)}50%{transform:scaleX(.7)}100%{transform:scaleX(.1);transform-origin:right}}
+.chk{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.chk li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px}.chk .lamp{margin-top:6px}
 .dr-foot{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface)}
 .dr-foot input{flex:1;min-width:0;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);color:var(--ink);font-size:16px}
 .chat{display:flex;flex-direction:column;gap:10px}
@@ -481,11 +492,47 @@ function paintSite() {
   document.documentElement.style.setProperty('--site', dark() ? c[1] : c[0]);
 }
 
-/* ---- talking to the office ---- */
+/* ---- talking to the office ----
+   "the program lags while changing sections or buttons — it should be fast."
+   Reads are kept here for five minutes and shown at once; one older than a
+   couple of seconds is asked for again quietly, and the screen is redrawn
+   only if the answer actually changed. Anything that changes something (every
+   POST) throws the kept answers away, so what is shown after a click is the
+   office's answer, never the one from before it. */
+const KEPT = new Map(), ASKING = new Map();
+const KEPT_MS = 5 * 60000, RECHECK_MS = 2500;
+const KEEPABLE = /^\/api\/(state|activity|run\/status|review|leads|content\/topics|comms|leftovers|index-status|orders|results|site\/changes|check\/list|brand|engine-state|sectors|sector\/[^/?]+|mail\/sent\/\d+)(\?|$)/;
+async function ask(url) {
+  if (ASKING.has(url)) return ASKING.get(url);
+  const p = (async () => {
+    const r = await fetch(url, {cache: 'no-store'});
+    let j = {};
+    try { j = await r.json(); } catch (e) { j = {ok: false, error: 'The office answered in a way this screen cannot read.'}; }
+    if (r.status === 401 && j.signin) { location.href = '/account'; return {ok: false}; }
+    if (r.status === 409 && j.needsSite) { location.href = '/account'; return {ok: false}; }
+    if (r.ok && j && j.ok !== false && KEEPABLE.test(url)) KEPT.set(url, {at: Date.now(), j, s: JSON.stringify(j)});
+    return j;
+  })().catch(() => ({ok: false, error: 'The office did not answer. Is the agency window still open?'}))
+    .finally(() => ASKING.delete(url));
+  ASKING.set(url, p);
+  return p;
+}
+function recheck(url) {
+  if (ASKING.has(url)) return;
+  const before = (KEPT.get(url) || {}).s;
+  ask(url).then(() => { const now = KEPT.get(url); if (now && before !== undefined && now.s !== before) changed(); });
+}
 async function api(url, body, method) {
+  if (body === undefined && !method) {
+    VIEW.urls.add(url);
+    const k = KEPT.get(url);
+    if (k && Date.now() - k.at < KEPT_MS) { if (Date.now() - k.at > RECHECK_MS) recheck(url); return k.j; }
+    return ask(url);
+  }
+  // A change: nothing kept is true any more. (The editor's live score is a read.)
+  if (!/\/score$/.test(url)) { KEPT.clear(); VIEW.dirty = false; }
   try {
-    const r = await fetch(url, body === undefined && !method ? {cache: 'no-store'} :
-      {method: method || 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+    const r = await fetch(url, {method: method || 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
     let j = {};
     try { j = await r.json(); } catch (e) { j = {ok: false, error: 'The office answered in a way this screen cannot read.'}; }
     if (r.status === 401 && j.signin) { location.href = '/account'; return {ok: false}; }
@@ -624,7 +671,7 @@ async function today(main) {
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">${runPill}
           <span class="muted" style="font-size:14px">${r && r.started_at ? 'Started at ' + esc(when(r.started_at)) : ''}</span></div>
         <p style="margin:0;font-size:17px">${esc(runLine)}</p>
-        <div id="runSay" class="muted" style="font-size:14px"></div>
+        <div id="runSay" class="muted" style="font-size:14px">${runSayHtml()}</div>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">${action}
         ${appr.length && !(r && r.running) ? '<button class="btn ghost" type="button" id="runNow">Run today</button>' : ''}</div>
@@ -653,23 +700,65 @@ async function today(main) {
           ${e.level === 'error' ? pill('stuck', 'Stuck') : ''}</span></li>`).join('')}</ol>`
           : empty('Quiet so far', 'Press Run today and each desk’s work appears here as it happens.')}</section>
     </div></div>`;
-  const rb = $('#runNow'); if (rb) rb.onclick = runToday;
+  const rb = $('#runNow'); if (rb) rb.onclick = runToday; wireRunSay();
   const sb = $('#stopRun'); if (sb) sb.onclick = async () => { const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
+}
+/* "with out any order the program will not start the day" — Run asks the
+   office first. No orders saved for today and none given: the office checks
+   every sector and desk instead, starts nothing, and this shows what it found. */
+const RC = {at: 0, check: null};
+function runSayHtml() {
+  if (!RC.check || Date.now() - RC.at > 15 * 60000) return '';
+  return `<span style="font-weight:600">No orders for today, so the day was not started.</span> ${esc(sentence(RC.check.head || ''))}.
+    <button class="btn quiet small" type="button" data-deskcheck>See every desk</button> <a href="#orders">Give an order</a>`;
 }
 async function runToday(force) {
   const say = $('#runSay'); const b = $('#runNow'); if (b) b.disabled = true;
-  say.textContent = 'Checking every desk can work — this takes a minute…';
-  const c = await api('/api/run/check', {quick: true});
-  if (!c.ok && !c.blocking) { say.textContent = c.error || 'The check did not finish.'; if (b) b.disabled = false; return; }
-  if (c.ready === false && force !== true) {
-    say.innerHTML = `<span style="color:var(--stuck);font-weight:600">Not started:</span> ${esc((c.blocking || []).slice(0, 3).join('; '))}
-      <br><button class="btn small ghost" type="button" id="runForce" style="margin-top:8px">Run anyway</button>`;
-    $('#runForce').onclick = () => runToday(true); if (b) b.disabled = false; return;
-  }
+  if (say) say.textContent = 'Looking for today’s orders and checking every desk can work…';
   const j = await api('/api/run/start', force === true ? {force: true} : {});
-  if (!j.ok) { say.textContent = (j.preflight && (j.preflight.blocking || []).join('; ')) || j.error || j.why || 'It did not start.'; if (b) b.disabled = false; return; }
+  if (b) b.disabled = false;
+  const line = $('#runSay') || say;
+  if (j && j.no_orders) {
+    RC.at = Date.now(); RC.check = j.check || {};
+    if (line) { line.innerHTML = runSayHtml(); wireRunSay(); }
+    openDeskCheck();
+    return;
+  }
+  RC.check = null;
+  if (j && j.refused && force !== true) {
+    if (line) { line.innerHTML = `<span style="color:var(--stuck);font-weight:600">Not started:</span> ${esc((j.blocking || (j.preflight || {}).blocking || []).slice(0, 3).join('; '))}
+      <br><button class="btn small ghost" type="button" id="runForce" style="margin-top:8px">Run anyway</button>`;
+      $('#runForce').onclick = () => runToday(true); }
+    return;
+  }
+  if (!j || !j.ok) { if (line) line.textContent = (j && (j.why || j.error)) || 'It did not start.'; return; }
   toast('Running. Each desk’s work appears in today’s list as it happens.');
   setTimeout(route, 1500);
+}
+function wireRunSay() { const x = document.querySelector('[data-deskcheck]'); if (x) x.onclick = openDeskCheck; }
+const CHECK_LOOK = {ready: ['done', 'Can work'], unchecked: ['plain', 'Can work · not proven'], thin: ['wait', 'Can work · no backup'],
+  off: ['plain', 'Switched off'], blocked: ['stuck', 'Cannot work'], broken: ['stuck', 'Will not load'], stuck: ['stuck', 'Stuck right now']};
+function floorName(key) {
+  for (const r of FLOOR) for (const d of r.desks) if (d[0] === key) return d[2];
+  return deskName(key);
+}
+function openDeskCheck() {
+  const c = RC.check; if (!c) return;
+  const secs = c.sectors || [];
+  openPanel(`${panelHead('Every desk, checked', 'No orders for today — nothing was started')}
+    <div class="dr-body">
+      <section class="dr-sec"><p>${esc(sentence(c.head || ''))}.</p>
+        <p class="muted" style="font-size:14px">The day only starts when a desk has an order. Give one, then press Run today again.</p>
+        <div><a class="btn small" href="#orders">Give an order</a></div></section>
+      ${secs.map((s) => { const lk = CHECK_LOOK[s.state] || ['plain', s.state];
+        return `<section class="dr-sec"><div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between">
+          <b style="font-weight:600">${esc(s.label)}</b>${pill(lk[0], lk[1])}</div>
+          <p class="muted" style="font-size:14px">${esc(sentence(s.says || ''))}</p>
+          <ul class="chk">${(s.desks || []).map((d) => { const dl = CHECK_LOOK[d.state] || ['plain', d.state];
+            return `<li><span class="lamp ${dl[0] === 'done' ? 'done' : dl[0] === 'stuck' ? 'stuck' : 'plain'}"></span><span style="min-width:0"><b style="font-weight:600">${esc(floorName(d.desk))}</b>
+              <span class="muted"> · ${esc(d.look || '')}</span>${d.state !== 'ready' && d.says !== s.says ? `<br><span class="muted" style="font-size:13.5px">${esc(sentence(d.says || ''))}</span>` : ''}</span></li>`; }).join('')}</ul></section>`; }).join('')}
+    </div>`, 'Every desk, checked', 'deskcheck', 'deskcheck');
+  const a = $('#drawer a[href="#orders"]'); if (a) a.onclick = () => closePanel();
 }
 
 /* ======================= WAITING ON YOU ======================= */
@@ -717,7 +806,7 @@ async function orders(main, desk) {
   const todayKey = new Date().toLocaleDateString('en-CA');   // YYYY-MM-DD, this computer's day
   const mine = rows.find((r) => r.day === todayKey && r.sector === desk && r.origin === 'order box');
   main.innerHTML = `<div class="page narrow">${head('Your orders',
-    'Tell a desk what you want today, in your own words. The Managing Director plans the day around your orders and asks you before anything goes out.')}
+    'Tell a desk what you want today, in your own words. The Managing Director plans the day around your orders and asks you before anything goes out. No order, no day: Run today only checks the desks.')}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <span style="font-weight:600">Which desk?</span>
       <div role="group" aria-label="Desk" style="display:flex;flex-wrap:wrap;gap:8px">${DESKS.map(([k, n]) =>
@@ -733,7 +822,7 @@ async function orders(main, desk) {
         <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:4px"><span class="label">${esc(deskName(r.sector))}</span><span style="font-weight:600;font-size:16px">“${esc(r.text)}”</span>
           <span class="muted" style="font-size:14px">${esc(sentence((r.left || []).slice(0, 2).join(' · ')))}</span></div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">${pill(lk[0], lk[1])}<span class="mono muted" style="font-size:12.5px">${esc(r.day || '')}</span></div></article>`; }).join('')
-      : `<div class="card">${empty('No orders this week', 'Give one above. The agency also works without orders, from what it finds itself.')}</div>`}
+      : `<div class="card">${empty('No orders this week', 'Give one above. The day only starts when a desk has an order — without one, Run today checks every desk and starts nothing.')}</div>`}
     </section></div>`;
   main.querySelectorAll('[data-desk]').forEach((b) => b.onclick = () => { sessionStorage.setItem('gw-desk', b.dataset.desk); orders(main, b.dataset.desk); });
   $('#saveOrder').onclick = async () => {
@@ -1701,7 +1790,7 @@ async function agency(main) {
         ${!running && left && left.ok && Number(left.garbage || 0) > 0 ? `<button class="btn quiet" type="button" id="tidyUp" title="Takes finished, duplicate and impossible jobs off the board, without using the AI">Clear up · ${Number(left.garbage)}</button>` : ''}
         ${canResume ? `<button class="btn ghost" type="button" id="resumeRun">Pick up where it left off · ${Number(left.waiting)}</button>` : ''}
         ${running ? '<button class="btn ghost" type="button" id="stopRun">Stop the run</button>' : '<button class="btn" type="button" id="runNow">Run today</button>'}</div>`)}
-    <div id="runSay" class="muted" style="font-size:14px;margin-top:-8px">${running ? esc(run.head || '') : ''}</div>
+    <div id="runSay" class="muted" style="font-size:14px;margin-top:-8px">${running ? esc(run.head || '') : runSayHtml()}</div>
     <div class="tiles fl-tiles">
       <div class="card tile" title="${esc(m.health_why || '')}"><span class="label">Agency health</span><span class="big mono">${esc(health)}</span>
         <span class="muted" style="font-size:13.5px">out of 100, across every sector</span></div>
@@ -1887,7 +1976,7 @@ function applyFilter(main) {
   main.querySelectorAll('.fl-filter [data-filter]').forEach((b) => { const on = b.dataset.filter === FL.filter; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
 }
 function wireFloor(main) {
-  const rb = $('#runNow'); if (rb) rb.onclick = runToday;
+  const rb = $('#runNow'); if (rb) rb.onclick = runToday; wireRunSay();
   const sb = $('#stopRun'); if (sb) sb.onclick = async () => { sb.disabled = true; const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
   const tu = $('#tidyUp'); if (tu) tu.onclick = async () => {
     tu.disabled = true; const j = await api('/api/leftovers/tidy', {});
@@ -2102,28 +2191,55 @@ function openThread(id) {
 
 /* ======================= ACTIVITY ======================= */
 const VERB = {got: ['wait', 'Received'], grabbed: ['work', 'Took on'], pushed: ['plain', 'Asked'], delivered: ['done', 'Finished'], errored: ['stuck', 'Failed']};
-const ACT = {room: 'all', problems: false};
-async function activity(main) {
-  const a = await api('/api/activity');
-  const ev = (a && a.events) || [];
+/* "the activity section get stuck" — it was not stuck, it was filtered. The
+   Problems switch sat in the same row as the sector buttons, stayed on between
+   visits, and hid every line on a day nothing had failed; each click then went
+   back to the office for the same list. Now: the list is fetched once and
+   refreshed every 15 seconds, the buttons filter what is already here (no
+   wait), Problems is a separate switch that is off each time the screen is
+   opened, and a filter that hides lines always says so, with Show everything. */
+const ACT = {room: 'all', problems: false, data: null, err: ''};
+const isProblem = (e) => e.verb === 'errored' || e.level === 'error';
+async function activity(main, local) {
+  if (!local || !ACT.data) {
+    const got = await api('/api/activity');
+    if (got && got.ok !== false) { ACT.data = got; ACT.err = ''; }
+    else ACT.err = (got && got.error) || 'The activity could not be read just now.';
+  }
+  const a = ACT.data || {};
+  const ev = a.events || [];
   const rooms = [...new Set(ev.map((e) => e.room).filter(Boolean))];
-  const shown = ev.filter((e) => (ACT.room === 'all' || e.room === ACT.room) && (!ACT.problems || e.verb === 'errored' || e.level === 'error'));
+  if (ACT.room !== 'all' && !rooms.includes(ACT.room)) ACT.room = 'all';
+  const inRoom = ev.filter((e) => ACT.room === 'all' || e.room === ACT.room);
+  const shown = ACT.problems ? inRoom.filter(isProblem) : inRoom;
+  const probs = ev.filter(isProblem).length;
+  const filtered = ACT.room !== 'all' || ACT.problems;
+  const scroll = window.scrollY;
   main.innerHTML = `<div class="page narrow">${head('Activity',
     'Every line is something a desk actually did — written by the work itself, never summarised by this screen.',
     `<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn ghost small" type="button" id="actRead">Mark all read</button>
-      <button class="btn quiet small" type="button" id="actClear">Hide what’s read</button>${a && a.hidden ? `<button class="btn quiet small" type="button" id="actAll">Show all ${Number(a.hidden)} hidden</button>` : ''}</div>`)}
-    <div role="group" aria-label="Which sector" style="display:flex;flex-wrap:wrap;gap:8px">
-      ${['all', ...rooms].map((r) => `<button type="button" class="seg ${ACT.room === r ? 'on' : ''}" aria-pressed="${ACT.room === r}" data-room="${esc(r)}">${r === 'all' ? 'Every sector' : esc(deskName(r))}</button>`).join('')}
-      <button type="button" class="seg ${ACT.problems ? 'on' : ''}" aria-pressed="${ACT.problems}" id="actProb">Problems only${a && a.errors ? ` <span class="n">${Number(a.errors)}</span>` : ''}</button></div>
-    <section class="card"><div class="card-h"><h2>${esc((a && a.head) || 'Today')}</h2><span class="muted" style="font-size:13.5px">${Number((a && a.unread) || 0)} unread</span></div>
+      <button class="btn quiet small" type="button" id="actClear">Hide what’s read</button>${a.hidden ? `<button class="btn quiet small" type="button" id="actAll">Show all ${Number(a.hidden)} hidden</button>` : ''}</div>`)}
+    ${ACT.err ? `<div class="note">${esc(ACT.err)}${ACT.data ? ' Showing what was read last.' : ''}</div>` : ''}
+    <div class="act-bar">
+      <div role="group" aria-label="Which sector" class="act-rooms">
+        ${['all', ...rooms].map((r) => `<button type="button" class="seg ${ACT.room === r ? 'on' : ''}" aria-pressed="${ACT.room === r}" data-room="${esc(r)}">${r === 'all' ? 'Every sector' : esc(deskName(r))}</button>`).join('')}</div>
+      <label class="seg tog ${ACT.problems ? 'on' : ''}"><input type="checkbox" id="actProb" ${ACT.problems ? 'checked' : ''}> Problems only <span class="n">${probs}</span></label></div>
+    ${filtered ? `<div class="act-shown"><span>Showing ${shown.length} of ${ev.length} line${ev.length === 1 ? '' : 's'}${ACT.problems ? ' · problems only' : ''}${ACT.room !== 'all' ? ' · ' + esc(deskName(ACT.room)) : ''}</span>
+      <button class="btn quiet small" type="button" id="actReset">Show everything</button></div>` : ''}
+    <section class="card"><div class="card-h"><h2>${esc(a.head || 'Today')}</h2><span class="muted" style="font-size:13.5px">${Number(a.unread || 0)} unread</span></div>
       ${shown.length ? `<ol class="feed">${shown.map((e) => { const v = VERB[e.verb] || ['plain', sentence(e.verb || '')];
-        return `<li${e.at > ((a && a.seen_to) || 0) ? ' class="unread"' : ''}><span class="mono" style="font-size:13px;color:var(--faint);padding-top:2px">${esc(e.hhmm || '')}</span>
+        return `<li${e.at > (a.seen_to || 0) ? ' class="unread"' : ''}><span class="mono" style="font-size:13px;color:var(--faint);padding-top:2px">${esc(e.hhmm || '')}</span>
         <span style="display:flex;flex-direction:column;gap:6px;min-width:0"><span><b style="font-weight:600">${esc(deskName(e.who))}</b> ${esc(e.what || '')}</span>
           <span style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">${pill(v[0], v[1])}${e.detail ? `<span class="muted" style="font-size:13.5px">${esc(e.detail)}</span>` : ''}<span class="muted" style="font-size:13px">${esc(e.ago || '')}</span></span></span></li>`; }).join('')}</ol>`
-        : empty('Nothing here', ACT.problems ? 'No desk has failed in what is shown. Good.' : 'Press Run today and each desk’s work appears here as it happens.')}</section></div>`;
-  main.querySelectorAll('[data-room]').forEach((b) => b.onclick = () => { ACT.room = b.dataset.room; activity(main); });
-  $('#actProb').onclick = () => { ACT.problems = !ACT.problems; activity(main); };
-  const seen = (extra) => api('/api/activity/seen', Object.assign({seen_to: (a && (a.newest_at || a.at)) || Math.floor(Date.now() / 1000)}, extra || {}));
+        : ev.length && filtered ? empty(ACT.problems ? 'Nothing has failed' : 'Nothing from this sector',
+            `${ACT.problems ? 'No desk has failed today. ' : ''}${ev.length} line${ev.length === 1 ? ' is' : 's are'} hidden by the filter. <button class="btn quiet small" type="button" data-reset>Show everything</button>`)
+        : empty('Nothing here yet', 'Give a desk an order and press Run today — each desk’s work appears here as it happens.')}</section></div>`;
+  if (local) window.scrollTo(0, scroll);
+  const redraw = () => activity(main, true);
+  main.querySelectorAll('[data-room]').forEach((b) => b.onclick = () => { ACT.room = b.dataset.room; redraw(); });
+  $('#actProb').onchange = (e) => { ACT.problems = e.target.checked; redraw(); };
+  main.querySelectorAll('#actReset,[data-reset]').forEach((b) => b.onclick = () => { ACT.room = 'all'; ACT.problems = false; redraw(); });
+  const seen = (extra) => api('/api/activity/seen', Object.assign({seen_to: a.newest_at || a.at || Math.floor(Date.now() / 1000)}, extra || {}));
   $('#actRead').onclick = async () => { await seen(); toast('Marked as read.'); state(); activity(main); };
   $('#actClear').onclick = async () => { await seen({clear: true}); toast('Hidden. Nothing is deleted — Show all brings it back.'); state(); activity(main); };
   const all = $('#actAll'); if (all) all.onclick = async () => { await api('/api/activity/seen', {showAll: true}); activity(main); };
@@ -2267,9 +2383,41 @@ function more(main) {
     ${item('#settings', 'Settings', 'Your business, the AI, your account')}</div></div>`;
 }
 
-/* ---- routing ---- */
+/* ---- routing ----
+   Each visit to a screen gets its own view of the page. A screen that was left
+   before its answer came back can no longer paint over the one now showing —
+   which, with clicks faster than the office, is what made the app look stuck
+   on the wrong section. */
 const ROUTES = {today, agency, waiting, orders, leads, content, post, website, google, activity, results, check, settings, more};
-let polling = null;
+const VIEW = {gen: 0, r: '', urls: new Set(), view: null, dirty: false};
+const NO_REDRAW = new Set(['post', 'check', 'settings', 'more']);
+let polling = null, redrawT = null;
+function viewFor(gen) {
+  const el = $('#main');
+  return new Proxy(el, {
+    get: (t, k) => { const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; },
+    set: (t, k, v) => { if (gen === VIEW.gen) t[k] = v; return true; },
+  });
+}
+function typing(main) {
+  const a = document.activeElement;
+  return !!(a && main.contains(a) && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable));
+}
+// Fresh answers differ from what is on screen: draw it again, unless he is typing on it.
+function changed() { clearTimeout(redrawT); redrawT = setTimeout(redraw, 80); }
+async function redraw() {
+  const main = $('#main'), fn = ROUTES[VIEW.r];
+  if (!fn || NO_REDRAW.has(VIEW.r) || document.hidden || typing(main) || VIEW.dirty) return;
+  const a = document.activeElement;
+  const keep = a && main.contains(a) && a.dataset ? a.dataset.agent || a.dataset.sector || a.dataset.room || a.dataset.tab || '' : '';
+  const y = window.scrollY, gen = VIEW.gen;
+  await fn(VIEW.view);
+  if (gen !== VIEW.gen) return;
+  window.scrollTo(0, y);
+  if (keep) { const el = main.querySelector(`[data-agent="${CSS.escape(keep)}"], [data-sector="${CSS.escape(keep)}"], [data-room="${CSS.escape(keep)}"], [data-tab="${CSS.escape(keep)}"]`); if (el) el.focus({preventScroll: true}); }
+}
+// A poll asks again for what this screen read; it is redrawn only if any of it changed.
+function poll() { if (!document.hidden) [...VIEW.urls].forEach(recheck); }
 async function route() {
   const r = (location.hash || '#today').slice(1).split('?')[0];
   const fn = ROUTES[r] || today;
@@ -2278,18 +2426,24 @@ async function route() {
     a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
   const main = $('#main');
-  await fn(main);
-  clearInterval(polling);
-  if (r === 'today' || r === 'waiting') polling = setInterval(() => { if (!document.hidden && !main.contains(document.activeElement)) fn(main); }, 30000);
-  // The floor refreshes itself every ten seconds, so a desk lights up as it works — unless
-  // something is being typed on it. The side panel lives outside it and is left alone.
-  if (r === 'agency') polling = setInterval(() => {
-    const a = document.activeElement;
-    if (document.hidden || (a && main.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return;
-    const keep = a && main.contains(a) && a.dataset ? a.dataset.agent || a.dataset.sector || '' : '';
-    fn(main).then(() => { if (keep) { const el = main.querySelector(`.desk[data-agent="${CSS.escape(keep)}"], .room-h [data-sector="${CSS.escape(keep)}"]`); if (el) el.focus({preventScroll: true}); } });
-  }, 10000);
+  const gen = ++VIEW.gen;
+  if (r === 'activity' && VIEW.r !== 'activity') { ACT.room = 'all'; ACT.problems = false; }
+  VIEW.r = ROUTES[r] ? r : 'today'; VIEW.urls = new Set(); VIEW.view = viewFor(gen); VIEW.dirty = false;
+  clearInterval(polling); clearTimeout(redrawT);
+  // Nothing kept for this screen yet: say so within a blink, rather than leaving
+  // the last screen up looking as though the click did nothing.
+  const slow = setTimeout(() => { if (gen === VIEW.gen) main.classList.add('busy'); }, 120);
+  try { await fn(VIEW.view); } finally { clearTimeout(slow); if (gen === VIEW.gen) main.classList.remove('busy'); }
+  if (gen !== VIEW.gen) return;
+  const every = {today: 30000, waiting: 30000, activity: 15000, agency: 10000, leads: 20000, content: 20000, results: 30000, website: 30000}[VIEW.r];
+  if (every) polling = setInterval(poll, every);
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+// Words typed on a screen and not saved yet are never drawn over by a refresh.
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t && $('#main').contains(t) && t.matches('textarea, [contenteditable], input:not([type]), input[type=text], input[type=email], input[type=url], input[type=search], input[type=number]')) VIEW.dirty = true;
+}, true);
 $('#scrim').addEventListener('click', closePanel);
 window.addEventListener('hashchange', () => { if (FL.open) closePanel(); route(); $('#main').focus({preventScroll: true}); window.scrollTo(0, 0); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite);
@@ -2298,7 +2452,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   await loadShell();
   state();
   route();
-  setInterval(async () => { const e = await api('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
+  setInterval(async () => { const e = await ask('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
 })();
 </script>
 </body>
