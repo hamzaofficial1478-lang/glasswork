@@ -388,6 +388,17 @@ def test_a_dark_bulb_always_says_why():
         check("not just what it was attempting",
               desk["t"].strip() != "checking the site", True)
         check("and there is a why to show in the drawer", bool(desk.get("why")), True)
+        check("and it is named as a failure, not guessed from the words", desk.get("problem"), "failed")
+
+        # started and never came back: a stall, and named as one
+        board.DB = _fresh_db()
+        con = sqlite3.connect(board.DB)
+        con.execute("INSERT INTO agent_runs(agent, started_at, status, note) VALUES(?,?, 'running', ?)",
+                    ("seo-auditor", int(time.time()) - state.STALL_SECS - 60, "auditing pages"))
+        con.commit()
+        con.close()
+        desk = _room(state.build(), "SEO")["agents"][0]
+        check("a run that never came back is a stall", (desk["s"], desk.get("problem")), ("blocked", "stalled"))
 
         # a claim nobody is working is a stall, and it blocks everyone else
         board.DB = _fresh_db()
@@ -400,6 +411,7 @@ def test_a_dark_bulb_always_says_why():
         desk = _room(state.build(), "Leads")["agents"][0]
         check("a long-held claim with no run is a stall", desk["s"], "blocked")
         check("and it says so", "nothing running" in desk["t"], True)
+        check("  named as a job being held", desk.get("problem"), "held")
 
         # ...but a claim made moments ago is just work in progress
         board.DB = _fresh_db()
@@ -407,6 +419,7 @@ def test_a_dark_bulb_always_says_why():
         board.claim_task(tid, "leads-hunter")
         check("a fresh claim is not a stall",
               _room(state.build(), "Leads")["agents"][0]["s"], "working")
+        check("  and carries no problem", "problem" in _room(state.build(), "Leads")["agents"][0], False)
     finally:
         board.DB = real_b
 

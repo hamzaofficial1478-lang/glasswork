@@ -46,6 +46,7 @@
   --site:#3E8F95;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
 .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
@@ -170,9 +171,124 @@ ol.feed li:last-child{border-bottom:0}
   .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:56px;text-decoration:none;
     color:var(--muted);font-size:11.5px;font-weight:600;position:relative}
   .tabs a.on{color:var(--accent)}
+  .tabs .b.bad{background:var(--stuck-bg);color:var(--stuck)}
   .tabs .b{position:absolute;top:6px;left:calc(50% + 6px);font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:0 5px;
     border-radius:999px;background:var(--wait-bg);color:var(--wait)}
 }
+/* the agency floor */
+.page.wide{max-width:1320px}
+.lamp{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--line-strong);flex:none;vertical-align:middle}
+.lamp.work{background:var(--work)} .lamp.done{background:var(--done)} .lamp.stuck{background:var(--stuck)}
+.lamp.wait{background:var(--wait)} .lamp.plain{background:var(--line-strong)}
+@keyframes lampPulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes beamFlow{to{stroke-dashoffset:-22}}
+@media (prefers-reduced-motion:no-preference){.lamp.pulse,.lamp-c.pulse{animation:lampPulse 1.6s ease-in-out infinite}.beam{animation:beamFlow 1.2s linear infinite}}
+.fl-tiles button.tile{font:inherit;text-align:left;cursor:pointer;border:1px solid var(--line)}
+.fl-tiles .tile:hover{border-color:var(--line-strong)}
+.tile.bad{background:var(--stuck-bg);border-color:transparent} .tile.bad .big{color:var(--stuck)}
+.plan-card{padding:14px 16px 12px}
+.plan{display:block;width:100%;height:auto}
+.plan-room{cursor:pointer}
+.plan-room rect{fill:var(--sunken);stroke:var(--line);stroke-width:1.5}
+.plan-room:hover rect{stroke:var(--line-strong)}
+.plan-room:focus{outline:none}
+.plan-room:focus-visible rect{stroke:var(--accent);stroke-width:2.5}
+.plan-room.bad rect{stroke:var(--stuck);stroke-width:2}
+.plan-room.off{opacity:.5}
+.plan-name{font:600 12px 'Instrument Sans',system-ui,sans-serif;letter-spacing:.08em;fill:var(--faint)}
+.plan-desk{cursor:pointer}
+.plan-desk.dim{opacity:.22}
+.plan-desk-name{font:500 12.5px 'Instrument Sans',system-ui,sans-serif;fill:var(--ink-2)}
+.lamp-c{fill:var(--line-strong);stroke:var(--sunken);stroke-width:3}
+.lamp-c.work{fill:var(--work)} .lamp-c.done{fill:var(--done)} .lamp-c.stuck{fill:var(--stuck)} .lamp-c.wait{fill:var(--wait)}
+.beam{stroke:var(--accent);stroke-width:2;stroke-dasharray:5 6;fill:none}
+.beam.amber{stroke:var(--wait)}
+.beam-halo{stroke:var(--surface);stroke-width:6;fill:none;opacity:.85}
+.ah.live{fill:var(--accent)} .ah.amber{fill:var(--wait)}
+.beam-g{pointer-events:stroke}
+.plan-key{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);padding:8px 4px 0}
+.plan-key>span{display:inline-flex;align-items:center;gap:6px}
+.beam-key{display:inline-block;width:22px;border-top:2px dashed var(--accent)}
+.rooms{columns:3 340px;column-gap:20px}
+.rooms>.room{break-inside:avoid;margin:0 0 20px;display:flex;flex-direction:column}
+.room-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:14px 14px 12px 20px;border-bottom:1px solid var(--line-soft)}
+.room-h h2{margin:0;font-size:16.5px;font-weight:600}
+.linkish{all:unset;cursor:pointer;color:var(--ink)}
+.linkish:hover{color:var(--accent)}
+.linkish:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.room-sub{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.room.is-off{opacity:.72}
+.desks{list-style:none;margin:0;padding:6px}
+.desk{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"av who st" "av what what";column-gap:12px;row-gap:3px;
+  align-items:center;width:100%;padding:10px;border:0;border-radius:10px;background:none;color:var(--ink);text-align:left;cursor:pointer;font:inherit}
+.desk:hover{background:var(--hover)}
+.desk .av{grid-area:av;align-self:start}
+.desk .who{grid-area:who;display:flex;flex-direction:column;min-width:0;line-height:1.3}
+.desk .who b{font-weight:600;font-size:15px}
+.desk .who small{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desk .pill{grid-area:st}
+.desk .what{grid-area:what;font-size:13.5px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.desk.st-failed,.desk.st-stalled,.desk.st-held,.desk.st-blocked{background:var(--stuck-bg)}
+.desk.st-failed .what,.desk.st-stalled .what,.desk.st-held .what,.desk.st-blocked .what{color:var(--stuck)}
+.desk.st-idle .who b,.desk.st-off .who b{color:var(--ink-2)}
+.desk.dim{opacity:.3}
+.av{position:relative;display:inline-grid;place-items:center;width:38px;height:38px;border-radius:50%;background:var(--accent-soft);
+  color:var(--nav-on);font-weight:700;font-size:13.5px;letter-spacing:.02em;flex:none}
+.av .lamp{position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border:2px solid var(--surface)}
+.av.big{width:46px;height:46px;font-size:16px}
+.room-board{padding:4px 20px 12px;display:flex;flex-direction:column;gap:6px}
+.bl{display:flex;gap:10px;align-items:baseline;font-size:14px;line-height:1.45}
+.room-f{padding:10px 20px 14px;border-top:1px solid var(--line-soft);font-size:13px;color:var(--faint)}
+.shelf-row{flex-wrap:nowrap;align-items:center}
+.shelf-row .grow{flex:1 1 auto}
+.shelf-st{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13.5px;text-align:right;flex:none}
+.rowbtn{width:100%;border:0;border-top:1px solid var(--line-soft);background:none;text-align:left;cursor:pointer;color:var(--ink);font:inherit}
+.rowbtn:hover{background:var(--sunken)}
+.counts{display:flex;flex-wrap:wrap;gap:6px 18px;padding:14px 20px;font-size:14px;color:var(--muted)}
+.counts b{font-size:17px;color:var(--ink);font-weight:500}
+.strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));border-radius:0 0 12px 12px;overflow:hidden}
+.strip-room{display:flex;flex-direction:column;gap:7px;padding:14px 16px;background:var(--surface);text-decoration:none;color:var(--ink);
+  box-shadow:inset -1px -1px 0 var(--line-soft)}
+.strip-room:hover{background:var(--sunken);color:var(--ink)}
+.strip-room.bad{background:var(--stuck-bg)}
+.strip-room .lamps{display:flex;gap:5px;flex-wrap:wrap}
+.count.bad{background:var(--stuck-bg);color:var(--stuck)} .count.soft{background:var(--plain-bg);color:var(--plain)}
+ol.feed li.unread>span:first-child{color:var(--accent)!important;font-weight:500}
+/* the side panel: one agent, one sector, or one conversation */
+.scrim{position:fixed;inset:0;background:rgba(8,16,18,.34);z-index:30;display:none}
+.scrim.open{display:block}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(500px,100vw);background:var(--surface);border-left:1px solid var(--line);z-index:31;
+  display:none;flex-direction:column;box-shadow:-12px 0 32px rgba(10,20,22,.14)}
+.drawer.open{display:flex}
+body.drawer-open{overflow:hidden}
+.dr-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 16px 14px 20px;border-bottom:1px solid var(--line-soft)}
+.dr-h h2{margin:0;font-size:18px;font-weight:600}
+.dr-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;overscroll-behavior:contain}
+.dr-sec{padding:16px 20px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:10px}
+.dr-sec p,.dr-sec h3{margin:0}
+.dr-foot{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface)}
+.dr-foot input{flex:1;min-width:0;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);color:var(--ink);font-size:16px}
+.chat{display:flex;flex-direction:column;gap:10px}
+.msg{align-self:flex-start;max-width:92%;padding:10px 12px;border-radius:12px;background:var(--sunken);font-size:14.5px;line-height:1.5;overflow-wrap:anywhere}
+.msg.me{align-self:flex-end;background:var(--accent-soft)}
+.msg .foot{display:block;margin-top:8px;font-size:12.5px;color:var(--faint)}
+.bad-t{color:var(--stuck)} .wait-t{color:var(--wait)}
+ol.feed .pill{align-self:flex-start}
+ol.feed.tight{padding:0}
+ol.feed.tight li{grid-template-columns:48px 1fr}
+.switchrow{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.mini-desks{display:flex;flex-direction:column;gap:2px;margin:0 -10px}
+.mini-desk{display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:center;padding:8px 10px;border:0;border-radius:8px;background:none;
+  color:var(--ink);text-align:left;cursor:pointer;font:inherit}
+.mini-desk:hover{background:var(--hover)}
+.mini-desk .muted{justify-self:end;font-size:13.5px}
+.why-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.why-list li{display:grid;grid-template-columns:44px 1fr;gap:10px;font-size:14px}
+.pts{font-size:13px;color:var(--done)} .pts.neg{color:var(--stuck)}
+.plain-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--ink-2)}
+details.more summary{cursor:pointer;color:var(--accent);font-weight:500;font-size:14px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:760px){.plan-card{display:none} .rooms{columns:1} .drawer{width:100vw;border-left:0} .fl-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* website check */
 .ck-hero{display:flex;flex-wrap:wrap;gap:20px 36px;align-items:center;padding:20px 22px}
 .ck-score{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:56px;line-height:1;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
@@ -226,12 +342,15 @@ details.ck .row{padding-left:40px}
 <div class="wrap">
   <nav class="nav" aria-label="Main" id="nav">
     <a href="#today" data-r="today">Today</a>
+    <a href="#agency" data-r="agency">Your agency <span class="count bad" id="navFloor" hidden title="desks that failed or are stuck">0</span></a>
     <a href="#waiting" data-r="waiting">Waiting on you <span class="count" id="navCount" hidden>0</span></a>
     <a href="#orders" data-r="orders">Your orders</a>
     <a href="#leads" data-r="leads">Leads</a>
     <a href="#content" data-r="content">Content</a>
     <a href="#website" data-r="website">Website</a>
     <a href="#google" data-r="google">On Google</a>
+    <a href="#activity" data-r="activity">Activity <span class="count soft" id="navAct" hidden title="unread">0</span></a>
+    <a href="#results" data-r="results">Results</a>
     <div class="rule"></div>
     <a href="#check" data-r="check">Website Check</a>
     <a href="#settings" data-r="settings">Settings</a>
@@ -241,11 +360,13 @@ details.ck .row{padding-left:40px}
 
 <nav class="tabs" aria-label="Main" id="tabs">
   <a href="#today" data-r="today"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><path d="M3 10 L11 3 L19 10 V19 H3 Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></svg>Today</a>
+  <a href="#agency" data-r="agency"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"></rect><rect x="12" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"></rect><rect x="3" y="12" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"></rect><rect x="12" y="12" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"></rect></svg>Agency<span class="b bad" id="tabFloor" hidden>0</span></a>
   <a href="#waiting" data-r="waiting"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.7"></circle><path d="M11 6.5 V11 L14 13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>Waiting<span class="b" id="tabCount" hidden>0</span></a>
   <a href="#leads" data-r="leads"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3.5" stroke="currentColor" stroke-width="1.7"></circle><path d="M3 18 C3.8 14.5 6 13 9 13 C12 13 14.2 14.5 15 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>Leads</a>
-  <a href="#website" data-r="website"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><rect x="3" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.7"></rect><path d="M3 8 H19" stroke="currentColor" stroke-width="1.7"></path></svg>Website</a>
   <a href="#more" data-r="more"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="5" cy="11" r="1.6" fill="currentColor"></circle><circle cx="11" cy="11" r="1.6" fill="currentColor"></circle><circle cx="17" cy="11" r="1.6" fill="currentColor"></circle></svg>More</a>
 </nav>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Details"></aside>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -376,9 +497,18 @@ function sentence(t) { t = String(t || ''); return t ? t[0].toUpperCase() + t.sl
 function when(ts) {
   if (!ts) return '';
   const d = new Date(Number(ts) * 1000);
-  return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
 }
-async function state() { const s = await api('/api/state'); if (s && s.ok) { S.state = s; setCount((s.approvals || []).length); } return s; }
+async function state() {
+  const s = await api('/api/state');
+  if (s && s.ok) {
+    S.state = s; setCount((s.approvals || []).length);
+    const bad = problemCount(s), unread = Number((s.activity || {}).unread || 0);
+    for (const id of ['#navFloor', '#tabFloor']) { const el = $(id); if (el) { el.textContent = bad; el.hidden = !bad; } }
+    const a = $('#navAct'); if (a) { a.textContent = unread > 99 ? '99+' : unread; a.hidden = !unread; }
+  }
+  return s;
+}
 
 /* ======================= TODAY ======================= */
 async function today(main) {
@@ -412,6 +542,7 @@ async function today(main) {
       <div style="display:flex;gap:10px;flex-wrap:wrap">${action}
         ${appr.length && !(r && r.running) ? '<button class="btn ghost" type="button" id="runNow">Run today</button>' : ''}</div>
     </section>
+    ${agencyStrip(st)}
     <div class="tiles">
       <a href="#leads" class="card tile"><span class="label">Leads waiting</span><span class="big mono">${esc((leads && leads.total) || 0)}</span>
         <span class="muted" style="font-size:13.5px">${esc((leads && leads.today) || 0)} new today · ${esc((leads && leads.mailed) || 0)} written to</span></a>
@@ -896,6 +1027,529 @@ function wireCheck(main, shown) {
   };
 }
 
+/* ======================= THE AGENCY FLOOR =======================
+   "the user using the program should have a full knowledge that which sector
+    and which agent is working properly and which agent is failed at work and
+    also as full control of agents like to chat with the agents"
+
+   Every desk, in its room, lit by what it actually did — the same live lines
+   the classic office drew (coordination/state.py), with the reason a red desk
+   stopped travelling with it. Nothing here is invented by the browser: a desk
+   with no line from the server is idle and says so. */
+const FLOOR = [
+  {key: 'Director', name: 'Director’s Office', desks: [
+    ['managing-director', 'director', 'Director', 'Plans the day and hands out the work'],
+    ['critic', 'critic', 'Critic', 'Challenges the plan before it goes out']]},
+  {key: 'Leads', name: 'Leads & Outreach', desks: [
+    ['leads-hunter', 'hunter', 'Hunter', 'Finds businesses that buy what you sell'],
+    ['leads-scanner', 'scanner', 'Scanner', 'Stops anyone being collected or written to twice'],
+    ['leads-outreach', 'outreach', 'Outreach', 'Writes to leads, under the daily limit'],
+    ['leads-responder', 'responder', 'Responder', 'Reads replies and brings you the ones that matter']]},
+  {key: 'SEO', name: 'SEO & Rankings', desks: [
+    ['seo-auditor', 'auditor', 'Auditor', 'Checks pages and structured data'],
+    ['seo-strategist', 'strategist', 'Strategist', 'Finds searches worth winning'],
+    ['seo-rival', 'rival', 'Rival', 'Watches your competitors'],
+    ['seo-backlinks', 'backlinks', 'Backlinks', 'Finds where links to you could come from'],
+    ['seo-answers', 'answers', 'Answers', 'Gets your pages picked by AI answers']]},
+  {key: 'Content', name: 'Content & Social', desks: [
+    ['content-writer', 'writer', 'Writer', 'Drafts pages and posts in your voice'],
+    ['content-illustrator', 'illustrator', 'Illustrator', 'Your real project photos first, then stock'],
+    ['content-publisher', 'publisher', 'Publisher', 'Publishes only what passed the checks']]},
+  {key: 'IT', name: 'IT & Site Health', desks: [
+    ['it-watcher', 'watcher', 'Watcher', 'Checks your site and that enquiries arrive'],
+    ['it-fixer', 'fixer', 'Fixer', 'Writes fixes, never on the live site'],
+    ['it-releaser', 'releaser', 'Releaser', 'The only desk allowed on your live site'],
+    ['it-search', 'search', 'Search', 'Keeps your site’s search up to date']]},
+  {key: 'Security', name: 'Security', desks: [
+    ['security-screener', 'screener', 'Screener', 'Screens leads and messages for scams'],
+    ['security-guard', 'guard', 'Guard', 'Treats text copied from the web as untrusted']]},
+  {key: 'Report', name: 'Reports', desks: [
+    ['reporter', 'reporter', 'Reporter', 'Scores every desk and the Director’s calls']]},
+];
+const SLOT_ALIAS = {md: 'director', managing: 'director'};
+const ST_LOOK = {working: ['work', 'Working'], done: ['done', 'Done'], failed: ['stuck', 'Failed'],
+  stalled: ['stuck', 'Stalled'], held: ['stuck', 'Stuck on a job'], blocked: ['stuck', 'Stopped'],
+  waiting: ['wait', 'Needs your yes'], queued: ['plain', 'Next in line'], idle: ['plain', 'Idle'], off: ['plain', 'Switched off']};
+const RDY_LOOK = {ready: ['done', 'Ready to work'], unchecked: ['plain', 'Not proven yet'], thin: ['wait', 'No backup'], blocked: ['stuck', 'Cannot run']};
+const SHELF_NAMES = {crawler: 'Reading web pages', email: 'Sending email', maps: 'Maps and places', seo_data: 'Search data',
+  stock_images: 'Stock photos', other: 'Other tools', reasoning: 'Thinking'};
+const FL = {filter: 'all', live: null, comms: null, run: null, left: null, chats: {}, open: null, asking: false};
+const PROBLEM = ['failed', 'stalled', 'held', 'blocked'];
+
+function deskState(f) { return !f ? 'idle' : f.s === 'blocked' ? (f.problem || 'blocked') : (f.s || 'idle'); }
+function groupOf(k) { return k === 'working' ? 'working' : PROBLEM.includes(k) ? 'problem' : k === 'waiting' ? 'you' : k === 'done' ? 'done' : 'quiet'; }
+function roomLive(key, st) { st = st || FL.live; return ((st && st.rooms) || []).find((r) => r.key === key) || null; }
+function readinessOf(key) { return (((FL.live && FL.live.readiness) || {}).sectors || []).find((s) => s.room === key) || null; }
+function seatRoom(room, st) {
+  const live = roomLive(room.key, st);
+  const desks = room.desks.map(([id, slot, n, role]) => ({id, slot, n, role, room: room.key, f: null}));
+  const board = [];
+  ((live && live.agents) || []).forEach((f) => {
+    let slot = String(f.slot || '').toLowerCase(); slot = SLOT_ALIAS[slot] || slot;
+    const d = slot && desks.find((x) => !x.f && x.slot === slot);
+    if (d) d.f = f; else board.push(f);
+  });
+  if (live && live.enabled === false) desks.forEach((d) => { if (!d.f) d.f = {s: 'off', t: 'switched off'}; });
+  return {...room, live, desks, board};
+}
+function allDesks(st) { return FLOOR.map((r) => seatRoom(r, st)).flatMap((r) => r.desks); }
+function deskById(id) { return allDesks().find((d) => d.id === id) || null; }
+function problemCount(st) { return allDesks(st).filter((d) => PROBLEM.includes(deskState(d.f))).length; }
+
+async function agency(main) {
+  const [st, comms, run, left] = await Promise.all([state(), api('/api/comms'), api('/api/run/status'), api('/api/leftovers')]);
+  FL.live = st && st.ok ? st : FL.live; FL.comms = comms && comms.ok ? comms : FL.comms; FL.run = run; FL.left = left;
+  if (!FL.live) {
+    main.innerHTML = `<div class="page">${head('Your agency')}<div class="card">${empty('The office did not answer',
+      esc((st && st.error) || 'Is the agency window still open?'))}</div></div>`;
+    return;
+  }
+  const rooms = FLOOR.map((r) => seatRoom(r));
+  const desks = rooms.flatMap((r) => r.desks);
+  const by = (g) => desks.filter((d) => groupOf(deskState(d.f)) === g).length;
+  const working = by('working'), problems = by('problem'), done = by('done');
+  const appr = (FL.live.approvals || []).length;
+  const threads = ((FL.comms || {}).threads || []);
+  const openThreads = threads.filter((t) => t.waiting || t.state === 'open' || t.state === 'claimed').length;
+  const m = FL.live.metrics || {};
+  const health = m.health == null ? '—' : String(m.health);
+  const r = (run && run.run) || null;
+  const running = !!(r && r.running);
+  const canResume = !running && left && left.ok && left.resumable && Number(left.waiting || 0) > 0;
+  main.innerHTML = `<div class="page wide">
+    ${head('Your agency', `${rooms.length} sectors and ${desks.length} desks. A desk lights up as it works; red means it stopped, and it tells you why. Click any desk to see its work and talk to it.`,
+      `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">${running ? pill('work', 'Running') : ''}
+        ${!running && left && left.ok && Number(left.garbage || 0) > 0 ? `<button class="btn quiet" type="button" id="tidyUp" title="Takes finished, duplicate and impossible jobs off the board, without using the AI">Clear up · ${Number(left.garbage)}</button>` : ''}
+        ${canResume ? `<button class="btn ghost" type="button" id="resumeRun">Pick up where it left off · ${Number(left.waiting)}</button>` : ''}
+        ${running ? '<button class="btn ghost" type="button" id="stopRun">Stop the run</button>' : '<button class="btn" type="button" id="runNow">Run today</button>'}</div>`)}
+    <div id="runSay" class="muted" style="font-size:14px;margin-top:-8px">${running ? esc(run.head || '') : ''}</div>
+    <div class="tiles fl-tiles">
+      <div class="card tile" title="${esc(m.health_why || '')}"><span class="label">Agency health</span><span class="big mono">${esc(health)}</span>
+        <span class="muted" style="font-size:13.5px">out of 100, across every sector</span></div>
+      <button type="button" class="card tile" data-filter="working"><span class="label">Working now</span><span class="big mono">${working}</span>
+        <span class="muted" style="font-size:13.5px">${done} finished a run today</span></button>
+      <button type="button" class="card tile${problems ? ' bad' : ''}" data-filter="problem"><span class="label">Failed or stuck</span><span class="big mono">${problems}</span>
+        <span class="muted" style="font-size:13.5px">${problems ? 'each one says why — click to see' : 'every desk is fine'}</span></button>
+      <a class="card tile" href="#waiting"><span class="label">Needs your yes</span><span class="big mono">${appr}</span>
+        <span class="muted" style="font-size:13.5px">${appr ? 'nothing goes out until you decide' : 'nothing waiting'}</span></a>
+      <a class="card tile" href="#floor-traffic"><span class="label">Between desks</span><span class="big mono">${openThreads}</span>
+        <span class="muted" style="font-size:13.5px">${esc((FL.comms || {}).head || 'no requests today')}</span></a>
+    </div>
+    <div role="group" aria-label="Show desks" class="fl-filter" style="display:flex;flex-wrap:wrap;gap:8px">
+      ${[['all', 'Every desk'], ['working', 'Working'], ['problem', 'Failed or stuck'], ['you', 'Needs you'], ['done', 'Done'], ['quiet', 'Quiet']].map(([k, n]) =>
+        `<button type="button" class="seg ${FL.filter === k ? 'on' : ''}" aria-pressed="${FL.filter === k}" data-filter="${k}">${n}</button>`).join('')}
+    </div>
+    <section class="card plan-card" aria-label="Floor plan">${planSvg(rooms)}</section>
+    <div class="rooms">${rooms.map(roomHtml).join('')}</div>
+    <div class="two">
+      <section class="card" id="floor-shelf">${shelfHtml((FL.live.shelf) || [])}</section>
+      <section class="card" id="floor-traffic">${trafficHtml(threads)}</section>
+    </div>
+  </div>`;
+  wireFloor(main);
+  applyFilter(main);
+}
+
+function roomHtml(r) {
+  const L = r.live || {}, rd = readinessOf(r.key), off = L.enabled === false;
+  const rl = rd ? (RDY_LOOK[rd.state] || ['plain', rd.state]) : null;
+  const score = L.score == null ? null : Number(L.score);
+  return `<section class="card room${off ? ' is-off' : ''}" id="room-${esc(r.key)}">
+    <div class="room-h">
+      <div style="min-width:0;display:flex;flex-direction:column;gap:4px">
+        <h2><button type="button" class="linkish" data-sector="${esc(r.key)}">${esc(L.name || r.name)}</button></h2>
+        <span class="room-sub">${off ? '<span class="lamp plain"></span>Switched off' : rl ? `<span class="lamp ${rl[0]}"></span>${esc(rl[1])}` : ''}
+          ${score != null ? `<span>·</span><span>health <b class="mono" style="font-weight:500">${score}</b></span>` : ''}</span>
+      </div>
+      <button class="btn quiet small" type="button" data-sector="${esc(r.key)}" aria-label="Open ${esc(L.name || r.name)}">Open</button>
+    </div>
+    <ul class="desks">${r.desks.map(deskHtml).join('')}</ul>
+    ${r.board.length ? `<div class="room-board">${r.board.map(boardLine).join('')}</div>` : ''}
+    ${(L.foot || []).length ? `<div class="room-f">${(L.foot || []).map(esc).join(' · ')}</div>` : ''}
+  </section>`;
+}
+function deskHtml(d) {
+  const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
+  const t = d.f && d.f.t && k !== 'idle' ? sentence(d.f.t) : '';
+  return `<li><button type="button" class="desk st-${k}" data-agent="${esc(d.id)}" data-grp="${groupOf(k)}">
+    <span class="av" aria-hidden="true">${esc(d.n.slice(0, 2))}<i class="lamp ${lk[0]}${k === 'working' ? ' pulse' : ''}"></i></span>
+    <span class="who"><b>${esc(d.n)}</b><small>${esc(d.role)}</small></span>
+    ${pill(lk[0], lk[1])}
+    ${t ? `<span class="what">${esc(t)}</span>` : ''}
+  </button></li>`;
+}
+function boardLine(f) {
+  const k = f.s === 'waiting' ? ['wait', 'needs your yes'] : f.n === 'no desk can take this' ? ['stuck', 'no desk can take it'] : ['plain', 'next in line'];
+  return `<div class="bl" title="${esc(f.why || '')}"><span class="lamp ${k[0]}"></span><span>On the board: <b style="font-weight:600">${esc(f.t || '')}</b> — ${esc(k[1])}</span></div>`;
+}
+
+/* The floor plan: the seven rooms, a lamp for every desk, and a line for every
+   request one sector has open with another. No requests, no lines — the quiet
+   is information, exactly as on the classic floor. */
+const PLAN = {Director: [20, 20, 280, 112], Report: [320, 20, 240, 112], Security: [580, 20, 400, 112],
+  Leads: [20, 150, 300, 124], SEO: [340, 150, 340, 124], Content: [700, 150, 280, 124], IT: [20, 292, 960, 100]};
+function planEdge(b, tx, ty) {
+  const cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2, dx = tx - cx, dy = ty - cy;
+  const s = Math.min(dx ? (b[2] / 2 + 2) / Math.abs(dx) : Infinity, dy ? (b[3] / 2 + 2) / Math.abs(dy) : Infinity);
+  return [cx + dx * s, cy + dy * s];
+}
+function planSvg(rooms) {
+  const beams = (((FL.comms || {}).beams) || []).filter((b) => PLAN[b.from_room] && PLAN[b.to_room] && b.from_room !== b.to_room
+    && !['answered', 'closed'].includes(b.state)).slice(0, 8);
+  let lines = '';
+  beams.forEach((b, i) => {
+    const A = PLAN[b.from_room], B = PLAN[b.to_room];
+    const a = planEdge(A, B[0] + B[2] / 2, B[1] + B[3] / 2), c = planEdge(B, A[0] + A[2] / 2, A[1] + A[3] / 2);
+    const tone = b.tone === 'amber' ? 'amber' : 'live';
+    // Bowed, so a line across a room — or two between the same rooms — stays readable.
+    const dx = c[0] - a[0], dy = c[1] - a[1], len = Math.hypot(dx, dy) || 1, bow = 26 + (i % 3) * 16;
+    const qx = (a[0] + c[0]) / 2 - dy / len * bow, qy = (a[1] + c[1]) / 2 + dx / len * bow;
+    const d = `M ${a[0].toFixed(1)} ${a[1].toFixed(1)} Q ${qx.toFixed(1)} ${qy.toFixed(1)} ${c[0].toFixed(1)} ${c[1].toFixed(1)}`;
+    lines += `<g class="beam-g"><title>${esc(deskName(b.from))} asked ${esc(deskName(b.to))}: ${esc(b.subject || '')}</title>
+      <path class="beam-halo" d="${d}"></path><path class="beam ${tone}" d="${d}" marker-end="url(#ah-${tone})"></path></g>`;
+  });
+  const defs = `<defs>${['live', 'amber'].map((t) => `<marker id="ah-${t}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path class="ah ${t}" d="M0 0 L10 5 L0 10 Z"></path></marker>`).join('')}</defs>`;
+  const roomsSvg = rooms.map((r) => {
+    const [x, y, w, h] = PLAN[r.key]; const L = r.live || {};
+    const off = L.enabled === false;
+    const bad = r.desks.some((d) => PROBLEM.includes(deskState(d.f)));
+    const step = w / r.desks.length;
+    const lamps = r.desks.map((d, i) => {
+      const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
+      const cx = x + step * (i + 0.5), cy = y + h * 0.56;
+      return `<g class="plan-desk" data-agent="${esc(d.id)}"><circle class="lamp-c ${lk[0]}${k === 'working' ? ' pulse' : ''}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9"></circle>
+        <text class="plan-desk-name" x="${cx.toFixed(1)}" y="${(cy + 27).toFixed(1)}" text-anchor="middle">${esc(d.n)}</text><title>${esc(d.n)} — ${esc(lk[1])}</title></g>`;
+    }).join('');
+    return `<g class="plan-room${bad ? ' bad' : ''}${off ? ' off' : ''}" data-sector="${esc(r.key)}" tabindex="0" role="button" aria-label="${esc(L.name || r.name)}: open the sector">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12"></rect>
+      <text class="plan-name" x="${x + 16}" y="${y + 26}">${esc((L.name || r.name).toUpperCase())}</text>${lamps}</g>`;
+  }).join('');
+  return `<svg class="plan" viewBox="0 0 1000 410" role="group" aria-label="Floor plan of the agency">${defs}${roomsSvg}${lines}</svg>
+    <div class="plan-key">${[['work', 'working'], ['done', 'done'], ['stuck', 'failed or stuck'], ['wait', 'needs your yes'], ['plain', 'idle']].map(([c, n]) =>
+      `<span><span class="lamp ${c}"></span>${n}</span>`).join('')}<span><span class="beam-key"></span>a request between sectors</span></div>`;
+}
+
+function shelfHtml(sh) {
+  const stocked = sh.filter((s) => s.items).length, busy = sh.filter((s) => s.holder).length;
+  const rows = sh.map((s) => {
+    const names = (s.names || []).filter(Boolean);
+    const tone = s.holder ? 'work' : s.items ? 'done' : 'plain';
+    const st = s.holder ? `In use by ${esc(deskName(s.holder_sector || ''))}${s.holder ? ' · ' + esc(s.holder) : ''}`
+      : s.queue ? `${Number(s.queue)} waiting their turn` : s.items ? 'Ready' : 'No tool on it yet';
+    return `<div class="row shelf-row"><span class="lamp ${tone}"></span>
+      <span class="grow"><b style="font-weight:600">${esc(SHELF_NAMES[s.shelf] || sentence(String(s.shelf || '').replace(/_/g, ' ')))}</b>
+        <span class="muted" style="font-size:13.5px">${names.length ? esc(names[0]) + (names.length > 1 ? ' · backup: ' + esc(names.slice(1).join(', ')) : '') : 'No tool yet — add one on the Setup screen'}</span></span>
+      ${s.items || s.holder || s.queue ? `<span class="shelf-st"><span>${st}</span>${s.spend ? `<span class="mono muted">${money(s.spend)} today</span>` : ''}</span>` : ''}</div>`;
+  }).join('');
+  return `<div class="card-h"><h2>The shelf</h2><span class="muted" style="font-size:13.5px">${busy ? busy + ' in use · ' : ''}${stocked} of ${sh.length} stocked</span></div>
+    <p class="muted" style="margin:0;padding:12px 20px 0;font-size:14px">The tools every desk shares. One desk holds a tool at a time; the others wait their turn, so nobody overrides anybody.</p>
+    ${rows || empty('The shelf is empty', 'Tools appear here once they are added on the Setup screen.')}
+    <div class="row" style="justify-content:flex-end"><a class="btn ghost small" href="/setup">Manage the tools</a></div>`;
+}
+function trafficHtml(threads) {
+  const look = (t) => t.state === 'closed' ? ['plain', 'Closed'] : t.state === 'answered' ? ['done', 'Answered'] : t.waiting ? ['wait', 'Waiting for an answer'] : ['work', 'Being worked on'];
+  const rows = threads.slice(0, 10).map((t) => {
+    const lk = look(t);
+    return `<button type="button" class="row rowbtn" data-thread="${esc(t.id)}"><span class="grow">
+      <span class="mono" style="font-size:12.5px;color:var(--faint)">${esc(deskName(t.from))} → ${esc(deskName(t.to))} · ${esc(t.ago || '')}</span>
+      <b style="font-weight:600">${esc(t.subject || '')}</b></span>${pill(lk[0], lk[1])}</button>`;
+  }).join('');
+  return `<div class="card-h"><h2>Between desks</h2><span class="muted" style="font-size:13.5px">${esc((FL.comms || {}).head || '')}</span></div>
+    <p class="muted" style="margin:0;padding:12px 20px 0;font-size:14px">When one sector needs another it asks here and waits for an answer. Nobody reaches into another sector’s work.</p>
+    ${rows || empty('No requests today', 'When SEO asks Content for a page, or Leads asks Security to clear a lead, it shows here.')}`;
+}
+
+function applyFilter(main) {
+  main.querySelectorAll('.desk').forEach((b) => b.classList.toggle('dim', FL.filter !== 'all' && b.dataset.grp !== FL.filter));
+  main.querySelectorAll('.plan-desk').forEach((g) => {
+    const d = deskById(g.dataset.agent); const grp = d ? groupOf(deskState(d.f)) : 'quiet';
+    g.classList.toggle('dim', FL.filter !== 'all' && grp !== FL.filter);
+  });
+  main.querySelectorAll('.fl-filter [data-filter]').forEach((b) => { const on = b.dataset.filter === FL.filter; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+}
+function wireFloor(main) {
+  const rb = $('#runNow'); if (rb) rb.onclick = runToday;
+  const sb = $('#stopRun'); if (sb) sb.onclick = async () => { sb.disabled = true; const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
+  const tu = $('#tidyUp'); if (tu) tu.onclick = async () => {
+    tu.disabled = true; const j = await api('/api/leftovers/tidy', {});
+    toast(sentence((j && (j.head || j.why || j.error)) || 'Cleared up.')); route();
+  };
+  const rs = $('#resumeRun'); if (rs) rs.onclick = async () => {
+    rs.disabled = true; $('#runSay').textContent = 'Checking every desk can work, then picking up what was left…';
+    const j = await api('/api/run/resume', {});
+    $('#runSay').textContent = j.why || j.error || (j.ok ? 'Picked up.' : 'It did not start.'); rs.disabled = false;
+    if (j.ok) setTimeout(route, 1500);
+  };
+  main.onclick = (e) => {
+    const f = e.target.closest('[data-filter]');
+    if (f) {
+      FL.filter = FL.filter === f.dataset.filter && f.classList.contains('tile') ? 'all' : f.dataset.filter; applyFilter(main);
+      if (f.classList.contains('tile') && FL.filter !== 'all') { const first = main.querySelector(`.desk[data-grp="${FL.filter}"]`); if (first) first.scrollIntoView({block: 'center', behavior: 'smooth'}); }
+      return;
+    }
+    const a = e.target.closest('[data-agent]'); if (a) { openAgent(a.dataset.agent); return; }
+    const s = e.target.closest('[data-sector]'); if (s) { openSector(s.dataset.sector); return; }
+    const t = e.target.closest('[data-thread]'); if (t) { openThread(t.dataset.thread); }
+  };
+  main.querySelectorAll('.plan-room').forEach((g) => g.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSector(g.dataset.sector); }
+  }));
+}
+
+/* ---- the side panel: one agent, one sector, or one conversation between two ---- */
+function openPanel(html, label, kind, key) {
+  const d = $('#drawer');
+  if (!d.classList.contains('open')) FL.back = document.activeElement;
+  d.innerHTML = html; d.setAttribute('aria-label', label);
+  d.classList.add('open'); $('#scrim').classList.add('open'); document.body.classList.add('drawer-open');
+  FL.open = {kind, key};
+  const c = d.querySelector('[data-close]'); if (c) c.onclick = closePanel;
+  setTimeout(() => { const f = d.querySelector('[data-focus]') || c; if (f) f.focus({preventScroll: true}); }, 40);
+}
+function closePanel() {
+  $('#drawer').classList.remove('open'); $('#scrim').classList.remove('open'); document.body.classList.remove('drawer-open');
+  FL.open = null;
+  if (FL.back && document.contains(FL.back)) FL.back.focus({preventScroll: true});
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && FL.open) closePanel(); });
+function panelHead(title, sub, extra) {
+  return `<div class="dr-h"><div style="min-width:0;display:flex;gap:12px;align-items:center">${extra || ''}<div style="min-width:0"><h2>${esc(title)}</h2>
+    ${sub ? `<div class="muted" style="font-size:13.5px">${esc(sub)}</div>` : ''}</div></div>
+    <button class="btn quiet small" type="button" data-close aria-label="Close">Close</button></div>`;
+}
+
+function rightNow(d) {
+  const f = d.f || {}, k = deskState(f), t = esc(f.t || '');
+  if (k === 'failed') return `<p><b class="bad-t">My last run failed.</b> ${t}</p>${f.why ? `<p class="muted">${esc(f.why)}</p>` : ''}<p class="muted">Ask me below and I’ll tell you what I know about it.</p>`;
+  if (k === 'stalled') return `<p><b class="bad-t">I stopped answering.</b> ${t}</p>${f.why ? `<p class="muted">${esc(f.why)}</p>` : ''}`;
+  if (k === 'held' || k === 'blocked') return `<p><b class="bad-t">I’m stuck.</b> ${t}</p>${f.why ? `<p class="muted">${esc(f.why)}</p>` : ''}
+    ${f.task_id ? `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"><button class="btn small" type="button" id="relBtn" data-task="${esc(f.task_id)}">Put the job back on the board</button><span class="muted" id="relSay" style="font-size:13.5px"></span></div>` : ''}`;
+  if (k === 'working') return `<p><b>Working now:</b> ${t}</p>`;
+  if (k === 'done') return `<p><b>Last thing I did:</b> ${t}</p>`;
+  if (k === 'waiting') return `<p><b class="wait-t">I need your yes or no.</b> ${t}</p><p class="muted">Until you decide I can’t start it.</p><a class="btn small" href="#waiting">Go to Waiting on you</a>`;
+  if (k === 'queued') return `<p><b>Next in line:</b> ${t}</p><p class="muted">Nothing is blocking it; each sector takes one job at a time.</p>`;
+  if (k === 'off') return `<p><b>My sector is switched off.</b> Turn it back on from the sector’s panel and I’ll pick up work again.</p>`;
+  return `<p>Nothing on the board for me right now. Ask me what I’m for, or what my sector is carrying.</p>`;
+}
+function runRow(x) {
+  const tone = x.status === 'ok' ? 'done' : x.status === 'running' ? 'work' : ['error', 'stalled', 'killed'].includes(x.status) ? 'stuck' : 'plain';
+  const word = {ok: 'Done', running: 'Working', error: 'Failed', stalled: 'Stalled', killed: 'Stopped'}[x.status] || sentence(x.status || '');
+  return `<li><span class="mono" style="font-size:12.5px;color:var(--faint)">${esc(when(x.started_at))}</span>
+    <span style="display:flex;flex-direction:column;gap:4px;min-width:0"><span>${esc(sentence(x.note || 'a run'))}</span>${pill(tone, word)}</span></li>`;
+}
+function chatHtml(id) {
+  return (FL.chats[id] || []).map((m) => `<div class="msg ${m.me ? 'me' : ''}">${m.html}</div>`).join('');
+}
+async function openAgent(id) {
+  const d = deskById(id);
+  if (!d) return;
+  const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
+  const room = (roomLive(d.room) || {}).name || d.room;
+  const av = `<span class="av big" aria-hidden="true">${esc(d.n.slice(0, 2))}<i class="lamp ${lk[0]}${k === 'working' ? ' pulse' : ''}"></i></span>`;
+  openPanel(`${panelHead(d.n, room + ' · ' + d.role, av)}
+    <div class="dr-body" id="drBody">
+      <section class="dr-sec"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${pill(lk[0], lk[1])}
+        <button class="btn quiet small" type="button" data-sector-open="${esc(d.room)}">Open ${esc(room)}</button></div>${rightNow(d)}</section>
+      <section class="dr-sec"><h3 class="label">Its work today</h3><ol class="feed tight" id="drRuns"><li class="muted">Reading…</li></ol></section>
+      <section class="dr-sec" id="drJobsSec" hidden><h3 class="label">Its jobs on the board</h3><div id="drJobs"></div></section>
+      <section class="dr-sec"><h3 class="label">Talk to ${esc(d.n)}</h3>
+        <p class="muted" style="margin:0;font-size:13.5px">Ask what it did, why something failed, or what it would do next. It answers from its own records.</p>
+        <div class="chat" id="chatLog" aria-live="polite">${chatHtml(id)}</div></section>
+    </div>
+    <form class="dr-foot" id="chatForm"><label class="sr" for="chatIn">Message to ${esc(d.n)}</label>
+      <input id="chatIn" type="text" autocomplete="off" placeholder="Ask ${esc(d.n)} something…" data-focus>
+      <button class="btn" type="submit">Send</button></form>`, d.n, 'agent', id);
+  const dr = $('#drawer');
+  dr.querySelector('[data-sector-open]').onclick = () => openSector(d.room);
+  const rel = $('#relBtn');
+  if (rel) rel.onclick = async () => {
+    rel.disabled = true; $('#relSay').textContent = 'Putting it back…';
+    const j = await api('/api/release', {id: rel.dataset.task, by: 'owner'});
+    if (!j.ok) { rel.disabled = false; $('#relSay').textContent = sentence(j.error || j.why || 'Not put back.'); return; }
+    rel.remove(); $('#relSay').textContent = 'Back on the board — the next desk that can do it will take it.';
+    if (location.hash.startsWith('#agency')) agency($('#main'));
+  };
+  $('#chatForm').onsubmit = (e) => { e.preventDefault(); sendChat(id, d.n); };
+  const log = $('#chatLog'); log.scrollTop = log.scrollHeight;
+  const sec = await api(`/api/sector/${encodeURIComponent(d.room)}`);
+  if (!FL.open || FL.open.key !== id) return;
+  const mine = (x) => { const a = String(x || '').toLowerCase(); const slot = SLOT_ALIAS[a.split('-').pop()] || a.split('-').pop(); return a === d.id || slot === d.slot; };
+  const runs = ((sec && sec.runs) || []).filter((x) => mine(x.agent));
+  $('#drRuns').innerHTML = runs.length ? runs.slice(0, 8).map(runRow).join('') : '<li class="muted" style="display:block">No runs today yet.</li>';
+  const jobs = ((sec && sec.tasks) || []).filter((t) => mine(t.owner));
+  if (jobs.length) {
+    $('#drJobsSec').hidden = false;
+    $('#drJobs').innerHTML = jobs.map((t) => `<div class="bl"><span class="lamp ${t.status === 'in_progress' ? 'work' : 'plain'}"></span><span><b style="font-weight:600">${esc(t.title)}</b>${t.detail ? ` — <span class="muted">${esc(t.detail)}</span>` : ''}</span></div>`).join('');
+  }
+}
+async function sendChat(id, name) {
+  const inp = $('#chatIn'); const v = inp.value.trim();
+  if (!v || FL.asking) return;
+  FL.asking = true; inp.value = '';
+  const log = FL.chats[id] = FL.chats[id] || [];
+  log.push({me: true, html: esc(v)});
+  log.push({html: '<span class="muted">Thinking…</span>', wait: true});
+  const paint = () => { const el = $('#chatLog'); if (el && FL.open && FL.open.key === id) { el.innerHTML = chatHtml(id); el.scrollTop = el.scrollHeight; } };
+  paint();
+  const j = await api('/api/chat', {agent: id, message: v});
+  log.splice(log.findIndex((m) => m.wait), 1);
+  if (!j || !j.ok) log.push({html: `<span class="bad-t">${esc(name)} could not answer: ${esc((j && j.error) || 'no reply')}</span>`});
+  else {
+    let html = esc(j.reply || '').replace(/\n/g, '<br>');
+    if (j.brain_error) html += `<span class="foot bad-t">The AI failed (${esc(j.brain_error)}), so this is read straight from its records.</span>`;
+    else if (j.unrouted) html += `<span class="foot">Read straight from its records — the AI is not available: ${esc(j.unrouted)}</span>`;
+    else if (j.brain) html += `<span class="foot">Answered with ${esc(j.brain.label || j.brain.model || j.brain)}</span>`;
+    log.push({html});
+  }
+  FL.asking = false; paint();
+  const again = $('#chatIn'); if (again && FL.open && FL.open.key === id) again.focus();
+}
+
+async function openSector(key) {
+  const room = FLOOR.find((r) => r.key === key); if (!room) return;
+  const seated = seatRoom(room), L = seated.live || {}, rd = readinessOf(key);
+  const name = L.name || room.name;
+  openPanel(`${panelHead(name, L.score != null ? `Health ${Number(L.score)} of 100 · ${L.band || ''}` : '')}
+    <div class="dr-body"><p class="muted" style="margin:0">Reading the sector…</p></div>`, name, 'sector', key);
+  const [sec, ord] = await Promise.all([api(`/api/sector/${encodeURIComponent(key)}`), api('/api/orders')]);
+  if (!FL.open || FL.open.key !== key) return;
+  const on = L.enabled !== false;
+  const todayKey = new Date().toLocaleDateString('en-CA');
+  const mine = ((ord && ord.orders) || []).find((o) => o.day === todayKey && o.sector === key && o.origin === 'order box');
+  const rl = rd ? (RDY_LOOK[rd.state] || ['plain', rd.state]) : null;
+  const list = (xs) => xs.filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).map((x) => `<li>${esc(x)}</li>`).join('');
+  const why = ((sec && sec.why) || []).map((w) => `<li><span class="mono pts ${w.points < 0 ? 'neg' : ''}">${w.points > 0 ? '+' : ''}${Number(w.points)}</span>
+    <span><b style="font-weight:600">${esc(w.label)}</b><br><span class="muted">${esc(w.detail)}</span></span></li>`).join('');
+  const threads = (xs, dir) => (xs || []).map((t) => `<div class="bl"><span class="lamp ${['answered', 'closed'].includes(t.status || t.state) ? 'done' : 'wait'}"></span>
+    <span>${dir === 'in' ? 'From ' + esc(deskName(t.from_sector || t.from || '')) : 'To ' + esc(deskName(t.to_sector || t.to || ''))}: <b style="font-weight:600">${esc(t.subject || '')}</b>
+    <span class="muted"> · ${esc(t.status || t.state || '')}</span></span></div>`).join('');
+  const made = (sec && sec.made) || [];
+  const cols = (sec && sec.columns) || [];
+  $('#drawer').querySelector('.dr-body').outerHTML = `<div class="dr-body">
+    <section class="dr-sec">
+      <div class="switchrow"><div><b style="font-weight:600">${on ? 'This sector is working' : 'This sector is switched off'}</b>
+        <div class="muted" style="font-size:13.5px">${on ? (L.essential ? 'Essential: ' + esc(L.why_essential || 'the agency needs it') : 'You can switch it off; its desks stop taking work.') : esc(L.off_note || 'Its desks take no work until you switch it back on.')}</div></div>
+        <button class="btn ${on ? 'ghost' : ''} small" type="button" id="secSwitch">${on ? 'Switch off' : 'Switch on'}</button></div>
+    </section>
+    <section class="dr-sec"><h3 class="label">Its desks</h3><div class="mini-desks">${seated.desks.map((d) => {
+      const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
+      return `<button type="button" class="mini-desk" data-agent-open="${esc(d.id)}"><span class="lamp ${lk[0]}${k === 'working' ? ' pulse' : ''}"></span><b style="font-weight:600">${esc(d.n)}</b><span class="muted">${esc(lk[1])}</span></button>`; }).join('')}</div></section>
+    ${rd ? `<section class="dr-sec"><h3 class="label">Can it work?</h3><div>${pill(rl[0], rl[1])}</div><p style="margin:0">${esc(rd.says || '')}</p>
+      ${rd.brain_does ? `<p class="muted" style="margin:0;font-size:14px">What its AI is used for: ${esc(rd.brain_does)}.</p>` : ''}
+      ${list([...(rd.blocking || []), ...(rd.thin || []), ...(rd.notes || [])].filter((x) => x !== rd.says)) ? `<ul class="plain-list">${list([...(rd.blocking || []), ...(rd.thin || []), ...(rd.notes || [])].filter((x) => x !== rd.says))}</ul>` : ''}</section>` : ''}
+    ${why ? `<section class="dr-sec"><h3 class="label">Why it scores ${Number((sec && sec.score) || 0)}</h3><ul class="why-list">${why}</ul>
+      ${(sec.how_to_raise || []).length ? `<details class="more"><summary>How to raise it</summary><ul class="plain-list">${list(sec.how_to_raise)}</ul></details>` : ''}</section>` : ''}
+    <section class="dr-sec"><h3 class="label">Today’s order for ${esc(name)}</h3>
+      <textarea id="secOrder" placeholder="In your own words — the Director plans the day around it">${esc(mine ? mine.text : '')}</textarea>
+      <div><button class="btn small" type="button" id="secOrderSave">Save the order</button></div></section>
+    ${((sec && sec.tasks) || []).length ? `<section class="dr-sec"><h3 class="label">On its board</h3>${sec.tasks.map((t) => `<div class="bl"><span class="lamp ${t.status === 'in_progress' ? 'work' : ['amber', 'red'].includes(t.risk) ? 'wait' : 'plain'}"></span>
+      <span><b style="font-weight:600">${esc(t.title)}</b><span class="muted"> · ${t.status === 'in_progress' ? 'taken by ' + esc(t.owner || 'a desk') : ['amber', 'red'].includes(t.risk) ? 'needs your yes' : 'waiting its turn'}</span></span></div>`).join('')}</section>` : ''}
+    ${((sec && sec.inbox) || []).length || ((sec && sec.outbox) || []).length ? `<section class="dr-sec"><h3 class="label">Between it and other sectors</h3>${threads(sec.inbox, 'in')}${threads(sec.outbox, 'out')}</section>` : ''}
+    ${((sec && sec.faults) || []).length ? `<section class="dr-sec"><h3 class="label">Faults</h3>${sec.faults.map((f) => `<div class="bl"><span class="lamp ${f.severity === 'blocking' ? 'stuck' : 'wait'}"></span><span><b style="font-weight:600">${esc(sentence(f.what || f.kind || 'A fault'))}</b>
+      <span class="muted"> · ${esc([f.agent, f.severity, f.status === 'routed' ? 'given to ' + deskName(f.routed_to || '') : f.status].filter(Boolean).join(' · '))}</span></span></div>`).join('')}</section>` : ''}
+    <section class="dr-sec"><h3 class="label">Made today${sec && sec.output_label ? ' · ' + esc(sec.output_label) : ''}</h3>
+      ${made.length ? `<div class="scroll"><table style="min-width:520px"><thead><tr><th>When</th>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>
+        ${made.slice(0, 12).map((row) => `<tr><td class="mono">${esc(row.at || '')}</td>${(row.cols || []).map((v) => `<td>${esc(String(v == null ? '' : v).slice(0, 160))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted" style="margin:0">Nothing yet today.</p>'}</section>
+  </div>`;
+  const dr = $('#drawer');
+  dr.querySelectorAll('[data-agent-open]').forEach((b) => b.onclick = () => openAgent(b.dataset.agentOpen));
+  $('#secSwitch').onclick = async () => {
+    const off = on;
+    if (off && !confirm(L.essential ? `${name} is essential: ${L.why_essential || ''}\n\nSwitch it off anyway?` : `Switch ${name} off? Its desks stop taking work until you switch it back on.`)) return;
+    $('#secSwitch').disabled = true;
+    const j = await api('/api/sectors', {sector: key, enabled: !off});
+    if (!j.ok) { $('#secSwitch').disabled = false; toast(sentence(j.error || j.why || 'Not changed.')); return; }
+    toast(off ? `${name} is switched off.` : `${name} is working again.`);
+    await state(); if (location.hash.startsWith('#agency')) await agency($('#main')); openSector(key);
+  };
+  $('#secOrderSave').onclick = async () => {
+    const t = $('#secOrder').value.trim(); if (!t) { toast('Write the order first.'); return; }
+    $('#secOrderSave').disabled = true;
+    const j = await api('/api/orders', {orders: {[key]: t}});
+    $('#secOrderSave').disabled = false;
+    toast(j.ok ? 'Saved. The Director reads it when the day runs.' : (j.why || j.error || 'Not saved.'));
+  };
+}
+function openThread(id) {
+  const t = (((FL.comms || {}).threads) || []).find((x) => x.id === id); if (!t) return;
+  openPanel(`${panelHead(t.subject || 'A request', deskName(t.from) + ' asked ' + deskName(t.to) + ' · ' + (t.ago || ''))}
+    <div class="dr-body"><section class="dr-sec">${(t.messages || []).map((m) => `<div class="msg ${m.author === t.from ? '' : 'me'}"><b style="font-weight:600">${esc(deskName(m.author))}</b>
+      <span class="mono muted" style="font-size:12px"> · ${esc(m.when || m.hhmm || '')}</span><br>${esc(m.body || '').replace(/\n/g, '<br>')}</div>`).join('') || '<p class="muted">No messages.</p>'}</section>
+      <section class="dr-sec"><p class="muted" style="margin:0;font-size:14px">${t.waiting ? `${esc(deskName(t.to))} has not answered yet. It is waited on, not overridden: the asking sector stops until it hears back.` : 'This exchange is finished.'}</p></section></div>`,
+    t.subject || 'Request', 'thread', id);
+}
+
+/* ======================= ACTIVITY ======================= */
+const VERB = {got: ['wait', 'Received'], grabbed: ['work', 'Took on'], pushed: ['plain', 'Asked'], delivered: ['done', 'Finished'], errored: ['stuck', 'Failed']};
+const ACT = {room: 'all', problems: false};
+async function activity(main) {
+  const a = await api('/api/activity');
+  const ev = (a && a.events) || [];
+  const rooms = [...new Set(ev.map((e) => e.room).filter(Boolean))];
+  const shown = ev.filter((e) => (ACT.room === 'all' || e.room === ACT.room) && (!ACT.problems || e.verb === 'errored' || e.level === 'error'));
+  main.innerHTML = `<div class="page narrow">${head('Activity',
+    'Every line is something a desk actually did — written by the work itself, never summarised by this screen.',
+    `<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn ghost small" type="button" id="actRead">Mark all read</button>
+      <button class="btn quiet small" type="button" id="actClear">Hide what’s read</button>${a && a.hidden ? `<button class="btn quiet small" type="button" id="actAll">Show all ${Number(a.hidden)} hidden</button>` : ''}</div>`)}
+    <div role="group" aria-label="Which sector" style="display:flex;flex-wrap:wrap;gap:8px">
+      ${['all', ...rooms].map((r) => `<button type="button" class="seg ${ACT.room === r ? 'on' : ''}" aria-pressed="${ACT.room === r}" data-room="${esc(r)}">${r === 'all' ? 'Every sector' : esc(deskName(r))}</button>`).join('')}
+      <button type="button" class="seg ${ACT.problems ? 'on' : ''}" aria-pressed="${ACT.problems}" id="actProb">Problems only${a && a.errors ? ` <span class="n">${Number(a.errors)}</span>` : ''}</button></div>
+    <section class="card"><div class="card-h"><h2>${esc((a && a.head) || 'Today')}</h2><span class="muted" style="font-size:13.5px">${Number((a && a.unread) || 0)} unread</span></div>
+      ${shown.length ? `<ol class="feed">${shown.map((e) => { const v = VERB[e.verb] || ['plain', sentence(e.verb || '')];
+        return `<li${e.at > ((a && a.seen_to) || 0) ? ' class="unread"' : ''}><span class="mono" style="font-size:13px;color:var(--faint);padding-top:2px">${esc(e.hhmm || '')}</span>
+        <span style="display:flex;flex-direction:column;gap:6px;min-width:0"><span><b style="font-weight:600">${esc(deskName(e.who))}</b> ${esc(e.what || '')}</span>
+          <span style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">${pill(v[0], v[1])}${e.detail ? `<span class="muted" style="font-size:13.5px">${esc(e.detail)}</span>` : ''}<span class="muted" style="font-size:13px">${esc(e.ago || '')}</span></span></span></li>`; }).join('')}</ol>`
+        : empty('Nothing here', ACT.problems ? 'No desk has failed in what is shown. Good.' : 'Press Run today and each desk’s work appears here as it happens.')}</section></div>`;
+  main.querySelectorAll('[data-room]').forEach((b) => b.onclick = () => { ACT.room = b.dataset.room; activity(main); });
+  $('#actProb').onclick = () => { ACT.problems = !ACT.problems; activity(main); };
+  const seen = (extra) => api('/api/activity/seen', Object.assign({seen_to: (a && (a.newest_at || a.at)) || Math.floor(Date.now() / 1000)}, extra || {}));
+  $('#actRead').onclick = async () => { await seen(); toast('Marked as read.'); state(); activity(main); };
+  $('#actClear').onclick = async () => { await seen({clear: true}); toast('Hidden. Nothing is deleted — Show all brings it back.'); state(); activity(main); };
+  const all = $('#actAll'); if (all) all.onclick = async () => { await api('/api/activity/seen', {showAll: true}); activity(main); };
+}
+
+/* ======================= RESULTS ======================= */
+const RES = {days: 0};
+async function results(main) {
+  const d = await api('/api/results' + (RES.days ? '?days=' + RES.days : ''));
+  const secs = (d && d.sectors) || [];
+  main.innerHTML = `<div class="page">${head('Results',
+    'What each sector actually produced — the rows themselves, not a count of effort. A sector that ran and made nothing says why.',
+    `<div role="group" aria-label="Period" style="display:flex;gap:8px">${[[0, 'Today'], [7, '7 days'], [30, '30 days']].map(([n, l]) =>
+      `<button type="button" class="seg ${RES.days === n ? 'on' : ''}" aria-pressed="${RES.days === n}" data-days="${n}">${l}</button>`).join('')}</div>`)}
+    ${d && d.ok ? '' : `<div class="note">${esc((d && d.error) || 'The results could not be read.')}</div>`}
+    <div class="rooms">${secs.map((s) => {
+      const bad = s.nothing_because ? [] : (s.steps || []).filter((x) => ['failed', 'stopped', 'skipped'].includes(x.status));
+      return `<section class="card room"><div class="room-h"><div style="display:flex;flex-direction:column;gap:4px"><h2>${esc(s.name)}</h2>
+        ${s.enabled === false ? '<span class="room-sub"><span class="lamp plain"></span>Switched off</span>' : ''}</div>
+        <button class="btn quiet small" type="button" data-sector-open="${esc(s.key)}">Open</button></div>
+        <div class="counts">${(s.counts || []).map((c) => `<span><b class="mono">${Number(c.n || 0)}</b> ${esc(c.label)}</span>`).join('')}</div>
+        ${s.nothing_because ? `<p class="muted" style="margin:0;padding:0 20px 16px;font-size:14px">${esc(sentence(s.nothing_because))}</p>` : ''}
+        ${bad.map((x) => `<div class="bl" style="padding:0 20px 10px"><span class="lamp ${x.status === 'failed' ? 'stuck' : 'wait'}"></span><span>${esc(sentence(x.status))}: ${esc(x.label)}${x.summary ? ' — ' + esc(x.summary) : ''}</span></div>`).join('')}
+        ${(s.items || []).length ? `<div class="scroll"><table style="min-width:520px"><thead><tr><th>When</th>${(s.columns || []).map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+          <tbody>${s.items.slice(0, 8).map((it) => `<tr><td class="mono">${esc(it.at || '')}</td>${(it.cols || []).map((v) => `<td>${esc(String(v == null ? '' : v).slice(0, 140))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+          ${s.made > 8 ? `<p class="muted" style="margin:0;padding:8px 20px 14px;font-size:13.5px">…and ${Number(s.made) - 8} more.</p>` : ''}` : ''}
+      </section>`; }).join('')}</div></div>`;
+  main.querySelectorAll('[data-days]').forEach((b) => b.onclick = () => { RES.days = Number(b.dataset.days); results(main); });
+  main.querySelectorAll('[data-sector-open]').forEach((b) => b.onclick = async () => { if (!FL.live) FL.live = await state(); openSector(b.dataset.sectorOpen); });
+}
+
+/* A line on Today for the floor: every sector at a glance, red first. */
+function agencyStrip(st) {
+  if (!st || !st.ok) return '';
+  const rooms = FLOOR.map((r) => seatRoom(r, st));
+  return `<section class="card"><div class="card-h"><h2>Your agency</h2><a href="#agency" style="font-size:14px;font-weight:500">Open the floor</a></div>
+    <div class="strip">${rooms.map((r) => {
+      const ks = r.desks.map((d) => deskState(d.f));
+      const bad = ks.filter((k) => PROBLEM.includes(k)).length, work = ks.filter((k) => k === 'working').length;
+      const off = r.live && r.live.enabled === false;
+      return `<a class="strip-room${bad ? ' bad' : ''}" href="#agency"><b style="font-weight:600">${esc((r.live && r.live.name) || r.name)}</b>
+        <span class="lamps">${ks.map((k) => `<span class="lamp ${(ST_LOOK[k] || ['plain'])[0]}${k === 'working' ? ' pulse' : ''}"></span>`).join('')}</span>
+        <span class="muted" style="font-size:13px">${off ? 'switched off' : bad ? bad + ' failed or stuck' : work ? work + ' working' : 'quiet'}</span></a>`; }).join('')}</div></section>`;
+}
+
 /* ======================= SETTINGS ======================= */
 function settings(main) {
   const me = S.me || {}, e = S.engine || {};
@@ -928,12 +1582,14 @@ function more(main) {
   const item = (href, t, s) => `<a class="row" href="${href}" style="text-decoration:none;color:var(--ink);align-items:center"><span class="grow"><b style="font-weight:600">${t}</b><span class="muted" style="font-size:14px">${s}</span></span></a>`;
   main.innerHTML = `<div class="page narrow">${head('More')}<div class="card">
     ${item('#orders', 'Your orders', 'Tell a desk what you want today')}${item('#content', 'Content', 'Posts and pages')}
+    ${item('#website', 'Website', 'What changed on your website')}${item('#activity', 'Activity', 'Everything every desk did today')}
+    ${item('#results', 'Results', 'What each sector actually produced')}
     ${item('#google', 'On Google', 'Which pages Google lists')}${item('#check', 'Website Check', 'A report on any website')}
     ${item('#settings', 'Settings', 'Your business, the AI, your account')}</div></div>`;
 }
 
 /* ---- routing ---- */
-const ROUTES = {today, waiting, orders, leads, content, website, google, check, settings, more};
+const ROUTES = {today, agency, waiting, orders, leads, content, website, google, activity, results, check, settings, more};
 let polling = null;
 async function route() {
   const r = (location.hash || '#today').slice(1).split('?')[0];
@@ -946,8 +1602,17 @@ async function route() {
   await fn(main);
   clearInterval(polling);
   if (r === 'today' || r === 'waiting') polling = setInterval(() => { if (!document.hidden && !main.contains(document.activeElement)) fn(main); }, 30000);
+  // The floor refreshes itself every ten seconds, so a desk lights up as it works — unless
+  // something is being typed on it. The side panel lives outside it and is left alone.
+  if (r === 'agency') polling = setInterval(() => {
+    const a = document.activeElement;
+    if (document.hidden || (a && main.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return;
+    const keep = a && main.contains(a) && a.dataset ? a.dataset.agent || a.dataset.sector || '' : '';
+    fn(main).then(() => { if (keep) { const el = main.querySelector(`.desk[data-agent="${CSS.escape(keep)}"], .room-h [data-sector="${CSS.escape(keep)}"]`); if (el) el.focus({preventScroll: true}); } });
+  }, 10000);
 }
-window.addEventListener('hashchange', () => { route(); $('#main').focus({preventScroll: true}); window.scrollTo(0, 0); });
+$('#scrim').addEventListener('click', closePanel);
+window.addEventListener('hashchange', () => { if (FL.open) closePanel(); route(); $('#main').focus({preventScroll: true}); window.scrollTo(0, 0); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite);
 (async function boot() {
   theme();

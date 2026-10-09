@@ -180,7 +180,7 @@ def _run_feed(c, match, now):
 
         if r["status"] == "running" and (now - r["started_at"]) > STALL_SECS:
             # said it was working, then stopped saying anything
-            feed.append({**base, "s": "blocked",
+            feed.append({**base, "s": "blocked", "problem": "stalled",
                          "t": f"stalled — started {_ago(now - r['started_at'])} and "
                               "never finished",
                          "why": ("This agent began a run and never reported back. Either "
@@ -192,7 +192,7 @@ def _run_feed(c, match, now):
         elif r["status"] == "stalled":
             # The Overseer reaped it: the agent stopped answering and the claim
             # to be running was retracted. Past tense, unlike the branch above.
-            feed.append({**base, "s": "blocked",
+            feed.append({**base, "s": "blocked", "problem": "stalled",
                          "t": "stopped responding · " + _ago(age),
                          "why": ("This agent began a run and never reported back, so "
                                  "the Overseer declared it dead and closed the run off. "
@@ -200,7 +200,7 @@ def _run_feed(c, match, now):
                                  " A fault was filed against this desk and given to IT; "
                                  "open the sector to see where it went.")})
         elif r["status"] == "error":
-            feed.append({**base, "s": "blocked",
+            feed.append({**base, "s": "blocked", "problem": "failed",
                          "t": (r["note"] or "the run failed") + " · " + _ago(age),
                          "why": ("The last run raised an error and stopped. " +
                                  (r["note"] or "No detail was recorded.") +
@@ -667,6 +667,9 @@ def build():
                 # and do nothing about it, which is what the owner had.
                 "task_id": t["id"],
                 "s": "blocked" if held > STALL_SECS else "working",
+                # WHICH KIND OF RED. The new floor names it — failed, stalled or
+                # holding a job — rather than guessing from the wording.
+                **({"problem": "held"} if held > STALL_SECS else {}),
                 "t": (f"holding '{t['title']}' since {_ago(held)} with nothing running"
                       if held > STALL_SECS else t["title"]),
                 **({"why": ("This task was claimed and never finished, and no run is "
