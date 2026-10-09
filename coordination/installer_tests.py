@@ -19,21 +19,15 @@ and removed again on a real Windows machine by .github/workflows/windows-install
 import importlib.machinery
 import json
 import os
-import shutil
-import socket
 import struct
-import subprocess
 import sys
 import tempfile
-import time
 import urllib.error
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "installer"))
 import build_windows as bw  # noqa: E402
-from coordination import product  # noqa: E402
 
 _fail = []
 
@@ -61,64 +55,6 @@ def test_what_goes_in():
     private = [p.relative_to(app).as_posix() for p in app.rglob("*")
                if p.name == ".env" or p.name.endswith((".local.json", ".db")) or p.relative_to(app).parts[0] in ("data", ".git")]
     check("  and no settings, keys, records or history ride along", private, [])
-    his = sorted(p.relative_to(app).as_posix() for p in app.rglob("*")
-                 if p.is_file() and product.publisher_only(p.relative_to(app).as_posix()))
-    check("  nor the publisher's own side: his users room, publishing, the Home's code, his guides", his, [])
-    check("  but a copy can still seal a report to him", (app / "coordination" / "sealed.py").exists()
-          and (app / "coordination" / "support.py").exists(), True)
-
-
-def _get(url):
-    try:
-        with urllib.request.urlopen(url, timeout=20) as r:
-            return r.status, r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, (e.read() or b"").decode("utf-8", "replace")
-
-
-def test_a_copy_given_out_has_no_users_room():
-    """
-    "will the users will see that section YOUR USERS Section? ... the users
-     should not have the program back end"
-    """
-    print("\nA copy given out, started as it would be on their computer, has no users room at all:")
-    if not (shutil.which("node") and (ROOT / "node_modules" / "express").exists()):
-        print("  SKIP  Node and the office's libraries are not here")
-        return
-    place = Path(tempfile.mkdtemp(prefix="given-out-"))
-    app = place / "app"
-    app.mkdir()
-    bw.stage_program(app, json.dumps({"name": "Glasswork", "version": "9.9.9"}))
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    env = {**os.environ, "PORT": str(port), "AGENCY_DATA": str(place / "data"), "AGENCY_IGNORE_DOTENV": "1",
-           "CLAUDE_TEAM_OFF": "1", "NODE_PATH": str(ROOT / "node_modules")}
-    env.pop("AGENCY_DB", None)
-    proc = subprocess.Popen(["node", "server.js"], cwd=app, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        base = f"http://127.0.0.1:{port}"
-        for _ in range(80):
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
-                break
-            except OSError:
-                time.sleep(0.25)
-        code, body = _get(base + "/api/publisher")
-        check("the office there says it is not the publisher's copy",
-              (code, json.loads(body).get("can_publish")), (200, False))
-        check("  the list of users is not there to ask for", _get(base + "/api/publisher/users")[0], 404)
-        check("  nor collecting, nor putting a version out",
-              (_get(base + "/api/publisher/inbox")[0], _get(base + "/api/publisher/job")[0]), (404, 404))
-        check("  nor the room's own screen", _get(base + "/publisher.js")[0], 404)
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except Exception:
-            proc.kill()
-        shutil.rmtree(place, ignore_errors=True)
 
 
 def test_the_icon():
@@ -192,7 +128,7 @@ def test_an_installed_copy_finds_its_things():
 
 
 def main():
-    for t in (test_what_goes_in, test_a_copy_given_out_has_no_users_room, test_the_icon, test_the_setup_script, test_an_installed_copy_finds_its_things):
+    for t in (test_what_goes_in, test_the_icon, test_the_setup_script, test_an_installed_copy_finds_its_things):
         t()
     print()
     if _fail:

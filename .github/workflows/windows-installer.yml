@@ -2,9 +2,10 @@
 # the way a new person would (silently here), opens the program and checks it
 # answers — so a Setup.exe that does not work never reaches anybody.
 #
-# The installer it builds is kept for two weeks under this run's "Artifacts".
-# Putting a version out to the people using the program is done from the
-# publisher's own copy (Settings → Publisher), not from here.
+# The installer it builds is kept for two weeks under this run's "Artifacts",
+# and the first time a version passes, its Setup is put on the program's
+# GitHub release page, where people download it. A version already there is
+# left alone. Nothing about anyone using the program is ever collected.
 name: windows-installer
 on:
   push:
@@ -23,6 +24,8 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -76,14 +79,21 @@ jobs:
           $prod = Invoke-RestMethod http://127.0.0.1:3917/api/product
           "version $($prod.version), installed: $($prod.installed)"
           if (-not $prod.installed) { throw "the office does not know it was installed" }
-          $st = Invoke-RestMethod http://127.0.0.1:3917/api/state
-          if (-not $st.ok) { throw "the office could not read its records" }
-          "the office answers and reads its records"
-          $pub = Invoke-RestMethod http://127.0.0.1:3917/api/publisher
-          if ($pub.can_publish) { throw "the publisher's own side is in the installer" }
-          if (Test-Path C:\gw-test\coordination\publisher.py) { throw "the publisher's code is in the installer" }
-          "a person's copy has no users room and none of the publisher's side"
-          Invoke-RestMethod -Method Post http://127.0.0.1:3917/api/quit -ContentType 'application/json' -Body '{}'
+          $code = 0
+          try { Invoke-WebRequest http://127.0.0.1:3917/api/state -UseBasicParsing | Out-Null; $code = 200 } catch { $code = [int]$_.Exception.Response.StatusCode }
+          if ($code -ne 401) { throw "a fresh copy did not ask for an account first (it answered $code)" }
+          "a fresh copy asks for an account before anything else"
+          $who = @{ name = "Tester"; password = "correct horse battery"; confirm = "correct horse battery" } | ConvertTo-Json
+          $su = Invoke-RestMethod -Method Post http://127.0.0.1:3917/api/account/sign-up -ContentType 'application/json' -Body $who -SessionVariable gw
+          if (-not $su.ok) { throw "an account could not be made: $($su.error)" }
+          $add = Invoke-RestMethod -Method Post http://127.0.0.1:3917/api/account/add-site -ContentType 'application/json' -Body (@{ name = "Test shop"; url = "https://example.com" } | ConvertTo-Json) -WebSession $gw
+          if (-not $add.ok) { throw "a website could not be added: $($add.error)" }
+          $st = Invoke-RestMethod http://127.0.0.1:3917/api/state -WebSession $gw
+          if (-not $st.ok) { throw "the office could not read the new website's records" }
+          "an account, a website, and the office reads its encrypted records"
+          if (Test-Path C:\gw-test\coordination\agency.db) { throw "records were written in the program's own folder" }
+          if (Test-Path C:\gw-test\.env) { throw "settings were written in the program's own folder" }
+          Invoke-RestMethod -Method Post http://127.0.0.1:3917/api/quit -ContentType 'application/json' -Body '{}' -WebSession $gw
           Start-Sleep 3
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 
@@ -101,3 +111,14 @@ jobs:
           name: glasswork-setup
           path: build/*-setup.exe
           retention-days: 14
+
+      - name: Put the tested Setup on the release page (once per version)
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver=$(python -c "import json; print(json.load(open('config/product.json'))['version'])")
+          if gh release view "v$ver" >/dev/null 2>&1; then echo "v$ver is already on the release page"; exit 0; fi
+          exe=$(ls build/*-setup.exe | head -n 1)
+          gh release create "v$ver" "$exe" --target "$GITHUB_SHA" --title "Glasswork $ver" --notes "Windows: download the Setup below and open it. If Windows says it protected your PC, choose More info, then Run anyway. Installing over an earlier version keeps all your work. Everything stays on your computer: the program collects nothing about you."

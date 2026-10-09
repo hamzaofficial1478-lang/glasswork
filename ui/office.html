@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>World Deal Technical Agency — Live Office</title>
+<title>Glasswork — Live Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -482,7 +482,7 @@ header>*{flex:none}
 <body>
 
 <header>
-  <div class="brand"><b id="brandName">World Deal Technical Agency</b><span class="etch">Live office</span></div>
+  <div class="brand"><b id="brandName">Glasswork</b><span class="etch">Live office</span></div>
   <div class="site-switch">
     <!-- Filled from /api/settings. The markup shows a neutral placeholder, not
          a name: whatever is written here is what the owner sees for the first
@@ -2045,7 +2045,7 @@ function findReplaceBox(){
     <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6">Type any text — an old email, a phone number, a wrong word.
       The agency reads every file of your website and shows each one it is in. Then replace it everywhere in one press.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="frFind" value="${escA(FR.find)}" placeholder="text to find, e.g. info@worlddealtechnicalservices.ae"
+      <input id="frFind" value="${escA(FR.find)}" placeholder="text to find, e.g. info@oldaddress.com"
         style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12.5px">
       <button class="actbtn" onclick="frFind()">${FR.busy?'Reading your files…':'Find'}</button>
     </div>`;
@@ -2057,7 +2057,7 @@ function findReplaceBox(){
       h += (r.pages||[]).map(p=>`<div style="font-size:12px;margin-top:6px"><b style="font-family:'IBM Plex Mono',monospace">${esc(p.page)}</b> — ${p.times} time${p.times===1?'':'s'}
         <div style="color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px;overflow-x:auto;white-space:nowrap">${esc(p.sample||'')}</div></div>`).join('');
       if((r.pages||[]).length) h += `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
-          <input id="frTo" value="${escA(FR.to)}" placeholder="replace with, e.g. teamworlddeal@worlddealtechnicalservices.com"
+          <input id="frTo" value="${escA(FR.to)}" placeholder="replace with, e.g. hello@yourbusiness.com"
             style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12.5px">
           <button class="pbtn" style="width:auto;padding:7px 14px;margin:0" onclick="frReplace()">Replace everywhere</button></div>`;
     }

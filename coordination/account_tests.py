@@ -126,7 +126,9 @@ def test_the_cabinet_is_encrypted():
     with _Place() as place:
         made = workspace.create_account("Ammar", "correct horse")
         acct = made["account"]["id"]
+        os.environ["AGENCY_KEY"] = made["key"]          # signed in, as the office is when a website is added
         site = workspace.add_site(acct, "World Deal", "https://www.worlddealtechnicalservices.com")["site"]["id"]
+        os.environ.pop("AGENCY_KEY", None)
         workspace.open_site(acct, site)
         env = dict(os.environ, AGENCY_KEY=made["key"])
         code, out, err = _py("from coordination import board\n"

@@ -12,21 +12,11 @@ anything leaves your computer.
 
 YOUR DATA STAYS WITH YOU
 Your account, your websites and everything the agency records are kept on your
-computer, encrypted with your password. The publisher does not receive them.
-Keep your recovery key safe: without your password and your recovery key, your
-data cannot be opened again by anyone.
-
-WHAT THE PUBLISHER DOES RECEIVE
-- Once a day: a random number for your copy, its version and the kind of
-  computer, so copies in use can be counted. You can switch this off in Help
-  and reports; updates are still looked for.
-- Only if you choose to register: the name, business, email, phone, website
-  and country you type. You can withdraw it at any time.
-- Only if you send a problem report: what you wrote and, if you tick the box,
-  a support report with every key, password, address and number taken out.
-All of it is sealed on your computer so that only the publisher's own
-computer can open it. It waits, unreadable, on the publisher's website until
-their program collects it, and is then deleted there.
+computer, encrypted with your password. Nothing is sent to the people who make
+the program: no account on a server, no counting of copies, no reports. Each
+person on the computer has their own account, and no account can open
+another's. Keep your recovery key safe: without your password and your
+recovery key, your data cannot be opened again by anyone.
 
 SERVICES YOU CONNECT
 The AI company, Google, maps, email and your website are reached with your own
@@ -49,12 +39,13 @@ AI MAKES MISTAKES
 The agents' work is written with AI. It can be wrong. Check it before it
 reaches anyone else.
 
-UPDATES
-Updates are signed by the publisher, and the program installs only an update
-whose signature matches. You can go back to the previous version from Settings.
+NEW VERSIONS
+New versions are published on the program's GitHub release page. The program
+looks for one only when you ask it to. Installing a new version over an old
+one keeps your work.
 
 THE LICENCE
 The program's code is released under the GNU General Public Licence, version 3.
 It is provided as it is, without any warranty, to the extent the law allows.
-To the extent the law allows, the publisher is not responsible for indirect
+To the extent the law allows, its authors are not responsible for indirect
 losses, lost profits or lost data arising from using the program.

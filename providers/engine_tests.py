@@ -612,7 +612,9 @@ def test_encrypted_end_to_end():
     with _Place() as p:
         made = workspace.create_account("Bakery", "correct horse")
         acct = made["account"]["id"]
+        os.environ["AGENCY_KEY"] = made["key"]          # signed in, as the office is when a website is added
         site = workspace.add_site(acct, "Bakery", "https://bakery.de")["site"]["id"]
+        os.environ.pop("AGENCY_KEY", None)
         workspace.open_site(acct, site)
         env = {k: v for k, v in os.environ.items() if k not in ("AGENCY_DB",) + KEYS}
         env.update(AGENCY_KEY=made["key"], CLAUDE_TEAM_OFF="1")

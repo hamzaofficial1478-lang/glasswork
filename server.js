@@ -177,6 +177,18 @@ function accountsExist() {
     return fs.readdirSync(dir).some((d) => fs.existsSync(path.join(dir, d, "account.json")));
   } catch (_) { return false; }
 }
+// "the other user using the program may not get access to the other user" —
+// every copy installed from Setup, and any fresh copy, asks for an account
+// before anything else: each person's work is then encrypted with their own
+// password from the very first thing they do, and nothing is written in the
+// program's folder. Only a copy that was already in use before accounts (his
+// own, with its original files) opens as it always has, until he brings it in.
+// Looked at once, here, before the office makes a cabinet of its own.
+const LEGACY_AT_START = fs.existsSync(path.join(__dirname, "coordination", "agency.db"))
+  || fs.existsSync(path.join(__dirname, ".env")) || !!process.env.AGENCY_DB;
+function accountRequired() {
+  return accountsExist() || process.env.GLASSWORK_INSTALLED === "1" || !LEGACY_AT_START;
+}
 function accountToken(req) {
   const raw = req.headers.cookie || "";
   for (const part of raw.split(";")) {
@@ -203,9 +215,9 @@ app.use((req, res, next) => {
       "Refused: this server answers to localhost only. If you meant to reach it " +
       "over the network, start it with BIND_HOST set and put a password on it.");
   }
-  if (accountsExist()) {
-    // Accounts exist: the account sign-in is the front door, and the old
-    // single admin password no longer applies.
+  if (accountRequired()) {
+    // Accounts exist, or must: the account sign-in is the front door, and the
+    // old single admin password no longer applies.
     if (ACCOUNT_OPEN.has(req.path)) return next();
     if (signedIn(req)) {
       // Signed in with no website open yet: nothing but the account page, or
@@ -219,8 +231,8 @@ app.use((req, res, next) => {
       return res.redirect("/account");
     }
     if (req.path.startsWith("/api/")) {
-      return res.status(401).json({ ok: false, signin: true,
-        error: "Signed out. Sign in at /account." });
+      return res.status(401).json({ ok: false, signin: true, needsAccount: !accountsExist(),
+        error: accountsExist() ? "Signed out. Sign in at /account." : "Make your account first, at /account." });
     }
     return res.redirect("/account");
   }
@@ -235,7 +247,7 @@ app.use((req, res, next) => {
 
 app.get("/login", async (_q, res) => {
   res.type("html").send(`<!doctype html><meta charset="utf-8">
-<title>World Deal Technical Agency</title>
+<title>Glasswork</title>
 <style>
  body{margin:0;height:100vh;display:grid;place-items:center;background:#0c1216;
    color:#e7eff3;font-family:system-ui,sans-serif}
@@ -248,7 +260,7 @@ app.get("/login", async (_q, res) => {
  .err{color:#e5565b;font-size:12.5px;margin-top:10px;min-height:16px}
 </style>
 <form method="POST" action="/api/login">
-  <h1>World Deal Technical Agency</h1>
+  <h1>Glasswork</h1>
   <p>This machine's copy is locked. Enter your admin password.</p>
   <input type="password" name="password" placeholder="Password" autofocus required>
   <button>Unlock</button>
@@ -367,8 +379,6 @@ const SETUP_API = [
   "/api/engine",
   // The website connection: the connector download carries the website's secret.
   "/api/connect",
-  // The publisher's Home: making it and its download carry his key.
-  "/api/publisher/setup", "/api/publisher/home.zip", "/api/publisher/publish",
 ];
 // Two connection calls carry no secret — how the website is connected, and a
 // knock to test it — so the Website screen may use them without the lock. The
@@ -632,7 +642,8 @@ function productInfo() {
 app.get("/api/product", async (_q, res) => {
   const p = productInfo();
   res.json({ ok: true, name: p.name || "Glasswork", version: p.version || "", tagline: p.tagline || "",
-             support_email: p.support_email || "", installed: process.env.GLASSWORK_INSTALLED === "1" });
+             support_email: p.support_email || "", support_url: p.support_url || "",
+             installed: process.env.GLASSWORK_INSTALLED === "1" });
 });
 // CLOSE THE PROGRAM. An installed copy runs with no window to close, so the
 // office closes itself: it answers, then stops; the launcher stops with it.
@@ -645,128 +656,9 @@ app.post("/api/quit", async (_q, res) => {
   res.json({ ok: true, why: "Closing. Open it again from the Start menu or the desktop whenever you like." });
   setTimeout(() => process.exit(0), 400);
 });
+// Only when he presses "Check for a new version": nothing is looked up on its own.
 app.get("/api/update", async (_q, res) => res.json(await pyModule("coordination.updates", ["--check", "--json"], 60000)));
-app.post("/api/update/apply", async (_q, res) =>
-  res.json(await pyModule("coordination.updates", ["--apply", "--json"], 900000)));
-app.post("/api/update/rollback", async (_q, res) =>
-  res.json(await pyModule("coordination.updates", ["--rollback", "--json"], 120000)));
 app.get("/api/diagnostics", async (_q, res) => res.json(await pyModule("coordination.diagnostics", ["--json"], 90000)));
-
-/* ---- PROBLEMS REPORTED, AND THE ANSWERS (coordination/support.py) -------------
-   "i want the report section where user will be able to submit the report and
-    those reports will get over to me" — sealed on this computer so only the
-   publisher's own computer can open it, and posted to his Glasswork Home,
-   which holds it until he collects. The publisher's side is below it. */
-const textField = (v, n) => String(v || "").slice(0, n);
-app.get("/api/support/mine", async (_q, res) => res.json(await pyModule("coordination.support", ["--mine"], 60000)));
-app.get("/api/support/preview", async (_q, res) => res.json(await pyModule("coordination.support", ["--preview"], 90000)));
-app.post("/api/support/send", async (req, res) => {
-  const b = req.body || {};
-  res.json(await pyStdin("coordination.support", ["--send"], { title: textField(b.title, 200),
-    text: textField(b.text, 20000), contact: textField(b.contact, 200), attach: b.attach !== false }, 120000));
-});
-// Telling the developer who uses this copy: only if they press Register, and
-// Withdraw takes it back. Counting (a random number and the version, sealed,
-// once a day) can be switched off.
-app.get("/api/support/registration", async (_q, res) =>
-  res.json(await pyModule("coordination.support", ["--registration"], 30000)));
-app.post("/api/support/register", async (req, res) => {
-  const b = req.body || {};
-  const body = b.withdraw === true ? { withdraw: true } : {
-    name: textField(b.name, 120), business: textField(b.business, 160), email: textField(b.email, 200),
-    phone: textField(b.phone, 60), website: textField(b.website, 300), country: textField(b.country, 80) };
-  res.json(await pyStdin("coordination.support", ["--register"], body, 60000));
-});
-app.post("/api/support/counting", async (req, res) =>
-  res.json(await pyModule("coordination.support", ["--counting", (req.body || {}).on === false ? "off" : "on"], 30000)));
-
-/* ---- HIS SIDE: who uses the program, their issues, putting a version out -----
-   "the users should not have the program back end" — coordination/publisher.py
-   and ui/publisher.js are on his computer only, never in a copy he gives out.
-   Without them none of this exists: /api/publisher says so, and everything
-   under it answers 404. His records are on this computer (data/publisher); his
-   website only ever holds sealed envelopes until they are collected. */
-const PUBLISHER_HERE = fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));
-app.get("/api/publisher", async (_q, res) => {
-  if (!PUBLISHER_HERE) return res.json({ ok: true, publisher: false, can_publish: false });
-  res.json(await pyModule("coordination.publisher", ["--view"], 30000));
-});
-app.use("/api/publisher", (_q, res, next) => PUBLISHER_HERE ? next()
-  : res.status(404).json({ ok: false, error: "That is not part of this copy of the program." }));
-app.post("/api/publisher/collect", async (_q, res) =>
-  res.json(await pyModule("coordination.publisher", ["--collect"], 300000)));
-app.get("/api/publisher/users", async (_q, res) => res.json(await pyModule("coordination.publisher", ["--users"], 60000)));
-app.get("/api/publisher/user/:id", async (req, res) => {
-  const id = String(req.params.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.publisher", ["--user", id], 60000));
-});
-app.post("/api/publisher/forget", async (req, res) => {
-  const b = req.body || {};
-  const id = String(b.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.publisher", ["--forget", id].concat(b.reports === true ? ["--with-reports"] : []), 60000));
-});
-app.post("/api/publisher/setup", async (req, res) => {
-  const b = req.body || {};
-  res.json(await pyStdin("coordination.publisher", ["--setup"], { site: textField(b.site, 300),
-    email: textField(b.email, 200) }, 60000));
-});
-app.get("/api/publisher/home.zip", async (_q, res) => {
-  const r = await pyModule("coordination.publisher", ["--home-zip"], 60000);
-  if (!r.ok || !r.zip) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", 'attachment; filename="glasswork-home.zip"');
-  res.setHeader("Cache-Control", "no-store");
-  res.send(Buffer.from(r.zip, "base64"));
-});
-app.post("/api/publisher/check", async (_q, res) => res.json(await pyModule("coordination.publisher", ["--check-home"], 60000)));
-app.get("/api/publisher/inbox", async (_q, res) => res.json(await pyModule("coordination.publisher", ["--inbox"], 60000)));
-app.get("/api/publisher/read/:id", async (req, res) => {
-  const id = String(req.params.id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.publisher", ["--read", id], 60000));
-});
-app.post("/api/publisher/answer", async (req, res) => {
-  const b = req.body || {};
-  const body = { id: String(b.id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40) };
-  if (typeof b.status === "string") body.status = b.status.slice(0, 20);
-  if (typeof b.reply === "string") body.reply = b.reply.slice(0, 5000);
-  if (typeof b.fixed_in === "string") body.fixed_in = b.fixed_in.slice(0, 40);
-  res.json(await pyStdin("coordination.publisher", ["--answer"], body, 60000));
-});
-// PUTTING A VERSION OUT takes minutes when the installer is built, longer than
-// a request may be held open — so it runs on its own and leaves its progress in
-// a file this route reads.
-const publishJob = () => path.join(DATA_ROOT, "publish-job.local.json");
-app.post("/api/publisher/publish", async (req, res) => {
-  const py = resolvePython();
-  if (!py) return res.json({ ok: false, error: NO_PY });
-  try {
-    const now = JSON.parse(fs.readFileSync(publishJob(), "utf8"));
-    if (now && now.running && Date.now() / 1000 - (now.at || 0) < 1800)
-      return res.json({ ok: false, busy: true, error: "A version is being put out already — " + (now.stage || "working") });
-  } catch (_) { /* no job yet */ }
-  const b = req.body || {};
-  const args = [...py.prefix, "-m", "coordination.publisher", "--publish", "--job", publishJob(),
-    "--notes", String(b.notes || "").slice(0, 2000)];
-  if (b.installer === true) args.push("--installer");
-  try {
-    fs.mkdirSync(path.dirname(publishJob()), { recursive: true });
-    fs.writeFileSync(publishJob(), JSON.stringify({ running: true, stage: "Starting", at: Math.floor(Date.now() / 1000) }));
-    const child = spawn(py.cmd, args, { cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true });
-    child.on("error", () => {});
-    child.unref();
-  } catch (e) {
-    return res.json({ ok: false, error: "Could not start: " + e.message });
-  }
-  res.json({ ok: true, started: true });
-});
-app.get("/api/publisher/job", async (_q, res) => {
-  try { res.json({ ok: true, ...JSON.parse(fs.readFileSync(publishJob(), "utf8")) }); }
-  catch (_) { res.json({ ok: true, running: false, none: true }); }
-});
-app.post("/api/publisher/remove", async (req, res) => {
-  const id = String((req.body || {}).id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.publisher", ["--remove", id], 60000));
-});
 
 /* ---- READING A SENT MAIL, AND THE CONTENT SCREEN'S CONTROLS -------------------
    "we cannot read the sent mails" — coordination/review.py --sent-mail.
@@ -1015,9 +907,12 @@ app.post("/api/account/sign-out", async (_q, res) => {
 app.get("/api/account/me", async (_q, res) => {
   if (!SIGNED_IN) return res.json({ ok: true, signedIn: null });
   const [list, st] = await Promise.all([pyAccounts("list", {}), pyAccounts("status", {})]);
-  const mine = (list.accounts || []).find((a) => a.id === SIGNED_IN.account) || {};
+  // The websites come from the signed-in account itself, opened with its key.
+  const own = (st.account || {}).id === SIGNED_IN.account;
+  const mine = own ? (st.sites || []) : [];
   res.json({ ok: true, signedIn: { account: SIGNED_IN.account, name: SIGNED_IN.name },
-             sites: mine.sites || [], open: (st.site || {}).id || null, maxSites: list.max_sites,
+             sites: mine.map((x) => ({ id: x.id, name: x.name, url: x.url })), open: own ? (st.site || {}).id || null : null,
+             maxSites: list.max_sites,
              runGoing: !!st.run_going, legacyPresent: !!list.legacy_present,
              legacySite: list.legacy_site || {}, broughtIn: !!st.brought_in });
 });
@@ -1089,7 +984,7 @@ const API_CAPABILITIES = [
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
   "account", "business", "engine", "connect", "check", "product", "update", "diagnostics",
-  "support", "publisher", "quit",
+  "quit",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 // Which copy of the program this is, without saying where it lives: run.py
@@ -1176,6 +1071,9 @@ function activeSite() {
   try {
     const a = JSON.parse(fs.readFileSync(path.join(DATA_ROOT, "active.json"), "utf8"));
     if (!a || !a.account || !a.site) return null;
+    // Only ever the signed-in person's own website: another account's, left
+    // open from before, is not theirs to work in.
+    if (SIGNED_IN && a.account !== SIGNED_IN.account) return null;
     const dir = path.join(DATA_ROOT, "accounts", a.account, "sites", a.site);
     return fs.existsSync(dir) ? { account: a.account, site: a.site } : null;
   } catch (_) { return null; }
@@ -1485,9 +1383,10 @@ function shared(key, make) {
 // costs a few milliseconds and closes the hole permanently. Python's own
 // board._migrate does the same on its side; either route now heals a cabinet.
 function ensureDbSync() {
-  // Accounts exist and nobody is signed in: the cabinets are locked. Each one
-  // is built and upgraded when its owner signs in (see signInDone).
-  if (accountsExist() && !SIGNED_IN) return { built: true, ran: false, error: null };
+  // Accounts exist (or must) and nobody is signed in: the cabinets are locked,
+  // and a fresh copy makes none in the program's folder. Each one is built and
+  // upgraded when its owner signs in (see signInDone).
+  if (accountRequired() && !SIGNED_IN) return { built: true, ran: false, error: null };
   const py = resolvePython();
   if (!py) return { built: dbBuilt(), ran: false, error: NO_PY };
   try {

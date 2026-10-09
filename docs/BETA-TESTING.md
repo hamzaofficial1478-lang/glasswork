@@ -71,40 +71,31 @@ on their own computer.
 
 ## How they report a problem
 
-**Settings → This program → Help and feedback → Make a support report → Copy
-the report**, then paste it into an email to you.
+**Help → Make it → Copy it**, then paste it into an email to you (or a new
+issue on the program's GitHub page, if they are happy for it to be public).
+Nothing is ever sent from the program itself.
 
 The report lists the program's version, which desks failed and why, open
 faults, and what stops any sector from running. It has no keys, passwords,
 email addresses, phone numbers, web addresses or lead details in it, and they
 can read every line before copying it.
 
-## Sending an update
+## Sending a new version
 
-1. Change `version` in `config/product.json` (for example `0.6.0` → `0.6.1`)
-   and commit.
-2. Make the release:
+1. Change `version` in `config/product.json` (for example `0.9.0` → `0.9.1`)
+   and push. (Claude does this with each round of work.)
+2. GitHub builds the Windows Setup on a real Windows machine, installs it,
+   opens it, makes an account, adds a website, checks the office reads it,
+   removes it again — and only then puts the Setup on the program's release
+   page, once per version.
+3. Testers press **Settings → This program → Check for a new version →
+   Download**, and run the new Setup over the old one. The same install is
+   updated and their work — kept in its own folder — is not touched.
 
-       python -m coordination.updates --make-release C:\releases\0.6.1 --key C:\Users\you\glasswork-signing.key --base-url https://your-address/releases/0.6.1 --notes "What changed, in one line"
+## Good to know
 
-   This writes the zip and `manifest.json`. Only files tracked in git go into
-   the zip, never `.env` or anyone's data.
-3. Upload both files to the address you chose, and put the new `manifest.json`
-   where `update_url` points.
-4. Testers press **Settings → This program → Check for updates → Install**.
-   The program installs it only if your signature matches. Their data and
-   settings are not touched, and **Go back to the previous version** undoes it.
-
-Never share the signing key, and never put it in the program folder. Anyone
-with it can sign an update that every copy will trust.
-
-## Not built yet
-
-- **A signed Windows .exe and Mac .dmg installer.** Today's installer is a
-  script that sets Python and Node up for the user. A real installer that
-  carries everything inside it needs a code-signing certificate and a build
-  computer for each system. Without signing, Windows and macOS warn people off
-  a downloaded program.
-- **A download page.** Testers get the zip from you directly.
-- **Updates installing themselves.** This is deliberate: the program says an
-  update is out and the person presses Install.
+- **Windows shows "Windows protected your PC"** for the Setup, because it is
+  not signed with a paid certificate. **More info → Run anyway** opens it.
+- **Mac and Linux** run the program from source (see the README).
+- **Nothing installs itself, and nothing is looked up on its own.** A new
+  version is looked for only when the person presses the button.

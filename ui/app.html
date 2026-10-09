@@ -157,14 +157,6 @@ ol.feed li:last-child{border-bottom:0}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:10px;
   font-size:14px;max-width:min(560px,calc(100vw - 32px));z-index:20;display:none}
 .toast.show{display:block}
-.upd-banner{position:fixed;right:20px;bottom:20px;z-index:40;max-width:420px;background:var(--surface);border:1px solid var(--line-strong);
-  border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.14);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
-.upd-banner[hidden],body.drawer-open .upd-banner{display:none}
-.reg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 16px}
-.reg-grid input{font-weight:400}
-.steps{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:14px;font-size:15px;line-height:1.55}
-.steps .btn{margin-left:6px}
-@media (max-width:760px){.upd-banner{left:12px;right:12px;bottom:84px;max-width:none}}
 
 /* phone */
 .tabs{display:none}
@@ -460,7 +452,7 @@ details.ck .row{padding-left:40px}
     <div class="rule"></div>
     <a href="#check" data-r="check">Website Check</a>
     <a href="#settings" data-r="settings">Settings</a>
-    <a href="#help" data-r="help">Help and reports</a>
+    <a href="#help" data-r="help">Help</a>
   </nav>
   <main id="main" tabindex="-1"><div class="page"><p class="muted">Opening your office…</p></div></main>
 </div>
@@ -475,7 +467,6 @@ details.ck .row{padding-left:40px}
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Details"></aside>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<aside class="upd-banner" id="updBanner" hidden aria-live="polite"></aside>
 
 <script>
 const $ = (q) => document.querySelector(q);
@@ -655,10 +646,40 @@ async function state() {
 }
 
 /* ======================= TODAY ======================= */
+/* GETTING STARTED — "make user to setup their websites and to start managing
+   them". Until each step is done, Today says what is left, in order, with the
+   one button that does it; the first step not done is the bright one. It goes
+   away by itself once everything is in place. */
+function gettingStarted(biz, con, ord, r) {
+  const e = S.engine || {};
+  const d = new Date();
+  const ymd = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const missing = (biz && biz.missing) || [];
+  const steps = [
+    {done: !missing.length, t: 'Tell the agency about your business', href: '/business', b: 'Your business',
+     s: missing.length ? 'Still needed: ' + missing.slice(0, 3).join(', ') + (missing.length > 3 ? ' and more' : '') + '.' : 'Done.'},
+    {done: !!(e.chosen && e.ready), t: 'Choose how your agency thinks', href: '/engine?first=1', b: 'Choose the AI',
+     s: e.chosen && e.ready ? 'It thinks with ' + e.name + '.' : 'Claude, OpenAI or Google Gemini, with your own key. You pay them directly; your daily limit keeps it in check.'},
+    {done: !!(con && con.connected), t: 'Connect your website', href: '/setup#connectBox', b: 'Connect it',
+     s: con && con.connected ? (con.mode === 'full' ? 'Connected: the agency can make the changes you approve.' : 'Connected to look only.')
+       : 'One folder to upload to your hosting, or a WordPress app password. Until then the agency can only look at it from outside.'},
+    {done: ((ord && ord.orders) || []).some((o) => o.day === ymd) || !!r, t: 'Tell your agency what to do today', href: '#orders', b: 'Give orders',
+     s: 'A line or two for any desk: find leads, write a post, fix a page. Without orders the day does not start.'},
+  ];
+  const left = steps.filter((x) => !x.done).length;
+  if (!left) return '';
+  const first = steps.findIndex((x) => !x.done);
+  return `<section class="card" id="gettingStarted" style="padding:20px 22px;display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h2 style="margin:0;font-size:18px">Getting started</h2>
+      <span class="muted" style="font-size:14px">${steps.length - left} of ${steps.length} done</span></div>
+    ${steps.map((x, i) => `<div class="row" style="align-items:center;gap:14px;padding-left:0;padding-right:0"><span class="lamp ${x.done ? 'done' : 'wait'}"></span>
+      <span class="grow"><b style="font-weight:600">${i + 1}. ${esc(x.t)}</b><span class="muted" style="font-size:14px">${esc(x.s)}</span></span>
+      ${x.done ? '' : `<a class="btn ${i === first ? '' : 'ghost '}small" href="${esc(x.href)}">${esc(x.b)}</a>`}</div>`).join('')}
+    <p class="muted" style="margin:6px 0 0;font-size:14px">Then press <b style="font-weight:600">Run today</b>. Nothing leaves the building without your yes.</p></section>`;
+}
 async function today(main) {
-  const [st, run, idx, leads, reg] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all'), api('/api/support/registration')]);
-  let regLater = false; try { regLater = localStorage.getItem('gw-reg-later') === '1'; } catch (e) { /* private window */ }
-  const askReg = reg && reg.ok && reg.home && !reg.registered && !reg.publisher && !regLater;
+  const [st, run, idx, leads, biz, con, ord] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all'),
+    api('/api/business'), api('/api/connect'), api('/api/orders')]);
   const appr = (st && st.approvals) || [];
   const ev = ((st && st.activity) || {}).events || [];
   const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
@@ -675,9 +696,10 @@ async function today(main) {
   const pages = (idx && idx.pages) || [];
   const onG = (idx && idx.on_google) || 0;
   const date = new Date().toLocaleDateString('en-GB', {weekday: 'long', day: 'numeric', month: 'long'});
+  const setup = gettingStarted(biz, con, ord, r);
   main.innerHTML = `<div class="page">
     <div><div class="label">${esc(date)}</div>
-      <h1 style="margin-top:6px">${hello} ${appr.length ? (appr.length === 1 ? 'One thing needs your yes.' : appr.length + ' things need your yes.') : 'Nothing needs you right now.'}</h1></div>
+      <h1 style="margin-top:6px">${hello} ${appr.length ? (appr.length === 1 ? 'One thing needs your yes.' : appr.length + ' things need your yes.') : setup ? 'A few things to set up first.' : 'Nothing needs you right now.'}</h1></div>
     <section class="card" style="padding:22px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px">
       <div style="flex:1 1 420px;display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">${runPill}
@@ -688,9 +710,7 @@ async function today(main) {
       <div style="display:flex;gap:10px;flex-wrap:wrap">${action}
         ${appr.length && !(r && r.running) ? '<button class="btn ghost" type="button" id="runNow">Run today</button>' : ''}</div>
     </section>
-    ${askReg ? `<section class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between">
-      <span><b style="font-weight:600">Register your copy?</b> <span class="muted">So the people who make this program know who you are when you ask for help. It takes a minute, and you can withdraw it later.</span></span>
-      <span style="display:flex;gap:8px"><a class="btn small" href="#help">Register</a><button class="btn quiet small" type="button" id="regLater">Not now</button></span></section>` : ''}
+    ${setup}
     ${agencyStrip(st)}
     <div class="tiles">
       <a href="#leads" class="card tile"><span class="label">Leads waiting</span><span class="big mono">${esc((leads && leads.total) || 0)}</span>
@@ -716,7 +736,6 @@ async function today(main) {
           : empty('Quiet so far', 'Press Run today and each desk’s work appears here as it happens.')}</section>
     </div></div>`;
   const rb = $('#runNow'); if (rb) rb.onclick = runToday; wireRunSay();
-  const rl = $('#regLater'); if (rl) rl.onclick = () => { try { localStorage.setItem('gw-reg-later', '1'); } catch (e) { /* fine */ } rl.closest('section').remove(); };
   const sb = $('#stopRun'); if (sb) sb.onclick = async () => { const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
 }
 /* "with out any order the program will not start the day" — Run asks the
@@ -2013,7 +2032,6 @@ function applyFilter(main) {
 }
 function wireFloor(main) {
   const rb = $('#runNow'); if (rb) rb.onclick = runToday; wireRunSay();
-  const rl = $('#regLater'); if (rl) rl.onclick = () => { try { localStorage.setItem('gw-reg-later', '1'); } catch (e) { /* fine */ } rl.closest('section').remove(); };
   const sb = $('#stopRun'); if (sb) sb.onclick = async () => { sb.disabled = true; const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
   const tu = $('#tidyUp'); if (tu) tu.onclick = async () => {
     tu.disabled = true; const j = await api('/api/leftovers/tidy', {});
@@ -2282,96 +2300,40 @@ async function activity(main, local) {
   const all = $('#actAll'); if (all) all.onclick = async () => { await api('/api/activity/seen', {showAll: true}); activity(main); };
 }
 
-/* ======================= HELP AND REPORTS =======================
-   "i want the report section where user will be able to submit the report and
-    those reports will get over to me" — a report is sealed here, so only the
-   publisher's own computer can open it; his answer comes back here, sealed to
-   this copy. */
-const HELP = {sent: null, editing: false};
-const REP_LOOK = {new: ['plain', 'Sent'], seen: ['plain', 'Read'], working: ['work', 'Being worked on'], fixed: ['done', 'Fixed'], 'wont-fix': ['plain', 'Not changing']};
+/* ======================= HELP =======================
+   "i don't want the users data ... each program on pc is remains to itself" —
+   nothing leaves this computer from here. A support report is made here, read
+   here, and copied by the person to whoever they choose to ask for help. */
 async function help(main) {
-  const [m, reg] = await Promise.all([api('/api/support/mine'), api('/api/support/registration')]);
-  const mine = (m && m.reports) || [];
-  const R = (reg && reg.ok) ? reg : {}, me = R.person || {};
-  const pre = {name: me.name || ((S.me && S.me.name) || ''), business: me.business || ((S.brand && S.brand.agencyName) || ''),
-    email: me.email || '', phone: me.phone || '', website: me.website || (((S.brand || {}).website || {}).siteUrl || ''), country: me.country || ''};
-  const regCard = !R.home || R.publisher ? '' : R.registered && !HELP.editing
-    ? `<section class="card" style="padding:18px 22px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between">
-        <span><b style="font-weight:600">Registered</b> <span class="muted">as ${esc([me.name, me.business].filter(Boolean).join(' · ') || me.email)}</span></span>
-        <span style="display:flex;gap:8px"><button class="btn quiet small" type="button" id="regEdit">Change</button><button class="btn quiet small" type="button" id="regWithdraw">Withdraw</button></span></section>`
-    : `<section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:10px" id="regCard">
-        <h2 style="margin:0;font-size:18px">Register your copy</h2>
-        <p class="muted" style="margin:0;font-size:14px">Tell the people who make this program who you are, so they know who a problem report is from and can help you sooner. Only what you type here is sent, sealed so only they can read it — nothing about your leads, customers, keys or websites' content — and you can withdraw it at any time.</p>
-        <div class="reg-grid">
-          ${[['regName', 'Your name', 'name', 'text'], ['regBiz', 'Your business', 'business', 'text'], ['regMail', 'Email', 'email', 'email'],
-            ['regPhone', 'Phone', 'phone', 'text'], ['regSite', 'Website', 'website', 'text'], ['regCountry', 'Country', 'country', 'text']].map(([id, l, k, t]) =>
-            `<label for="${id}" style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px">${l}<input id="${id}" type="${t}" maxlength="300" value="${esc(pre[k])}"></label>`).join('')}
-        </div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" type="button" id="regGo">Register</button>${HELP.editing ? '<button class="btn quiet" type="button" id="regCancel">Cancel</button>' : ''}<span class="muted" id="regSay" style="font-size:14px"></span></div>
-      </section>`;
-  const countCard = !R.home || R.publisher ? '' : `<label class="card" style="padding:14px 22px;display:flex;gap:12px;align-items:flex-start;cursor:pointer">
-      <input type="checkbox" id="regCount" ${R.counting ? 'checked' : ''} style="margin-top:4px">
-      <span><b style="font-weight:600">Say this copy is in use</b><br><span class="muted" style="font-size:14px">Once a day it tells the people who make this program a random number for this copy, its version and the kind of computer — nothing else, sealed so only they can read it. It still looks for updates if you switch this off.</span></span></label>`;
-  main.innerHTML = `<div class="page narrow">${head('Help and reports',
-    'Something not working? Tell the people who make this program. Your report is sealed on this computer so only they can read it, and their answer appears below.')}
-    ${regCard}
+  const p = await api('/api/product');
+  const where = p && p.support_url ? p.support_url : '';
+  main.innerHTML = `<div class="page narrow">${head('Help',
+    'Something not working? Make a support report, read it, and send it to whoever helps you. Nothing is sent from here — this program never contacts anyone about you.')}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
-      <h2 style="margin:0;font-size:18px">Report a problem</h2>
-      ${m && m.home === false ? `<div class="note">This copy cannot send reports by itself yet. Write it below and press Send — you will get a support report to copy into an email instead.</div>` : ''}
-      <label for="repTitle" style="font-weight:600">What went wrong, in a line</label>
-      <input id="repTitle" maxlength="200" placeholder="For example: the Leads screen will not open">
-      <label for="repText" style="font-weight:600">What were you doing, and what happened?</label>
-      <textarea id="repText" maxlength="20000" style="min-height:130px" placeholder="The more you say, the quicker it is fixed. Which screen, which button, and what you saw."></textarea>
-      <label for="repContact" style="font-weight:600">Your email, if you would like a reply by email too <span class="muted" style="font-weight:400">(optional)</span></label>
-      <input id="repContact" type="email" maxlength="200" placeholder="you@example.com">
-      <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="repAttach" checked style="margin-top:4px">
-        <span>Send a support report with it <span class="muted">— which desks failed and why, the version and the kind of computer. No keys, passwords, email addresses, web addresses or lead details.</span>
-        <button type="button" class="btn quiet small" id="repPeek">See exactly what is in it</button></span></label>
-      <pre id="repPreview" class="mono" hidden style="margin:0;white-space:pre-wrap;font-size:12.5px;background:var(--sunken);padding:12px 14px;border-radius:8px;max-height:260px;overflow:auto"></pre>
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button class="btn" type="button" id="repSend">Send the report</button><span class="muted" id="repSay" style="font-size:14px"></span></div>
+      <h2 style="margin:0;font-size:18px">Make a support report</h2>
+      <p class="muted" style="margin:0;font-size:14px">Which desks failed and why, the version and the kind of computer. Every key, password, email address, web address, phone number and lead detail is taken out before you see it.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" type="button" id="diagMake">Make it</button>
+        <button class="btn quiet" type="button" id="diagCopy" hidden>Copy it</button><span class="muted" id="diagTo" style="font-size:14px"></span></div>
+      <pre id="diagText" class="mono" hidden style="margin:0;white-space:pre-wrap;font-size:13px;background:var(--sunken);padding:12px 14px;border-radius:8px;max-height:360px;overflow:auto"></pre>
     </section>
-    <section style="display:flex;flex-direction:column;gap:10px"><h2 class="label" style="margin:0">Your reports</h2>
-      ${mine.length ? mine.map((r) => { const lk = REP_LOOK[r.status] || ['plain', r.status_words || r.status];
-        return `<article class="card" style="padding:16px 20px;display:flex;flex-direction:column;gap:8px">
-          <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between"><b style="font-weight:600">${esc(r.title || 'A problem')}</b>${pill(lk[0], lk[1])}</div>
-          <span class="muted mono" style="font-size:12.5px">${esc(r.id || '')} · sent ${esc(when(r.at))} · version ${esc(r.version || '')}</span>
-          ${r.reply ? `<div class="say"><b style="font-weight:600">Their answer:</b> ${esc(r.reply)}</div>` : ''}
-          ${r.update_needed ? `<div class="note">Fixed in version ${esc(r.fixed_in)}. <a href="#settings">Get the update in Settings</a>.</div>` : (r.fixed_in && r.status === 'fixed' ? `<span class="muted" style="font-size:13.5px">Fixed in version ${esc(r.fixed_in)} — you have it.</span>` : '')}
-        </article>`; }).join('')
-        : `<div class="card">${empty('None yet', 'Reports you send from here are listed with their answers.')}</div>`}
-    </section>
-    ${countCard}</div>`;
-  const val = (id) => ($('#' + id) || {}).value || '';
-  const go = $('#regGo'); if (go) go.onclick = async () => {
-    go.disabled = true; $('#regSay').textContent = 'Registering…';
-    const j = await api('/api/support/register', {name: val('regName').trim(), business: val('regBiz').trim(), email: val('regMail').trim(),
-      phone: val('regPhone').trim(), website: val('regSite').trim(), country: val('regCountry').trim()});
-    go.disabled = false;
-    if (j.ok) { HELP.editing = false; VIEW.dirty = false; toast(j.head || 'Registered.'); help(main); return; }
-    $('#regSay').textContent = j.error || 'Not registered.';
-  };
-  const cancel = $('#regCancel'); if (cancel) cancel.onclick = () => { HELP.editing = false; VIEW.dirty = false; help(main); };
-  const edit = $('#regEdit'); if (edit) edit.onclick = () => { HELP.editing = true; help(main); };
-  const wd = $('#regWithdraw'); if (wd) wd.onclick = async () => {
-    if (!confirm('Withdraw your registration? The people who make this program will no longer have your name or details.')) return;
-    const j = await api('/api/support/register', {withdraw: true}); toast(j.head || j.error || 'Done.'); help(main);
-  };
-  const ct = $('#regCount'); if (ct) ct.onchange = async () => { const j = await api('/api/support/counting', {on: ct.checked}); toast(j.head || j.error || 'Saved.'); };
-  $('#repPeek').onclick = async (e) => {
-    e.preventDefault();
-    const pre = $('#repPreview'); pre.hidden = !pre.hidden; if (pre.hidden) return;
-    pre.textContent = 'Making it…'; const p = await api('/api/support/preview');
-    pre.textContent = (p && p.support) || 'Nothing could be gathered.';
-  };
-  $('#repSend').onclick = async () => {
-    const title = $('#repTitle').value.trim(), text = $('#repText').value.trim();
-    if (!title && !text) { toast('Say what went wrong first.'); return; }
-    const b = $('#repSend'); b.disabled = true; $('#repSay').textContent = 'Sending…';
-    const j = await api('/api/support/send', {title, text, contact: $('#repContact').value.trim(), attach: $('#repAttach').checked});
+    <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:10px">
+      <h2 style="margin:0;font-size:18px">Where to ask</h2>
+      ${where ? `<p style="margin:0">The program's own page: <a href="${esc(where)}" target="_blank" rel="noopener">${esc(where.replace(/^https?:\/\//, ''))}</a> — open a new issue there and paste your report, if you are happy for it to be public.</p>`
+        : '<p style="margin:0">Send it to whoever gave you the program, by email or message.</p>'}
+      <p class="muted" style="margin:0;font-size:14px">A new version, when there is one: <a href="#settings">Settings → Check for a new version</a>.</p>
+    </section></div>`;
+  $('#diagMake').onclick = async () => {
+    const b = $('#diagMake'); b.disabled = true; $('#diagTo').textContent = 'Making it…';
+    const d = await api('/api/diagnostics');
     b.disabled = false;
-    if (j.ok) { VIEW.dirty = false; toast(j.head || 'Sent.'); help(main); return; }
-    $('#repSay').textContent = j.error || 'Not sent.';
-    if (j.support) { const pre = $('#repPreview'); pre.hidden = false; pre.textContent = j.support; }
+    if (!d.ok) { $('#diagTo').textContent = d.error || 'The report could not be made.'; return; }
+    $('#diagText').textContent = d.text || ''; $('#diagText').hidden = false; $('#diagCopy').hidden = false;
+    $('#diagTo').textContent = 'Read it, then copy it into your email or message.';
+  };
+  $('#diagCopy').onclick = async () => {
+    const text = $('#diagText').textContent;
+    try { await navigator.clipboard.writeText(text); toast('Copied. Paste it into your email or message.'); }
+    catch (e) { const r = document.createRange(); r.selectNodeContents($('#diagText')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected — press Ctrl+C (or ⌘C) to copy it.'); }
   };
 }
 
@@ -2443,96 +2405,38 @@ function settings(main) {
       <div class="card">
         <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600" id="prodName">${esc((S.brand && S.brand.product) || 'Glasswork')}</b>
           <span class="muted" style="font-size:14px" id="prodVer">Version ${esc((S.brand && S.brand.version) || '')}</span></span>
-          <button class="btn ghost small" type="button" id="updCheck">Check for updates</button>
+          <button class="btn ghost small" type="button" id="updCheck">Check for a new version</button>
           <button class="btn quiet small" type="button" id="quitApp" hidden>Close the program</button></div>
         <div class="row" id="updRow" hidden><span class="grow" id="updSay"></span><span style="display:flex;gap:8px;flex-wrap:wrap" id="updBtns"></span></div>
       </div>
       <div class="card">
-        <a class="row" href="#help" style="text-decoration:none;color:var(--ink);align-items:center"><span class="grow"><b style="font-weight:600">Report a problem</b>
-          <span class="muted" style="font-size:14px">Tell the people who make this program what went wrong, and read their answer here.</span></span>
+        <a class="row" href="#help" style="text-decoration:none;color:var(--ink);align-items:center"><span class="grow"><b style="font-weight:600">Help</b>
+          <span class="muted" style="font-size:14px">A support report to send to whoever helps you — made and read here, sent by you.</span></span>
           <span style="font-size:14px;font-weight:500;color:var(--accent)">Open</span></a>
-        <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">Help and feedback</b>
-          <span class="muted" style="font-size:14px">A report of what is failing, to send to whoever helps you — with no keys, passwords, email addresses or lead details in it.</span></span>
-          <button class="btn ghost small" type="button" id="diagMake">Make a support report</button></div>
-        <div class="row" id="diagRow" hidden style="flex-direction:column;align-items:stretch">
-          <pre id="diagText" class="mono" style="margin:0;white-space:pre-wrap;font-size:13px;background:var(--sunken);padding:12px 14px;border-radius:8px;max-height:320px;overflow:auto"></pre>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="diagCopy">Copy the report</button>
-            <span class="muted" style="font-size:14px" id="diagTo"></span></div></div>
         <a class="row" href="/terms" target="_blank" rel="noopener" style="text-decoration:none;color:var(--ink)"><span class="grow"><b style="font-weight:600">Terms of use</b></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Read</span></a>
         <a class="row" href="/privacy" target="_blank" rel="noopener" style="text-decoration:none;color:var(--ink)"><span class="grow"><b style="font-weight:600">Privacy</b></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Read</span></a>
       </div>
-    </section>
-    <section id="pubBox" hidden style="display:flex;flex-direction:column;gap:8px"></section></div>`;
-  EXTRA.settings.forEach((f) => f());
+    </section></div>`;
   ask('/api/product').then((p) => { const q = $('#quitApp'); if (!q || !(p && p.installed)) return; q.hidden = false;
     q.onclick = async () => { if (!confirm('Close the program? Nothing is lost — open it again from the Start menu or the desktop.')) return;
       const j = await api('/api/quit', {}); toast(j.why || j.error || 'Closing.');
       if (j.ok) setTimeout(() => { document.body.innerHTML = '<main style="max-width:520px;margin:20vh auto;font:17px system-ui;padding:0 16px">The program is closed. You can close this tab.</main>'; }, 800); }; });
   main.querySelectorAll('[data-theme-pick]').forEach((b) => b.onclick = () => { theme(b.dataset.themePick); buildSiteMenu(); settings(main); });
   $('#updCheck').onclick = () => checkUpdate();
-  $('#diagMake').onclick = async () => {
-    const b = $('#diagMake'); b.disabled = true;
-    const [d, p] = await Promise.all([api('/api/diagnostics'), api('/api/product')]);
-    b.disabled = false;
-    if (!d.ok) { toast(d.error || 'The report could not be made.'); return; }
-    $('#diagText').textContent = d.text || ''; $('#diagRow').hidden = false;
-    $('#diagTo').textContent = p && p.support_email ? 'Send it to ' + p.support_email : 'Paste it into an email or a message to whoever helps you.';
-  };
-  $('#diagCopy').onclick = async () => {
-    const text = $('#diagText').textContent;
-    try { await navigator.clipboard.writeText(text); toast('Copied. Paste it into your email or message.'); }
-    catch (e) { const r = document.createRange(); r.selectNodeContents($('#diagText')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected — press Ctrl+C (or ⌘C) to copy it.'); }
-  };
+
 }
+/* A NEW VERSION. Asked only when the button is pressed — nothing is ever
+   looked up on its own — and the question carries nothing about this copy. A
+   new version is a new Setup: run it over this one and everything is kept. */
 async function checkUpdate() {
   const b = $('#updCheck'); b.disabled = true; $('#updRow').hidden = false; $('#updSay').textContent = 'Looking…'; $('#updBtns').innerHTML = '';
   const u = await api('/api/update');
   b.disabled = false;
   $('#updSay').innerHTML = u.ok
-    ? (u.available ? `<b style="font-weight:600">Version ${esc(u.latest)} is out.</b> ${u.notes ? `<span class="muted">${esc(u.notes)}</span>` : ''}${u.can_install ? '' : `<br><span class="muted">${esc(u.why || '')}</span>`}` : esc(u.why || 'You have the latest version.'))
-    : esc(u.error || 'Could not look for updates.');
-  if (u.can_install) {
-    $('#updBtns').innerHTML = `<button class="btn small" type="button" id="updGo">Install version ${esc(u.latest)}</button>`;
-    $('#updGo').onclick = async () => {
-      if (!confirm(`Install version ${u.latest}? Your data and settings are not touched, and you can go back afterwards.`)) return;
-      $('#updGo').disabled = true; $('#updSay').textContent = 'Downloading, checking the signature and installing — this takes a minute or two…';
-      const j = await api('/api/update/apply', {});
-      $('#updSay').textContent = j.why || j.error || (j.ok ? 'Installed.' : 'It was not installed.');
-      $('#updBtns').innerHTML = j.ok && j.installed ? '<button class="btn quiet small" type="button" id="updBack">Go back to the previous version</button>' : '';
-      const back = $('#updBack'); if (back) back.onclick = undoUpdate;
-    };
-  } else if (!u.git && u.ok) {
-    $('#updBtns').innerHTML = '<button class="btn quiet small" type="button" id="updBack">Go back to the previous version</button>';
-    $('#updBack').onclick = undoUpdate;
-  }
-}
-/* "when ever i will update the program here the users will get the update
-   message on their program" — asked when the program opens and every six
-   hours; a copy that updates itself from git never shows it. */
-async function updateBanner() {
-  const u = await ask('/api/update');
-  const b = $('#updBanner'); if (!b) return;
-  if (!(u && u.ok && u.available && u.can_install)) { b.hidden = true; return; }
-  try { if (localStorage.getItem('gw-upd-later') === u.latest) return; } catch (e) { /* private window */ }
-  b.innerHTML = `<b style="font-weight:600">Version ${esc(u.latest)} is ready</b>
-    ${u.notes ? `<span class="muted" style="font-size:14px">${esc(u.notes)}</span>` : ''}
-    <span class="muted" style="font-size:13.5px">Your data, websites and settings are not touched, and you can go back afterwards.</span>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="updNow">Update now</button>
-      <button class="btn quiet small" type="button" id="updLater">Later</button><span class="muted" id="updNowSay" style="font-size:13.5px"></span></div>`;
-  b.hidden = false;
-  $('#updLater').onclick = () => { try { localStorage.setItem('gw-upd-later', u.latest); } catch (e) { /* fine */ } b.hidden = true; };
-  $('#updNow').onclick = async () => {
-    $('#updNow').disabled = true; $('#updNowSay').textContent = 'Downloading, checking its signature and installing…';
-    const j = await api('/api/update/apply', {});
-    $('#updNowSay').textContent = j.ok ? (j.why || 'Installed.') + ' The page reloads in a moment.' : (j.error || 'It was not installed.');
-    if (j.ok && j.installed) setTimeout(() => location.reload(), 6000); else $('#updNow').disabled = false;
-  };
-}
-
-async function undoUpdate() {
-  if (!confirm('Go back to the version before the last update?')) return;
-  const j = await api('/api/update/rollback', {});
-  toast(j.why || j.error || (j.ok ? 'Done.' : 'Nothing to go back to.'));
+    ? (u.available ? `<b style="font-weight:600">Version ${esc(u.latest)} is out.</b> ${u.notes ? `<span class="muted">${esc(u.notes)}</span>` : ''}<br><span class="muted">${esc(u.why || '')}</span>` : esc(u.why || 'You have the newest version.'))
+    : esc(u.error || 'Could not look for a new version.');
+  const link = u.ok && u.available ? (u.download_url || u.page_url) : '';
+  if (link) $('#updBtns').innerHTML = `<a class="btn small" href="${esc(link)}" target="_blank" rel="noopener">Download version ${esc(u.latest)}</a>`;
 }
 
 /* ======================= MORE (phone) ======================= */
@@ -2544,8 +2448,7 @@ function more(main) {
     ${item('#results', 'Results', 'What each sector actually produced')}
     ${item('#google', 'On Google', 'Which pages Google lists')}${item('#check', 'Website Check', 'A report on any website')}
     ${item('#settings', 'Settings', 'Your business, the AI, your account')}
-    ${item('#help', 'Help and reports', 'Tell us about a problem, and see the answers')}
-    ${EXTRA.more.map((f) => f(item)).join('')}</div></div>`;
+    ${item('#help', 'Help', 'A support report to send to whoever helps you')}</div></div>`;
 }
 
 /* ---- routing ----
@@ -2554,16 +2457,6 @@ function more(main) {
    which, with clicks faster than the office, is what made the app look stuck
    on the wrong section. */
 const ROUTES = {today, agency, waiting, orders, leads, content, post, website, google, activity, results, check, settings, more, help};
-/* What a copy may add to itself. On the publisher's own copy, ui/publisher.js
-   adds his users room — a screen, a menu entry, a line on More and a Settings
-   card. Every other copy has no such file, so none of it exists there. */
-const EXTRA = {more: [], settings: []};
-async function loadPublisher() {
-  const p = await ask('/api/publisher');
-  if (!(p && p.ok && p.can_publish)) return;
-  const s = document.createElement('script'); s.src = '/publisher.js'; s.async = true;
-  document.head.appendChild(s);
-}
 const VIEW = {gen: 0, r: '', urls: new Set(), view: null, dirty: false};
 const NO_REDRAW = new Set(['post', 'check', 'settings', 'more', 'help']);
 let polling = null, redrawT = null;
@@ -2627,9 +2520,6 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   await loadShell();
   state();
   route();
-  loadPublisher();
-  updateBanner();
-  setInterval(updateBanner, 6 * 3600 * 1000);
   setInterval(async () => { const e = await ask('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
 })();
 </script>

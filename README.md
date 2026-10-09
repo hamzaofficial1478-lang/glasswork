@@ -1,77 +1,101 @@
-# The Agency — an autonomous growth team on Claude Code
+# Glasswork
 
-A small company of AI agents that runs the online growth of a glass & aluminium
-services business in the UAE. One MD reasons and plans, a Critic challenges the
-plan, sector leads (IT, Content, SEO, Leads, Report) run their crews, an Overseer
-polices the agents, and Security screens the outside world. They coordinate without
-overriding each other, and report to you through one Telegram bridge.
+**Your online growth agency, on your own computer.**
 
-## What's here
+Glasswork runs a small digital agency for a business: a team of AI desks that
+look after its website, find leads, write content, watch how it does on Google,
+and ask before anything leaves the building. It is open source (GPL-3.0) and
+runs entirely on the computer it is installed on.
 
-```
-agency/
-├── CLAUDE.md                  the company handbook + the MD's brain and red lines
-├── .claude/
-│   ├── agents/                every agent's job description (18 of them)
-│   ├── settings.json          wires the hooks in
-│   └── hooks/                 the automatic guardrails (block / log / enforce)
-├── coordination/
-│   ├── schema.sql             the filing cabinet (all sectors)
-│   ├── init_db.py             build the cabinet
-│   └── board.py               claim tasks · resource locks · request board  <-- the anti-override core
-├── mcp/site_connector/
-│   └── connector.example.py   template for the ONE site adapter (setup writes connector.py)
-├── runner/
-│   ├── daily.py               the cron clock — wakes the MD each morning
-│   └── service.py             the always-on crew (Reception, Watcher, Security)
-└── ui/agency.html             the control room — rooms, agents, scores, config
-```
+- **Everything stays on your computer.** Your account, websites, leads, posts,
+  keys and settings are kept on your own machine, encrypted with your password.
+- **Nobody else on the same computer can open it.** Each person has their own
+  account; another account — even on the same computer, in the same copy of the
+  program — cannot read yours. Before you sign in, the program shows only the
+  names of the accounts, never which websites they look after.
+- **Nothing is sent to the people who make it.** No accounts on a server, no
+  usage counting, no reports sent anywhere. The program only talks to the
+  services *you* connect: your AI company, your website, Google, your email.
+- **You approve what goes out.** An email, a published page or a change to your
+  website waits for your yes.
 
-## Where it runs
+## Install it (Windows)
 
-- **Website + the dashboard (ui/agency.html):** your existing Hostinger *shared*
-  hosting is fine. The dashboard is one static file.
-- **The agents:** NOT shared hosting — it kills long-running processes. Use a
-  **Hostinger VPS** (KVM 1, ~$6/mo intro). Ubuntu 24.04, root access, persistent
-  processes. Same provider, one extra box sitting next to your site.
+1. Open the [release page](https://github.com/hamzaofficial1478-lang/glasswork/releases/latest)
+   and download `glasswork-x.y.z-setup.exe`.
+2. Open it. If Windows says *"Windows protected your PC"*, choose **More info →
+   Run anyway** — the Setup is not signed with a paid certificate.
+3. Choose where to install the program and where to keep your work. That is
+   all: the Setup carries its own Python, Node and every library, and needs no
+   administrator password.
 
-## Setup (on the VPS)
+Every Setup on the release page was built, installed, opened and tested on a
+real Windows machine before it was put there (`.github/workflows/windows-installer.yml`).
+
+**A new version:** *Settings → This program → Check for a new version*. Run the
+new Setup over the old one; your work is kept. The program never looks for one
+on its own.
+
+## Run it from source (Windows, macOS, Linux)
+
+You need Python 3.10+ and Node.js 18+.
 
 ```bash
-python3 coordination/init_db.py          # build the filing cabinet
-npm install -g @anthropic-ai/claude-code # if not already
-# put your ANTHROPIC_API_KEY, DataForSEO, Telegram + site creds in a .env
+git clone https://github.com/hamzaofficial1478-lang/glasswork.git
+cd glasswork
+python run.py          # installs what it needs the first time, then opens the office
 ```
 
-## Connect your website (the only per-stack step)
+Or use the scripts in `install/` (`Install-Windows.bat`, `Install-Mac.command`,
+`install.sh`). A copy run from git updates itself with `git pull` each time
+`run.py` starts.
 
-Easiest: open the **setup screen** at `/setup` (served by `server.js`) and fill in
-the form — it writes your `.env` and the site connector for you, no hand-editing.
+## First run
 
-Prefer to do it by hand? The tracked template is
-`mcp/site_connector/connector.example.py`. Copy it to `connector.py` and set one line:
+The office walks you through it, and **Today** shows what is left:
 
-```python
-SITE = WordPressSite("https://yoursite.ae", "admin", "app-password")   # WordPress
-SITE = CustomSite("https://yoursite.ae/api/admin", "YOUR_TOKEN")       # custom backend
+1. **Make your account** — your name and a password. Write down the recovery
+   key it shows you once: without your password and that key, nobody can open
+   your data again.
+2. **Add your website** — its name and address (an account holds two).
+3. **Your business** — what you do, where, and who buys from you. *Draft it*
+   reads your own website and fills it in for you to check.
+4. **How your agency thinks** — Claude, OpenAI or Google Gemini, with your own
+   API key. You pay them directly; a daily spending limit keeps it in check.
+5. **Connect your website** — a hand-built (PHP/HTML) website: download your
+   connector from Setup and upload its `agency-api` folder next to your home
+   page. WordPress: make an Application Password (Users → Profile) and paste it.
+   No connection yet? The agency still works read-only and hands you each change.
+6. **Tell your agency what to do today**, then press **Run today**.
+
+## How it is built
+
+```
+server.js              the office: one local web server (listens on this computer only)
+ui/                    the screens (app.html is the main one)
+coordination/          accounts and encryption (vault.py, workspace.py), the cabinet
+                       (board.py, schema.sql), the day's plan, approvals, reports
+pipelines/             what each desk does: website health and fixes, SEO, leads,
+                       outreach, content, Google indexing, Website Check
+providers/             the AI engines (Claude, OpenAI, Gemini) and paid tools
+paste-into-your-site/  the website connector (agency-api.php)
+installer/             the Windows Setup (build_windows.py, glasswork.iss)
 ```
 
-For a custom backend, expose the small protected endpoints the adapter calls
-(`/health`, `/pages`, `/contact`, and the release hooks) and you're wired in.
-Every agent that touches the site goes through this one adapter — nothing else changes.
-The filled `connector.py` is git-ignored, so your credentials never leave the box.
+**Encryption.** Each account has a random master key, locked with the password
+and with the recovery key (scrypt + AES-256-GCM). Each website's cabinet is a
+SQLCipher database; settings and config files are sealed with AES-256-GCM; the
+account file keeps each website's name and address sealed too. The key lives in
+memory only while the person is signed in.
 
-## Run order
+**Tests.** `python run.py --tests` runs every suite. The website releaser runs
+the same suite before any change goes on a website.
 
-1. `daily.py` on cron at 07:00 — the MD plans the day.
-2. `service.py` under pm2/systemd — the always-on crew reacts in real time.
-3. Open `ui/agency.html` to watch the rooms and approve amber items.
+**Developing with Claude Code.** `CLAUDE.md` and `.claude/` hold the agency
+handbook and guard-rail hooks used when working on the program with Claude Code;
+see `START-HERE.md`.
 
-## The rules that keep it safe (see CLAUDE.md)
+## Licence
 
-- The brain never touches the hands — the MD only ever plans.
-- No decision without evidence; every plan is challenged by the Critic.
-- One door to production — only the IT Releaser deploys.
-- Claim, don't grab. Request, don't reach. Append, don't overwrite.
-- Hooks enforce the red lines automatically; the Overseer holds the kill-switch
-  and the spend cap; Security treats all scraped text as untrusted data.
+GNU General Public Licence v3.0 — see `LICENSE`. The program is provided as it
+is, without warranty. AI makes mistakes: check its work before it reaches anyone.

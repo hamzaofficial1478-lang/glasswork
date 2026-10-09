@@ -19,7 +19,7 @@ cap — sits on the account, once, for both websites.
 THE LAYOUT
 
     data/active.json                          who is signed in, which website is open
-    data/accounts/<account>/account.json      the account and its websites (no secrets)
+    data/accounts/<account>/account.json      the account; its websites' names and addresses sealed
     data/accounts/<account>/account.env       settings that belong to the person
     data/accounts/<account>/config/           the same, kept as files
     data/accounts/<account>/sites/<site>/agency.db     that website's cabinet
@@ -246,6 +246,67 @@ def public(acct: dict) -> dict:
     return {k: v for k, v in (acct or {}).items() if k != "keys"}
 
 
+# ---------------------------------------------------------------------------
+# a website's name and address, sealed with its own account's key
+# ---------------------------------------------------------------------------
+#
+# "the other user using the program may not get access to the other user have
+#  or using the same program"
+#
+# account.json is read before anyone signs in (it is how the sign-in screen
+# knows who can sign in), so a website's name and address are kept in it
+# SEALED with the account's own key. Someone else on the same computer can see
+# that an account exists — its name, as on any sign-in screen — and never which
+# websites it looks after. The website's folder is named by a random number for
+# the same reason.
+
+def _site_where(site_id) -> str:
+    return f"account.json#site/{site_id}"
+
+
+def _seal_site(master: bytes, site: dict) -> dict:
+    from . import vault
+    plain = json.dumps({"name": site.get("name") or "", "url": site.get("url") or ""}).encode("utf-8")
+    out = {k: v for k, v in site.items() if k not in ("name", "url")}
+    out["sealed"] = vault.seal(master, plain, _site_where(site["id"])).decode("ascii")
+    return out
+
+
+def site_info(acct: dict, site: dict, master=None) -> dict:
+    """A website as its owner sees it: name and address opened with the account's key."""
+    out = {"id": site.get("id"), "created": site.get("created"),
+           "name": site.get("name") or "", "url": site.get("url") or ""}
+    if site.get("sealed"):
+        from . import vault
+        m = master if master is not None else master_key((acct or {}).get("id"))
+        try:
+            if m is None:
+                raise ValueError("no key")
+            d = json.loads(vault.unseal(m, site["sealed"].encode("ascii"), _site_where(site["id"])))
+            out.update(name=d.get("name") or "", url=d.get("url") or "")
+        except Exception:
+            out["locked"] = True
+    return out
+
+
+def sites(acct: dict, master=None) -> list:
+    return [site_info(acct, s, master) for s in (acct or {}).get("sites") or []]
+
+
+def seal_sites(acct: dict, master) -> bool:
+    """Seal any website of this account still kept readable (made before this). True when one was."""
+    if not acct.get("keys") or master is None:
+        return False
+    changed, out = False, []
+    for s in acct.get("sites") or []:
+        if not s.get("sealed") and (s.get("name") or s.get("url")):
+            s, changed = _seal_site(master, s), True
+        out.append(s)
+    if changed:
+        acct["sites"] = out
+    return changed
+
+
 def encrypted(account_id) -> bool:
     return bool(account(account_id).get("keys"))
 
@@ -277,6 +338,8 @@ def sign_in(who, password) -> dict:
     master = vault.open_with(acct["keys"], "password", password or "", acct["id"])
     if master is None:
         return {"ok": False, "error": "that password does not open this account"}
+    if seal_sites(acct, master):
+        _save(acct)
     return {"ok": True, "account": public(acct), "key": vault.as_env(master)}
 
 
@@ -293,6 +356,7 @@ def recover(who, recovery_key, new_password) -> dict:
         acct["keys"] = vault.relock(acct["keys"], master, "password", new_password or "", acct["id"])
     except ValueError as e:
         return {"ok": False, "error": str(e)}
+    seal_sites(acct, master)
     _save(acct)
     return {"ok": True, "account": public(acct), "key": vault.as_env(master)}
 
@@ -369,15 +433,20 @@ def add_site(account_id, name, url="") -> dict:
     acct = account(account_id)
     if not acct:
         return {"ok": False, "error": "no such account"}
-    if len(acct.get("sites") or []) >= MAX_SITES:
-        names = ", ".join(s.get("name") or s["id"] for s in acct["sites"])
+    master = master_key(account_id)
+    if acct.get("keys") and master is None:
+        return {"ok": False, "error": "sign in again first — this account's key is not open"}
+    have = sites(acct, master)
+    if len(have) >= MAX_SITES:
+        names = ", ".join(s.get("name") or s["id"] for s in have)
         return {"ok": False, "error": f"an account holds {MAX_SITES} websites "
                                       f"({names}) — remove one before adding another"}
     host = _host(url)
-    if host and any(_host(s.get("url")) == host for s in acct.get("sites") or []):
+    if host and any(_host(s.get("url")) == host for s in have):
         return {"ok": False, "error": f"{host} is already one of this account's websites"}
     name = (name or "").strip() or host or "My website"
-    site = {"id": _slug(host or name, "site"), "name": name,
+    # A random name for its folder: the folder says nothing about which website it is.
+    site = {"id": "site-" + secrets.token_hex(5), "name": name,
             "url": (url or "").strip(), "created": int(time.time())}
     d = site_dir(acct["id"], site["id"])
     for sub in ("config", "logs"):
@@ -391,9 +460,9 @@ def add_site(account_id, name, url="") -> dict:
                                          f"SITE_NAME={clean(name)}\n")
         except Exception:
             pass                       # signed out: Setup asks for it instead
-    acct.setdefault("sites", []).append(site)
+    acct.setdefault("sites", []).append(_seal_site(master, site) if acct.get("keys") else site)
     _save(acct)
-    return {"ok": True, "site": site, "account": public(acct)}
+    return {"ok": True, "site": {k: site[k] for k in ("id", "name", "url", "created")}, "account": public(acct)}
 
 
 def _run_going() -> str:
@@ -416,10 +485,11 @@ def open_site(account_id, site_id) -> dict:
     if not site:
         return {"ok": False, "error": "no such website on this account"}
     now = active()
+    site = site_info(acct, site)
     if now == {"account": account_id, "site": site_id}:
         return {"ok": True, "site": site, "unchanged": True}
     if now and _run_going():
-        cur = next((s for s in account(now["account"]).get("sites") or []
+        cur = next((site_info(account(now["account"]), s) for s in account(now["account"]).get("sites") or []
                     if s["id"] == now["site"]), {})
         return {"ok": False, "running": True,
                 "error": f"today's run on {cur.get('name') or 'the open website'} is still "
@@ -553,8 +623,8 @@ def describe() -> dict:
                    retired_original=bool(acct.get("retired_original")),
                    encrypted=bool(acct.get("keys")))
         out.update(account={"id": acct.get("id"), "name": acct.get("name")},
-                   sites=acct.get("sites") or [],
-                   site=next((s for s in acct.get("sites") or [] if s["id"] == a["site"]), {}),
+                   sites=sites(acct),
+                   site=next((s for s in sites(acct) if s["id"] == a["site"]), {}),
                    site_dir=str(site_dir()), account_dir=str(account_dir()))
     return out
 

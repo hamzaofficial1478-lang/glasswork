@@ -288,6 +288,12 @@ async function save() {
   $('#pLang').innerHTML = (OPT.languages || []).map((l) => `<option value="${esc(l.code)}">${esc(l.name)}</option>`).join('');
   $('#pCountry').addEventListener('change', renderRule);
   fill(P || {});
+  // The address they gave when they added the website, so drafting is one press.
+  if (!$('#draftUrl').value.trim()) {
+    const me = await get('/api/account/me');
+    const open = ((me && me.sites) || []).find((x) => x.id === me.open);
+    if (open && open.url) $('#draftUrl').value = open.url;
+  }
 })();
 </script>
 </body>

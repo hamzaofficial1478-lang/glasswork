@@ -24,8 +24,22 @@ website, so nothing is lost.
   manages with the program. It is never the program's address: the program's
   Home (download page, updates, the sealed postbox) goes on a website of the
   program's own, and setting it up refuses any website the program looks after.
-- **His users are kept on his computer**, never readable on any website; people's
-  copies carry none of his side of the program.
+
+## Decided (10 October)
+
+- **No user data at all.** "now i don't want the users data." The users room,
+  the postbox Home, problem reports to the developer, registration and copy
+  counting are gone. Help makes a support report the person sends themselves.
+- **Open source, each copy to itself.** "each program on pc is remains to itself
+  and that pc not to anything else." GPL-3.0. A copy talks only to the services
+  its owner connects; a new version is looked for only when they press the
+  button, from the program's GitHub release page, with nothing about them in
+  the question.
+- **Every account sealed from the others on the same computer.** An account is
+  required from the first run of every installed copy; each website's name and
+  address are sealed in the account file; the sign-in screen shows names only.
+- **New versions** are published by the GitHub check, once per version, after
+  the Setup has been built, installed and tested on Windows.
 
 ---
 

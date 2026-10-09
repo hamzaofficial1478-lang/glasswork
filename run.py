@@ -217,19 +217,10 @@ def update():
     head("Checking for updates")
     code, out = sh(["git", "rev-parse", "--is-inside-work-tree"])
     if code != 0:
-        # A downloaded copy: no git, so it asks its update address instead, and
-        # says what it found. Installing is a button in Settings, never a
-        # surprise at start-up — see coordination/updates.py.
-        try:
-            sys.path.insert(0, str(ROOT))
-            from coordination import updates
-            u = updates.check()
-        except Exception as e:
-            u = {"ok": False, "error": type(e).__name__}
-        if u.get("available"):
-            say(f"  Version {u.get('latest')} is out. Install it from Settings → This program.")
-        else:
-            say("  " + (u.get("why") or u.get("error") or "Not a git checkout — skipping the update."))
+        # An installed copy: no git. It asks nobody anything at start-up — a new
+        # version is looked for only when the person presses "Check for a new
+        # version" in Settings (coordination/updates.py).
+        say("  Not a git copy — look for a new version from Settings → This program.")
         return
 
     code, dirty = sh(["git", "status", "--porcelain"])
@@ -485,7 +476,7 @@ def tests():
             "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
             "coordination.launch_kit_tests", "coordination.posts_tests",
             "coordination.speed_tests", "pipelines.connector_tests",
-            "coordination.publish_tests", "coordination.sealed_tests", "coordination.installer_tests",
+            "coordination.installer_tests", "coordination.isolation_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",
@@ -510,10 +501,9 @@ def tests():
             "pipelines.answers_tests", "pipelines.intel_tests",
             "pipelines.report_tests", "pipelines.run_tests",
             "pipelines.keepgoing_tests", "pipelines.index_tests"]
-    # A copy he gives out has no publisher side (coordination/product.py,
-    # PUBLISHER_ONLY), so the suites for it are not there either. Asked for
-    # anyway, they would fail on a missing file — and the IT Releaser runs this
-    # whole list before anything goes on that person's website.
+    # A suite whose file is not in this copy is skipped rather than failed: the
+    # IT Releaser runs this whole list before anything goes on a person's
+    # website, and a missing test file must never be what blocks it.
     mods = [m for m in mods if (ROOT / (m.replace(".", "/") + ".py")).exists()]
     # SAY WHAT ACTUALLY FAILED, NOT JUST WHICH FILE.
     #

@@ -30,9 +30,11 @@ def _cipher_ready() -> str:
     return ""
 
 
-def _sites(acct) -> list:
+def _sites(acct, key_hex=None) -> list:
+    """The account's websites, opened with its key (the one just unlocked, or the office's)."""
+    master = bytes.fromhex(key_hex) if key_hex else None
     return [{"id": s["id"], "name": s.get("name"), "url": s.get("url", "")}
-            for s in (acct or {}).get("sites") or []]
+            for s in workspace.sites(acct, master)]
 
 
 def _legacy_site():
@@ -58,9 +60,9 @@ def _legacy_site():
 def cmd_list(_):
     a = workspace.active()
     url, name = _legacy_site()
+    # Read before anyone signs in: who can sign in, and nothing about their websites.
     return {"ok": True,
-            "accounts": [{"id": x["id"], "name": x.get("name"), "sites": _sites(x)}
-                         for x in workspace.accounts()],
+            "accounts": [{"id": x["id"], "name": x.get("name")} for x in workspace.accounts()],
             "active": a, "max_sites": workspace.MAX_SITES,
             "legacy_present": workspace.legacy_present(),
             "legacy_site": {"url": url, "name": name},
@@ -73,7 +75,10 @@ def cmd_sign_up(d):
         return {"ok": False, "error": bad}
     if (d.get("password") or "") != (d.get("confirm") or d.get("password") or ""):
         return {"ok": False, "error": "the two passwords do not match"}
-    return workspace.create_account(d.get("name"), d.get("password") or "")
+    r = workspace.create_account(d.get("name"), d.get("password") or "")
+    if r.get("ok"):
+        workspace.close()          # a new person starts with nobody else's website open
+    return r
 
 
 def _open_first(acct_id):
@@ -84,6 +89,9 @@ def _open_first(acct_id):
         return a["site"]
     sites = acct.get("sites") or []
     if not sites:
+        # Nothing of theirs to open — and whoever's website was open before is
+        # not left open for them.
+        workspace.close()
         return None
     r = workspace.open_site(acct_id, sites[0]["id"])
     return sites[0]["id"] if r.get("ok") else None
@@ -95,7 +103,7 @@ def cmd_sign_in(d):
         return r
     acct_id = r["account"]["id"]
     r["site"] = _open_first(acct_id)
-    r["sites"] = _sites(workspace.account(acct_id))
+    r["sites"] = _sites(workspace.account(acct_id), r.get("key"))
     return r
 
 
@@ -109,7 +117,7 @@ def cmd_recover(d):
     r = workspace.recover(d.get("account"), d.get("recovery_key"), d.get("password"))
     if r.get("ok"):
         r["site"] = _open_first(r["account"]["id"])
-        r["sites"] = _sites(workspace.account(r["account"]["id"]))
+        r["sites"] = _sites(workspace.account(r["account"]["id"]), r.get("key"))
     return r
 
 

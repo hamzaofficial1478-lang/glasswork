@@ -202,13 +202,13 @@ function renderState() {
   n.style.display = '';
   if (!S.chosen) {
     n.className = 'note';
-    n.innerHTML = FIRST ? '<b>One last step.</b> Choose how your agency thinks, paste your key, and press Save. '
+    n.innerHTML = FIRST ? '<b>Next: how your agency thinks.</b> Choose the AI, paste your key, and press Save. '
       + 'Nothing is spent until you start a day\'s work.'
       : 'No AI is chosen yet, so no desk can think. Choose one below.';
   } else if (S.ready) {
     n.className = 'note ok';
     n.innerHTML = `Your agency thinks with <b>${esc(S.name)}</b>, and it is ready.`
-      + (FIRST ? ' <a href="/">Go to your office →</a>' : '');
+      + (FIRST ? ' <a href="/">Go to your office →</a> It shows what is left: connecting your website, and your first orders.' : '');
   } else {
     n.className = 'note bad';
     n.innerHTML = `Your agency is set to think with <b>${esc(S.name)}</b>, but it is not ready: ${esc(S.why)}`;
