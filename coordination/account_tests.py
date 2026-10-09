@@ -319,6 +319,12 @@ def test_the_real_server():
         check("Setup refuses a wrong password", st, 401)
         st, page, _ = s.req("POST", "/api/setup/unlock", {"password": "correct horse"}, cookie, form=True)
         check("and opens with the account password", st, 302)
+        # The Users room and the Publisher card ask for it in place, and want an answer, not a page.
+        st, j, _ = s.req("POST", "/api/setup/unlock", {"password": "wrong", "json": True}, cookie)
+        check("asked in place, a wrong password gets a plain no", (st, j.get("ok")), (401, False))
+        st, j, ticket = s.req("POST", "/api/setup/unlock", {"password": "correct horse", "json": True}, cookie)
+        check("  and the right one a plain yes, with the Setup ticket", (st, j.get("ok"), "glasswork_setup=" in ticket),
+              (200, True, True))
         st, j, _ = s.req("POST", "/api/account/add-site",
                          {"name": "Second Shop", "url": "https://secondshop.ae"}, cookie)
         second = j.get("site", {}).get("id")

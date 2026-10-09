@@ -1,8 +1,8 @@
 # Putting your program out — the owner's guide
 
-Everything here is done from your own copy of the program, in **Settings →
-Publisher**. Your copy is the one the program is made from; everyone else's copy
-is installed from the Setup.exe you put out.
+Everything here is done from your own copy of the program — **Your users** in
+the menu, and **Settings → Publisher**. Your copy is the one the program is made
+from; everyone else's copy is installed from the Setup.exe you put out.
 
 ---
 
@@ -18,13 +18,20 @@ Your Home is one folder on your own website. It does three jobs:
 
 How:
 
-1. **Settings → Publisher.** Type your website (`https://www.worlddealtechnicalservices.com`)
-   and the email that should hear about new reports. Press **Make my Glasswork Home**.
-2. A file called `glasswork-home.zip` downloads. Unzip it.
+1. Click **Your users** in the menu on the left (on a phone: *More → Your
+   users*). Type your website (`https://www.worlddealtechnicalservices.com`)
+   and the email that should hear about new reports. Press **Make it**, and
+   type the password you sign in with when it asks.
+2. Press **Download glasswork-home.zip**. Unzip it (right-click → *Extract All*).
 3. In your hosting's **File Manager**, open your website's main folder (the one
-   with your home page in it) and upload the **glasswork-home** folder there.
-4. Back in Settings → Publisher, press **Check it**. It should say *Your Home
-   answers and knows you.*
+   with your home page in it, usually `public_html`) and upload the
+   **glasswork-home** folder there.
+4. Back in Your users, press **Check it**. It should say *Your Home answers and
+   knows you*, and the room opens.
+
+(The same thing is in **Settings → Publisher**, with *Make my Glasswork Home*.
+After updating the program, close it and open it again if Your users is not in
+the menu.)
 
 Your download page is then `https://www.worlddealtechnicalservices.com/glasswork-home/`.
 
@@ -82,7 +89,11 @@ inside the program never show it, only a fresh download does.
 
 ## 4. Your users and their issues
 
-**Your users** appears in your menu once your Home is set up. It has two tabs.
+**Your users** is always in the menu on your own copy (the one the program is
+made from — copies installed from your Setup.exe do not have it). Until your
+Home is on your website, it walks you through section 1; after that it has two
+tabs. What it shows lives on your website's Home, so it is the same on any
+computer you set up as the publisher.
 
 **People** — every copy of the program in use:
 

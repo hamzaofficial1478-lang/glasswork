@@ -456,16 +456,21 @@ app.use((req, res, next) => {
     error: "Setup is locked. Open the Setup screen and enter your password." });
 });
 
-app.post("/api/setup/unlock", express.urlencoded({ extended: false }), async (req, res) => {
+app.post("/api/setup/unlock", express.urlencoded({ extended: false }), JSON_BODY, async (req, res) => {
   const supplied = (req.body && req.body.password) || "";
   const ok = accountsExist()
     ? !!(SIGNED_IN && (await pyAccounts("check", { account: SIGNED_IN.account, password: supplied })).ok)
     : passwordOk(supplied);
   const next = (req.body && req.body.next) === "/engine" ? "/engine" : "/setup";
+  // The app asks for the password in place (the Users room, the Publisher
+  // card) and wants a plain answer, not a page to follow.
+  const wantsJson = req.is("application/json") || (req.body && req.body.json === true);
   if (!ok) {
+    if (wantsJson) return res.status(401).json({ ok: false, error: "That is not the password." });
     return res.status(401).type("html").send(unlockPage("That is not the password.", next));
   }
   res.setHeader("Set-Cookie", setupCookie());
+  if (wantsJson) return res.json({ ok: true });
   res.redirect(next);
 });
 

@@ -162,6 +162,8 @@ ol.feed li:last-child{border-bottom:0}
 .upd-banner[hidden],body.drawer-open .upd-banner{display:none}
 .reg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 16px}
 .reg-grid input{font-weight:400}
+.steps{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:14px;font-size:15px;line-height:1.55}
+.steps .btn{margin-left:6px}
 @media (max-width:760px){.upd-banner{left:12px;right:12px;bottom:84px;max-width:none}}
 
 /* phone */
@@ -2377,7 +2379,12 @@ const PUB = {filter: 'open', list: null, tab: 'people', who: 'all'};
 async function publisherNav() {
   const p = await api('/api/publisher');
   S.publisher = !!(p && p.ok && p.publisher);
-  const nav = $('#navReports'); if (nav) nav.hidden = !S.publisher;
+  // "i updated the program and did not get the users managing room" — it was
+  // hidden until the Home was set up, and setting it up lived at the bottom of
+  // Settings. On the copy the program is made from it is always in the menu
+  // now, and the room itself walks through the setting up.
+  S.canPublish = !!(p && p.ok && (p.publisher || p.can_publish));
+  const nav = $('#navReports'); if (nav) nav.hidden = !S.canPublish;
   if (!S.publisher) return;
   const inb = await api('/api/publisher/inbox');
   const n = Number((inb && inb.new) || 0), c = $('#navRep');
@@ -2398,15 +2405,105 @@ function who(u) {
   const p = (u && u.person) || null;
   return p ? (p.name || p.business || p.email) : 'Not registered';
 }
+/* Some publisher settings sit behind the Setup password. Asked for here, in
+   place — the same password he signs in with — rather than sending him off to
+   another page and back. */
+function askPassword(box, why) {
+  return new Promise((resolve) => {
+    box.innerHTML = `<div class="note" style="display:flex;flex-direction:column;gap:8px"><span>${esc(why)}</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input type="password" id="unlockPw" autocomplete="current-password" placeholder="Your password" style="max-width:260px">
+      <button class="btn small" type="button" id="unlockGo">Confirm</button><button class="btn quiet small" type="button" id="unlockNo">Cancel</button></div></div>`;
+    const done = (v) => { resolve(v); };
+    $('#unlockGo').onclick = () => done($('#unlockPw').value);
+    $('#unlockPw').onkeydown = (e) => { if (e.key === 'Enter') done($('#unlockPw').value); };
+    $('#unlockNo').onclick = () => done(null);
+    $('#unlockPw').focus();
+  });
+}
+async function unlocked(call, box) {
+  let j = await call();
+  for (let i = 0; i < 3 && j && j.needsSetupUnlock; i++) {
+    const pw = await askPassword(box, i ? 'That was not the password — try again.' : 'To change publisher settings, confirm it is you: the password you sign in with.');
+    if (pw === null) { box.innerHTML = ''; return {ok: false, error: 'Left as it was.'}; }
+    const u = await api('/api/setup/unlock', {password: pw, json: true});
+    if (u && u.ok) { box.innerHTML = ''; j = await call(); }
+  }
+  return j || {ok: false};
+}
+async function downloadHome(box) {
+  const get = async () => {
+    try {
+      const r = await fetch('/api/publisher/home.zip', {cache: 'no-store'});
+      if (r.ok) return {ok: true, blob: await r.blob()};
+      try { return await r.json(); } catch (e) { return {ok: false, error: 'It could not be made.'}; }
+    } catch (e) { return {ok: false, error: 'The office did not answer.'}; }
+  };
+  const j = await unlocked(get, box);
+  if (!j.ok) { toast(j.error || 'Not downloaded.'); return false; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(j.blob); a.download = 'glasswork-home.zip';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('Downloaded glasswork-home.zip — now unzip it and upload the folder to your website.');
+  return true;
+}
+function homeSteps(home) {
+  return `<ol class="steps">
+    <li><b>Download it.</b> <button class="btn small" type="button" id="homeGet">Download glasswork-home.zip</button></li>
+    <li><b>Unzip it.</b> Right-click the file → <i>Extract All</i>. You get a folder called <span class="mono">glasswork-home</span>.</li>
+    <li><b>Put it on your website.</b> In your hosting's <i>File Manager</i>, open your website's main folder — the one with your home page in it, usually <span class="mono">public_html</span> — and upload the whole <span class="mono">glasswork-home</span> folder there.</li>
+    <li><b>Check it.</b> <button class="btn ghost small" type="button" id="homeCheck">Check it</button> <span class="muted" id="homeSay" style="font-size:14px"></span>
+      ${home ? `<br><span class="muted" style="font-size:13.5px">It should answer at <span class="mono">${esc(home)}/</span> — your download page for new people.</span>` : ''}</li>
+  </ol><div id="homeBox"></div>`;
+}
+function wireHomeSteps(main) {
+  const g = $('#homeGet'); if (g) g.onclick = () => downloadHome($('#homeBox'));
+  const c = $('#homeCheck'); if (c) c.onclick = async () => {
+    c.disabled = true; $('#homeSay').textContent = 'Knocking on your website…';
+    const j = await api('/api/publisher/check', {}); c.disabled = false;
+    if (j.ok) { toast(j.head || 'Your Home answers.'); reports(main); publisherNav(); return; }
+    $('#homeSay').textContent = j.error || 'It did not answer.';
+  };
+}
 async function reports(main) {
   const p = await api('/api/publisher');
-  if (!(p && p.publisher)) {
-    main.innerHTML = `<div class="page narrow">${head('Your users')}<div class="card">${empty('Not set up on this copy',
-      'The people using your program, and their issues, come to your Glasswork Home. Set it up in Settings → Publisher.')}</div></div>`;
+  if (!(p && (p.publisher || p.can_publish))) {
+    main.innerHTML = `<div class="page narrow">${head('Your users')}<div class="card">${empty('Not on this copy',
+      'The users room is on the copy the program is made from — the publisher\'s own.')}</div></div>`;
+    return;
+  }
+  if (!p.publisher) {
+    const site = (((S.brand || {}).website || {}).siteUrl) || '';
+    main.innerHTML = `<div class="page narrow">${head('Your users',
+      'Everyone using your program, and their issues, in one place. It is kept on your own website, in a folder called your Glasswork Home — one minute to make here, a few minutes to upload once.')}
+      <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
+        <h2 style="margin:0;font-size:18px">Make your Glasswork Home</h2>
+        <label for="homeSite" style="font-weight:600">Your website</label><input id="homeSite" placeholder="https://www.yourwebsite.com" value="${esc(site)}">
+        <label for="homeMail" style="font-weight:600">Email a new issue to <span class="muted" style="font-weight:400">(optional)</span></label><input id="homeMail" type="email" placeholder="you@yourwebsite.com">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" type="button" id="homeMake">Make it</button><span class="muted" id="homeMakeSay" style="font-size:14px"></span></div>
+        <div id="homeMakeBox"></div>
+        <p class="muted" style="margin:0;font-size:14px">Then you download one folder and upload it to your website, and this room fills up as people install and open the program. The same Home carries your updates to them and is their download page.</p>
+      </section></div>`;
+    $('#homeMake').onclick = async () => {
+      const b = $('#homeMake'); b.disabled = true; $('#homeMakeSay').textContent = 'Making it…';
+      const body = {site: $('#homeSite').value.trim(), email: $('#homeMail').value.trim()};
+      const j = await unlocked(() => api('/api/publisher/setup', body), $('#homeMakeBox'));
+      b.disabled = false;
+      if (!j.ok) { $('#homeMakeSay').textContent = j.error || 'Not made.'; return; }
+      VIEW.dirty = false; toast('Made. Now put it on your website — the steps are on this page.');
+      await publisherNav(); reports(main);
+    };
     return;
   }
   PUB.tab = PUB.tab || 'people';
   const [us, inb] = await Promise.all([api('/api/publisher/users'), api('/api/publisher/inbox')]);
+  if (us && us.ok === false && !(us.users || []).length) {
+    main.innerHTML = `<div class="page narrow">${head('Your users', 'Your Glasswork Home is made. One more thing: it has to be on your website before people can reach it.')}
+      <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
+        <h2 style="margin:0;font-size:18px">Put your Home on your website</h2>
+        <div class="note">Right now: ${esc(sentence((us && us.error) || 'your Home did not answer').replace(/([^.?!])$/, '$1.'))}</div>
+        ${homeSteps(p.home_url)}</section></div>`;
+    wireHomeSteps(main);
+    return;
+  }
   const users = (us && us.users) || [], c = (us && us.counts) || {};
   const byCopy = Object.fromEntries(users.map((u) => [u.id, u]));
   const all = (inb && inb.reports) || [];
@@ -2651,7 +2748,7 @@ async function publisherCard() {
       ${p.publisher ? `<div><b style="font-weight:600">Your Glasswork Home</b> <span class="muted mono" style="font-size:13px">${esc(p.home_url)}</span></div>
         <p class="muted" style="margin:0;font-size:14px">Reports from the people using your program arrive there, and every version you put out goes there for them to update to. A download page for new people is at that address too.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn ghost small" type="button" id="pubCheck">Check it</button>
-          <a class="btn quiet small" href="/api/publisher/home.zip">Download it again</a><a class="btn quiet small" href="#reports">Read the reports</a>
+          <button class="btn quiet small" type="button" id="pubAgain">Download it again</button><a class="btn quiet small" href="#reports">Open Your users</a>
           <span class="muted" id="pubSay" style="font-size:14px"></span></div>
         <div style="border-top:1px solid var(--line-soft);padding-top:12px;display:flex;flex-direction:column;gap:10px">
           <b style="font-weight:600">Put out version ${esc(p.version)}</b>
@@ -2664,25 +2761,27 @@ async function publisherCard() {
         <label for="pubSite" style="font-weight:600">Your website</label><input id="pubSite" placeholder="https://www.yourwebsite.com">
         <label for="pubMail" style="font-weight:600">Email a new report to <span class="muted" style="font-weight:400">(optional)</span></label><input id="pubMail" type="email" placeholder="you@yourwebsite.com">
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="pubMake">Make my Glasswork Home</button><span class="muted" id="pubSay" style="font-size:14px"></span></div>`}
+      <div id="pubUnlock"></div>
     </div>`;
   const say = (t) => { const x = $('#pubSay'); if (x) x.textContent = t; };
+  const again = $('#pubAgain'); if (again) again.onclick = () => downloadHome($('#pubUnlock'));
   const mk = $('#pubMake'); if (mk) mk.onclick = async () => {
     mk.disabled = true; say('Making it…');
-    const j = await api('/api/publisher/setup', {site: $('#pubSite').value.trim(), email: $('#pubMail').value.trim()});
+    const body = {site: $('#pubSite').value.trim(), email: $('#pubMail').value.trim()};
+    const j = await unlocked(() => api('/api/publisher/setup', body), $('#pubUnlock'));
     mk.disabled = false;
-    if (j.needsSetupUnlock) { say('This is behind your Setup password — open Setup once, then come back.'); return; }
     if (!j.ok) { say(j.error || 'Not made.'); return; }
-    toast('Made. Download it, unzip it and upload the glasswork-home folder to your website.');
-    location.href = '/api/publisher/home.zip';
-    setTimeout(publisherCard, 800);
+    await downloadHome($('#pubUnlock'));
+    publisherNav(); setTimeout(publisherCard, 300);
   };
   const ck = $('#pubCheck'); if (ck) ck.onclick = async () => { ck.disabled = true; say('Knocking…'); const j = await api('/api/publisher/check', {}); ck.disabled = false; say(j.ok ? j.head : (j.error || 'It did not answer.')); };
   const go = $('#pubGo'); if (go) go.onclick = async () => {
     const exe = $('#pubExe').checked;
     if (!confirm(`Put out version ${p.version}${exe ? ', with the Windows installer' : ''}? Everyone using the program is told the next time it opens.`)) return;
     go.disabled = true;
-    const j = await api('/api/publisher/publish', {notes: $('#pubNotes').value.trim(), installer: exe});
-    if (!j.ok) { go.disabled = false; $('#pubJob').textContent = j.needsSetupUnlock ? 'This is behind your Setup password — open Setup once, then come back.' : (j.error || 'It did not start.'); return; }
+    const body = {notes: $('#pubNotes').value.trim(), installer: exe};
+    const j = await unlocked(() => api('/api/publisher/publish', body), $('#pubUnlock'));
+    if (!j.ok) { go.disabled = false; $('#pubJob').textContent = j.error || 'It did not start.'; return; }
     VIEW.dirty = false;
     const tick = async () => {
       const s = await ask('/api/publisher/job');
@@ -2735,7 +2834,7 @@ function more(main) {
     ${item('#google', 'On Google', 'Which pages Google lists')}${item('#check', 'Website Check', 'A report on any website')}
     ${item('#settings', 'Settings', 'Your business, the AI, your account')}
     ${item('#help', 'Help and reports', 'Tell us about a problem, and see the answers')}
-    ${S.publisher ? item('#reports', 'Your users', 'Who uses your program, and their issues') : ''}</div></div>`;
+    ${S.canPublish ? item('#reports', 'Your users', 'Who uses your program, and their issues') : ''}</div></div>`;
 }
 
 /* ---- routing ----
