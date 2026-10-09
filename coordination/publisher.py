@@ -18,8 +18,9 @@ WHERE THINGS ARE
   — are kept in data/publisher/records.locked on his computer, locked with a key
   made from his postbox key. They are not on his website at all.
 
-  His Glasswork Home (publish-to-your-site/glasswork-home) is a postbox on his
-  website. Copies post envelopes SEALED with his public postbox key; the Home
+  His Glasswork Home (publish-to-your-site/glasswork-home) is a postbox on the
+  PROGRAM'S OWN website — never on a website the program looks after for a
+  client (setup() refuses those). Copies post envelopes SEALED with his public postbox key; the Home
   cannot read them; collect() takes them home, opens them here, files them in
   his records and has the Home delete them. His answers go back sealed to the
   person's own copy.
@@ -139,13 +140,41 @@ def publisher_view() -> dict:
             "latest": st.get("latest") or ""}
 
 
+def managed_hosts() -> set:
+    """
+    The websites this program looks after for a business. "why should i gave my
+    website link to others while am managing the website of my client ... the
+    program is mine not the website" — the program's own Home never goes on one.
+    """
+    hosts = set()
+    for a in workspace.accounts():
+        for s in a.get("sites") or []:
+            h = workspace._host(s.get("url"))
+            if h:
+                hosts.add(h)
+    try:
+        from . import site as site_mod
+        h = workspace._host(site_mod.from_env_file())
+        if h:
+            hosts.add(h)
+    except Exception:
+        pass
+    return hosts
+
+
 def setup(site, email="") -> dict:
     """Make this copy the publisher's: a Home address and three keys, all kept here."""
     site = str(site or "").strip().rstrip("/")
     if site and not site.lower().startswith(("http://", "https://")):
         site = "https://" + site
     if not site.lower().startswith(("https://", "http://127.0.0.1", "http://localhost")):
-        return {"ok": False, "error": "Give your website's address, starting https://"}
+        return {"ok": False, "error": "Give your program's own website, starting https://"}
+    host = workspace._host(site)
+    if host in managed_hosts():
+        return {"ok": False, "client_site": True,
+                "error": (f"{host} is a website this program looks after for a business, so the program's "
+                          "own Home does not go there. Use a website that belongs to the program — for "
+                          "example a domain you buy for it.")}
     email = str(email or "").strip()[:200]
     p = _pub()
     p["home_key"] = p.get("home_key") or secrets.token_urlsafe(36)

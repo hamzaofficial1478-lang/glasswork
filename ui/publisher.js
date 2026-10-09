@@ -106,13 +106,16 @@ async function reports(main) {
     return;
   }
   if (!p.ready) {
-    const site = p.home_url ? p.home_url.replace(/\/glasswork-home$/, '') : ((((S.brand || {}).website || {}).siteUrl) || '');
+    // Never filled in with the website the agency looks after: that is a client's, not the program's.
+    const site = p.home_url ? p.home_url.replace(/\/glasswork-home$/, '') : '';
     main.innerHTML = `<div class="page narrow">${head('Your users',
-      'Everyone using your program, and their issues, kept here on this computer. Your website only carries a postbox: what people send is sealed on their computer so only this one can open it, and it leaves the website as soon as you collect it.')}
+      'Everyone using your program, and their issues, kept here on this computer. Your program\'s own website only carries a postbox and the download page: what people send is sealed on their computer so only this one can open it, and it leaves the website as soon as you collect it.')}
       <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
         <h2 style="margin:0;font-size:18px">${p.publisher ? 'Make your Glasswork Home again' : 'Make your Glasswork Home'}</h2>
         ${p.publisher ? '<div class="note">Your Home is from before your users moved onto this computer. Make it again and upload the new folder in place of the old one.</div>' : ''}
-        <label for="homeSite" style="font-weight:600">Your website</label><input id="homeSite" placeholder="https://www.yourwebsite.com" value="${esc(site)}">
+        <label for="homeSite" style="font-weight:600">Your program's own website</label>
+        <span class="muted" style="font-size:14px;margin-top:-6px">A website that belongs to you and the program — not a client's website the agency looks after. People download the program from it.</span>
+        <input id="homeSite" placeholder="https://www.yourprogram.com" value="${esc(site)}">
         <label for="homeMail" style="font-weight:600">Email me when a report is waiting <span class="muted" style="font-weight:400">(optional — the email says only that one is waiting)</span></label><input id="homeMail" type="email" placeholder="you@yourwebsite.com" value="${esc(p.email || '')}">
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" type="button" id="homeMake">Make it</button><span class="muted" id="homeMakeSay" style="font-size:14px"></span></div>
         <div id="homeMakeBox"></div>
@@ -273,7 +276,7 @@ async function publisherCard() {
   box.innerHTML = `<h2 class="label" style="margin:0">Publisher — for whoever makes this program</h2>
     <div class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:12px">
       ${p.ready ? `<div><b style="font-weight:600">Your Glasswork Home</b> <span class="muted mono" style="font-size:13px">${esc(p.home_url)}</span></div>
-        <p class="muted" style="margin:0;font-size:14px">A postbox and a download page on your website. Your users and their reports are kept on this computer, not there. Every version you put out goes there for people to update to.</p>
+        <p class="muted" style="margin:0;font-size:14px">A postbox and a download page on your program's own website. Your users and their reports are kept on this computer, not there. Every version you put out goes there for people to update to.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn ghost small" type="button" id="pubCheck">Check it</button>
           <button class="btn quiet small" type="button" id="pubAgain">Download it again</button><a class="btn quiet small" href="#reports">Open Your users</a>
           <span class="muted" id="pubSay" style="font-size:14px"></span></div>
@@ -284,7 +287,7 @@ async function publisherCard() {
           <label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" id="pubExe"> Build the Windows installer too (on a Windows computer, a few minutes)</label>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="pubGo">Put it out</button><span class="muted" id="pubJob" style="font-size:14px"></span></div>
         </div>`
-      : `<p style="margin:0">Your users and their reports, kept on this computer; your updates and a download page on your own website. One folder, uploaded once.</p>
+      : `<p style="margin:0">Your users and their reports, kept on this computer; your updates and a download page on your program's own website — never a client's. One folder, uploaded once.</p>
         <a class="btn small" href="#reports" style="align-self:flex-start">Set it up in Your users</a>`}
       <div id="pubUnlock"></div>
     </div>`;

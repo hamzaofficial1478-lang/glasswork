@@ -17,6 +17,16 @@ website, so nothing is lost.
   every trade and country (services, lead types, areas, phone formats,
   languages, and each country's privacy law), not just Gulf trades.
 
+## Decided (9 October)
+
+- **The program is his; the websites are his clients'.** "the program is mine
+  not the website." `worlddealtechnicalservices.com` is a client's website he
+  manages with the program. It is never the program's address: the program's
+  Home (download page, updates, the sealed postbox) goes on a website of the
+  program's own, and setting it up refuses any website the program looks after.
+- **His users are kept on his computer**, never readable on any website; people's
+  copies carry none of his side of the program.
+
 ---
 
 ## What we are building

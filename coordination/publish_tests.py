@@ -35,7 +35,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from . import product, publisher, sealed, support, updates
+from . import product, publisher, sealed, support, updates, workspace
 
 ROOT = Path(__file__).parents[1]
 _fail = []
@@ -267,6 +267,23 @@ def test_an_older_home():
         check("a Home older than this is not trusted with anything", (old.get("ok"), old.get("old_home")), (False, True))
 
 
+def test_never_on_a_clients_website():
+    """
+    "why should i gave my website link to others while am managing the website
+     of my clinet that is not my setup website the program is mine not the website"
+    """
+    print("\nThe program's Home never goes on a website the program looks after for a client:")
+    with Home():
+        acct = workspace.create_account("Client office")["account"]
+        workspace.add_site(acct["id"], "A client", "https://www.client-glazing.example")
+        r = publisher.setup("https://client-glazing.example", "")
+        check("a client's website is refused for the Home", (r.get("ok"), r.get("client_site")), (False, True))
+        check("  and nothing about the Home changed", product.publisher()["public"]["home_url"].startswith("http://127.0.0.1"),
+              True)
+        check("the program's own website is still fine", publisher.setup(product.publisher()["public"]["home_url"]
+                                                                          .rsplit("/glasswork-home", 1)[0]).get("ok"), True)
+
+
 def test_putting_a_version_out():
     print("\nA version put out is signed, knows his Home, and leaves his side of the program out:")
     if not (ROOT / ".git").exists():
@@ -307,7 +324,7 @@ def main():
         print("SKIPPED: PHP is not installed here, so the Home cannot be run.")
         return 0
     for t in (test_a_report_and_its_answer, test_nobody_else_gets_in, test_your_users, test_an_older_home,
-              test_putting_a_version_out):
+              test_never_on_a_clients_website, test_putting_a_version_out):
         t()
     print()
     if _fail:

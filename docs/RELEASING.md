@@ -8,7 +8,15 @@ below).
 
 ## 1. Once: your Glasswork Home (about five minutes)
 
-Your Home is one folder on your own website. It does three jobs:
+**The program is yours; the websites it looks after are your clients'.**
+`worlddealtechnicalservices.com` is a client's website you manage — it is not
+the program's, and the program's Home never goes on it (the program refuses
+any website it looks after). The Home needs a website that belongs to the
+program: a domain you buy for it (for example `yourprogram.com`), or a
+subdomain of a website you personally own (`app.yourcompany.com`). Any ordinary
+hosting plan with PHP will do — the Home is one PHP file and a few folders.
+
+Your Home is one folder on the program's own website. It does three jobs:
 
 - **A sealed postbox.** When someone sends a problem report, registers, or
   their copy says "I'm in use", it is sealed on *their* computer so that only
@@ -24,18 +32,19 @@ Someone who got into your hosting would find sealed envelopes and nothing else.
 How:
 
 1. Click **Your users** in the menu on the left (on a phone: *More → Your
-   users*). Type your website (`https://www.worlddealtechnicalservices.com`).
+   users*). Type the program's own website (`https://www.yourprogram.com`).
    If you like, add the email that should hear "a report is waiting" (the email
    never says what the report says). Press **Make it**, and type the password
    you sign in with when it asks.
 2. Press **Download glasswork-home.zip**. Unzip it (right-click → *Extract All*).
-3. In your hosting's **File Manager**, open your website's main folder (the one
-   with your home page in it, usually `public_html`) and upload the
+3. In that website's hosting **File Manager**, open its main folder (the one
+   with its home page in it, usually `public_html`) and upload the
    **glasswork-home** folder there. If there is one from before, replace it.
 4. Back in Your users, press **Check it**. It should say *Your Home answers and
    knows you*, and the room opens.
 
-Your download page is then `https://www.worlddealtechnicalservices.com/glasswork-home/`.
+Your download page is then `https://www.yourprogram.com/glasswork-home/` — that
+is the only link you give people. No client's website is ever named to them.
 
 ### Your three keys — back them up
 
