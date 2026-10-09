@@ -47,6 +47,10 @@ def check(name, got, want):
 
 
 APP = (ROOT / "ui" / "app.html").read_text(encoding="utf-8")
+# The publisher's users room, on his own copy only (it is left out of every
+# copy he gives out). Where it is, it is held to the same rules as the app.
+PUB_FILE = ROOT / "ui" / "publisher.js"
+PUBJS = PUB_FILE.read_text(encoding="utf-8") if PUB_FILE.exists() else ""
 SERVER = (ROOT / "server.js").read_text(encoding="utf-8")
 RUN = (ROOT / "run.py").read_text(encoding="utf-8")
 
@@ -72,7 +76,7 @@ def test_every_address_it_asks_for_exists():
     print("\nEvery address the new app asks for is one the server answers:")
     routes = _routes()
     asked = set()
-    for m in re.finditer(r"api\('(/api/[^'?]+)(?:\?[^']*)?'(\s*,\s*([^)]+))?\)", APP):
+    for m in re.finditer(r"api\('(/api/[^'?]+)(?:\?[^']*)?'(\s*,\s*([^)]+))?\)", APP + PUBJS):
         method = "GET" if not m.group(2) else "POST"
         asked.add((method, m.group(1)))
     # A route with a parameter (/api/review/start/:job) answers every value of it.
@@ -103,12 +107,34 @@ def test_nothing_from_elsewhere():
 def test_data_is_escaped():
     print("\nWhat the agency says is put on screen as text, never as markup:")
     risky = []
-    for m in re.finditer(r"\$\{([^{}]*?(?:\.(?:text|why|what|title|company|summary|url|email|area|head|name|segment|source|page)\b)[^{}]*)\}", APP):
+    for m in re.finditer(r"\$\{([^{}]*?(?:\.(?:text|why|what|title|company|summary|url|email|area|head|name|segment|source|page)\b)[^{}]*)\}", APP + PUBJS):
         expr = m.group(1)
         # row(), pill() and panelHead() escape what they are given themselves.
         if not any(h in expr for h in ("esc(", "deskName(", "row(", "pill(", "panelHead(")):
             risky.append(expr.strip()[:60])
     check("every agency field inside the markup goes through esc()", risky, [])
+
+
+def test_the_users_room_is_his_alone():
+    """
+    "will the users will see that section YOUR USERS Section? ... the users
+     should not have the program back end"
+    """
+    print("\nThe users room is the publisher's alone:")
+    check("the app itself has no users room in it", any(w in APP for w in ("Your users", "/api/publisher/users",
+                                                                            "/api/publisher/collect")), False)
+    check("  it loads one only when the office says this copy is the publisher's",
+          "p && p.ok && p.can_publish" in APP and "s.src = '/publisher.js'" in APP, True)
+    check("the office says so only where his side of the program is",
+          'const PUBLISHER_HERE = fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));' in SERVER
+          and 'if (!PUBLISHER_HERE) return res.json({ ok: true, publisher: false, can_publish: false });' in SERVER, True)
+    check("  and everything under it answers 404 where it is not",
+          'app.use("/api/publisher", (_q, res, next) => PUBLISHER_HERE ? next()' in SERVER, True)
+    if not PUBJS:
+        print("  SKIP  this copy has no users room, as a copy given out should not")
+        return
+    check("the room says where the records are: on this computer", "Kept on this computer — not on your website." in PUBJS, True)
+    check("  and collects from the postbox when it is opened", "api('/api/publisher/collect', {})" in PUBJS, True)
 
 
 def test_the_connection_summary():
@@ -182,6 +208,7 @@ def main():
     test_light_and_dark()
     test_nothing_from_elsewhere()
     test_data_is_escaped()
+    test_the_users_room_is_his_alone()
     test_the_connection_summary()
     test_the_agency_floor()
     test_mail_content_and_the_shelf()

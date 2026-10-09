@@ -17,13 +17,16 @@ Keep your recovery key safe: without your password and your recovery key, your
 data cannot be opened again by anyone.
 
 WHAT THE PUBLISHER DOES RECEIVE
-- When the program looks for updates: a random number for your copy, its
-  version and the kind of computer, so copies in use can be counted. You can
-  switch this off in Help and reports; updates are still looked for.
+- Once a day: a random number for your copy, its version and the kind of
+  computer, so copies in use can be counted. You can switch this off in Help
+  and reports; updates are still looked for.
 - Only if you choose to register: the name, business, email, phone, website
   and country you type. You can withdraw it at any time.
 - Only if you send a problem report: what you wrote and, if you tick the box,
   a support report with every key, password, address and number taken out.
+All of it is sealed on your computer so that only the publisher's own
+computer can open it. It waits, unreadable, on the publisher's website until
+their program collects it, and is then deleted there.
 
 SERVICES YOU CONNECT
 The AI company, Google, maps, email and your website are reached with your own

@@ -40,6 +40,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from coordination import diagnostics, product, updates  # noqa: E402
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+
+# Making a release is the publisher's side, which a copy he gives out does not
+# have; the release test steps aside there. Everything a copy does — check,
+# verify, install, undo — is tested everywhere.
+try:
+    from coordination import publisher  # noqa: E402
+except ImportError:
+    publisher = None
 
 _fail = []
 
@@ -69,19 +79,31 @@ class _Copy:
         (self.dir / ".env").write_text("ANTHROPIC_API_KEY=keep-me\n", encoding="utf-8")
         (self.dir / "data").mkdir()
         (self.dir / "data" / "account.json").write_text('{"me": 1}', encoding="utf-8")
-        self.saved = (updates.ROOT, product.ROOT, product.FILE)
+        self.saved = (updates.ROOT, product.ROOT, product.FILE, publisher.ROOT if publisher else None)
         updates.ROOT = product.ROOT = self.dir
+        if publisher:
+            publisher.ROOT = self.dir
         product.FILE = self.dir / "config" / "product.json"
         return self
 
     def __exit__(self, *a):
-        updates.ROOT, product.ROOT, product.FILE = self.saved
+        updates.ROOT, product.ROOT, product.FILE = self.saved[:3]
+        if publisher:
+            publisher.ROOT = self.saved[3]
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
 def _keypair(tmp):
-    made = updates.new_key(tmp / "signing.key")
-    return made["update_key"], tmp / "signing.key"
+    k = Ed25519PrivateKey.generate()
+    (tmp / "signing.key").write_bytes(k.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+                                                      serialization.NoEncryption()))
+    pub = k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return base64.b64encode(pub).decode(), tmp / "signing.key"
+
+
+def _sign(m, key_file):
+    k = Ed25519PrivateKey.from_private_bytes(Path(key_file).read_bytes())
+    return base64.b64encode(k.sign(updates._signed_text(m))).decode()
 
 
 def _zip(files, top="glasswork-0.7.0/"):
@@ -94,7 +116,7 @@ def _zip(files, top="glasswork-0.7.0/"):
 
 def _release(data, version, key_file, zip_url="https://updates.example/glasswork-0.7.0.zip"):
     m = {"version": version, "zip": zip_url, "sha256": hashlib.sha256(data).hexdigest(), "notes": "Better floor."}
-    m["signature"] = updates.sign(m, key_file)
+    m["signature"] = _sign(m, key_file)
     return m
 
 
@@ -200,6 +222,9 @@ def test_a_release_has_only_tracked_files():
     if not shutil.which("git"):
         print("  SKIP  git is not installed here")
         return
+    if publisher is None:
+        print("  SKIP  releases are made on the publisher's own copy")
+        return
     tmp = Path(tempfile.mkdtemp(prefix="keys-"))
     pub, key_file = _keypair(tmp)
     with _Copy(key=pub) as c:
@@ -209,7 +234,7 @@ def test_a_release_has_only_tracked_files():
                     ["git", "commit", "-q", "-m", "x"]):
             subprocess.run(cmd, cwd=c.dir, capture_output=True, text=True, encoding="utf-8", env=env, check=True)
         out = Path(tempfile.mkdtemp(prefix="release-"))
-        r = updates.make_release(out, key_file, "https://updates.example")
+        r = publisher.make_release(out, key_file, "https://updates.example")
         check("it is made", r["ok"], True)
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         check("its signature verifies with the copy's key", updates.verify(m, pub), True)

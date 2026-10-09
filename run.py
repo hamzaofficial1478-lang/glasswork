@@ -485,7 +485,7 @@ def tests():
             "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
             "coordination.launch_kit_tests", "coordination.posts_tests",
             "coordination.speed_tests", "pipelines.connector_tests",
-            "coordination.publish_tests", "coordination.installer_tests",
+            "coordination.publish_tests", "coordination.sealed_tests", "coordination.installer_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",
@@ -510,6 +510,11 @@ def tests():
             "pipelines.answers_tests", "pipelines.intel_tests",
             "pipelines.report_tests", "pipelines.run_tests",
             "pipelines.keepgoing_tests", "pipelines.index_tests"]
+    # A copy he gives out has no publisher side (coordination/product.py,
+    # PUBLISHER_ONLY), so the suites for it are not there either. Asked for
+    # anyway, they would fail on a missing file — and the IT Releaser runs this
+    # whole list before anything goes on that person's website.
+    mods = [m for m in mods if (ROOT / (m.replace(".", "/") + ".py")).exists()]
     # SAY WHAT ACTUALLY FAILED, NOT JUST WHICH FILE.
     #
     # "why program not giving the actaul fatal reason?"

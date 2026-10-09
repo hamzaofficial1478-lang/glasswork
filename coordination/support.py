@@ -1,65 +1,46 @@
 """
-support.py — problems reported by the people using the program, and your answers.
+support.py — a problem report, registering a copy, and the developer's answers:
+the side every copy of the program has.
 
     "i want the report section where user will be able to submit the report and
-     those reports will get over to me i'll solve those to update program user
-     will get update message"
+     those reports will get over to me"
+    "i want the Users to be stored on my pc in program storage not on my
+     website hosting"
 
-The reports travel to Glasswork Home — one folder you upload once to your own
-website (publish-to-your-site/glasswork-home). Nothing goes to anybody else.
+Everything this copy tells the developer is SEALED here, on this computer,
+with his public key (coordination/sealed.py) before it leaves — so only his
+own computer can open it. It travels through his Glasswork Home, a postbox on
+his website that holds the envelope until his program collects it and cannot
+read it. His answers come back the same way: sealed to this copy, waiting in
+a mailbox only this copy knows the number of. The developer's own side — his
+users room, his inbox, putting versions out — is coordination/publisher.py,
+which is on his computer only and is not in any copy he gives out.
 
-    For everyone:
-    python -m coordination.support --send         a report; JSON on stdin:
-                                                  {title, text, contact, attach}
-    python -m coordination.support --mine         the reports sent from here, and your answers
-    python -m coordination.support --registration    whether this copy is registered, and counted
-    python -m coordination.support --register     JSON on stdin: {name, business, email, phone,
-                                                  website, country} — or {withdraw: true}
+    python -m coordination.support --send          a report; JSON on stdin:
+                                                   {title, text, contact, attach}
+    python -m coordination.support --mine          the reports sent from here, and the answers
+    python -m coordination.support --preview       exactly what a report would carry
+    python -m coordination.support --registration  whether this copy is registered, and counted
+    python -m coordination.support --register      JSON on stdin: {name, business, email, phone,
+                                                   website, country} — or {withdraw: true}
     python -m coordination.support --counting on|off   say this copy is in use, or not
 
-    For you, the publisher:
-    python -m coordination.support --publisher    is this copy set up to publish
-    python -m coordination.support --setup        make the Home; JSON on stdin: {site, email}
-    python -m coordination.support --home-zip     the Home folder to upload (with your key)
-    python -m coordination.support --check-home   does the Home answer, and know you
-    python -m coordination.support --inbox        every report
-    python -m coordination.support --read ID      one report in full
-    python -m coordination.support --answer       JSON on stdin: {id, status, reply, fixed_in}
-    python -m coordination.support --remove ID
-    python -m coordination.support --users        everyone using the program, with their issues
-    python -m coordination.support --user COPY    one of them in full
-    python -m coordination.support --forget COPY  remove one (add --with-reports to remove theirs too)
+WHAT REACHES THE DEVELOPER, AND ONLY HIM
 
-WHO IS USING THE PROGRAM
+  - Once a day, if "say this copy is in use" is on: a random number for this
+    copy, its version and the kind of computer. Switch it off in Help and
+    reports and it stops; updates are still looked for.
+  - Only if they press Register: the name, business, email, phone, website and
+    country they typed. Withdraw takes them back.
+  - Only if they send a report: what they wrote, the email they chose to give,
+    the copy's number, its version and the kind of computer — and, only if they
+    tick the box, the support report, with every key, password, address and
+    number taken out first, which they can read in full before sending.
 
-    "where i will get the user details and their issues? like will i have any
-     of my room where i will be able to manage the my users their issues?"
-
-  Every copy has a random number of its own (install_id). When it asks the
-  Home for the newest version it says that number, its version and the kind
-  of computer — and nothing else. That is how the Home counts copies in use,
-  and the person can switch it off in Help and reports. Their name, business,
-  email, phone, website and country reach you only if they choose Register,
-  and Withdraw takes them back. A report carries the copy's number, so in your
-  Users room each person's issues are under their name.
-
-WHAT A REPORT CARRIES
-
-  What they wrote, the email they chose to give for a reply (or none), the
-  program's version and the kind of computer — and, only if they tick the box,
-  the support report from coordination/diagnostics, which has every key,
-  password, address and number taken out before it leaves, and which they can
-  read in full first.
-
-YOUR KEY
-
-  The Home knows you by a key made here, kept in config/publisher.local.json on
-  your computer and in home-key.php on your website. It is never in a release
-  and never sent to anyone using the program.
+Nothing is ever kept readable on his website, and nothing here can reach his
+computer: his program fetches from the postbox; nothing ever calls in.
 """
 import argparse
-import base64
-import io
 import json
 import os
 import platform
@@ -69,26 +50,34 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
 from pathlib import Path
 
 try:
-    from . import product, workspace
+    from . import product, sealed, workspace
 except ImportError:  # pragma: no cover - run as a script
     import product
+    import sealed
     import workspace
 
 ROOT = product.ROOT
-HOME_SOURCE = ROOT / "publish-to-your-site" / "glasswork-home" / "index.php"
 TIMEOUT = 30
 STATUS_WORDS = {"new": "Sent — waiting to be read", "seen": "Read by the developer",
                 "working": "Being worked on", "fixed": "Fixed", "wont-fix": "Not changing this"}
+STATUSES = tuple(STATUS_WORDS)
 
 
 def home_url() -> str:
     """The Home's address, or '' when this copy has none to send reports to."""
-    u = (os.environ.get("GLASSWORK_HOME") or product.info().get("home_url") or "").strip().rstrip("/")
-    return u
+    return (os.environ.get("GLASSWORK_HOME") or product.info().get("home_url") or "").strip().rstrip("/")
+
+
+def postbox_key() -> str:
+    """The developer's PUBLIC sealing key — safe for every copy to carry; it can only seal, never open."""
+    return (os.environ.get("GLASSWORK_POSTBOX_KEY") or product.info().get("postbox_key") or "").strip()
+
+
+def can_send() -> bool:
+    return bool(home_url() and postbox_key())
 
 
 def _copy_file() -> Path:
@@ -118,6 +107,17 @@ def install_id() -> str:
     return d["id"]
 
 
+def _mailbox() -> dict:
+    """This copy's own mailbox for answers: a random number and a key pair, made once."""
+    d = _copy()
+    if not (d.get("box") and d.get("box_key") and d.get("box_pub")):
+        d.setdefault("id", secrets.token_hex(12))
+        d["box"] = secrets.token_hex(16)
+        d["box_key"], d["box_pub"] = sealed.keypair()
+        _save_copy(d)
+    return d
+
+
 def counting() -> bool:
     return _copy().get("counting", True) is not False
 
@@ -127,17 +127,8 @@ def set_counting(on: bool) -> dict:
     d["counting"] = bool(on)
     _save_copy(d)
     return {"ok": True, "counting": bool(on),
-            "head": ("This copy says it is in use when it looks for updates." if on else
+            "head": ("This copy says it is in use, once a day." if on else
                      "This copy no longer says it is in use. It still looks for updates.")}
-
-
-def with_copy(url: str) -> str:
-    """The update address, with this copy's number, version and computer — if counting is on."""
-    # Only a Glasswork Home counts copies; any other update address is asked plainly.
-    if not counting() or not url or "do=latest" not in url:
-        return url
-    q = urllib.parse.urlencode({"copy": install_id(), "v": product.version(), "os": _system_short()})
-    return url + ("&" if "?" in url else "?") + q
 
 
 def _system_short() -> str:
@@ -147,54 +138,11 @@ def _system_short() -> str:
         return ""
 
 
-def registration() -> dict:
-    d = _copy()
-    return {"ok": True, "home": bool(home_url()), "registered": bool(d.get("person")),
-            "person": d.get("person") or {}, "counting": counting(), "copy": install_id(),
-            "publisher": is_publisher()}
-
-
-def register(person: dict) -> dict:
-    """Tell the makers who is using this copy — only what was typed, only when asked."""
-    if not home_url():
-        return {"ok": False, "error": "This copy has no address to register with yet."}
-    if person.get("withdraw"):
-        r = _ask("register", "POST", {"copy": install_id(), "withdraw": True})
-        if not r.get("ok"):
-            return {"ok": False, "error": "Not withdrawn — " + str(r.get("error") or "no answer")}
-        d = _copy()
-        d.pop("person", None)
-        _save_copy(d)
-        return {"ok": True, "head": "Withdrawn. The makers no longer have your name or details."}
-    clean = {k: str(person.get(k) or "").strip()[:n] for k, n in
-             (("name", 120), ("business", 160), ("email", 200), ("phone", 60), ("website", 300), ("country", 80))}
-    if not (clean["name"] or clean["business"] or clean["email"]):
-        return {"ok": False, "error": "Give at least your name, your business or your email."}
-    r = _ask("register", "POST", {"copy": install_id(), "version": product.version(), "system": _system_short(), **clean})
-    if not r.get("ok"):
-        return {"ok": False, "error": "Not registered — " + str(r.get("error") or "no answer") + ". Try again in a minute."}
-    d = _copy()
-    d["person"] = clean
-    _save_copy(d)
-    return {"ok": True, "head": "Registered. When you report a problem, the makers know who it is from."}
-
-
-def _mine_file() -> Path:
-    return workspace.data_root() / "support-reports.local.json"
-
-
-def _load_mine() -> list:
+def _system() -> str:
     try:
-        d = json.loads(_mine_file().read_text(encoding="utf-8"))
-        return d if isinstance(d, list) else []
+        return f"{platform.system()} {platform.release()} · Python {platform.python_version()}"[:160]
     except Exception:
-        return []
-
-
-def _save_mine(rows) -> None:
-    f = _mine_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(rows[-200:], indent=1), encoding="utf-8")
+        return ""
 
 
 def _ask(do, method="GET", body=None, query=None, key="", base=None, timeout=TIMEOUT) -> dict:
@@ -242,15 +190,97 @@ def _ask(do, method="GET", body=None, query=None, key="", base=None, timeout=TIM
     return out if isinstance(out, dict) else {"ok": False, "error": "an odd answer from the Home"}
 
 
+def _drop(payload: dict, note="other", timeout=TIMEOUT) -> dict:
+    """Seal it to the developer and post it. Nothing readable leaves this computer."""
+    if not can_send():
+        return {"ok": False, "no_home": True, "error": "this copy has no address to send to yet"}
+    try:
+        env = sealed.seal(postbox_key(), {**payload, "at": int(time.time()), "product": product.name()})
+    except Exception as e:
+        return {"ok": False, "error": f"it could not be sealed ({type(e).__name__})"}
+    return _ask("drop", "POST", {"sealed": env, "note": note}, timeout=timeout)
+
+
 # ---------------------------------------------------------------------------
-# for everyone
+# "this copy is in use" and registering
 # ---------------------------------------------------------------------------
 
-def _system() -> str:
+def say_in_use() -> dict:
+    """Once a day, if counting is on: this copy's number, version and kind of computer — sealed."""
+    if not (counting() and can_send()):
+        return {"ok": True, "sent": False}
+    today = time.strftime("%Y-%m-%d")
+    d = _copy()
+    if d.get("seen_day") == today and d.get("seen_version") == product.version():
+        return {"ok": True, "sent": False}
+    r = _drop({"kind": "seen", "copy": install_id(), "version": product.version(), "system": _system_short()},
+              timeout=10)
+    if r.get("ok"):
+        d = _copy()
+        d["seen_day"], d["seen_version"] = today, product.version()
+        _save_copy(d)
+    return {"ok": bool(r.get("ok")), "sent": bool(r.get("ok"))}
+
+
+def _is_publisher_copy() -> bool:
+    return bool(product.publisher().get("home_key"))
+
+
+def registration() -> dict:
+    d = _copy()
+    return {"ok": True, "home": can_send(), "registered": bool(d.get("person")),
+            "person": d.get("person") or {}, "counting": counting(), "copy": install_id(),
+            "publisher": _is_publisher_copy()}
+
+
+def register(person: dict) -> dict:
+    """Tell the developer who is using this copy — only what was typed, only when asked, sealed."""
+    if not can_send():
+        return {"ok": False, "error": "This copy has no address to register with yet."}
+    if person.get("withdraw"):
+        r = _drop({"kind": "withdraw", "copy": install_id()})
+        if not r.get("ok"):
+            return {"ok": False, "error": "Not withdrawn — " + str(r.get("error") or "no answer")}
+        d = _copy()
+        d.pop("person", None)
+        _save_copy(d)
+        return {"ok": True, "head": "Withdrawn. The developer's program removes your name and details when it next collects."}
+    clean = {k: str(person.get(k) or "").strip()[:n] for k, n in
+             (("name", 120), ("business", 160), ("email", 200), ("phone", 60), ("website", 300), ("country", 80))}
+    if not (clean["name"] or clean["business"] or clean["email"]):
+        return {"ok": False, "error": "Give at least your name, your business or your email."}
+    if clean["email"] and ("@" not in clean["email"] or "." not in clean["email"].split("@")[-1]):
+        return {"ok": False, "error": "That email address does not look right."}
+    r = _drop({"kind": "register", "copy": install_id(), "version": product.version(),
+               "system": _system_short(), "person": clean})
+    if not r.get("ok"):
+        return {"ok": False, "error": "Not registered — " + str(r.get("error") or "no answer") + ". Try again in a minute."}
+    d = _copy()
+    d["person"] = clean
+    _save_copy(d)
+    return {"ok": True, "head": "Registered. When you report a problem, the developer knows who it is from."}
+
+
+# ---------------------------------------------------------------------------
+# problem reports, and the answers
+# ---------------------------------------------------------------------------
+
+def _mine_file() -> Path:
+    return workspace.data_root() / "support-reports.local.json"
+
+
+def _load_mine() -> list:
     try:
-        return f"{platform.system()} {platform.release()} · Python {platform.python_version()}"[:160]
+        d = json.loads(_mine_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, list) else []
     except Exception:
-        return ""
+        return []
+
+
+def _save_mine(rows) -> None:
+    f = _mine_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(rows[-200:], indent=1), encoding="utf-8")
 
 
 def preview(attach=True) -> dict:
@@ -263,7 +293,7 @@ def preview(attach=True) -> dict:
         except Exception as e:
             support = f"(the support report could not be made: {type(e).__name__})"
     return {"ok": True, "product": product.name(), "version": product.version(), "system": _system(),
-            "support": support, "home": bool(home_url()),
+            "support": support, "home": can_send(),
             "support_email": product.info().get("support_email") or ""}
 
 
@@ -274,255 +304,92 @@ def send(title="", text="", contact="", attach=True) -> dict:
     if not title and not text:
         return {"ok": False, "error": "Say what went wrong first."}
     p = preview(attach)
-    if not home_url():
+    if not can_send():
         mail = p["support_email"]
         return {"ok": False, "no_home": True, "support": p["support"],
                 "error": ("This copy cannot send reports by itself yet. "
                           + (f"Email it to {mail}, with the support report below." if mail
                              else "Copy the support report below and send it to whoever gave you the program."))}
-    r = _ask("report", "POST", {"title": title, "text": text, "contact": contact, "product": p["product"],
-                                "version": p["version"], "system": p["system"], "support": p["support"],
-                                "copy": install_id()})
+    box = _mailbox()
+    rid = time.strftime("%y%m%d") + "-" + secrets.token_hex(3)
+    r = _drop({"kind": "report", "id": rid, "copy": install_id(), "title": title or "A problem", "text": text,
+               "contact": contact, "version": p["version"], "system": p["system"], "support": p["support"],
+               "box": box["box"], "box_pub": box["box_pub"]}, note="report")
     if not r.get("ok"):
         return {"ok": False, "error": "Not sent — " + str(r.get("error") or "no answer") + ". Try again in a minute."}
     rows = _load_mine()
-    rows.append({"id": r.get("id"), "key": r.get("key"), "title": title or "A problem", "at": int(time.time()),
-                 "version": p["version"]})
+    rows.append({"id": rid, "title": title or "A problem", "at": int(time.time()), "version": p["version"],
+                 "status": "new", "reply": "", "fixed_in": ""})
     _save_mine(rows)
-    return {"ok": True, "id": r.get("id"),
-            "head": f"Sent. Your report is {r.get('id')} — the answer appears here when there is one."}
+    return {"ok": True, "id": rid,
+            "head": f"Sent, sealed so only the developer can read it. Your report is {rid} — the answer appears here."}
+
+
+def fetch_answers() -> dict:
+    """Open the sealed answers waiting in this copy's mailbox, keep them here, and clear the mailbox."""
+    d = _copy()
+    if not (can_send() and d.get("box") and d.get("box_key")):
+        return {"ok": True, "got": 0}
+    r = _ask("mail", "POST", {"box": d["box"]}, timeout=15)
+    if not r.get("ok"):
+        return {"ok": False, "got": 0, "error": r.get("error")}
+    rows = _load_mine()
+    by = {x.get("id"): x for x in rows}
+    done, got = [], 0
+    for letter in r.get("letters") or []:
+        done.append(letter.get("id"))
+        try:
+            a = sealed.open_(d["box_key"], letter.get("sealed"))
+        except ValueError:
+            continue                      # not for us, or changed on the way: thrown away
+        row = by.get(str(a.get("report") or "")) if isinstance(a, dict) else None
+        if not row or a.get("kind") != "answer":
+            continue
+        if int(a.get("seq") or 0) <= int(row.get("seq") or 0):
+            continue                      # an older answer arriving late
+        row["seq"] = int(a.get("seq") or 0)
+        if a.get("status") in STATUSES:
+            row["status"] = a["status"]
+        for k, n in (("reply", 5000), ("fixed_in", 40)):
+            if k in a:
+                row[k] = str(a.get(k) or "")[:n]
+        row["updated"] = int(a.get("at") or time.time())
+        got += 1
+    if got:
+        _save_mine(rows)
+    if done:
+        _ask("mail-done", "POST", {"box": d["box"], "ids": [x for x in done if x]}, timeout=15)
+    return {"ok": True, "got": got}
 
 
 def mine() -> dict:
-    rows = _load_mine()
-    out = [{"id": r.get("id"), "title": r.get("title"), "at": r.get("at"), "version": r.get("version"),
-            "status": "new", "status_words": STATUS_WORDS["new"], "reply": "", "fixed_in": ""} for r in rows]
-    if rows and home_url():
-        got = _ask("status", "POST", {"reports": [{"id": r.get("id"), "key": r.get("key")} for r in rows[-50:]]})
-        by = {x.get("id"): x for x in (got.get("reports") or []) if x.get("found")}
-        for o in out:
-            x = by.get(o["id"])
-            if x:
-                o.update(status=x.get("status") or "new", reply=x.get("reply") or "",
-                         fixed_in=x.get("fixed_in") or "", updated=x.get("updated"))
-                o["status_words"] = STATUS_WORDS.get(o["status"], o["status"])
-                here = product.parse_version(product.version())
-                if o["fixed_in"] and product.parse_version(o["fixed_in"]) > here:
-                    o["update_needed"] = True
+    fetched = fetch_answers() if _load_mine() else {"ok": True}
+    here = product.parse_version(product.version())
+    out = []
+    for r in _load_mine():
+        st = r.get("status") or "new"
+        o = {"id": r.get("id"), "title": r.get("title"), "at": r.get("at"), "version": r.get("version"),
+             "status": st, "status_words": STATUS_WORDS.get(st, st), "reply": r.get("reply") or "",
+             "fixed_in": r.get("fixed_in") or "", "updated": r.get("updated")}
+        if o["fixed_in"] and product.parse_version(o["fixed_in"]) > here:
+            o["update_needed"] = True
+        out.append(o)
     out.sort(key=lambda o: o.get("at") or 0, reverse=True)
-    return {"ok": True, "reports": out, "home": bool(home_url()),
-            "answered": sum(1 for o in out if o.get("reply"))}
-
-
-# ---------------------------------------------------------------------------
-# for the publisher
-# ---------------------------------------------------------------------------
-
-def _pub() -> dict:
-    return product.publisher()
-
-
-def _save_pub(d: dict) -> None:
-    f = product.publisher_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(d, indent=1), encoding="utf-8")
-
-
-def is_publisher() -> bool:
-    return bool(_pub().get("home_key"))
-
-
-def publisher_view() -> dict:
-    p = _pub()
-    git = (ROOT / ".git").exists()
-    return {"ok": True, "publisher": bool(p.get("home_key")), "can_publish": git or bool(p.get("home_key")),
-            "home_url": (p.get("public") or {}).get("home_url") or "", "email": p.get("email") or "",
-            "signing_key": bool(p.get("signing_key") and Path(p["signing_key"]).exists()),
-            "version": product.version()}
-
-
-def _signing_key_path() -> Path:
-    return Path(os.environ.get("GLASSWORK_SIGNING_KEY") or (Path.home() / ".glasswork-publisher" / "signing.key"))
-
-
-def setup(site, email="") -> dict:
-    """Make this copy the publisher's: a Home address, a key, and a signing key."""
-    site = str(site or "").strip().rstrip("/")
-    if site and not site.lower().startswith(("http://", "https://")):
-        site = "https://" + site
-    if not site.lower().startswith(("https://", "http://127.0.0.1", "http://localhost")):
-        return {"ok": False, "error": "Give your website's address, starting https://"}
-    email = str(email or "").strip()[:200]
-    p = _pub()
-    p["home_key"] = p.get("home_key") or secrets.token_urlsafe(36)
-    p["email"] = email
-    home = site + "/glasswork-home"
-    keyfile = _signing_key_path()
-    made = None
-    if not keyfile.exists():
-        from . import updates
-        keyfile.parent.mkdir(parents=True, exist_ok=True)
-        made = updates.new_key(str(keyfile))
-        if not made.get("ok"):
-            return made
-    pub_key = made["update_key"] if made else _public_key(keyfile)
-    p["signing_key"] = str(keyfile)
-    p["public"] = {"home_url": home, "update_url": home + "/index.php?do=latest", "update_key": pub_key,
-                   "support_email": email or (p.get("public") or {}).get("support_email", "")}
-    _save_pub(p)
-    return {"ok": True, "home_url": home,
-            "head": ("Your Glasswork Home is ready to upload. Download it, unzip it, and put the "
-                     "glasswork-home folder in your website's main folder. Then press Check."),
-            "signing_key_file": str(keyfile)}
-
-
-def _public_key(keyfile: Path) -> str:
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    k = Ed25519PrivateKey.from_private_bytes(keyfile.read_bytes())
-    return base64.b64encode(k.public_key().public_bytes(serialization.Encoding.Raw,
-                                                        serialization.PublicFormat.Raw)).decode()
-
-
-def home_zip() -> dict:
-    p = _pub()
-    if not p.get("home_key"):
-        return {"ok": False, "error": "Set up your Home first."}
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("glasswork-home/index.php", HOME_SOURCE.read_text(encoding="utf-8"))
-        z.writestr("glasswork-home/home-key.php", "<?php\nreturn '" + p["home_key"] + "';\n")
-        cfg = {"owner_email": p.get("email") or "", "product": product.name()}
-        z.writestr("glasswork-home/home-config.php",
-                   "<?php\nreturn " + _php_array(cfg) + ";\n")
-    return {"ok": True, "zip": buf.getvalue(), "filename": "glasswork-home.zip"}
-
-
-def _php_array(d: dict) -> str:
-    def q(v):
-        return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
-    return "[" + ", ".join(f"{q(k)} => {q(v)}" for k, v in d.items()) + "]"
-
-
-def _key() -> str:
-    return _pub().get("home_key") or ""
-
-
-def check_home() -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "Set up your Home first."}
-    r = _ask("ping", key=_key())
-    if not r.get("ok"):
-        return {"ok": False, "error": "The Home did not answer: " + str(r.get("error") or "no answer")}
-    if not r.get("owner"):
-        return {"ok": False, "error": ("The Home answered, but does not know your key — upload the "
-                                       "glasswork-home folder again, from the newest download.")}
-    return {"ok": True, "latest": r.get("latest") or "",
-            "head": "Your Home answers and knows you." + (f" Version {r['latest']} is out." if r.get("latest") else "")}
-
-
-def inbox() -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up to read reports."}
-    r = _ask("inbox", key=_key())
-    if r.get("ok"):
-        for x in r.get("reports") or []:
-            x["status_words"] = STATUS_WORDS.get(x.get("status"), x.get("status"))
-    return r
-
-
-def read(rid) -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up to read reports."}
-    return _ask("read", query={"id": str(rid)}, key=_key())
-
-
-def answer(rid, status=None, reply=None, fixed_in=None) -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up to answer reports."}
-    body = {"id": str(rid)}
-    if status:
-        body["status"] = status
-    if reply is not None:
-        body["reply"] = str(reply)[:5000]
-    if fixed_in is not None:
-        body["fixed_in"] = str(fixed_in)[:40]
-    return _ask("answer", "POST", body, key=_key())
-
-
-def remove(rid) -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up for that."}
-    return _ask("remove", "POST", {"id": str(rid)}, key=_key())
-
-
-def users() -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up to see who uses the program."}
-    r = _ask("users", key=_key())
-    if r.get("ok"):
-        latest = product.parse_version(r.get("latest") or "0")
-        for u in r.get("users") or []:
-            u["old_version"] = bool(r.get("latest")) and product.parse_version(u.get("version") or "0") < latest
-    return r
-
-
-def user(cid) -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up to see who uses the program."}
-    r = _ask("user", query={"id": str(cid)}, key=_key())
-    if r.get("ok"):
-        for x in r.get("reports") or []:
-            x["status_words"] = STATUS_WORDS.get(x.get("status"), x.get("status"))
-    return r
-
-
-def forget(cid, with_reports=False) -> dict:
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up for that."}
-    return _ask("forget", "POST", {"id": str(cid), "reports": bool(with_reports)}, key=_key())
-
-
-def upload(path, name=None, chunk=4 * 1024 * 1024, progress=None) -> dict:
-    """Send one file to the Home's updates/ folder, in pieces, checked whole at the end."""
-    import hashlib
-    data = Path(path).read_bytes()
-    name = name or Path(path).name
-    parts = max(1, -(-len(data) // chunk))
-    digest = hashlib.sha256(data).hexdigest()
-    r = {"ok": False}
-    for i in range(parts):
-        piece = data[i * chunk:(i + 1) * chunk]
-        body = {"name": name, "part": i, "parts": parts, "data": base64.b64encode(piece).decode()}
-        if i == parts - 1:
-            body["sha256"] = digest
-        for attempt in range(3):
-            r = _ask("upload", "POST", body, key=_key(), timeout=180)
-            if r.get("ok") or not r.get("unreachable"):
-                break
-            time.sleep(2 + attempt * 3)
-        if not r.get("ok"):
-            return {"ok": False, "error": f"{name}: " + str(r.get("error") or "the upload stopped")}
-        if progress:
-            progress(name, i + 1, parts)
-    return {"ok": True, "name": name, "bytes": len(data), "sha256": digest}
+    res = {"ok": True, "reports": out, "home": can_send(), "answered": sum(1 for o in out if o.get("reply"))}
+    if not fetched.get("ok"):
+        res["note"] = "Answers could not be fetched just now: " + str(fetched.get("error") or "no answer")
+    return res
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Problems reported, and the answers.")
-    for f in ("send", "mine", "preview", "publisher", "setup", "home-zip", "check-home", "inbox", "answer",
-              "registration", "register", "users"):
+    for f in ("send", "mine", "preview", "registration", "register", "in-use"):
         ap.add_argument("--" + f, action="store_true")
-    ap.add_argument("--read", metavar="ID")
-    ap.add_argument("--remove", metavar="ID")
-    ap.add_argument("--user", metavar="COPY")
-    ap.add_argument("--forget", metavar="COPY")
-    ap.add_argument("--with-reports", action="store_true")
     ap.add_argument("--counting", choices=("on", "off"))
     ap.add_argument("--no-attach", action="store_true")
     a = ap.parse_args(argv)
     body = {}
-    if a.send or a.setup or a.answer or a.register:
+    if a.send or a.register:
         try:
             body = json.loads(sys.stdin.read() or "{}")
         except Exception:
@@ -530,39 +397,16 @@ def main(argv=None) -> int:
         body = body if isinstance(body, dict) else {}
     if a.send:
         r = send(body.get("title"), body.get("text"), body.get("contact"), body.get("attach", True) is not False)
-    elif a.mine:
-        r = mine()
     elif a.preview:
         r = preview(not a.no_attach)
-    elif a.publisher:
-        r = publisher_view()
-    elif a.setup:
-        r = setup(body.get("site"), body.get("email"))
-    elif a.home_zip:
-        z = home_zip()
-        r = {**z, "zip": base64.b64encode(z["zip"]).decode()} if z.get("ok") else z
-    elif a.check_home:
-        r = check_home()
-    elif a.inbox:
-        r = inbox()
-    elif a.read:
-        r = read(a.read)
-    elif a.answer:
-        r = answer(body.get("id"), body.get("status"), body.get("reply"), body.get("fixed_in"))
-    elif a.remove:
-        r = remove(a.remove)
     elif a.registration:
         r = registration()
     elif a.register:
         r = register(body)
     elif a.counting:
         r = set_counting(a.counting == "on")
-    elif a.users:
-        r = users()
-    elif a.user:
-        r = user(a.user)
-    elif a.forget:
-        r = forget(a.forget, a.with_reports)
+    elif a.in_use:
+        r = say_in_use()
     else:
         r = mine()
     print(json.dumps(r, ensure_ascii=False))

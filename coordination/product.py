@@ -28,9 +28,26 @@ PUBLISHER = ROOT / "config" / "publisher.local.json"
 def publisher_file() -> Path:
     """Where the publisher's settings are (the tests point it at a temp file)."""
     return Path(os.environ.get("GLASSWORK_PUBLISHER_FILE") or PUBLISHER)
-PUBLIC_KEYS = ("home_url", "update_url", "update_key", "support_email")
+# What a release carries of his: where his Home is, and the PUBLIC halves of
+# his keys — one checks his signature on updates, one seals what a copy sends
+# him. Neither can be used to sign or to open anything.
+PUBLIC_KEYS = ("home_url", "update_url", "update_key", "postbox_key", "support_email")
 DEFAULTS = {"name": "Glasswork", "version": "0.0.0", "tagline": "", "support_email": "",
-            "update_url": "", "update_key": "", "home_url": ""}
+            "update_url": "", "update_key": "", "postbox_key": "", "home_url": ""}
+
+# HIS SIDE OF THE PROGRAM — his users room, his inbox, putting versions out,
+# the Home's own code and his guides. On his computer only: never in a
+# release, never in the installer (both leave these out), so a copy he
+# gives out has none of it. A path ending in "/" is a whole folder.
+PUBLISHER_ONLY = ("coordination/publisher.py", "coordination/publish_tests.py", "ui/publisher.js",
+                  "publish-to-your-site/", "docs/RELEASING.md", "docs/PUBLIC-LAUNCH-PLAN.md", ".github/")
+
+
+def publisher_only(rel: str) -> bool:
+    rel = str(rel).replace("\\", "/")
+    if rel.startswith("./"):
+        rel = rel[2:]
+    return any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in PUBLISHER_ONLY)
 
 
 def publisher() -> dict:

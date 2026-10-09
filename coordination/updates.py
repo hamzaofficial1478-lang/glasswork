@@ -5,12 +5,8 @@ updates.py — keeping a copy of the program up to date, signed and reversible.
     python -m coordination.updates --apply --json        download, verify, install
     python -m coordination.updates --rollback --json     put the previous version back
 
-    For whoever publishes the program:
-    python -m coordination.updates --new-key KEYFILE     make a signing key (keep it secret)
-    python -m coordination.updates --make-release DIR --key KEYFILE --base-url URL
-    python -m coordination.updates --publish [--installer] [--notes TEXT]
-                                   build, sign and put out this version on your
-                                   Glasswork Home — everyone using it is told
+Making, signing and putting out a version is the publisher's side
+(coordination/publisher.py), which only his own copy has.
 
 TWO KINDS OF COPY
 
@@ -129,17 +125,17 @@ def check(fetch=_fetch) -> dict:
         out["why"] = "No update address is set for this copy, so it cannot look for updates."
         return out
     try:
-        # A Glasswork Home also hears this copy's random number and version, so
-        # the publisher can see how many copies are in use — never anything
-        # else, and not at all when the person has switched it off.
-        try:
-            from . import support
-            asked = support.with_copy(url)
-        except Exception:
-            asked = url
-        m = json.loads(fetch(asked, 1024 * 1024).decode("utf-8"))
+        # Asked plainly: nothing about this copy is in the question.
+        m = json.loads(fetch(url, 1024 * 1024).decode("utf-8"))
     except Exception as e:
         return {**out, "ok": False, "error": f"could not reach the update address ({type(e).__name__})"}
+    # Once a day, if the person has not switched it off: "this copy is in use",
+    # sealed so that only the publisher's own computer can read it.
+    try:
+        from . import support
+        support.say_in_use()
+    except Exception:
+        pass
     newer = product.parse_version(m.get("version")) > product.parse_version(here)
     signed = verify(m, info["update_key"])
     out.update({"available": newer, "latest": str(m.get("version", "")), "notes": str(m.get("notes", ""))[:2000],
@@ -272,202 +268,17 @@ def rollback() -> dict:
             "The office restarts itself in a moment."}
 
 
-# ---------------------------------------------------------------------------
-# for whoever publishes the program
-# ---------------------------------------------------------------------------
-
-def new_key(path) -> dict:
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    p = Path(path)
-    if p.exists():
-        return {"ok": False, "error": f"{p} already exists — not overwriting a signing key"}
-    k = Ed25519PrivateKey.generate()
-    p.write_bytes(k.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
-                                  serialization.NoEncryption()))
-    try:
-        os.chmod(p, 0o600)
-    except OSError:
-        pass
-    pub = k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    return {"ok": True, "key_file": str(p), "update_key": base64.b64encode(pub).decode(),
-            "next": "Put update_key into config/product.json. Keep the key file secret and OUT of the program folder."}
-
-
-def sign(manifest: dict, key_file) -> str:
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    k = Ed25519PrivateKey.from_private_bytes(Path(key_file).read_bytes())
-    return base64.b64encode(k.sign(_signed_text(manifest))).decode()
-
-
-def release_product_json() -> str:
-    """
-    config/product.json as a release carries it: the publisher's Home address
-    and public key filled in, so every copy installed from it knows where its
-    updates and reports go. His own product.json is never edited for this.
-    """
-    try:
-        d = json.loads(product.FILE.read_text(encoding="utf-8"))
-    except Exception:
-        d = {}
-    mine = product.publisher().get("public") or {}
-    d.update({k: mine[k] for k in product.PUBLIC_KEYS if mine.get(k)})
-    return json.dumps(d, indent=2) + "\n"
-
-
-def make_release(out_dir, key_file, base_url="", notes="", installer=None) -> dict:
-    """Zip the TRACKED files only (so nothing private can ride along), sign, write the manifest."""
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    try:
-        listed = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, timeout=60)
-        files = [f for f in listed.stdout.decode("utf-8").split("\0") if f]
-    except Exception:
-        files = []
-    if not files:
-        return {"ok": False, "error": "a release is made from a git copy, so only tracked files go in"}
-    ver = product.version()
-    zname = f"{product.name().lower()}-{ver}.zip"
-    with zipfile.ZipFile(out / zname, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in files:
-            if not _kept(f) and (ROOT / f).is_file():
-                if f == "config/product.json":
-                    z.writestr(f"{product.name().lower()}-{ver}/{f}", release_product_json())
-                else:
-                    z.write(ROOT / f, f"{product.name().lower()}-{ver}/{f}")
-    digest = hashlib.sha256((out / zname).read_bytes()).hexdigest()
-    m = {"version": ver, "zip": (base_url.rstrip("/") + "/" + zname) if base_url else zname, "sha256": digest,
-         "notes": notes, "published": time.strftime("%Y-%m-%d")}
-    m["signature"] = sign(m, key_file)
-    if installer:
-        exe = Path(installer)
-        iname = f"{product.name().lower()}-{ver}-setup.exe"
-        if exe.resolve() != (out / iname).resolve():
-            shutil.copy2(exe, out / iname)
-        idig = hashlib.sha256((out / iname).read_bytes()).hexdigest()
-        m.update(installer=(base_url.rstrip("/") + "/" + iname) if base_url else iname, installer_sha256=idig)
-        m["installer_signature"] = sign({"version": ver, "sha256": idig}, key_file)
-    (out / "manifest.json").write_text(json.dumps(m, indent=1), encoding="utf-8")
-    return {"ok": True, "zip": str(out / zname), "manifest": str(out / "manifest.json"), "version": ver,
-            "files": len(files), "installer": str(out / m["installer"]) if installer else ""}
-
-
-# ---------------------------------------------------------------------------
-# PUTTING A VERSION OUT
-# ---------------------------------------------------------------------------
-#
-# "when ever i will update the program here the users will get the update
-#  message on their program at their end"
-#
-# One button on the publisher's own copy: zip this version, sign it, build the
-# Windows installer if asked (installer/build_windows.py — on Windows), send
-# them to his Glasswork Home in pieces, and only then put the signed manifest
-# out. Every copy asks its Home for that manifest and shows the new version.
-
-def publish(notes="", installer=False, say=None) -> dict:
-    say = say or (lambda stage, **kw: None)
-    from . import support
-    if not support.is_publisher():
-        return {"ok": False, "error": "This copy is not set up to publish. Settings → Publisher first."}
-    pub = product.publisher()
-    key = pub.get("signing_key") or ""
-    if not key or not Path(key).exists():
-        return {"ok": False, "error": "The signing key is missing, so nothing can be signed. Set up the Home again."}
-    if not is_git_copy():
-        return {"ok": False, "error": "A version is put out from the publisher's own git copy of the program."}
-    say("Asking your Home which version is out")
-    home = support.check_home()
-    if not home.get("ok"):
-        return home
-    ver = product.version()
-    if home.get("latest") and product.parse_version(home["latest"]) >= product.parse_version(ver):
-        return {"ok": False, "error": (f"Version {home['latest']} is already out, and this copy is {ver}. "
-                                       "A new version needs a higher number first.")}
-    tmp = Path(tempfile.mkdtemp(prefix="release-"))
-    try:
-        exe = None
-        if installer:
-            say("Building the Windows installer — a few minutes")
-            built = _build_installer(tmp)
-            if not built.get("ok"):
-                return built
-            exe = built["installer"]
-        say("Zipping and signing this version")
-        rel = make_release(tmp / "out", key, notes=notes, installer=exe)
-        if not rel.get("ok"):
-            return rel
-        m = json.loads(Path(rel["manifest"]).read_text(encoding="utf-8"))
-        for f in [rel["zip"]] + ([rel["installer"]] if rel.get("installer") else []):
-            say(f"Sending {Path(f).name} to your Home")
-            up = support.upload(f, progress=lambda n, i, k: say(f"Sending {n}", part=i, of=k))
-            if not up.get("ok"):
-                return up
-        say("Putting the new version out")
-        r = support._ask("release", "POST", {"manifest": m}, key=support._key())
-        if not r.get("ok"):
-            return {"ok": False, "error": "The Home would not put it out: " + str(r.get("error") or "no answer")}
-        return {"ok": True, "version": ver, "installer": bool(exe), "download_page": r.get("download_page"),
-                "why": (f"Version {ver} is out. Everyone using the program is told the next time it opens"
-                        + (", and new people can download the installer from your Home." if exe else "."))}
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def _build_installer(tmp: Path) -> dict:
-    script = ROOT / "installer" / "build_windows.py"
-    if os.name != "nt" and not os.environ.get("GLASSWORK_CROSS_BUILD"):
-        return {"ok": False, "error": "The Windows installer is built on Windows. Publish from your Windows computer, "
-                                      "or untick the installer to put out the update alone."}
-    p = subprocess.run([sys.executable, str(script), "--out", str(tmp), "--product-json", "-"],
-                       input=release_product_json(), cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=3600)
-    last = (p.stdout or "").strip().splitlines()[-1:] or [""]
-    try:
-        r = json.loads(last[0])
-    except Exception:
-        r = {"ok": False, "error": "the installer build said: " + ((p.stderr or p.stdout or "nothing")[-400:])}
-    return r
-
-
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Keep this copy of the program up to date.")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--rollback", action="store_true")
-    ap.add_argument("--new-key", metavar="KEYFILE")
-    ap.add_argument("--make-release", metavar="DIR")
-    ap.add_argument("--key", metavar="KEYFILE")
-    ap.add_argument("--base-url", default="")
-    ap.add_argument("--notes", default="")
-    ap.add_argument("--publish", action="store_true")
-    ap.add_argument("--installer", action="store_true")
-    ap.add_argument("--job", metavar="FILE", help="with --publish: write progress here as it goes")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    if a.publish:
-        job = Path(a.job) if a.job else None
-
-        def say(stage, **kw):
-            if job:
-                job.write_text(json.dumps({"running": True, "stage": stage, "at": int(time.time()), **kw}),
-                               encoding="utf-8")
-        try:
-            r = publish(a.notes, a.installer, say)
-        except Exception as e:
-            r = {"ok": False, "error": f"publishing stopped: {type(e).__name__}: {e}"}
-        if job:
-            job.write_text(json.dumps({"running": False, "done": True, "at": int(time.time()), "result": r}),
-                           encoding="utf-8")
-        print(json.dumps(r, ensure_ascii=False))
-        return 0 if r.get("ok") else 1
     if a.apply:
         r = apply()
     elif a.rollback:
         r = rollback()
-    elif a.new_key:
-        r = new_key(a.new_key)
-    elif a.make_release:
-        r = make_release(a.make_release, a.key, a.base_url, a.notes) if a.key else {"ok": False, "error": "--key is needed"}
     else:
         r = check()
     if a.json:

@@ -654,8 +654,9 @@ app.get("/api/diagnostics", async (_q, res) => res.json(await pyModule("coordina
 
 /* ---- PROBLEMS REPORTED, AND THE ANSWERS (coordination/support.py) -------------
    "i want the report section where user will be able to submit the report and
-    those reports will get over to me" — sent to the publisher's own Glasswork
-   Home on his website, nowhere else. The publisher's side is below it. */
+    those reports will get over to me" — sealed on this computer so only the
+   publisher's own computer can open it, and posted to his Glasswork Home,
+   which holds it until he collects. The publisher's side is below it. */
 const textField = (v, n) => String(v || "").slice(0, n);
 app.get("/api/support/mine", async (_q, res) => res.json(await pyModule("coordination.support", ["--mine"], 60000)));
 app.get("/api/support/preview", async (_q, res) => res.json(await pyModule("coordination.support", ["--preview"], 90000)));
@@ -664,9 +665,9 @@ app.post("/api/support/send", async (req, res) => {
   res.json(await pyStdin("coordination.support", ["--send"], { title: textField(b.title, 200),
     text: textField(b.text, 20000), contact: textField(b.contact, 200), attach: b.attach !== false }, 120000));
 });
-// Telling the makers who uses this copy: only if they press Register, and
-// Withdraw takes it back. Counting (a random number and the version, with the
-// update check) can be switched off.
+// Telling the developer who uses this copy: only if they press Register, and
+// Withdraw takes it back. Counting (a random number and the version, sealed,
+// once a day) can be switched off.
 app.get("/api/support/registration", async (_q, res) =>
   res.json(await pyModule("coordination.support", ["--registration"], 30000)));
 app.post("/api/support/register", async (req, res) => {
@@ -678,35 +679,50 @@ app.post("/api/support/register", async (req, res) => {
 });
 app.post("/api/support/counting", async (req, res) =>
   res.json(await pyModule("coordination.support", ["--counting", (req.body || {}).on === false ? "off" : "on"], 30000)));
-app.get("/api/publisher", async (_q, res) => res.json(await pyModule("coordination.support", ["--publisher"], 30000)));
-app.get("/api/publisher/users", async (_q, res) => res.json(await pyModule("coordination.support", ["--users"], 60000)));
+
+/* ---- HIS SIDE: who uses the program, their issues, putting a version out -----
+   "the users should not have the program back end" — coordination/publisher.py
+   and ui/publisher.js are on his computer only, never in a copy he gives out.
+   Without them none of this exists: /api/publisher says so, and everything
+   under it answers 404. His records are on this computer (data/publisher); his
+   website only ever holds sealed envelopes until they are collected. */
+const PUBLISHER_HERE = fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));
+app.get("/api/publisher", async (_q, res) => {
+  if (!PUBLISHER_HERE) return res.json({ ok: true, publisher: false, can_publish: false });
+  res.json(await pyModule("coordination.publisher", ["--view"], 30000));
+});
+app.use("/api/publisher", (_q, res, next) => PUBLISHER_HERE ? next()
+  : res.status(404).json({ ok: false, error: "That is not part of this copy of the program." }));
+app.post("/api/publisher/collect", async (_q, res) =>
+  res.json(await pyModule("coordination.publisher", ["--collect"], 300000)));
+app.get("/api/publisher/users", async (_q, res) => res.json(await pyModule("coordination.publisher", ["--users"], 60000)));
 app.get("/api/publisher/user/:id", async (req, res) => {
   const id = String(req.params.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.support", ["--user", id], 60000));
+  res.json(await pyModule("coordination.publisher", ["--user", id], 60000));
 });
 app.post("/api/publisher/forget", async (req, res) => {
   const b = req.body || {};
   const id = String(b.id || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.support", ["--forget", id].concat(b.reports === true ? ["--with-reports"] : []), 60000));
+  res.json(await pyModule("coordination.publisher", ["--forget", id].concat(b.reports === true ? ["--with-reports"] : []), 60000));
 });
 app.post("/api/publisher/setup", async (req, res) => {
   const b = req.body || {};
-  res.json(await pyStdin("coordination.support", ["--setup"], { site: textField(b.site, 300),
+  res.json(await pyStdin("coordination.publisher", ["--setup"], { site: textField(b.site, 300),
     email: textField(b.email, 200) }, 60000));
 });
 app.get("/api/publisher/home.zip", async (_q, res) => {
-  const r = await pyModule("coordination.support", ["--home-zip"], 60000);
+  const r = await pyModule("coordination.publisher", ["--home-zip"], 60000);
   if (!r.ok || !r.zip) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", 'attachment; filename="glasswork-home.zip"');
   res.setHeader("Cache-Control", "no-store");
   res.send(Buffer.from(r.zip, "base64"));
 });
-app.post("/api/publisher/check", async (_q, res) => res.json(await pyModule("coordination.support", ["--check-home"], 60000)));
-app.get("/api/publisher/inbox", async (_q, res) => res.json(await pyModule("coordination.support", ["--inbox"], 60000)));
+app.post("/api/publisher/check", async (_q, res) => res.json(await pyModule("coordination.publisher", ["--check-home"], 60000)));
+app.get("/api/publisher/inbox", async (_q, res) => res.json(await pyModule("coordination.publisher", ["--inbox"], 60000)));
 app.get("/api/publisher/read/:id", async (req, res) => {
   const id = String(req.params.id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.support", ["--read", id], 60000));
+  res.json(await pyModule("coordination.publisher", ["--read", id], 60000));
 });
 app.post("/api/publisher/answer", async (req, res) => {
   const b = req.body || {};
@@ -714,7 +730,7 @@ app.post("/api/publisher/answer", async (req, res) => {
   if (typeof b.status === "string") body.status = b.status.slice(0, 20);
   if (typeof b.reply === "string") body.reply = b.reply.slice(0, 5000);
   if (typeof b.fixed_in === "string") body.fixed_in = b.fixed_in.slice(0, 40);
-  res.json(await pyStdin("coordination.support", ["--answer"], body, 60000));
+  res.json(await pyStdin("coordination.publisher", ["--answer"], body, 60000));
 });
 // PUTTING A VERSION OUT takes minutes when the installer is built, longer than
 // a request may be held open — so it runs on its own and leaves its progress in
@@ -729,7 +745,7 @@ app.post("/api/publisher/publish", async (req, res) => {
       return res.json({ ok: false, busy: true, error: "A version is being put out already — " + (now.stage || "working") });
   } catch (_) { /* no job yet */ }
   const b = req.body || {};
-  const args = [...py.prefix, "-m", "coordination.updates", "--publish", "--job", publishJob(),
+  const args = [...py.prefix, "-m", "coordination.publisher", "--publish", "--job", publishJob(),
     "--notes", String(b.notes || "").slice(0, 2000)];
   if (b.installer === true) args.push("--installer");
   try {
@@ -749,7 +765,7 @@ app.get("/api/publisher/job", async (_q, res) => {
 });
 app.post("/api/publisher/remove", async (req, res) => {
   const id = String((req.body || {}).id || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
-  res.json(await pyModule("coordination.support", ["--remove", id], 60000));
+  res.json(await pyModule("coordination.publisher", ["--remove", id], 60000));
 });
 
 /* ---- READING A SENT MAIL, AND THE CONTENT SCREEN'S CONTROLS -------------------

@@ -1,8 +1,8 @@
 # Putting your program out — the owner's guide
 
-Everything here is done from your own copy of the program — **Your users** in
-the menu, and **Settings → Publisher**. Your copy is the one the program is made
-from; everyone else's copy is installed from the Setup.exe you put out.
+This guide is for your own copy only. It is left out of every copy you give
+people, along with the rest of your side of the program (see *What people get*
+below).
 
 ---
 
@@ -10,41 +10,49 @@ from; everyone else's copy is installed from the Setup.exe you put out.
 
 Your Home is one folder on your own website. It does three jobs:
 
-- **Reports** — when someone using the program presses *Help and reports → Send
-  the report*, it arrives here, and in your email if you give one.
-- **Updates** — every version you put out is kept here, and every copy of the
-  program asks it once a day whether there is a newer one.
-- **A download page** — the address you give new people to get the program.
+- **A sealed postbox.** When someone sends a problem report, registers, or
+  their copy says "I'm in use", it is sealed on *their* computer so that only
+  *your* computer can open it. It waits in the postbox, unreadable, until your
+  program collects it, and is then deleted from the website.
+- **Updates.** Every version you put out is kept there, and every copy asks for
+  the newest one.
+- **A download page.** The address you give new people to get the program.
+
+**Your users and their issues are kept on your computer, not on your website.**
+Someone who got into your hosting would find sealed envelopes and nothing else.
 
 How:
 
 1. Click **Your users** in the menu on the left (on a phone: *More → Your
-   users*). Type your website (`https://www.worlddealtechnicalservices.com`)
-   and the email that should hear about new reports. Press **Make it**, and
-   type the password you sign in with when it asks.
+   users*). Type your website (`https://www.worlddealtechnicalservices.com`).
+   If you like, add the email that should hear "a report is waiting" (the email
+   never says what the report says). Press **Make it**, and type the password
+   you sign in with when it asks.
 2. Press **Download glasswork-home.zip**. Unzip it (right-click → *Extract All*).
 3. In your hosting's **File Manager**, open your website's main folder (the one
    with your home page in it, usually `public_html`) and upload the
-   **glasswork-home** folder there.
+   **glasswork-home** folder there. If there is one from before, replace it.
 4. Back in Your users, press **Check it**. It should say *Your Home answers and
    knows you*, and the room opens.
 
-(The same thing is in **Settings → Publisher**, with *Make my Glasswork Home*.
-After updating the program, close it and open it again if Your users is not in
-the menu.)
-
 Your download page is then `https://www.worlddealtechnicalservices.com/glasswork-home/`.
 
-Two keys are made for you and kept on your computer:
+### Your three keys — back them up
 
-- **Your Home key** (in `glasswork-home/home-key.php` on the website, and in
-  `config/publisher.local.json` on your computer). It is how the Home knows it
-  is you. Nobody else can read a report or put out a version without it.
-- **Your signing key** (`.glasswork-publisher/signing.key` in your Windows user
-  folder). Every version is signed with it, and every copy of the program
-  refuses an update that is not. **Back it up somewhere safe** (a USB stick).
-  If you lose it, copies already installed cannot be updated again — people
-  would have to reinstall.
+Made for you and kept on your computer, in the `.glasswork-publisher` folder in
+your Windows user folder (`C:\Users\<you>\.glasswork-publisher`):
+
+- **postbox.key** — opens what people send you, and locks your records.
+  Without it, nobody (you included) can open your records or waiting envelopes.
+- **signing.key** — signs every version. Every copy refuses an update that is
+  not signed with it. Lose it and installed copies cannot be updated again.
+- Your **Home key** (in `config/publisher.local.json`) — lets your program
+  collect, answer and put versions out. The website only holds a fingerprint
+  of it, not the key itself.
+
+**Copy the `.glasswork-publisher` folder to a USB stick** and keep it safe.
+Your records themselves are in the program's `data/publisher` folder; copy that
+too if you want a backup of who your users are.
 
 ## 2. Each new version
 
@@ -66,7 +74,7 @@ A version can only go out once; the next one needs a higher number.
 
 ## 3. New people: one link
 
-Send them your download page (step 1). They press **Download for Windows**,
+Send them your download page (section 1). They press **Download for Windows**,
 double-click the file, and follow the steps:
 
 1. Welcome, and the terms.
@@ -76,71 +84,82 @@ double-click the file, and follow the steps:
    touches them.
 4. A desktop shortcut, if they want one. Install. *Open Glasswork now.*
 
-Nothing else needs installing: the program carries its own Python and Node,
-and needs no administrator password.
+**Everything it needs is inside that one file.** The Setup carries its own
+Python, its own Node and every library, so nothing else downloads and no
+administrator password is needed. The only thing each person adds themselves is
+their own AI key (see section 5).
 
 **The blue "Windows protected your PC" box — no subscription needed.** The
 installer is not signed with a paid certificate, by choice. The first time,
 Windows says it does not recognise the publisher; people click **More info →
 Run anyway** and the installer opens as normal. Your download page shows these
-steps right under the button. Because every version is a new file to Windows,
-the box can appear again for each new Setup.exe — but updates installed from
-inside the program never show it, only a fresh download does.
+steps right under the button. Updates installed from inside the program never
+show it — only a fresh download does.
 
 ## 4. Your users and their issues
 
-**Your users** is always in the menu on your own copy (the one the program is
-made from — copies installed from your Setup.exe do not have it). Until your
-Home is on your website, it walks you through section 1; after that it has two
-tabs. What it shows lives on your website's Home, so it is the same on any
-computer you set up as the publisher.
+**Your users** is in the menu on your own copy only. Each time you open it, it
+collects whatever is waiting in your postbox (or press **Check for new**), opens
+it on your computer and files it in your records. It has two tabs.
 
 **People** — every copy of the program in use:
 
-- Each copy has a random number of its own. When it looks for updates it tells
-  your Home that number, its version and the kind of computer — nothing else.
-  That is how you see how many copies are in use, which version each has, and
-  when each was last opened. (A person can switch this off in their *Help and
-  reports* screen.)
+- Each copy has a random number of its own. Once a day it tells you — sealed —
+  that number, its version and the kind of computer, nothing else. That is how
+  you see how many copies are in use, which version each has, and when each was
+  last opened. (A person can switch this off in their *Help and reports*.)
 - Their **name, business, email, phone, website and country** appear only if
-  they choose **Register your copy** (offered once on their Today screen, and
-  always in *Help and reports*). They can change it or withdraw it at any time.
+  they choose **Register your copy**. They can change it or withdraw it; a
+  withdrawal removes their details from your records the next time you collect.
 - Filters: everyone, registered, with open issues, on an older version. Open
   someone to see their details (email and phone are clickable), their copy, and
-  every issue they sent. *Remove this person* deletes their details from your Home.
-- The tiles at the top: copies in use this week, registered, open issues, and
-  how many are on the newest version.
+  every issue they sent. *Remove this person* deletes them from your records.
 
 **Issues** — every problem report, newest first, with who sent it. Open one to
 read what they wrote, the version they have and (if they ticked it) their
 support report — which has every key, password, email, web address and phone
 number taken out before it leaves their computer. Choose where it stands
-(*Read*, *Being worked on*, *Fixed*, *Not changing*), write an answer, and if
-it is fixed say in which version. They see your answer in their *Help and
-reports* screen, and if the fix is in a newer version than theirs they are told
-to update. A new report is also emailed to you, if you gave an email.
+(*Read*, *Being worked on*, *Fixed*, *Not changing*), write an answer, say in
+which version it is fixed, and press **Save and send**. Your answer is sealed to
+that person's copy; they read it in their *Help and reports* screen, and if the
+fix is in a newer version than theirs they are told to update. If your website
+does not answer at that moment, the answer goes the next time you collect.
 
-## 5. What each person sets up themselves
+## 5. What people get — and what they do not
 
-**Their own AI key.** Each person's copy thinks with their own key (Anthropic,
-OpenAI or Google — the *How your agency thinks* page) and pays that company
-directly. Nothing is shared, and you are never billed for someone else's use.
+**What they get:** the program itself — the agency, its screens, its own Python
+and Node — and the *public* halves of two of your keys: one to check your
+signature on updates, one to seal what they send you. A public key can only
+check or seal; it cannot sign anything or open anything.
 
-**Their own website connection**, with its own secret — never the same for two
-people:
+**What they never get:** your users room, your inbox, putting versions out, the
+Home's own code, this guide, your keys, your records, your settings. None of it
+is in the Setup or in any update. On their copy the room does not exist, and
+the office answers "That is not part of this copy" if anything asks for it.
 
-- **A website built by hand (PHP or HTML)** — Settings → Website and connection
-  → *Download your connector*. The zip holds the connector file and a secret
-  made just for that person. They upload the `agency-api` folder once, next to
-  their home page, and press Check.
-- **A WordPress website** — nothing to upload. In WordPress, *Users → Profile
-  → Application Passwords*, they make a password called "Glasswork" and paste it
-  with their username. WordPress keeps it separate from their real password and
-  they can take it back at any time. The program reads and changes pages and
-  posts through WordPress's own REST API; WordPress keeps every old version of a
-  page as a revision, which is how a change is undone. What WordPress keeps out
-  of reach — a theme's header and footer, a page builder's own storage — is
-  handed to them as a short instruction instead.
+**Nothing in their copy can reach your computer.** Your program goes to your
+website and collects; nothing ever calls in. The office only listens on the
+computer it runs on.
 
-**Maps, Search Console, email** — each person's own keys on the Setup screen,
-each optional.
+**About "nobody can read the code".** The sealed envelopes and your records
+cannot be opened without your postbox key — not by guessing, not by any
+computer or AI. The program's *code* is different: any program that runs on
+someone's computer can, with enough effort, be read on that computer, because
+the computer has to understand it to run it. That is why nothing secret is in
+it. The code is also currently released under the GNU GPL licence, which lets
+people read and share it; if you want it closed, that is a licence decision to
+make before launch.
+
+**Each person sets up their own:**
+
+- **AI key.** Each copy thinks with the person's own key (Anthropic, OpenAI or
+  Google — the *How your agency thinks* page) and pays that company directly.
+  You are never billed for someone else's use.
+- **Website connection**, with its own secret — never the same for two people.
+  A hand-built (PHP/HTML) website: Settings → Website and connection →
+  *Download your connector*, upload the `agency-api` folder once, press Check.
+  A WordPress website: nothing to upload — *Users → Profile → Application
+  Passwords* in WordPress, make one called "Glasswork", paste it with their
+  username.
+- **Maps, Search Console, email** — their own keys on the Setup screen, each
+  optional.

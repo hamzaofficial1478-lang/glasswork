@@ -79,6 +79,10 @@ jobs:
           $st = Invoke-RestMethod http://127.0.0.1:3917/api/state
           if (-not $st.ok) { throw "the office could not read its records" }
           "the office answers and reads its records"
+          $pub = Invoke-RestMethod http://127.0.0.1:3917/api/publisher
+          if ($pub.can_publish) { throw "the publisher's own side is in the installer" }
+          if (Test-Path C:\gw-test\coordination\publisher.py) { throw "the publisher's code is in the installer" }
+          "a person's copy has no users room and none of the publisher's side"
           Invoke-RestMethod -Method Post http://127.0.0.1:3917/api/quit -ContentType 'application/json' -Body '{}'
           Start-Sleep 3
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
