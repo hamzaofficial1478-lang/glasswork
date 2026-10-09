@@ -259,8 +259,25 @@ def update():
 # 2 + 3. CABINET AND HEALTH
 # ---------------------------------------------------------------------------
 
+def legacy_allowed() -> bool:
+    """
+    May the program's ORIGINAL files (coordination/agency.db, .env) be used?
+    Only on a copy that was already in use before accounts — his own. Never on
+    an installed copy, and never on a fresh one: those ask for an account first
+    (server.js, accountRequired), and an empty, unencrypted cabinet made here
+    in the program's folder would both break that promise and, on a fresh
+    copy, make the office think it was an old one. Mirrors server.js.
+    """
+    from coordination import workspace
+    if os.environ.get("GLASSWORK_INSTALLED") == "1" or workspace.accounts():
+        return False
+    return workspace.legacy_present() or bool(os.environ.get("AGENCY_DB"))
+
+
 def ensure_cabinet():
     from coordination import workspace
+    if workspace.active() is None and not legacy_allowed():
+        return                          # each account's cabinet is built when its owner signs in
     db = workspace.db_path()            # the open website's cabinet
     if db.exists():
         return
@@ -289,6 +306,9 @@ def sweep_stale():
     """
     try:
         sys.path.insert(0, str(ROOT))
+        from coordination import workspace
+        if workspace.active() is None and not legacy_allowed():
+            return                      # nobody's cabinet is open: nothing of anyone's to tidy
         from coordination import board
         out = board.sweep_dead_processes()
     except Exception as e:
@@ -310,6 +330,13 @@ def check():
     """What is ready and what is not. Honest, and it never guesses."""
     head("Health check")
     sys.path.insert(0, str(ROOT))
+    from coordination import workspace
+    if workspace.active() is None and not legacy_allowed():
+        # A new copy: everything to check belongs to an account, and is
+        # encrypted until its owner signs in. Looking would only make an empty
+        # cabinet in the program's folder.
+        say("  Sign in (or make your account) in the office — Today shows what is set up and what is left.")
+        return
     ready, missing = [], []
 
     try:

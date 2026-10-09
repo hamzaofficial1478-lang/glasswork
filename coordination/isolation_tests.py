@@ -137,7 +137,10 @@ def test_websites_made_before_are_sealed_too():
 
 
 class _Office:
-    """A copy staged the way Setup installs it, with its office running."""
+    """A copy staged the way Setup installs it (or a fresh copy from source), with its office running."""
+
+    def __init__(self, installed=True):
+        self.installed = installed
 
     def __enter__(self):
         sys.path.insert(0, str(ROOT / "installer"))
@@ -152,9 +155,16 @@ class _Office:
         self.port = s.getsockname()[1]
         s.close()
         env = {**os.environ, "PORT": str(self.port), "AGENCY_DATA": str(self.dir / "data"), "AGENCY_IGNORE_DOTENV": "1",
-               "CLAUDE_TEAM_OFF": "1", "GLASSWORK_INSTALLED": "1", "NODE_PATH": str(ROOT / "node_modules")}
-        for k in ("AGENCY_DB", "AGENCY_KEY"):
+               "CLAUDE_TEAM_OFF": "1", "NODE_PATH": str(ROOT / "node_modules")}
+        if self.installed:
+            env["GLASSWORK_INSTALLED"] = "1"
+        for k in ("AGENCY_DB", "AGENCY_KEY") + (() if self.installed else ("GLASSWORK_INSTALLED",)):
             env.pop(k, None)
+        self.env = env
+        # run.py's own start-up first — the check it makes, and the cabinet it
+        # used to build — exactly as the shortcut starts it.
+        subprocess.run([sys.executable, "run.py", "--check", "--no-update"], cwd=self.app, env=env,
+                       capture_output=True, text=True, encoding="utf-8", timeout=300)
         self.proc = subprocess.Popen(["node", "server.js"], cwd=self.app, env=env,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
@@ -226,8 +236,22 @@ def test_an_installed_copy():
               readable(o.dir / "data", [ALPHA["host"], ALPHA["name"]]), [])
 
 
+def test_a_fresh_copy_from_source():
+    print("\nA fresh copy run from source is just as private: an account first, nothing in its folder:")
+    if not (shutil.which("node") and (ROOT / "node_modules" / "express").exists()):
+        print("  SKIP  Node and the office's libraries are not here")
+        return
+    with _Office(installed=False) as o:
+        st, j, _ = o.req("GET", "/api/state")
+        check("it asks for an account before anything else", (st, j.get("needsAccount")), (401, True))
+        after = sorted(p.relative_to(o.app).as_posix() for p in o.app.rglob("*")
+                       if p.is_file() and "__pycache__" not in p.parts)
+        check("  and starting it wrote nothing in its own folder", sorted(set(after) - set(o.before)), [])
+
+
 def main():
-    for t in (test_two_people_one_computer, test_websites_made_before_are_sealed_too, test_an_installed_copy):
+    for t in (test_two_people_one_computer, test_websites_made_before_are_sealed_too, test_an_installed_copy,
+              test_a_fresh_copy_from_source):
         t()
     print()
     if _fail:
