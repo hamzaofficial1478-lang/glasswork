@@ -37,11 +37,13 @@ DEFAULTS = {"name": "Botix", "company": "TECH DUO", "version": "0.0.0", "tagline
 
 # HIS SIDE OF THE PROGRAM — his Reports room, putting versions out, the
 # Home's own code and his guides — and his client's own files (the business
-# markup and the guides written for that one website). On his computer only:
+# markup and the guides written for that one website), and the TechDuo
+# website, which goes up on his hosting by hand. On his computer only:
 # never in a release, never in the installer (both leave these out), so a copy
 # he gives out has none of it. A path ending in "/" is a whole folder.
 PUBLISHER_ONLY = ("coordination/publisher.py", "coordination/publish_tests.py", "ui/publisher.js",
                   "publish-to-your-site/", "docs/", ".github/", ".claude/", "CLAUDE.md", "START-HERE.md", "README.md", "runner/",
+                  "website/", "coordination/website_tests.py",
                   "paste-into-your-site/1-localbusiness-every-page.html",
                   "paste-into-your-site/2-faq-schema-faq-page.html", "paste-into-your-site/HEAD-BLOCK-paste-once.php",
                   "paste-into-your-site/FULL-ACCESS-do-this.md", "paste-into-your-site/README.md")

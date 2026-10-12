@@ -1,12 +1,13 @@
 """
 mark.py — the program's mark: BT in orange on a dark tile, drawn once here.
 
-    python -m coordination.mark --write     writes ui/logo.svg and the app icons
+    python -m coordination.mark --write     writes ui/logo.svg, the app icons and the website's copy
 
 "i want the wordmark "BT" as the logo of the program as like we have for
 Premier pro, after effects" — a rounded tile, two letters, a thin border in
 the letters' colour. The letters are built from straight lines and circles,
-not a font, so the mark is the same everywhere and sharp at any size.
+not a font, so the mark is the same everywhere and sharp at any size. The
+T's bar runs on across the top of the B, so the two letters are one piece.
 
 One geometry, three outputs: an SVG for the screens, PNGs for the installed
 app (ui/icon-192.png, ui/icon-512.png) and the Windows installer's icon
@@ -21,12 +22,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-TILE = (26, 21, 18)          # warm charcoal — not Illustrator's dark brown
-ORANGE = (255, 138, 31)      # #FF8A1F
-TILE_HEX, ORANGE_HEX = "#1A1512", "#FF8A1F"
+TILE_TOP, TILE_BOTTOM = (29, 32, 40), (17, 19, 24)   # cool graphite, lighter at the top
+ORANGE = (232, 131, 79)      # #E8834F — a quiet orange, not a bright one
+TILE_HEX, TILE_HEX_2, ORANGE_HEX = "#1D2028", "#111318", "#E8834F"
 
 # The tile is 240 units square; the letters sit on a 100-unit-high grid.
-SIDE, RADIUS, RIM = 240.0, 44.0, 5.0
+SIDE, RADIUS, RIM = 240.0, 46.0, 4.0
 T = 14.0                                  # stroke
 HU, HL = 28.0, 30.0                       # the B's two counters
 CXU, CXL = 42.0, 46.0                     # where the bowls start to curve
@@ -38,7 +39,7 @@ LETTERS = (f"M0 0H{CXU:g}A{RU:g} {RU:g} 0 0 1 {CXU:g} {2 * RU:g}H0Z"
            f"M{T:g} {T:g}H{CXU:g}A{HU / 2:g} {HU / 2:g} 0 0 1 {CXU:g} {T + HU:g}H{T:g}Z",
            f"M0 {T + HU:g}H{CXL:g}A{RL:g} {RL:g} 0 0 1 {CXL:g} 100H0Z"
            f"M{T:g} {2 * T + HU:g}H{CXL:g}A{HL / 2:g} {HL / 2:g} 0 0 1 {CXL:g} {100 - T:g}H{T:g}Z",
-           f"M84 0H152V{T:g}H84Z", f"M111 {T:g}H125V100H111Z")
+           f"M0 0H152V{T:g}H0Z", f"M111 {T:g}H125V100H111Z")
 
 
 def svg(size=None, title="BT") -> str:
@@ -46,7 +47,9 @@ def svg(size=None, title="BT") -> str:
     wh = f' width="{size}" height="{size}"' if size else ""
     paths = "".join(f'<path fill-rule="evenodd" d="{d}"/>' for d in LETTERS)
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240"{wh} role="img" aria-label="{title}">'
-            f'<rect width="240" height="240" rx="{RADIUS:g}" fill="{TILE_HEX}"/>'
+            f'<defs><linearGradient id="bt-tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{TILE_HEX}"/>'
+            f'<stop offset="1" stop-color="{TILE_HEX_2}"/></linearGradient></defs>'
+            f'<rect width="240" height="240" rx="{RADIUS:g}" fill="url(#bt-tile)"/>'
             f'<rect x="{RIM / 2:g}" y="{RIM / 2:g}" width="{SIDE - RIM:g}" height="{SIDE - RIM:g}" rx="{RADIUS - RIM / 2:g}" '
             f'fill="none" stroke="{ORANGE_HEX}" stroke-width="{RIM:g}"/>'
             f'<g fill="{ORANGE_HEX}" transform="translate({OFF_X:g} {OFF_Y:g}) scale({SCALE:g})">{paths}</g></svg>')
@@ -80,7 +83,7 @@ def _in_hole(x, y, top, bottom, cx):
 
 def _in_letters(x, y):
     """x, y on the letters' 100-high grid."""
-    if 84 <= x <= 152 and 0 <= y <= T:
+    if 0 <= x <= 152 and 0 <= y <= T:              # one bar across the top of both letters
         return True
     if 111 <= x <= 125 and T <= y <= 100:
         return True
@@ -97,7 +100,8 @@ def _colour_at(x, y):
         return ORANGE
     if _in_letters((x - OFF_X) / SCALE, (y - OFF_Y) / SCALE):
         return ORANGE
-    return TILE
+    k = y / SIDE
+    return tuple(round(a + (b - a) * k) for a, b in zip(TILE_TOP, TILE_BOTTOM))
 
 
 def png(size: int, samples: int = 4) -> bytes:
@@ -143,6 +147,11 @@ def write(ui=ROOT / "ui") -> list:
     for s in (192, 512):
         (ui / f"icon-{s}.png").write_bytes(png(s))
         out.append(ui / f"icon-{s}.png")
+    site = ROOT / "website" / "assets"                 # the TechDuo website shows the same mark
+    if site.is_dir():
+        (site / "botix-logo.svg").write_text(svg() + "\n", encoding="utf-8")
+        (site / "botix-192.png").write_bytes((ui / "icon-192.png").read_bytes())
+        out += [site / "botix-logo.svg", site / "botix-192.png"]
     return out
 
 

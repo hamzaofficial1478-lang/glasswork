@@ -6,25 +6,18 @@
 <title>Botix — Setup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/botix.css">
 <style>
-:root{
-  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
-  --wall:#33484f; --walltop:#3f5860;
-  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
-  --text:#e7eff3; --muted:#7d919c; --faint:#54666f;
-  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.15);
-  --amber:#eaa543; --amber-dim:rgba(234,165,67,.15);
-  --danger:#e5565b; --danger-dim:rgba(229,86,91,.14); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
-}
 *{box-sizing:border-box}
-body{margin:0;background:radial-gradient(900px 500px at 70% -60px,rgba(84,203,217,.05),transparent 60%),var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
-.etch{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased;min-height:100vh}
+.etch{font-family:var(--mono);text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
 a{color:var(--glass);text-decoration:none}
 button{font-family:inherit}
-code{font-family:'IBM Plex Mono',monospace}
+code{font-family:var(--mono)}
 
-header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:rgba(12,18,22,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:var(--bar-bg);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .brand{display:flex;flex-direction:column;gap:2px}.brand b{font-size:14px}.brand span{font-size:9px}
 .badge{display:flex;align-items:center;gap:9px;padding:7px 13px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2);font-size:13px}
 .badge .fav{width:20px;height:20px;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
@@ -36,18 +29,18 @@ main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 .title{font-size:22px;font-weight:600;margin:0 0 6px}
 .lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 26px;max-width:64ch}
 
-.card{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;margin-bottom:20px;overflow:hidden;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
+.card{background:var(--surface);border:1px solid var(--line2);border-radius:14px;margin-bottom:20px;overflow:hidden;box-shadow:var(--shadow)}
 .card.optional{border-style:dashed;border-color:var(--line)}
 .card-h{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
 .card-h .ic{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
 .card-h b{font-size:14px;display:block}
 .card-h small{color:var(--muted);font-size:11px}
-.optpill{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);border:1px solid var(--amber);background:var(--amber-dim);border-radius:999px;padding:3px 9px}
+.optpill{margin-left:auto;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);border:1px solid var(--amber);background:var(--amber-dim);border-radius:999px;padding:3px 9px}
 .card-b{padding:18px}
 
 .field{margin:0 0 14px}.field:last-child{margin-bottom:0}
 .field label{display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:6px}
-.field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:'IBM Plex Mono',monospace}
+.field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:var(--mono)}
 .field input::placeholder{color:var(--faint)}
 .field input:focus,.field select:focus{outline:none;border-color:var(--glass);box-shadow:0 0 0 3px var(--glass-dim)}
 .hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45}
@@ -61,10 +54,10 @@ main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 .hidden{display:none}
 
 .pbtn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:13.5px;cursor:pointer}
-.pbtn:disabled{opacity:.55;cursor:default}.pbtn:hover:not(:disabled){background:rgba(84,203,217,.22)}
+.pbtn:disabled{opacity:.55;cursor:default}.pbtn:hover:not(:disabled){background:var(--accent-soft)}
 .mini{padding:7px 11px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--text);font-size:12px;cursor:pointer}
 .mini:hover{border-color:var(--glass);color:var(--glass)}
-.mini.del{border-color:rgba(229,86,91,.4);color:var(--danger)}
+.mini.del{border-color:var(--bad-line);color:var(--danger)}
 .mini.del:hover{background:var(--danger-dim)}
 .btnrow{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
 
@@ -75,28 +68,28 @@ main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 #pfOut .warn{color:var(--amber)}#pfOut .dim{color:var(--muted)}
 #pfOut li{list-style:disc}
 
-.cred{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:rgba(24,37,48,.4)}
+.cred{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:var(--sunken)}
 .cred-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.cred-h b{font-size:13.5px}.cred-h .mono{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
-.endpoint{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--etch);margin:2px 0 10px;word-break:break-all}
+.cred-h b{font-size:13.5px}.cred-h .mono{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.endpoint{font-family:var(--mono);font-size:10.5px;color:var(--etch);margin:2px 0 10px;word-break:break-all}
 .models{margin-top:12px;border-top:1px dashed var(--line);padding-top:12px}
 .model{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:9px;background:var(--panel2)}
 .model-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.model-top .mid{font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500}
-.tagchip{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:1px 7px}
+.model-top .mid{font-family:var(--mono);font-size:12.5px;font-weight:500}
+.tagchip{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:1px 7px}
 .tagchip.paid{color:var(--amber);border-color:var(--amber)}
 .tagchip.free{color:var(--ok);border-color:var(--ok)}
-.caps{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px}
+.caps{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:6px}
 .caps .y{color:var(--ok)}.caps .n{color:var(--danger)}.caps .q{color:var(--amber)}
 .testout{margin-top:8px;font-size:12px;line-height:1.5}
-.testout.ok{color:#bfe9cf}.testout.err{color:#f2b6b8}
-.testout pre{background:#0d1418;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:11px;color:var(--muted);max-height:240px;white-space:pre-wrap;word-break:break-word}
+.testout.ok{color:var(--done)}.testout.err{color:var(--stuck)}
+.testout pre{background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:11px;color:var(--muted);max-height:240px;white-space:pre-wrap;word-break:break-word}
 details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 
 .banner{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:12.5px;line-height:1.5;display:none}
 .banner.show{display:block}
-.banner.ok{border:1px solid var(--ok);background:var(--ok-dim);color:#bfe9cf}.banner.ok b{color:var(--ok)}
-.banner.err{border:1px solid var(--danger);background:var(--danger-dim);color:#f2b6b8}
+.banner.ok{border:1px solid var(--ok-line);background:var(--ok-dim);color:var(--done)}.banner.ok b{color:var(--ok)}
+.banner.err{border:1px solid var(--bad-line);background:var(--danger-dim);color:var(--stuck)}
 .foot{margin-top:22px;display:flex;align-items:flex-start;gap:8px;color:var(--muted);font-size:11.5px;line-height:1.5}
 .foot .lock{color:var(--glass)}
 </style>
@@ -214,7 +207,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <p class="hint" style="margin-top:0;margin-bottom:10px">Your site's real search clicks and queries. Create a Google service account, give it access to your property, then paste its JSON key.</p>
         <div class="field"><label>Property</label><input id="gsc_prop" placeholder="sc-domain:glassworks.ae"><div class="hint">Either <code>sc-domain:yoursite.ae</code> or the full <code>https://…</code> property.</div></div>
         <div class="field"><label>Service-account JSON key</label>
-          <textarea id="gsc_json" rows="4" placeholder="leave blank to keep saved" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:12px;font-family:'IBM Plex Mono',monospace"></textarea>
+          <textarea id="gsc_json" rows="4" placeholder="leave blank to keep saved" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:12px;font-family:var(--mono)"></textarea>
           <div class="hint">Paste the whole JSON file. Kept in a git-ignored file on the server, never shown back.</div></div>
         <div class="btnrow"><button class="pbtn" id="saveGsc">Save Search Console</button><button class="mini" id="testGsc">Test</button><span class="inl dim" id="gscMsg"></span></div>
         <div class="hint">Test asks Google straight away whether the agency can read your property, and says exactly what to change if not.</div>
@@ -525,7 +518,7 @@ let TEAM = null;
 function teamStateLine(t){
   if(!t || !t.ok) return '<span style="color:var(--danger)">✕ '+esc((t&&t.error)||'Could not read the team')+'</span>';
   if(!t.ready) return '<span style="color:var(--danger)">✕ Claude Code is not ready on this machine.</span>'
-    +'<pre style="white-space:pre-wrap;font-size:11.5px;color:var(--muted);background:#0d1418;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px">'+esc(t.why||'')+'</pre>';
+    +'<pre style="white-space:pre-wrap;font-size:11.5px;color:var(--muted);background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px">'+esc(t.why||'')+'</pre>';
   const accs=(t.accounts||[]).map(a=>{
     const who=a.email?(' as '+esc(a.email)):'';
     return a.ok?('<span style="color:var(--ok)">✓ '+esc(a.label)+' signed in'+who+'</span>')

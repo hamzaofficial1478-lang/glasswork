@@ -504,6 +504,7 @@ def tests():
             "coordination.speed_tests", "pipelines.connector_tests",
             "coordination.publish_tests", "coordination.sealed_tests", "coordination.security_tests",
             "coordination.installer_tests", "coordination.isolation_tests",
+            "coordination.website_tests",
             "coordination.account_tests",
             "coordination.profile_tests",
             "coordination.clock_tests",

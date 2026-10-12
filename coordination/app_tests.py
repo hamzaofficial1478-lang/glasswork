@@ -88,7 +88,7 @@ def test_light_and_dark():
     css = (ROOT / "ui" / "botix.css").read_text(encoding="utf-8")
     check("every screen takes its colours from one file", all('href="/botix.css"' in (ROOT / "ui" / f).read_text(encoding="utf-8")
           for f in ("app.html", "account.html", "business.html", "engine.html")), True)
-    check("the light palette is the default", ":root{" in css and "--bg:#F5F4F2" in css, True)
+    check("the light palette is the default", ":root{" in css and "--bg:#F4F5F7" in css, True)
     check("dark follows the computer unless light was chosen",
           '@media (prefers-color-scheme:dark){\n  :root:not([data-theme="light"])' in css, True)
     check("and dark can be chosen outright", ':root[data-theme="dark"]{' in css, True)
