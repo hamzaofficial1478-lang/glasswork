@@ -142,6 +142,7 @@ async function reports(main) {
       <span class="muted" style="font-size:14px"><span class="lamp done"></span> Kept on this computer — not on your website. <span id="pubLast">${last ? 'Last collected ' + esc(pubSeen(last)) + '.' : 'Not collected yet.'}</span></span>
       <span style="display:flex;gap:10px;align-items:center"><span class="muted" id="pubColSay" style="font-size:14px">${esc(PUB.lastSay)}</span><button class="btn ghost small" type="button" id="pubCollect">Check for new</button></span></div>
     ${inb && inb.ok === false ? `<div class="note">${esc(inb.error || 'Your records could not be opened.')}</div>` : ''}
+    <section id="pubOnline" style="display:flex;flex-direction:column;gap:10px"></section>
     <section class="card">${shown.length ? shown.map((r) => { const lk = REP_LOOK[r.status] || ['plain', r.status];
       return `<button type="button" class="row" data-rep="${esc(r.id)}" style="width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line-soft);cursor:pointer;color:var(--ink)">
         <span class="grow"><b style="font-weight:600">${esc(r.title)}</b><span class="muted" style="font-size:14px">${esc(r.text || '')}</span>
@@ -151,7 +152,40 @@ async function reports(main) {
   main.querySelectorAll('[data-pf]').forEach((b) => b.onclick = () => { PUB.filter = b.dataset.pf; reports(main); });
   main.querySelectorAll('[data-rep]').forEach((b) => b.onclick = () => openReport(b.dataset.rep, main));
   $('#pubCollect').onclick = () => collectNow(main, true);
+  onlineCard();
   if (!last || Date.now() / 1000 - Number(last) > COLLECT_EVERY_MS / 1000) collectNow(main, false);
+}
+
+/* YOUR ONLINE OFFICE: how many people use it — counts, never who. Its address
+   and owner key are kept here; the key and the Home's address go into the
+   server's settings so people online can send reports too. */
+async function onlineCard(shown) {
+  const box = $('#pubOnline'); if (!box) return;
+  const o = shown || await api('/api/publisher/online');
+  const st = (o && o.stats) || null;
+  const tile = (label, n, sub) => `<div class="card tile"><span class="label">${label}</span><span class="big mono">${esc(n == null ? '—' : n)}</span><span class="muted" style="font-size:13.5px">${sub}</span></div>`;
+  const set = o && o.server_settings ? Object.entries(o.server_settings).map(([k, v]) => `Environment=${k}=${v}`).join('\n') : '';
+  box.innerHTML = `<h2 class="label" style="margin:0">Your online office</h2>
+    ${st ? `<div class="tiles">${tile('Using it today', st.today, 'people signed in today')}${tile('Right now', st.using_now, 'signed in in the last 15 minutes')}
+      ${tile('A day, this week', st.average_a_day_7, 'on average')}${tile('Accounts', st.accounts, 'made in all')}</div>
+      <p class="muted" style="margin:0;font-size:13.5px">Counts only: nobody's name, websites or work is ever sent here.</p>` : ''}
+    ${o && o.url && !st ? `<div class="note">${esc(o.error || 'No answer yet.')}</div>` : ''}
+    <details class="card" style="padding:14px 18px" ${o && o.url ? '' : 'open'}><summary style="cursor:pointer;font-weight:600">${o && o.url ? 'Address and key' : 'Connect your online office'}</summary>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+        <label for="onUrl" style="font-weight:600">Its address</label><input id="onUrl" placeholder="https://app.yourprogram.com" value="${esc((o && o.url) || '')}">
+        <label for="onKey" style="font-weight:600">Owner key <span class="muted" style="font-weight:400">(leave empty and one is made for you)</span></label><input id="onKey" type="password" autocomplete="off">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn small" type="button" id="onSave">Save and check</button><span class="muted" id="onSay" style="font-size:14px"></span></div>
+        <div id="onUnlock"></div>
+        ${set ? `<p class="muted" style="margin:0;font-size:14px">Put these lines in your server's <span class="mono">glasswork.service</span> (docs/HOSTING.md, step 3), then restart it:</p>
+          <pre class="mono" style="margin:0;white-space:pre-wrap;font-size:12.5px;background:var(--sunken);padding:10px 12px;border-radius:8px">${esc(set)}</pre>` : ''}
+      </div></details>`;
+  $('#onSave').onclick = async () => {
+    $('#onSay').textContent = 'Checking…';
+    const body = {url: $('#onUrl').value.trim(), key: $('#onKey').value.trim()};
+    const j = await unlocked(() => api('/api/publisher/online', body), $('#onUnlock'));
+    if (j && (j.url || j.ok)) { onlineCard(j); return; }
+    $('#onSay').textContent = (j && j.error) || 'Not saved.';
+  };
 }
 
 /* Take home what is waiting in the postbox. The room is drawn from his records

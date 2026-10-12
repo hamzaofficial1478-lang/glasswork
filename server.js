@@ -185,7 +185,11 @@ function me() { return CTX.getStore() || null; }
 const ACCOUNT_OPEN = new Set(["/account", "/api/account/list", "/api/account/sign-in",
   "/api/account/sign-up", "/api/account/recover", "/api/ping",
   // Read before an account exists: the terms are agreed at sign-up.
-  "/terms", "/privacy", "/api/product"]);
+  "/terms", "/privacy", "/api/product",
+  // What a browser needs to install it as an app, before anyone signs in.
+  "/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png",
+  // The developer's own count of how many use it (its own key, below).
+  "/api/owner/stats"]);
 
 function accountsExist() {
   try {
@@ -225,6 +229,10 @@ function sessionOf(req) {
     return null;
   }
   s.seen = now;
+  if (HOSTED && s.day !== new Date(now).toISOString().slice(0, 10)) {
+    s.day = new Date(now).toISOString().slice(0, 10);
+    countUse(s.account);
+  }
   return s;
 }
 // Who a hosted office answers to: its own address(es), so a page elsewhere
@@ -466,6 +474,8 @@ const SETUP_API = [
   // The developer's Home: making it and its download carry his key.
   "/api/publisher/setup", "/api/publisher/home.zip", "/api/publisher/publish",
 ];
+// Reading the count needs no second password; setting the address, and seeing the owner key, does.
+const SETUP_POSTS = ["/api/publisher/online"];
 // Two connection calls carry no secret — how the website is connected, and a
 // knock to test it — so the Website screen may use them without the lock. The
 // connector download, which holds the secret, stays behind it.
@@ -524,8 +534,8 @@ function unlockPage(err, next) {
 app.use((req, res, next) => {
   if (!adminHash() && !accountsExist()) return next();   // no password: nothing to ask
   const isPage = req.method === "GET" && SETUP_PAGES.has(req.path);
-  const isApi = SETUP_API.some((p) => req.path === p || req.path.startsWith(p + "/"))
-    && !SETUP_OPEN.has(req.method + " " + req.path);
+  const isApi = (SETUP_API.some((p) => req.path === p || req.path.startsWith(p + "/"))
+    && !SETUP_OPEN.has(req.method + " " + req.path)) || (req.method === "POST" && SETUP_POSTS.includes(req.path));
   if (!isPage && !isApi) return next();
   if (req.path === "/api/setup/unlock") return next();
 
@@ -722,7 +732,83 @@ function productInfo() {
 app.get("/api/product", async (_q, res) => {
   const p = productInfo();
   res.json({ ok: true, name: p.name || "Glasswork", version: p.version || "", tagline: p.tagline || "",
-             support_email: p.support_email || "", installed: process.env.GLASSWORK_INSTALLED === "1" });
+             support_email: p.support_email || "", installed: process.env.GLASSWORK_INSTALLED === "1",
+             hosted: HOSTED });
+});
+// INSTALLED AS AN APP. "if user want to download program the user can also
+// download the program" — from the hosted office, a browser installs it as an
+// app: its own window and icon on the desktop or the phone, signing in with
+// the same account. The program itself stays on the server.
+app.get("/manifest.webmanifest", async (_q, res) => {
+  const p = productInfo(), name = p.name || "Glasswork";
+  res.type("application/manifest+json").json({ name, short_name: name, description: p.tagline || "",
+    start_url: "/", scope: "/", display: "standalone", background_color: "#F3F5F5", theme_color: "#1f5f4f",
+    icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+            { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }] });
+});
+
+/* ---- HOW MANY PEOPLE USE IT ---------------------------------------------------
+   "what i want to get from users is their reports, and just how many users
+   using the program" — a count and nothing else. usage.json holds one number
+   a day. So that a restart (every update is one) does not count the same
+   people twice, today's sign-ins are also kept, as scrambled tags under
+   today's own random salt, in usage-today.json; tomorrow both are replaced.
+   No name, account number or address is written down. */
+const usageFile = () => path.join(DATA_ROOT, "usage.json");
+const todayFile = () => path.join(DATA_ROOT, "usage-today.json");
+const TODAY = { day: "", salt: null, seen: new Set() };
+function readUsage() {
+  try { const u = JSON.parse(fs.readFileSync(usageFile(), "utf8")); return u && u.days ? u : { days: {} }; }
+  catch (_) { return { days: {} }; }
+}
+function loadToday(day) {
+  try {
+    const t = JSON.parse(fs.readFileSync(todayFile(), "utf8"));
+    if (t && t.day === day && /^[0-9a-f]{64}$/.test(t.salt) && Array.isArray(t.seen))
+      return { day, salt: Buffer.from(t.salt, "hex"), seen: new Set(t.seen.filter((x) => /^[0-9a-f]{64}$/.test(x))) };
+  } catch (_) { /* none yet, or yesterday's */ }
+  return { day, salt: crypto.randomBytes(32), seen: new Set() };
+}
+function writeAtomic(file, text) {
+  fs.writeFileSync(file + ".tmp", text);
+  fs.renameSync(file + ".tmp", file);
+}
+function countUse(account) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (TODAY.day !== day) Object.assign(TODAY, loadToday(day));
+  const tag = crypto.createHmac("sha256", TODAY.salt).update(String(account)).digest("hex");
+  if (TODAY.seen.has(tag)) return;
+  TODAY.seen.add(tag);
+  try {
+    const u = readUsage();
+    u.days[day] = (u.days[day] || 0) + 1;
+    for (const d of Object.keys(u.days).sort().slice(0, -400)) delete u.days[d];
+    fs.mkdirSync(DATA_ROOT, { recursive: true });
+    writeAtomic(todayFile(), JSON.stringify({ day, salt: TODAY.salt.toString("hex"), seen: [...TODAY.seen] }));
+    writeAtomic(usageFile(), JSON.stringify(u));
+  } catch (_) { /* a count is never worth an error */ }
+}
+// Asked for by the developer's own program, with the key only he and the
+// server know (GLASSWORK_OWNER_KEY). Without that setting the door is not there.
+app.get("/api/owner/stats", async (req, res) => {
+  const want = String(process.env.GLASSWORK_OWNER_KEY || "");
+  if (want.length < 24) return res.status(404).json({ ok: false, error: "That is not part of this program." });
+  if (tooMany("owner|" + req.ip, 30, 15)) return res.status(429).json(TOO_MANY);
+  const got = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const h = (v) => crypto.createHash("sha256").update(v).digest();
+  if (!crypto.timingSafeEqual(h(got), h(want))) return res.status(401).json({ ok: false, error: "not the owner's key" });
+  const u = readUsage(), days = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    days.push({ day: d, people: u.days[d] || 0 });
+  }
+  let accounts = 0;
+  try { accounts = fs.readdirSync(path.join(DATA_ROOT, "accounts")).filter((d) => fs.existsSync(path.join(DATA_ROOT, "accounts", d, "account.json"))).length; }
+  catch (_) { /* none yet */ }
+  const now = new Set([...SESSIONS_BY_TOKEN.values()].filter((x) => Date.now() - x.seen < 15 * 60000).map((x) => x.account)).size;
+  const last7 = days.slice(-7).reduce((n, d) => n + d.people, 0);
+  res.json({ ok: true, accounts, using_now: now, today: days[29].people,
+             average_a_day_7: Math.round(last7 / 7 * 10) / 10, days });
 });
 // CLOSE THE PROGRAM. An installed copy runs with no window to close, so the
 // office closes itself: it answers, then stops; the launcher stops with it.
@@ -817,6 +903,15 @@ app.post("/api/publisher/publish", async (req, res) => {
     return res.json({ ok: false, error: "Could not start: " + e.message });
   }
   res.json({ ok: true, started: true });
+});
+// How many people use his online office: counts only (coordination/publisher.py online).
+app.get("/api/publisher/online", async (_q, res) => {
+  const { key: _k, server_settings: _s, ...r } = await pub(["--online"], 30000);
+  res.json(r);
+});
+app.post("/api/publisher/online", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.publisher", ["--online"], { url: textField(b.url, 300), key: textField(b.key, 200) }, 30000));
 });
 app.get("/api/publisher/job", async (_q, res) => {
   try { res.json({ ok: true, ...JSON.parse(fs.readFileSync(publishJob(), "utf8")) }); }
@@ -1003,8 +1098,10 @@ async function pyAccounts(command, payload) {
 function startSession(res, account, name, keyHex, site) {
   if (!HOSTED) { SESSIONS_BY_TOKEN.clear(); SESSIONS.clear(); SETUP_TICKETS.clear(); }  // one at a time here
   const tok = crypto.randomBytes(32).toString("hex"), now = Date.now();
-  const s = { token: tok, account, name, key: Buffer.from(keyHex, "hex"), site: site || null, made: now, seen: now };
+  const s = { token: tok, account, name, key: Buffer.from(keyHex, "hex"), site: site || null, made: now, seen: now,
+              day: new Date(now).toISOString().slice(0, 10) };
   SESSIONS_BY_TOKEN.set(tok, s);
+  if (HOSTED) countUse(account);
   CTX.enterWith(s);
   res.setHeader("Set-Cookie", `${ACCOUNT_COOKIE}=${tok}; ${COOKIE_FLAGS}`);
   return s;

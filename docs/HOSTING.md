@@ -99,6 +99,9 @@ Environment=GLASSWORK_INVITE=choose-a-long-invitation-code
 Environment=AGENCY_DATA=/home/glasswork/data
 Environment=PORT=3000
 Environment=PYTHON_BIN=/home/glasswork/glasswork/.venv/bin/python
+Environment=GLASSWORK_OWNER_KEY=the-owner-key-your-reports-room-made
+Environment=GLASSWORK_HOME=https://www.yourprogram.com/glasswork-home
+Environment=GLASSWORK_POSTBOX_KEY=the-postbox-key-your-reports-room-shows
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 NoNewPrivileges=true
@@ -122,6 +125,12 @@ sudo systemctl status glasswork        # "active (running)"
   program can reach the server's own network.
 - `GLASSWORK_INVITE` — only people you give this code to can sign up. Leave it
   out to let anyone sign up.
+- `GLASSWORK_OWNER_KEY`, `GLASSWORK_HOME`, `GLASSWORK_POSTBOX_KEY` — you do
+  not make these up. In the Reports room on your own computer, open **Your
+  online office**, give the server's address and press **Save and check**: it
+  shows these three lines, ready to paste. The first lets your Reports room
+  read how many people use the office (counts only); the other two let people
+  online send you problem reports, sealed so only your computer can open them.
 - It listens on `127.0.0.1:3000` only; the next step puts HTTPS in front.
 
 ### 4. HTTPS in front (Caddy — certificates are automatic)
@@ -167,6 +176,26 @@ Merging to `main` is then the same as publishing.
 
 ## What the person sees
 
-A web address, not a download. If you want an icon on their desktop, the
-download page of your Home can offer a shortcut to the address; nothing of the
-program is in it.
+A web address — and, if they like, an app. In Chrome or Edge (and on Android)
+the address bar offers **Install Glasswork**; Settings → *Install the app* says
+where. It then opens in its own window with its own icon, on the desktop or the
+phone's home screen, and they sign in with the same account. Nothing of the
+program is downloaded: the app is a window onto your server, so it is always
+the newest version and your code stays with you. (On an iPhone: Share → *Add to
+Home Screen*.)
+
+The Windows Setup.exe still exists for your own computer. Do not hand it to
+customers: it contains the whole program, which is exactly what hosting keeps
+away from them.
+
+## What you learn about the people using it
+
+Two things, and nothing else:
+
+1. **How many.** Your Reports room shows people signed in today, right now, a
+   day on average this week, and how many accounts exist. On the server,
+   `data/usage.json` holds one number a day; `data/usage-today.json` holds
+   today's sign-ins as scrambled tags (so a restart does not count anyone
+   twice) and is replaced the next day. No names, websites or work.
+2. **Their problem reports**, when they choose to send one, sealed on the way
+   so only your computer can read it.

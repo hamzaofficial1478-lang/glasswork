@@ -58,15 +58,16 @@ def can_send() -> bool:
     return bool(home_url() and postbox_key())
 
 
-def _ask(do, method="GET", body=None, key="", base=None, timeout=TIMEOUT) -> dict:
-    """One request to a Glasswork Home. Always a dict, with a sentence when it fails."""
+def _ask(do, method="GET", body=None, key="", base=None, timeout=TIMEOUT, path=None) -> dict:
+    """One request to a Glasswork Home (or, with path, to another page of a server of his). Always a dict."""
     base = (base or home_url()).rstrip("/")
     if not base:
         return {"ok": False, "no_home": True, "error": "this copy has no address to send reports to yet"}
     if not base.lower().startswith(("https://", "http://127.0.0.1", "http://localhost")):
         return {"ok": False, "error": "reports only travel over https://"}
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(base + "/index.php?" + urllib.parse.urlencode({"do": do}), data=data, method=method)
+    where = path or "/index.php?" + urllib.parse.urlencode({"do": do})
+    req = urllib.request.Request(base + where, data=data, method=method)
     req.add_header("Accept", "application/json")
     req.add_header("User-Agent", f"{product.name()}/{product.version()}")
     if data is not None:

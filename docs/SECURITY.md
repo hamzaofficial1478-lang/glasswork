@@ -76,7 +76,7 @@ code so each round can re-check it.
 | 58 | Excessive AI permissions | Done | The AI returns text only: no tools, no commands (Claude Code runs `--restricted` in a scratch folder). Website changes go through the connector's narrow commands, with a backup of every page. |
 | 59 | Sensitive browser storage | Done, tested | The browser stores only the theme, the chosen desk and an update "later". The session is in an `HttpOnly` cookie that scripts cannot read (tested). |
 | 60 | Open redirects | Done | Only fixed, internal redirects; none take an address from the request. |
-| 61 | Unsecured endpoints | Done, tested | Open without signing in: the account page, sign-in, sign-up and recovery (all rate-limited), `ping`, the product name, terms and privacy. Everything else is closed (tested). |
+| 61 | Unsecured endpoints | Done, tested | Open without signing in: the account page, sign-in, sign-up and recovery (all rate-limited), `ping`, the product name, terms and privacy, and the four files that let a browser install it as an app (manifest, two icons, a worker that keeps nothing). `/api/owner/stats` answers only to the owner's key and gives counts, never who (tested). Everything else is closed (tested). |
 
 ## Known limits, said plainly
 

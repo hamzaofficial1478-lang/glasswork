@@ -40,6 +40,7 @@ from coordination import totp  # noqa: E402
 
 _fail = []
 INVITE = "glass-invite-2026"
+OWNER_KEY = "owner-key-for-the-tests-0123456789abcdef"
 A_PW, B_PW = "violet harbour drum", "copper lantern mist"
 
 
@@ -56,12 +57,16 @@ class Hosted:
 
     def __enter__(self):
         self.dir = Path(tempfile.mkdtemp(prefix="hosted-"))
+        return self._start()
+
+    def _start(self):
         s = socket.socket()
         s.bind(("127.0.0.1", 0))
         self.port = s.getsockname()[1]
         s.close()
         env = {**os.environ, "PORT": str(self.port), "AGENCY_DATA": str(self.dir / "data"),
                "GLASSWORK_HOSTED": "1", "GLASSWORK_HOST": "app.example.com", "GLASSWORK_INVITE": INVITE,
+               "GLASSWORK_OWNER_KEY": OWNER_KEY,
                "AGENCY_IGNORE_DOTENV": "1", "CLAUDE_TEAM_OFF": "1", "NODE_PATH": str(ROOT / "node_modules")}
         for k in ("AGENCY_DB", "AGENCY_KEY", "AGENCY_ACCOUNT", "AGENCY_SITE", "GLASSWORK_INSTALLED", "BIND_HOST"):
             env.pop(k, None)
@@ -75,21 +80,31 @@ class Hosted:
                 time.sleep(0.25)
         return self
 
-    def __exit__(self, *a):
+    def _stop(self):
         self.proc.terminate()
         try:
             self.proc.wait(timeout=10)
         except Exception:
             self.proc.kill()
+
+    def restart(self):
+        """What every update does to the server: everyone signed out, everything on disk kept."""
+        self._stop()
+        return self._start()
+
+    def __exit__(self, *a):
+        self._stop()
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def req(self, method, path, body=None, cookie="", host="app.example.com", origin=None):
+    def req(self, method, path, body=None, cookie="", host="app.example.com", origin=None, auth=None):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=180)
         headers = {"Host": host}
         if cookie:
             headers["Cookie"] = cookie
         if origin:
             headers["Origin"] = origin
+        if auth:
+            headers["Authorization"] = "Bearer " + auth
         data = None
         if body is not None:
             data = json.dumps(body)
@@ -150,6 +165,28 @@ def test_two_people_at_once():
         check("both are signed in at once", (st_a, st_b), (200, 200))
         check("  each sees their own website and nobody else's",
               ([s["name"] for s in me_a["sites"]], [s["name"] for s in me_b["sites"]]), (["alpha-glass"], ["beta-joinery"]))
+        # How many use it: counts for the developer, and nothing else
+        check("the count needs the owner's key",
+              (h.req("GET", "/api/owner/stats")[0], h.req("GET", "/api/owner/stats", auth="a-wrong-key-of-some-length")[0]), (401, 401))
+        st, stats, _, _ = h.req("GET", "/api/owner/stats", auth=OWNER_KEY)
+        check("  with it: how many accounts, and how many used it today",
+              (st, stats.get("accounts"), stats.get("today"), stats.get("using_now")), (200, 2, 2, 2))
+        check("  and nothing that says who", any(w in json.dumps(stats) for w in ("Alpha", "Beta", "alpha-glass", made["site"]["id"], "acct-")), False)
+        on_disk = (h.dir / "data" / "usage.json").read_text(encoding="utf-8")
+        check("  what is written down is a number for each day, no one's name or account",
+              ("acct-" in on_disk or "Alpha" in on_disk, '"days"' in on_disk), (False, True))
+        pubfile = h.dir / "publisher.local.json"
+        os.environ["GLASSWORK_PUBLISHER_FILE"] = str(pubfile)
+        try:
+            from coordination import publisher
+            o = publisher.online(f"http://127.0.0.1:{h.port}", OWNER_KEY)
+            check("the developer's own program reads the same counts", (o.get("ok"), (o.get("stats") or {}).get("accounts")), (True, 2))
+            check("  and gives him the line for his server's settings", o["server_settings"].get("GLASSWORK_OWNER_KEY"), OWNER_KEY)
+        finally:
+            os.environ.pop("GLASSWORK_PUBLISHER_FILE", None)
+        app_files = [h.req("GET", f)[0] for f in ("/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png")]
+        check("it can be installed as an app before signing in (manifest, icons, a worker that keeps nothing)", app_files, [200] * 4)
+        check("  named after the program", h.req("GET", "/manifest.webmanifest")[1].get("display"), "standalone")
         h.req("POST", "/api/orders", {"orders": {"Leads": "ALPHA-ORDER-MARKER find facilities firms"}}, alpha)
         h.req("POST", "/api/orders", {"orders": {"Leads": "BETA-ORDER-MARKER find bakeries"}}, beta)
         a_orders = json.dumps(h.req("GET", "/api/orders", cookie=alpha)[1])
@@ -232,6 +269,24 @@ def test_two_people_at_once():
         check("  even the right password, until the wait is over", st, 429)
 
 
+def test_a_restart_counts_nobody_twice():
+    print("\nThe count of people using it survives a restart without counting anyone twice:")
+    if not (shutil.which("node") and (ROOT / "node_modules" / "express").exists()):
+        print("  SKIP  Node and the office's libraries are not here")
+        return
+    with Hosted() as h:
+        h.person("Gamma", "amber falcon reed", "gamma-glazing")
+        h.person("Omega", "teal compass dune", "omega-doors")
+        check("two people today", h.req("GET", "/api/owner/stats", auth=OWNER_KEY)[1].get("today"), 2)
+        h.restart()
+        st, _, _, _ = h.req("POST", "/api/account/sign-in", {"account": "Gamma", "password": "amber falcon reed"})
+        check("  after a restart one of them signs in again", st, 200)
+        check("  still two people today, not three", h.req("GET", "/api/owner/stats", auth=OWNER_KEY)[1].get("today"), 2)
+        kept = (h.dir / "data" / "usage-today.json").read_text(encoding="utf-8")
+        check("  what is kept for today is scrambled tags, no name or account",
+              any(w in kept for w in ("Gamma", "Omega", "acct-", "gamma-glazing")), False)
+
+
 def test_no_program_reaches_the_servers_own_network():
     print("\nOn a hosted office no program can be pointed at the server's own network (SSRF):")
     code = ("import coordination, urllib.request\n"
@@ -301,7 +356,7 @@ def test_nothing_leaks_in_the_code():
 
 
 def main():
-    for t in (test_two_people_at_once, test_no_program_reaches_the_servers_own_network,
+    for t in (test_two_people_at_once, test_a_restart_counts_nobody_twice, test_no_program_reaches_the_servers_own_network,
               test_phone_approvals_need_a_code, test_nothing_leaks_in_the_code):
         t()
     print()

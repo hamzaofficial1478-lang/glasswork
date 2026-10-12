@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Glasswork</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1f5f4f">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -587,7 +591,7 @@ function buildSiteMenu() {
     html += `<button type="button" role="menuitem" data-signout="1">Sign out · ${esc((me.signedIn || {}).name || '')}</button>`;
   } else {
     html += `<a role="menuitem" href="/setup">Change this website<small>On the Setup screen</small></a>`;
-    html += `<a role="menuitem" href="/account">Make your account<small>Two websites, encrypted on this computer</small></a>`;
+    html += `<a role="menuitem" href="/account">Make your account<small>Two websites, encrypted with your password</small></a>`;
   }
   m.innerHTML = html;
 }
@@ -680,7 +684,7 @@ function gettingStarted(biz, con, ord, r) {
     <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h2 style="margin:0;font-size:18px">Getting started</h2>
       <span class="muted" style="font-size:14px">${steps.length - left} of ${steps.length} done</span></div>
     ${steps.map((x, i) => `<div class="row" style="align-items:center;gap:14px;padding-left:0;padding-right:0"><span class="lamp ${x.done ? 'done' : 'wait'}"></span>
-      <span class="grow"><b style="font-weight:600">${i + 1}. ${esc(x.t)}</b><span class="muted" style="font-size:14px">${esc(x.s)}</span></span>
+      <span class="grow" style="flex-basis:200px"><b style="font-weight:600">${i + 1}. ${esc(x.t)}</b><span class="muted" style="font-size:14px">${esc(x.s)}</span></span>
       ${x.done ? '' : `<a class="btn ${i === first ? '' : 'ghost '}small" href="${esc(x.href)}">${esc(x.b)}</a>`}</div>`).join('')}
     <p class="muted" style="margin:6px 0 0;font-size:14px">Then press <b style="font-weight:600">Run today</b>. Nothing leaves the building without your yes.</p></section>`;
 }
@@ -1636,7 +1640,7 @@ function historyCard(checks, pick) {
       <span style="display:flex;gap:6px">${c.status === 'done' && !on ? `<a class="btn ghost small" href="#check?id=${Number(c.id)}">View</a>` : ''}
         ${c.status !== 'running' ? `<button class="btn quiet small" type="button" data-del="${Number(c.id)}" aria-label="Delete the check of ${esc(c.host)}">Delete</button>` : ''}</span></div>`;
   }).join('');
-  return `<section class="card"><div class="card-h"><h2>Earlier checks</h2><span class="muted" style="font-size:14px">kept on this computer</span></div>${rows}</section>`;
+  return `<section class="card"><div class="card-h"><h2>Earlier checks</h2><span class="muted" style="font-size:14px">kept in your account</span></div>${rows}</section>`;
 }
 function brandCard(b) {
   CHK.logo = '';
@@ -2316,7 +2320,7 @@ async function help(main) {
   const m = await api('/api/support/mine');
   const mine = (m && m.reports) || [];
   main.innerHTML = `<div class="page narrow">${head('Help and reports',
-    'Something not working? Tell the people who make this program. Your report is sealed on this computer so only they can read it, and their answer appears below.')}
+    'Something not working? Tell the people who make this program. Your report is sealed before it is sent, so only they can read it, and their answer appears below.')}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <h2 style="margin:0;font-size:18px">Report a problem</h2>
       ${m && m.home === false ? '<div class="note">This copy cannot send reports by itself yet. Write it below and press Send — you get a support report to copy into an email instead.</div>' : ''}
@@ -2412,8 +2416,11 @@ function settings(main) {
   const t = theme();
   const row = (href, title, line) => `<a class="row" href="${href}" style="text-decoration:none;color:var(--ink);align-items:center">
     <span class="grow"><b style="font-weight:600">${esc(title)}</b><span class="muted" style="font-size:14px">${esc(line)}</span></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Open</span></a>`;
+  const many = (me.sites || []).length > 1;
   main.innerHTML = `<div class="page narrow">${head('Settings',
-    'Everything is kept on this computer. Each website has its own settings; what is yours — the AI, your phone, your password — is shared by both.')}
+    'Everything is kept encrypted with your password. ' + (many
+      ? 'Each website has its own settings; what is yours — the AI, your phone, your password — is shared by both.'
+      : 'What is yours — the AI, your phone, your password — stays the same if you add a second website.'))}
     <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This website</h2><div class="card">
       ${row('/business', 'Your business', 'What you do, where, what you sell and who buys it')}
       ${row('/setup', 'Website and connection', 'Its address, and how the agency reaches it')}
@@ -2421,8 +2428,8 @@ function settings(main) {
     </div></section>
     <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">You</h2><div class="card">
       ${row('/engine', 'How your agency thinks', e.chosen ? e.name + (e.ready ? ' · ready' : ' · not ready') : 'Not chosen yet')}
-      ${row('/engine', 'Daily spending limit', e.cap ? money(e.cap) + ' a day, for the AI and every paid tool, across both websites' : 'Set it on the engine page')}
-      ${row('/account', me.signedIn ? 'Websites, password and recovery key' : 'Make your account', me.signedIn ? ((me.sites || []).length + ' of ' + (me.maxSites || 2) + ' websites in use') : 'Two websites, encrypted on this computer')}
+      ${row('/engine', 'Daily spending limit', e.cap ? money(e.cap) + ' a day, for the AI and every paid tool' + (many ? ', across both websites' : '') : 'Set it on the engine page')}
+      ${row('/account', me.signedIn ? 'Websites, password and recovery key' : 'Make your account', me.signedIn ? ((me.sites || []).length + ' of ' + (me.maxSites || 2) + ' websites in use') : 'Two websites, encrypted with your password')}
     </div></section>
     <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This screen</h2>
       <div class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
@@ -2437,6 +2444,9 @@ function settings(main) {
           <button class="btn ghost small" type="button" id="updCheck">Check for a new version</button>
           <button class="btn quiet small" type="button" id="quitApp" hidden>Close the program</button></div>
         <div class="row" id="updRow" hidden><span class="grow" id="updSay"></span><span style="display:flex;gap:8px;flex-wrap:wrap" id="updBtns"></span></div>
+        <div class="row" id="appRow" hidden style="align-items:center"><span class="grow"><b style="font-weight:600">Install the app</b>
+          <span class="muted" style="font-size:14px" id="appSay">Its own window and icon on this computer or phone. You sign in with the same account.</span></span>
+          <button class="btn ghost small" type="button" id="appGo" hidden>Install</button></div>
       </div>
       <div class="card">
         <a class="row" href="#help" style="text-decoration:none;color:var(--ink);align-items:center"><span class="grow"><b style="font-weight:600">Report a problem</b>
@@ -2448,12 +2458,15 @@ function settings(main) {
     </section>
     <section id="pubBox" hidden style="display:flex;flex-direction:column;gap:8px"></section></div>`;
   EXTRA.settings.forEach((f) => f());
-  ask('/api/product').then((p) => { const q = $('#quitApp'); if (!q || !(p && p.installed)) return; q.hidden = false;
+  ask('/api/product').then((p) => {
+    if (p && p.hosted && $('#updCheck')) { $('#updCheck').hidden = true; $('#prodVer').textContent += ' · always the newest, kept up to date for you'; }
+    const q = $('#quitApp'); if (!q || !(p && p.installed)) return; q.hidden = false;
     q.onclick = async () => { if (!confirm('Close the program? Nothing is lost — open it again from the Start menu or the desktop.')) return;
       const j = await api('/api/quit', {}); toast(j.why || j.error || 'Closing.');
       if (j.ok) setTimeout(() => { document.body.innerHTML = '<main style="max-width:520px;margin:20vh auto;font:17px system-ui;padding:0 16px">The program is closed. You can close this tab.</main>'; }, 800); }; });
   main.querySelectorAll('[data-theme-pick]').forEach((b) => b.onclick = () => { theme(b.dataset.themePick); buildSiteMenu(); settings(main); });
   $('#updCheck').onclick = () => checkUpdate();
+  installRow();
 }
 /* A NEW VERSION. Asked plainly — nothing about this copy goes with the
    question. Only a version signed with the developer's key is installed, and
@@ -2500,6 +2513,26 @@ async function undoUpdate() {
   if (!confirm('Go back to the version before the last update?')) return;
   const j = await api('/api/update/rollback', {});
   toast(j.why || j.error || (j.ok ? 'Done.' : 'Nothing to go back to.'));
+}
+
+/* INSTALL THE APP. On the hosted office a browser can install Glasswork as an
+   app — its own window and icon, the same account. Browsers that offer it give
+   us a prompt to show; on an iPhone it is Share, then Add to Home Screen. */
+let INSTALL = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); INSTALL = e; if (VIEW.r === 'settings') installRow(); });
+async function installRow() {
+  const p = await ask('/api/product'), row = $('#appRow');
+  if (!row || !(p && p.hosted) || matchMedia('(display-mode: standalone)').matches) return;
+  row.hidden = false;
+  const go = $('#appGo');
+  if (INSTALL) {
+    go.hidden = false;
+    go.onclick = async () => { INSTALL.prompt(); const c = await INSTALL.userChoice; INSTALL = null; go.hidden = true;
+      $('#appSay').textContent = c && c.outcome === 'accepted' ? 'Installed. Open it from your desktop, Start menu or home screen.' : 'Not installed — you can do it any time.'; };
+  } else {
+    $('#appSay').textContent = /iPhone|iPad/.test(navigator.userAgent) ? 'On iPhone or iPad: tap Share, then Add to Home Screen.'
+      : 'In Chrome or Edge: the install icon at the right of the address bar, or the menu → Install Glasswork.';
+  }
 }
 
 /* ======================= MORE (phone) ======================= */
@@ -2596,6 +2629,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   route();
   loadPublisher();
   updateBanner();
+  ask('/api/product').then((p) => { if (p && p.hosted && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {}); });
   setInterval(updateBanner, 6 * 3600 * 1000);
   setInterval(async () => { const e = await ask('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
 })();

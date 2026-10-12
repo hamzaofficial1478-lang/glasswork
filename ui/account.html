@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sign in</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1f5f4f">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -38,6 +42,7 @@ p.lead{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px}
 label{display:block;font-size:12.5px;color:var(--etch);margin:14px 0 6px}
 input[type=text],input[type=password],input[type=url],select{width:100%;padding:12px 13px;border-radius:10px;
   border:1px solid var(--line2);background:var(--panel2);color:var(--text);font:inherit;font-size:15px}
+main p a{color:var(--glass)}
 input:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
 .btn{display:block;width:100%;margin-top:20px;padding:12px 14px;border-radius:10px;border:1px solid var(--glass);
   background:var(--glass);color:#06222a;font:inherit;font-weight:600;font-size:15px;cursor:pointer;text-align:center;text-decoration:none}
@@ -112,7 +117,7 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
   <!-- MAKE AN ACCOUNT -->
   <section id="signup">
     <h1>Make your account</h1>
-    <p class="lead">Each person on this computer has their own account. Nobody else can open yours — not even another account on the same computer.</p>
+    <p class="lead">Each person has their own account, locked with their own password. Nobody else can open yours — not another account, not even the people who make the program.</p>
     <div class="note" id="cipherNote" style="display:none"></div>
     <form onsubmit="signUp(event)">
       <label for="suName">Your name</label>
@@ -135,14 +140,14 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
   <!-- THE RECOVERY KEY, SHOWN ONCE -->
   <section id="recovery">
     <h1>Write down your recovery key</h1>
-    <p class="lead">If you ever forget your password, this key is the only way back in. It is shown once and kept nowhere — not on this computer, not by us.</p>
+    <p class="lead">If you ever forget your password, this key is the only way back in. It is shown once and kept nowhere — not here, not by us.</p>
     <div class="key" id="rkKey">—</div>
     <div class="row">
       <button class="btn quiet" onclick="copyKey()" id="rkCopy">Copy</button>
       <button class="btn quiet" onclick="saveKey()">Save as a file</button>
     </div>
     <label class="check"><input type="checkbox" id="rkDone" onchange="$('#rkNext').disabled=!this.checked">
-      <span>I have written it down or saved it somewhere safe, away from this computer.</span></label>
+      <span>I have written it down or saved it somewhere safe, away from this device.</span></label>
     <button class="btn" id="rkNext" disabled onclick="afterKey()">Continue</button>
   </section>
 
@@ -338,7 +343,7 @@ function copyKey() {
 function saveKey() {
   const text = 'Recovery key for the account "' + ACCOUNT_NAME + '"\n\n' + RECOVERY + '\n\n'
     + 'Keep this somewhere safe, away from the computer. It is the only way back into the account\n'
-    + 'if the password is forgotten. Anyone who has it and this computer can open the account.\n';
+    + 'if the password is forgotten. Anyone who has it and your account name can open the account.\n';
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], {type: 'text/plain'}));
   a.download = 'recovery-key.txt'; a.click();

@@ -38,6 +38,7 @@ it to a copy, or to any other report.
     python -m coordination.publisher --read ID        one report in full
     python -m coordination.publisher --answer         JSON on stdin: {id, status, reply, fixed_in}
     python -m coordination.publisher --remove ID
+    python -m coordination.publisher --online         how many use your online office (JSON on stdin {url, key} saves it first)
     python -m coordination.publisher --publish [--installer] [--notes TEXT] [--job FILE]
     python -m coordination.publisher --new-key KEYFILE
     python -m coordination.publisher --make-release DIR --key KEYFILE [--base-url URL]
@@ -423,6 +424,43 @@ def remove(rid) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# your online office: how many people use it, and nothing else
+# ---------------------------------------------------------------------------
+
+def online(url=None, key=None) -> dict:
+    """
+    "just how many users using the program" — asked of his hosted office with
+    its owner key (GLASSWORK_OWNER_KEY on the server). It answers with counts
+    alone: accounts, people today, people right now. Given a url and key, they
+    are kept first; a key is made for him when he has none.
+    """
+    p = _pub()
+    o = dict(p.get("online") or {})
+    if url is not None:
+        url = str(url).strip().rstrip("/")
+        if url and not url.lower().startswith(("http://", "https://")):
+            url = "https://" + url
+        o["url"] = url
+        o["key"] = str(key or "").strip() or o.get("key") or secrets.token_urlsafe(32)
+        p["online"] = o
+        _save_pub(p)
+    public = p.get("public") or {}
+    out = {"ok": True, "url": o.get("url") or "", "key": o.get("key") or "",
+           # what the server needs so people online can send him reports, as for a copy he gives out
+           "server_settings": {k: v for k, v in (("GLASSWORK_OWNER_KEY", o.get("key")),
+                                                 ("GLASSWORK_HOME", public.get("home_url")),
+                                                 ("GLASSWORK_POSTBOX_KEY", public.get("postbox_key"))) if v}}
+    if not o.get("url"):
+        return out
+    r = support._ask("", base=o["url"], path="/api/owner/stats", key=o.get("key", ""), timeout=15)
+    if r.get("status") == 404:
+        return {**out, "ok": False, "error": "Your online office has no owner key yet: add the settings below to it and restart it."}
+    if not r.get("ok"):
+        return {**out, "ok": False, "error": "Your online office did not answer: " + str(r.get("error") or "no answer")}
+    return {**out, "stats": {k: r.get(k) for k in ("accounts", "using_now", "today", "average_a_day_7", "days")}}
+
+
+# ---------------------------------------------------------------------------
 # signing and putting a version out
 # ---------------------------------------------------------------------------
 
@@ -594,13 +632,13 @@ def _build_installer(tmp: Path) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="The publisher's side: reports, answers, versions.")
-    for f in ("view", "setup", "home-zip", "check-home", "collect", "inbox", "answer", "publish", "installer"):
+    for f in ("view", "setup", "home-zip", "check-home", "collect", "inbox", "answer", "publish", "installer", "online"):
         ap.add_argument("--" + f, action="store_true")
     for f in ("read", "remove", "notes", "job", "new-key", "make-release", "key", "base-url"):
         ap.add_argument("--" + f, default=None)
     a = ap.parse_args(argv)
     body = {}
-    if a.setup or a.answer:
+    if a.setup or a.answer or a.online:
         try:
             body = json.loads(sys.stdin.read() or "{}")
         except Exception:
@@ -623,6 +661,8 @@ def main(argv=None) -> int:
                                encoding="utf-8")
         elif a.setup:
             r = setup(body.get("site"), body.get("email"))
+        elif a.online:
+            r = online(body["url"], body.get("key")) if "url" in body else online()
         elif a.home_zip:
             z = home_zip()
             r = {**z, "zip": base64.b64encode(z["zip"]).decode()} if z.get("ok") else z
