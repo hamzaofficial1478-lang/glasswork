@@ -97,8 +97,8 @@ def _person(who, password):
 def test_two_people_one_computer():
     print("\nTwo people, one computer: nothing of either can be read from the disk:")
     with _Place() as place:
-        a_id, a_key, a_site = _person(ALPHA, "alpha horse battery")
-        b_id, b_key, b_site = _person(BETA, "beta staple correct")
+        a_id, a_key, a_site = _person(ALPHA, "violet harbour drum")
+        b_id, b_key, b_site = _person(BETA, "copper lantern mist")
         words = [ALPHA["host"], ALPHA["name"], ALPHA["secret"], BETA["host"], BETA["name"], BETA["secret"]]
         check("no file on the disk shows a website, a name or a key", readable(place.dir, words), [])
         check("a website's folder is not named after it",
@@ -110,9 +110,9 @@ def test_two_people_one_computer():
         check("  nor is a folder named after anyone",
               [p.name for p in (place.dir / "data" / "accounts").iterdir() if not p.name.startswith("acct-")], [])
         check("each person signs in by typing their own name",
-              (workspace.sign_in("alpha", "alpha horse battery").get("ok"), workspace.sign_in("Alpha", "wrong").get("error")),
+              (workspace.sign_in("alpha", "violet harbour drum").get("ok"), workspace.sign_in("Alpha", "wrong").get("error")),
               (True, workspace.NO_SUCH))
-        check("  and a name nobody has gets the very same answer", workspace.sign_in("Gamma", "alpha horse battery").get("error"),
+        check("  and a name nobody has gets the very same answer", workspace.sign_in("Gamma", "violet harbour drum").get("error"),
               workspace.NO_SUCH)
         os.environ["AGENCY_KEY"] = b_key
         theirs = workspace.sites(workspace.account(a_id))
@@ -140,7 +140,7 @@ def test_two_people_one_computer():
 def test_websites_made_before_are_sealed_too():
     print("\nA website kept readable by an older version is sealed the next time its owner signs in:")
     with _Place() as place:
-        made = workspace.create_account("Older", "older horse battery")
+        made = workspace.create_account("Older", "quiet meadow anchor")
         acct = workspace.account(made["account"]["id"])
         acct["sites"] = [{"id": "old-site-1", "name": ALPHA["name"], "url": "https://" + ALPHA["host"], "created": 1}]
         (workspace.site_dir(acct["id"], "old-site-1")).mkdir(parents=True)
@@ -150,17 +150,17 @@ def test_websites_made_before_are_sealed_too():
         acct["name"] = "Older"
         master = bytes.fromhex(made["key"])
         salt = os.urandom(16)
-        old = hashlib.scrypt(b"older horse battery", salt=salt, n=2 ** 15, r=8, p=1, maxmem=64 * 1024 * 1024, dklen=32)
+        old = hashlib.scrypt(b"quiet meadow anchor", salt=salt, n=2 ** 15, r=8, p=1, maxmem=64 * 1024 * 1024, dklen=32)
         acct["keys"]["password"] = {"salt": vault._b64(salt), "scrypt": {"n": 2 ** 15, "r": 8, "p": 1},
                                     **vault._lock(old, master, acct["id"].encode())}
         workspace._save(acct)
         check("before: readable", bool(readable(place.dir, [ALPHA["host"], "Older"])), True)
-        r = workspace.sign_in("Older", "older horse battery")
+        r = workspace.sign_in("Older", "quiet meadow anchor")
         check("after signing in: sealed, the name too",
               (r.get("ok"), readable(place.dir, [ALPHA["host"], ALPHA["name"], "Older"])), (True, []))
         check("  and the password moved up to the stronger key stretch",
               vault.outdated(workspace.account(acct["id"])["keys"], "password"), False)
-        check("  which still opens it", workspace.sign_in("older", "older horse battery").get("ok"), True)
+        check("  which still opens it", workspace.sign_in("older", "quiet meadow anchor").get("ok"), True)
         os.environ["AGENCY_KEY"] = r["key"]
         check("  and still theirs to see", workspace.sites(workspace.account(acct["id"]))[0]["url"], "https://" + ALPHA["host"])
         os.environ.pop("AGENCY_KEY", None)
@@ -242,8 +242,8 @@ def test_an_installed_copy():
         check("before anyone has an account, it asks for one", (st, j.get("needsAccount")), (401, True))
         st, _j, _ = o.req("GET", "/api/account/list")
         check("  the account page itself is open", st, 200)
-        st, j, alpha = o.req("POST", "/api/account/sign-up", {"name": "Alpha", "password": "alpha horse battery",
-                                                              "confirm": "alpha horse battery"})
+        st, j, alpha = o.req("POST", "/api/account/sign-up", {"name": "Alpha", "password": "violet harbour drum",
+                                                              "confirm": "violet harbour drum"})
         check("Alpha makes an account", (st, j.get("ok")), (200, True))
         st, j, _ = o.req("POST", "/api/account/add-site", {"name": ALPHA["name"], "url": "https://www." + ALPHA["host"]}, alpha)
         check("  and adds a website", (st, j.get("ok")), (200, True))
@@ -266,8 +266,8 @@ def test_an_installed_copy():
         st, j, _ = o.req("GET", "/api/account/list")
         check("signed out, the sign-in screen names nobody, and no website",
               any(w in json.dumps(j) for w in ("Alpha", ALPHA["host"], ALPHA["name"])), False)
-        st, j, beta = o.req("POST", "/api/account/sign-up", {"name": "Beta", "password": "beta staple correct",
-                                                             "confirm": "beta staple correct"})
+        st, j, beta = o.req("POST", "/api/account/sign-up", {"name": "Beta", "password": "copper lantern mist",
+                                                             "confirm": "copper lantern mist"})
         st, me, _ = o.req("GET", "/api/account/me", cookie=beta)
         check("Beta signs up and sees no websites of Alpha's", (me.get("sites"), me.get("open")), ([], None))
         st, j, _ = o.req("GET", "/api/state", cookie=beta)

@@ -152,16 +152,29 @@ def _tidy_recovery(text: str) -> str:
 # making, opening and relocking an account's keys
 # ---------------------------------------------------------------------------
 
-def password_problem(password: str) -> str:
+# The passwords tried first by anyone guessing. A longer list is not much
+# safer: length and the slow key stretch are what make guessing hopeless.
+COMMON = frozenset("""password password1 password123 passw0rd 12345678 123456789 1234567890 qwerty123
+qwertyuiop 11111111 00000000 abcd1234 iloveyou letmein1 welcome1 admin123 administrator sunshine
+football baseball dragon123 monkey123 princess trustno1 superman batman123 starwars computer
+internet 1q2w3e4r 1qaz2wsx zaq12wsx qazwsxedc changeme glasswork glasswork1""".split())
+
+
+def password_problem(password: str, name: str = "") -> str:
     """Why a new password will not do, or ''."""
-    if len(password or "") < MIN_PASSWORD:
+    p = password or ""
+    if len(p) < MIN_PASSWORD:
         return f"Use at least {MIN_PASSWORD} characters."
+    if p.casefold() in COMMON or len(set(p)) < 4:
+        return "That password is one of the first anyone would guess. Choose another."
+    if name and len(name.strip()) >= 3 and name.strip().casefold() in p.casefold():
+        return "Leave your name out of your password."
     return ""
 
 
-def create(password: str, account_id: str):
+def create(password: str, account_id: str, name: str = ""):
     """(the keys to store on the account, the master key, the recovery key to show once)."""
-    bad = password_problem(password)
+    bad = password_problem(password, name)
     if bad:
         raise ValueError(bad)
     master = secrets.token_bytes(32)

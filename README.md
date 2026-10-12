@@ -25,6 +25,17 @@ developer's own side of the program are left out of every copy given to people
 - **They approve what goes out.** An email, a published page or a change to
   their website waits for their yes.
 
+## Two ways to run it
+
+- **Hosted, from your own server (recommended).** People open your address in
+  their browser and never receive the program's files; you update it once, for
+  everyone. Many people are signed in at once, each in their own encrypted
+  room. Setting up the server: `docs/HOSTING.md`.
+- **Installed on each person's computer**, from the Setup on your Home's
+  download page, with signed updates. Below.
+
+The security checklist, point by point: `docs/SECURITY.md`.
+
 ## How people get it, and new versions
 
 From the developer's **Glasswork Home** — one folder on the program's own
@@ -86,7 +97,7 @@ installer/             the Windows Setup (build_windows.py, glasswork.iss)
 **Encryption.** Each account has a random master key, locked twice — with the
 password and with the recovery key — each through a memory-hard key
 stretch (Argon2id where the encryption library has it, scrypt otherwise) and
-AES-256-GCM. From the master key each website gets its own cabinet key
+AES-256-GCM. Two-step sign-in (an authenticator app) is optional. From the master key each website gets its own cabinet key
 (SQLCipher) and the settings get a file key (HKDF-SHA256, AES-256-GCM, each
 file bound to its own place). Account names, website names and addresses are
 sealed too; folders are named by random numbers. The key exists only in

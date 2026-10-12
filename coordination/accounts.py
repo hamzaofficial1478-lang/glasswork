@@ -13,10 +13,12 @@ The office keeps it in memory for as long as he is signed in and gives it to
 each program it starts (AGENCY_KEY). It is never written to disk by anything
 here.
 """
+import hmac
 import json
+import os
 import sys
 
-from . import workspace
+from . import totp, workspace
 
 
 def _cipher_ready() -> str:
@@ -62,17 +64,24 @@ def cmd_list(_):
     url, name = _legacy_site()
     # Read before anyone signs in: whether there is any account here, and
     # nothing about them — not how many, not their names, not their websites.
-    return {"ok": True, "accounts": bool(workspace.accounts()),
+    return {"ok": True, "accounts": bool(workspace.accounts()), "invite": bool(_invite()),
             "active": a, "max_sites": workspace.MAX_SITES,
             "legacy_present": workspace.legacy_present(),
             "legacy_site": {"url": url, "name": name},
             "cipher_problem": _cipher_ready()}
 
 
+def _invite() -> str:
+    """On a hosted office the developer can say who may sign up: only people he gave the code to."""
+    return (os.environ.get("GLASSWORK_INVITE") or "").strip()
+
+
 def cmd_sign_up(d):
     bad = _cipher_ready()
     if bad:
         return {"ok": False, "error": bad}
+    if _invite() and not hmac.compare_digest(str(d.get("invite") or "").strip().encode(), _invite().encode()):
+        return {"ok": False, "invite": True, "error": "Signing up needs the invitation code you were given."}
     if (d.get("password") or "") != (d.get("confirm") or d.get("password") or ""):
         return {"ok": False, "error": "the two passwords do not match"}
     r = workspace.create_account(d.get("name"), d.get("password") or "")
@@ -87,7 +96,7 @@ def _open_first(acct_id):
     a = workspace.active()
     if a and a["account"] == acct_id:
         return a["site"]
-    sites = acct.get("sites") or []
+    sites = sorted(acct.get("sites") or [], key=lambda s: s["id"] != acct.get("last_site"))
     if not sites:
         # Nothing of theirs to open — and whoever's website was open before is
         # not left open for them.
@@ -98,7 +107,7 @@ def _open_first(acct_id):
 
 
 def cmd_sign_in(d):
-    r = workspace.sign_in(d.get("account"), d.get("password"))
+    r = workspace.sign_in(d.get("account"), d.get("password"), d.get("code"))
     if not r.get("ok"):
         return r
     acct_id = r["account"]["id"]
@@ -109,8 +118,8 @@ def cmd_sign_in(d):
 
 def cmd_check(d):
     """Is this the password for the signed-in account? (Setup's second door.)"""
-    r = workspace.sign_in(d.get("account"), d.get("password"))
-    return {"ok": bool(r.get("ok")), "error": r.get("error")}
+    ok = workspace.check_password(d.get("account"), d.get("password"))
+    return {"ok": ok, "error": "" if ok else "That is not the password."}
 
 
 def cmd_recover(d):
@@ -188,10 +197,26 @@ def cmd_retire_old(d):
     return {"ok": True, "removed": gone}
 
 
+def cmd_mfa_start(d):
+    """A new authenticator secret, for the app. Nothing is kept until a code from it is confirmed."""
+    secret = totp.new_secret()
+    return {"ok": True, "secret": secret, "uri": totp.uri(secret, d.get("label") or "your account")}
+
+
+def cmd_mfa_on(d):
+    return workspace.mfa_on(d.get("account"), str(d.get("secret") or ""), d.get("code"))
+
+
+def cmd_mfa_off(d):
+    return workspace.mfa_off(d.get("account"), d.get("code"))
+
+
 def cmd_status(_):
     d = workspace.describe()
     d["locked"] = workspace.locked()
     d["run_going"] = bool(workspace._run_going()) if workspace.active() else False
+    who = os.environ.get("AGENCY_ACCOUNT") or (workspace.active() or {}).get("account")
+    d["mfa"] = bool(who and workspace.account(who).get("mfa"))
     return {"ok": True, **d}
 
 
@@ -200,6 +225,7 @@ COMMANDS = {
     "recover": cmd_recover, "change-password": cmd_change_password,
     "add-site": cmd_add_site, "open-site": cmd_open_site, "bring-in": cmd_bring_in,
     "retire-old": cmd_retire_old, "status": cmd_status,
+    "mfa-start": cmd_mfa_start, "mfa-on": cmd_mfa_on, "mfa-off": cmd_mfa_off,
 }
 
 

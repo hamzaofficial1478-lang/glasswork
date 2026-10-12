@@ -259,7 +259,9 @@ def _setting(name: str) -> str:
 
 
 def claude_code_allowed() -> bool:
-    """His own copy: before any account, or the account his agency was brought into."""
+    """His own copy: before any account, or the account his agency was brought into. Never hosted."""
+    if _workspace.HOSTED:
+        return False
     a = _workspace.active()
     if not a:
         return True

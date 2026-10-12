@@ -115,10 +115,24 @@ def site_dir(account=None, site=None) -> Path:
     return _accounts_dir() / a["account"] / "sites" / a["site"]
 
 
+HOSTED = os.environ.get("GLASSWORK_HOSTED") == "1"
+_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
 def active():
-    """{'account', 'site'} of the website that is open, or None (no account open)."""
-    a = _read_json(data_root() / "active.json")
-    if not isinstance(a, dict) or not a.get("account") or not a.get("site"):
+    """
+    {'account', 'site'} of the website that is open, or None (no account open).
+
+    The office says which, for the person it is answering (AGENCY_ACCOUNT and
+    AGENCY_SITE) — on a hosted office many people are signed in at once, and
+    each program works on its own person's website alone. Run on its own, a
+    program reads the website last opened on this computer.
+    """
+    if "AGENCY_ACCOUNT" in os.environ:
+        a = {"account": os.environ.get("AGENCY_ACCOUNT"), "site": os.environ.get("AGENCY_SITE")}
+    else:
+        a = _read_json(data_root() / "active.json")
+    if not isinstance(a, dict) or not all(_ID.fullmatch(str(a.get(k) or "")) for k in ("account", "site")):
         return None
     if not (_accounts_dir() / a["account"] / "sites" / a["site"]).is_dir():
         return None
@@ -263,7 +277,7 @@ def create_account(name, password=None) -> dict:
     out, master = {"ok": True}, None
     if password is not None:
         try:
-            keys, master, recovery = vault.create(password, acct["id"])
+            keys, master, recovery = vault.create(password, acct["id"], name)
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         acct["keys"] = keys
@@ -275,7 +289,7 @@ def create_account(name, password=None) -> dict:
     return out
 
 
-SECRET_FIELDS = ("keys", "name_tag", "name_salt", "name_sealed")
+SECRET_FIELDS = ("keys", "name_tag", "name_salt", "name_sealed", "mfa")
 
 
 def public(acct: dict, master=None) -> dict:
@@ -371,15 +385,27 @@ def locked() -> bool:
 NO_SUCH = "That name and password do not open an account on this computer."
 
 
-def sign_in(who, password) -> dict:
-    """The master key for this account and password, or why not."""
+def check_password(account_id, password) -> bool:
+    """Is this the signed-in person's password? (Setup asks again; the second step was done at sign-in.)"""
+    from . import vault
+    acct = account(account_id)
+    return bool(acct.get("keys")) and vault.open_with(acct["keys"], "password", password or "", acct["id"]) is not None
+
+
+def sign_in(who, password, code=None) -> dict:
+    """The master key for this account and password (and its two-step code, if it has one), or why not."""
     from . import vault
     acct = find_account(who)
     master = vault.open_with(acct["keys"], "password", password or "", acct["id"]) if acct.get("keys") else None
     if master is None:
         # One answer for both, so nobody can find out by trying who has an account here.
         return {"ok": False, "error": NO_SUCH}
-    changed = seal_sites(acct, master)
+    if acct.get("mfa"):
+        if not code:
+            return {"ok": False, "mfa": True, "error": "Enter the six-digit code from your authenticator app."}
+        if not _mfa_ok(acct, master, code):
+            return {"ok": False, "mfa": True, "error": "That code is not right, or was used already. Try the next one."}
+    changed = seal_sites(acct, master) or bool(acct.get("mfa"))
     if acct.get("name"):
         _seal_name(acct, master, acct["name"])          # kept readable by an older version
         changed = True
@@ -401,17 +427,18 @@ def recover(who, recovery_key, new_password) -> dict:
     master = vault.open_with(acct["keys"], "recovery", recovery_key or "", acct["id"]) if acct.get("keys") else None
     if master is None:
         return {"ok": False, "error": "That name and recovery key do not open an account on this computer."}
-    try:
-        acct["keys"] = vault.relock(acct["keys"], master, "password", new_password or "", acct["id"])
-        if vault.outdated(acct["keys"], "recovery"):
-            acct["keys"] = vault.relock(acct["keys"], master, "recovery", recovery_key, acct["id"])
-    except ValueError as e:
-        return {"ok": False, "error": str(e)}
+    bad = vault.password_problem(new_password, account_name(acct, master))
+    if bad:
+        return {"ok": False, "error": bad}
+    # A recovery key that has been used is replaced: whoever might have seen it cannot use it again.
+    fresh = vault.new_recovery_key()
+    acct["keys"] = vault.relock(vault.relock(acct["keys"], master, "password", new_password, acct["id"]),
+                                master, "recovery", fresh, acct["id"])
     seal_sites(acct, master)
     if acct.get("name"):
         _seal_name(acct, master, acct["name"])
     _save(acct)
-    return {"ok": True, "account": public(acct, master), "key": vault.as_env(master)}
+    return {"ok": True, "account": public(acct, master), "key": vault.as_env(master), "recovery_key": fresh}
 
 
 def change_password(who, current, new_password) -> dict:
@@ -421,10 +448,57 @@ def change_password(who, current, new_password) -> dict:
                              (acct or {}).get("id", ""))
     if not acct or master is None:
         return {"ok": False, "error": "that is not the current password"}
+    bad = vault.password_problem(new_password, account_name(acct, master))
+    if bad:
+        return {"ok": False, "error": bad}
+    acct["keys"] = vault.relock(acct["keys"], master, "password", new_password, acct["id"])
+    _save(acct)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# two-step sign-in: a code from an authenticator app as well as the password
+# ---------------------------------------------------------------------------
+#
+# The app's secret is sealed with the account's own key, so it is no use to
+# anyone who copies the folder; and a code that worked is never accepted again.
+
+MFA_WHERE = "account.json#mfa"
+
+
+def _mfa_ok(acct: dict, master: bytes, code) -> bool:
+    from . import totp, vault
     try:
-        acct["keys"] = vault.relock(acct["keys"], master, "password", new_password or "", acct["id"])
-    except ValueError as e:
-        return {"ok": False, "error": str(e)}
+        secret = vault.unseal(master, acct["mfa"]["sealed"].encode("ascii"), MFA_WHERE).decode("ascii")
+    except Exception:
+        return False
+    ok, step = totp.check(secret, code, acct["mfa"].get("last", 0))
+    if ok:
+        acct["mfa"]["last"] = step
+    return ok
+
+
+def mfa_on(account_id, secret, code) -> dict:
+    """Turn two-step sign-in on, once the app has shown it gives the right code."""
+    from . import totp, vault
+    acct, master = account(account_id), master_key(account_id)
+    if master is None:
+        return {"ok": False, "error": "sign in first"}
+    ok, step = totp.check(secret, code)
+    if not ok:
+        return {"ok": False, "error": "That code is not right. Check the time on your phone, and type the newest code."}
+    acct["mfa"] = {"sealed": vault.seal(master, secret.encode("ascii"), MFA_WHERE).decode("ascii"), "last": step}
+    _save(acct)
+    return {"ok": True}
+
+
+def mfa_off(account_id, code) -> dict:
+    acct, master = account(account_id), master_key(account_id)
+    if master is None or not acct.get("mfa"):
+        return {"ok": False, "error": "two-step sign-in is not on"}
+    if not _mfa_ok(acct, master, code):
+        return {"ok": False, "error": "That code is not right."}
+    acct.pop("mfa")
     _save(acct)
     return {"ok": True}
 
@@ -547,8 +621,11 @@ def open_site(account_id, site_id) -> dict:
         return {"ok": False, "running": True,
                 "error": f"today's run on {cur.get('name') or 'the open website'} is still "
                          "going — finish it or press Stop, then switch"}
-    _write_json(data_root() / "active.json", {"account": account_id, "site": site_id,
-                                              "since": int(time.time())})
+    acct["last_site"] = site_id                       # opened first next time they sign in
+    _save(acct)
+    if not HOSTED:                                    # one computer, one person: remember it here too
+        _write_json(data_root() / "active.json", {"account": account_id, "site": site_id,
+                                                  "since": int(time.time())})
     return {"ok": True, "site": site}
 
 
@@ -659,8 +736,8 @@ def _copy_cabinet(src, dst, account_id, site_id):
 
 
 def legacy_present() -> bool:
-    """Is there a website in the program's original files to bring in?"""
-    return (ROOT / "coordination" / "agency.db").exists() or (ROOT / ".env").exists()
+    """Is there a website in the program's original files to bring in? Never on a hosted office."""
+    return not HOSTED and ((ROOT / "coordination" / "agency.db").exists() or (ROOT / ".env").exists())
 
 
 def is_original_site() -> bool:

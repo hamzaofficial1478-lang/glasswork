@@ -126,7 +126,7 @@ def test_reports_and_updates_without_tracking():
     check("the Reports room loads only when the office says this copy is the developer's",
           "p && p.ok && p.can_publish" in APP and "s.src = '/publisher.js'" in APP, True)
     check("  which it says only where his side of the program is",
-          'const PUBLISHER_HERE = fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));' in SERVER
+          'const PUBLISHER_HERE = !HOSTED && fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));' in SERVER
           and 'app.use("/api/publisher", (_q, res, next) => PUBLISHER_HERE ? next()' in SERVER, True)
     pubjs = ROOT / "ui" / "publisher.js"
     if not pubjs.exists():

@@ -239,7 +239,7 @@ def test_never_on_a_clients_website():
     """
     print("\nThe program's Home never goes on a website the program looks after for a client:")
     with Home():
-        made = workspace.create_account("Client office", "client office password")
+        made = workspace.create_account("Client office", "maple river lantern")
         os.environ["AGENCY_KEY"] = made["key"]          # signed in, as the office runs it
         try:
             workspace.add_site(made["account"]["id"], "A client", "https://www.client-glazing.example")

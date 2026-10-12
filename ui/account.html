@@ -100,6 +100,8 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
       <input id="siWho" type="text" autocomplete="username" required maxlength="60">
       <label for="siPw">Password</label>
       <input id="siPw" type="password" autocomplete="current-password" required>
+      <div id="siCodeBox" style="display:none"><label for="siCode">Six-digit code from your authenticator app</label>
+        <input id="siCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="[0-9 ]*"></div>
       <button class="btn" id="siBtn">Sign in</button>
       <div class="err" id="siErr"></div>
     </form>
@@ -115,7 +117,9 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
     <form onsubmit="signUp(event)">
       <label for="suName">Your name</label>
       <input id="suName" type="text" autocomplete="name" required maxlength="60">
-      <label for="suPw">Password <span style="color:var(--faint)">— at least 8 characters</span></label>
+      <div id="suInviteBox" style="display:none"><label for="suInvite">Invitation code</label>
+        <input id="suInvite" type="text" autocomplete="off" maxlength="80"></div>
+      <label for="suPw">Password <span style="color:var(--faint)">— at least 8 characters, not your name</span></label>
       <input id="suPw" type="password" autocomplete="new-password" required minlength="8">
       <label for="suPw2">Password again</label>
       <input id="suPw2" type="password" autocomplete="new-password" required minlength="8">
@@ -223,6 +227,22 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
       </form>
     </div>
 
+    <div class="block" id="mgMfa">
+      <h2>Two-step sign-in</h2>
+      <p id="mfaSay">Ask for a code from an authenticator app (Google Authenticator, Microsoft Authenticator, Authy…) as well as your password. Someone who learns your password still cannot sign in.</p>
+      <div id="mfaSetup" style="display:none">
+        <p>In your authenticator app, add an account and type this key (or open the link on your phone):</p>
+        <div class="key" id="mfaKey" style="white-space:normal;word-spacing:.2em">—</div>
+        <p style="margin:0"><a id="mfaLink" href="#" style="color:var(--glass)">Open in my authenticator app</a></p>
+        <label for="mfaCode">The six-digit code the app now shows</label>
+        <input id="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+      </div>
+      <div id="mfaOffBox" style="display:none"><label for="mfaOffCode">A code from your app, to turn it off</label>
+        <input id="mfaOffCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></div>
+      <button class="btn quiet" id="mfaBtn" onclick="mfaStep()">Turn on</button>
+      <div class="err" id="mfaErr"></div>
+    </div>
+
     <div class="block">
       <h2>Change your password</h2>
       <form onsubmit="changePw(event)">
@@ -238,13 +258,13 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
     </div>
   </section>
 </main>
-<footer>Your data is encrypted on this computer and opened only with your password. Forget the password and lose the recovery key, and nobody can open it again.</footer>
+<footer>Your data is encrypted and opened only with your password — nobody else can read it, not even the people who make the program. Forget the password and lose the recovery key, and nobody can open it again.</footer>
 
 <script>
 const $ = (q) => document.querySelector(q);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let LIST = null, ME = null, RECOVERY = '', ACCOUNT_NAME = '';
+let LIST = null, ME = null, RECOVERY = '', ACCOUNT_NAME = '', AFTER_KEY = '';
 
 function show(id) {
   document.querySelectorAll('section').forEach((s) => s.classList.toggle('on', s.id === id));
@@ -279,6 +299,7 @@ async function boot() {
   }
   if (LIST.signedIn) return manage();
   // Nobody's name is listed: each person types their own.
+  $('#suInviteBox').style.display = LIST.invite ? 'block' : 'none';
   if (!LIST.accounts) { $('#suBack').style.display = 'none'; return show('signup'); }
   show('signin');
 }
@@ -286,10 +307,12 @@ async function boot() {
 async function signIn(e) {
   e.preventDefault(); fail('siErr', '');
   busy('siBtn', true, 'Opening your account…');
-  const j = await call('/api/account/sign-in', {account: $('#siWho').value, password: $('#siPw').value});
+  const j = await call('/api/account/sign-in', {account: $('#siWho').value, password: $('#siPw').value,
+                                               code: $('#siCode').value.trim() || undefined});
   busy('siBtn', false);
+  if (j.mfa) { $('#siCodeBox').style.display = 'block'; $('#siCode').value = ''; $('#siCode').focus(); }
   if (!j.ok) return fail('siErr', j.error || 'That did not work.');
-  $('#siPw').value = '';
+  $('#siPw').value = $('#siCode').value = '';
   if (!j.site) { LIST = await call('/api/account/list'); return firstSite(); }
   location.href = '/';
 }
@@ -299,7 +322,7 @@ async function signUp(e) {
   if ($('#suPw').value !== $('#suPw2').value) return fail('suErr', 'The two passwords do not match.');
   busy('suBtn', true, 'Making your account…');
   const j = await call('/api/account/sign-up', {name: $('#suName').value, password: $('#suPw').value,
-                                               confirm: $('#suPw2').value});
+                                               confirm: $('#suPw2').value, invite: $('#suInvite').value.trim()});
   busy('suBtn', false);
   if (!j.ok) return fail('suErr', j.error || 'That did not work.');
   $('#suPw').value = $('#suPw2').value = '';
@@ -320,7 +343,11 @@ function saveKey() {
   a.href = URL.createObjectURL(new Blob([text], {type: 'text/plain'}));
   a.download = 'recovery-key.txt'; a.click();
 }
-async function afterKey() { RECOVERY = ''; $('#rkKey').textContent = '—'; LIST = await call('/api/account/list'); firstSite(); }
+async function afterKey() {
+  RECOVERY = ''; $('#rkKey').textContent = '—';
+  if (AFTER_KEY) return (location.href = AFTER_KEY);
+  LIST = await call('/api/account/list'); firstSite();
+}
 
 function firstSite() {
   const lp = LIST && LIST.legacy_present, ls = (LIST && LIST.legacy_site) || {};
@@ -360,8 +387,10 @@ async function recover(e) {
   busy('reBtn', false);
   if (!j.ok) return fail('reErr', j.error || 'That did not work.');
   $('#reKey').value = $('#rePw').value = $('#rePw2').value = '';
-  if (!j.site) { LIST = await call('/api/account/list'); return firstSite(); }
-  location.href = '/';
+  // The key just used is finished with: here is its replacement, shown once.
+  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; AFTER_KEY = j.site ? '/' : '';
+  $('#rkKey').textContent = RECOVERY; $('#rkDone').checked = false; $('#rkNext').disabled = true;
+  show('recovery');
 }
 
 async function manage(happy) {
@@ -382,7 +411,31 @@ async function manage(happy) {
   $('#mgRetire').style.display = ME.broughtIn && ME.legacyPresent ? 'block' : 'none';
   $('#mgAdd').style.display = sites.length < (ME.maxSites || 2) ? 'block' : 'none';
   $('#mgAdd h2').textContent = sites.length ? 'Add your second website' : 'Add a website';
+  $('#mfaSetup').style.display = 'none'; $('#mfaOffBox').style.display = ME.mfa ? 'block' : 'none';
+  $('#mfaBtn').textContent = ME.mfa ? 'Turn off' : 'Turn on';
+  $('#mfaSay').textContent = ME.mfa ? 'On: signing in asks for a code from your authenticator app as well as your password.'
+    : 'Ask for a code from an authenticator app (Google Authenticator, Microsoft Authenticator, Authy…) as well as your password. Someone who learns your password still cannot sign in.';
   show('manage');
+}
+
+/* Two-step sign-in: Turn on shows a key for the app; the app's first code confirms it. */
+async function mfaStep() {
+  fail('mfaErr', '');
+  if (ME.mfa) {
+    const j = await call('/api/account/mfa/off', {code: $('#mfaOffCode').value.trim()});
+    if (!j.ok) return fail('mfaErr', j.error || 'That did not work.');
+    return manage('Two-step sign-in is off.');
+  }
+  if ($('#mfaSetup').style.display === 'none') {
+    const j = await call('/api/account/mfa/start', {});
+    if (!j.ok) return fail('mfaErr', j.error || 'That did not work.');
+    $('#mfaKey').textContent = j.secret.replace(/(.{4})/g, '$1 ').trim(); $('#mfaLink').href = j.uri;
+    $('#mfaSetup').style.display = 'block'; $('#mfaBtn').textContent = 'Confirm and turn on'; $('#mfaCode').focus();
+    return;
+  }
+  const j = await call('/api/account/mfa/on', {code: $('#mfaCode').value.trim()});
+  if (!j.ok) return fail('mfaErr', j.error || 'That did not work.');
+  manage('Two-step sign-in is on. Next time you sign in, have your phone ready.');
 }
 
 async function openSite(id) {
@@ -411,7 +464,7 @@ async function changePw(e) {
   busy('cpBtn', false);
   if (!j.ok) return fail('cpErr', j.error || 'That did not work.');
   $('#cpCur').value = $('#cpNew').value = $('#cpNew2').value = '';
-  manage('Password changed. Your recovery key still works.');
+  manage('Password changed, and signed out everywhere else. Your recovery key still works.');
 }
 
 async function signOut() {

@@ -502,7 +502,7 @@ def tests():
             "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
             "coordination.launch_kit_tests", "coordination.posts_tests",
             "coordination.speed_tests", "pipelines.connector_tests",
-            "coordination.publish_tests", "coordination.sealed_tests",
+            "coordination.publish_tests", "coordination.sealed_tests", "coordination.security_tests",
             "coordination.installer_tests", "coordination.isolation_tests",
             "coordination.account_tests",
             "coordination.profile_tests",

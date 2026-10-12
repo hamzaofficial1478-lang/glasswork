@@ -119,6 +119,8 @@ def check(fetch=_fetch) -> dict:
     here = info["version"]
     out = {"ok": True, "version": here, "name": info["name"], "git": is_git_copy(),
            "available": False, "can_install": False}
+    if os.environ.get("GLASSWORK_HOSTED") == "1":
+        return {**out, "hosted": True, "why": "This program is kept up to date for you."}
     if out["git"]:
         out["why"] = ("This copy updates itself from git each time it starts. Close the program "
                       "and open it again to get the latest version.")
@@ -160,6 +162,8 @@ def _safe_members(z: zipfile.ZipFile) -> list:
 
 def apply(fetch=_fetch, install_deps=True) -> dict:
     """Download, verify, back up, install. Returns what happened."""
+    if os.environ.get("GLASSWORK_HOSTED") == "1":
+        return {"ok": False, "error": "This program is kept up to date for you."}
     if is_git_copy():
         return {"ok": False, "error": "This copy updates itself from git when it starts — close it and open it again."}
     found = check(fetch)

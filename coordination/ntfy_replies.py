@@ -65,7 +65,7 @@ UA = "glasswork-agency/1.0"
 # handed, probably in a hurry.
 YES = r"(?:ok|okay|yes|y|approve|approved|go|do it|sure)"
 NO = r"(?:no|n|nope|deny|denied|refuse|reject|stop|don'?t)"
-_RE = re.compile(rf"^\s*({YES}|{NO})\b[\s:#-]*(\d+)?\s*$", re.I)
+_RE = re.compile(rf"^\s*({YES}|{NO})\b[\s:#-]*(\d{{1,4}})?(?:\s+(\d{{6}}))?\s*$", re.I)
 
 # Only look at the last day of the topic. An "ok 3" from last week is not a
 # decision about today's item 3.
@@ -117,12 +117,36 @@ def _ours(msg):
 
 def parse(text):
     """('approved'|'rejected'|None, number or None) from one message."""
+    decision, n, _code = parse_coded(text)
+    return decision, n
+
+
+def parse_coded(text):
+    """The decision, the item number and the six-digit code ("ok 3 123456"), each None when absent."""
     m = _RE.match(text or "")
     if not m:
-        return None, None
+        return None, None, None
     word = m.group(1).lower()
     n = int(m.group(2)) if m.group(2) else None
-    return ("rejected" if re.fullmatch(NO, word, re.I) else "approved"), n
+    return ("rejected" if re.fullmatch(NO, word, re.I) else "approved"), n, m.group(3)
+
+
+def _code_ok(code) -> bool:
+    """
+    With two-step sign-in on, a reply must carry a fresh code from the
+    authenticator app: anyone who learns the topic's name can write to it, but
+    not make a code — and a code is never accepted twice.
+    """
+    from . import workspace
+    a = workspace.active()
+    acct = workspace.account(a["account"]) if a else {}
+    if not acct.get("mfa"):
+        return True
+    master = workspace.master_key(acct["id"])
+    if not (code and master is not None and workspace._mfa_ok(acct, master, code)):
+        return False
+    workspace._save(acct)
+    return True
 
 
 def pending():
@@ -158,8 +182,13 @@ def apply_replies(dry_run=False, env=None) -> dict:
         if mid in seen:
             continue                     # decided on a previous pass
         text = (m.get("message") or "").strip()
-        decision, n = parse(text)
+        decision, n, code = parse_coded(text)
         if not decision:
+            continue
+        if not dry_run and not _code_ok(code):
+            ignored.append({"id": mid, "said": text, "why": "no valid code from the authenticator app"})
+            _remember(mid)
+            _say("Not done: add the six-digit code from your authenticator app, e.g. 'ok 2 123456'.")
             continue
 
         if n is None:

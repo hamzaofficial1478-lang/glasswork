@@ -62,6 +62,17 @@ website, so nothing is lost.
 - **His client's details never reach anyone else's copy** — not the client's
   email as a default, not the client's markup, not in the connector template.
 
+## Decided (12 October, later)
+
+- **The brain stays on his server.** "the program brain to be in my control
+  fully ... the user will only be able to use the program nothing else." Hosted
+  mode (`GLASSWORK_HOSTED=1`, `docs/HOSTING.md`): people use it in their
+  browser and never receive the program's files; many are signed in at once,
+  each in their own encrypted room; each brings their own AI key. The installed
+  version stays available for anyone who needs it on their own computer.
+- **The 61-point security list** is checked and kept in `docs/SECURITY.md`;
+  `coordination/security_tests.py` attacks a hosted office on every run.
+
 ---
 
 ## What we are building

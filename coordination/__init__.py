@@ -5,6 +5,15 @@ Making this a package lets other modules import the board and the cabinet cleanl
 (`python3 coordination/init_db.py`) via the defensive imports inside them.
 """
 
+# On a hosted office, before anything can open a connection: only public
+# internet addresses, so nobody can point a program at the server's own
+# network (coordination/netguard.py). Not wrapped in try — if it cannot be
+# installed, the program must not run.
+import os as _os
+if _os.environ.get("GLASSWORK_HOSTED") == "1":
+    from .netguard import install as _netguard_install
+    _netguard_install()
+
 # FIRST, before any module here imports sqlite3: when the open website's
 # cabinet is encrypted, `sqlite3` becomes the cipher-capable one, so every
 # module gets the same one. Nothing changes until an encrypted account exists.

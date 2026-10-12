@@ -28,13 +28,21 @@ for (const m of ["get", "post", "put", "delete"]) {
     return orig(route, ...handlers.map((h) =>
       (typeof h === "function" && h.constructor && h.constructor.name === "AsyncFunction")
         ? (req, res, next) => h(req, res, next).catch((e) => {
-            if (!res.headersSent) res.status(500).json({ ok: false, error: String(e && e.message || e) });
+            if (!res.headersSent) res.status(500).json({ ok: false, error: oops("route", e && (e.stack || e.message) || e) });
             else next(e);
           })
         : h));
   };
 }
 process.on("unhandledRejection", (e) => console.error("unhandled:", e && e.message || e));
+// What went wrong, as the person is told it. Hosted, the details (paths, a
+// program's own error output) stay in the server's log: they say nothing
+// useful to a customer and a great deal to someone probing.
+function oops(where, detail) {
+  if (process.env.GLASSWORK_HOSTED !== "1") return where + ": " + String(detail || "no answer").slice(0, 300);
+  console.error(where + ":", String(detail || "").slice(0, 4000));
+  return "Something went wrong on our side. Please try again in a moment.";
+}
 
 /* ---------------------------------------------------------------------------
    THE CODE ON DISK, AGAINST THE CODE RUNNING
@@ -124,7 +132,6 @@ app.use((req, res, next) => (req.path === "/api/check/brand" ? JSON_LOGO
    then it is the only thing between a passer-by and his API keys. It is set on
    the Setup screen, which posts to /api/password below.
 --------------------------------------------------------------------------- */
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 function adminHash() {
   return (readEnv().ADMIN_PASSWORD_HASH || "").trim();
@@ -160,12 +167,21 @@ const COOKIE = "glasswork_admin";
    they are signed in, and given to each program the office starts
    (AGENCY_KEY). It is never written to disk. Signed out, nothing is readable.
 
-   One person signed in at a time on a computer: signing in replaces whoever
-   was before. Until the first account exists, the front door below behaves
-   exactly as it always has. --------------------------------------------- */
+   On a computer of its own, one person is signed in at a time: signing in
+   replaces whoever was before. HOSTED (GLASSWORK_HOSTED=1, the program run on
+   the developer's own server) many people are signed in at once, and each
+   request is answered inside its own person's session alone: their key, their
+   website, their files (CTX below). Nothing of one session is reachable from
+   another. Until the first account exists, a copy that was in use before
+   accounts behaves exactly as it always has. -------------------------------- */
+const HOSTED = process.env.GLASSWORK_HOSTED === "1";
 const ACCOUNT_COOKIE = "glasswork_account";
-const ACCOUNT_SESSIONS = new Set();
-let SIGNED_IN = null;                // { account, name, key: Buffer } while signed in
+const { AsyncLocalStorage } = require("async_hooks");
+const CTX = new AsyncLocalStorage();              // the session of the request being answered
+const SESSIONS_BY_TOKEN = new Map();              // token -> { account, name, key, site, made, seen }
+const SESSION_IDLE_MS = (HOSTED ? 2 : 12) * 3600 * 1000;   // signed out after this long untouched
+const SESSION_MAX_MS = 7 * 24 * 3600 * 1000;               // and after a week, whatever happens
+function me() { return CTX.getStore() || null; }
 const ACCOUNT_OPEN = new Set(["/account", "/api/account/list", "/api/account/sign-in",
   "/api/account/sign-up", "/api/account/recover", "/api/ping",
   // Read before an account exists: the terms are agreed at sign-up.
@@ -187,30 +203,100 @@ function accountsExist() {
 const LEGACY_AT_START = fs.existsSync(path.join(__dirname, "coordination", "agency.db"))
   || fs.existsSync(path.join(__dirname, ".env")) || !!process.env.AGENCY_DB;
 function accountRequired() {
-  return accountsExist() || process.env.GLASSWORK_INSTALLED === "1" || !LEGACY_AT_START;
+  return HOSTED || accountsExist() || process.env.GLASSWORK_INSTALLED === "1" || !LEGACY_AT_START;
 }
-function accountToken(req) {
-  const raw = req.headers.cookie || "";
-  for (const part of raw.split(";")) {
+function cookie(req, name) {
+  for (const part of String(req.headers.cookie || "").split(";")) {
     const i = part.indexOf("=");
-    if (i > 0 && part.slice(0, i).trim() === ACCOUNT_COOKIE) return part.slice(i + 1).trim();
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
   }
   return "";
 }
-function signedIn(req) { return !!SIGNED_IN && ACCOUNT_SESSIONS.has(accountToken(req)); }
-
-function cookieToken(req) {
-  const raw = req.headers.cookie || "";
-  for (const part of raw.split(";")) {
-    const i = part.indexOf("=");
-    if (i > 0 && part.slice(0, i).trim() === COOKIE) return part.slice(i + 1).trim();
+const cookieToken = (req) => cookie(req, COOKIE);
+// Secure (HTTPS only) when hosted; the office on a computer of its own is reached over localhost.
+const COOKIE_FLAGS = "HttpOnly; SameSite=Lax; Path=/" + (HOSTED ? "; Secure" : "");
+function sessionOf(req) {
+  const tok = cookie(req, ACCOUNT_COOKIE);
+  const s = tok && SESSIONS_BY_TOKEN.get(tok);
+  if (!s) return null;
+  const now = Date.now();
+  if (now - s.seen > SESSION_IDLE_MS || now - s.made > SESSION_MAX_MS) {
+    SESSIONS_BY_TOKEN.delete(tok);
+    return null;
   }
-  return "";
+  s.seen = now;
+  return s;
 }
+// Who a hosted office answers to: its own address(es), so a page elsewhere
+// cannot point a name of its own at it (DNS rebinding) or post into it.
+const HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1",
+  ...String(process.env.GLASSWORK_HOST || "").toLowerCase().split(",").map((h) => h.trim()).filter(Boolean)]);
 
+app.use((req, res, next) => CTX.run(sessionOf(req), next));
+
+/* ---- WHAT EVERY ANSWER CARRIES, AND WHAT IS REFUSED BEFORE THE DOOR ----------
+   - Headers: no framing (clickjacking), no sniffing, scripts and connections
+     only from the office itself (an injected script could not phone home), and
+     HTTPS only, for a year, when hosted.
+   - A change (anything but a read) is refused when the browser says it came
+     from another website: the session cookie alone is not permission (CSRF).
+   - Signing in, signing up, recovery and the Setup password are rate-limited
+     per address, and sign-in per name too, so guessing is slow everywhere.
+   - On a hosted office the parts that belong to one computer are not there:
+     closing the program, installing an update, the developer's Reports room,
+     the old single admin password, bringing in a pre-account website, and the
+     Claude Code team. ------------------------------------------------------ */
+const CSP = ["default-src 'self'", "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https: http:", "connect-src 'self'", "frame-src 'self' about: data:",
+  "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'"].join("; ");
+app.disable("x-powered-by");
 app.use((req, res, next) => {
-  const host = String(req.headers.host || "").split(":")[0].toLowerCase();
-  if (host && !LOCAL_HOSTS.has(host) && !process.env.BIND_HOST) {
+  res.setHeader("Content-Security-Policy", CSP);
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+  if (HOSTED) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  next();
+});
+app.use((req, res, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+  const from = req.headers.origin || req.headers.referer || "";
+  if (!from) return next();              // not from a browser page: it carries no cookie of a site visited
+  let host = "";
+  try { host = new URL(from).host.toLowerCase(); } catch (_) { /* "null" and the like: refused */ }
+  if (host && host === String(req.headers.host || "").toLowerCase()) return next();
+  res.status(403).json({ ok: false, error: "Refused: that request came from another website." });
+});
+const TRIES = new Map();
+function tooMany(key, max, minutes) {
+  const now = Date.now(), list = (TRIES.get(key) || []).filter((t) => now - t < minutes * 60000);
+  list.push(now);
+  TRIES.set(key, list);
+  if (TRIES.size > 10000) for (const [k, v] of TRIES) if (!v.some((t) => now - t < 3600000)) TRIES.delete(k);
+  return list.length > max;
+}
+const LIMITS = { "/api/account/sign-in": [30, 15], "/api/account/sign-up": [10, 60], "/api/account/recover": [10, 15],
+  "/api/setup/unlock": [15, 15], "/api/login": [15, 15], "/api/account/mfa/on": [10, 15],
+  "/api/account/mfa/off": [10, 15], "/api/support/send": [10, 60] };
+const TOO_MANY = { ok: false, error: "Too many tries. Wait a few minutes, then try again." };
+app.use((req, res, next) => {
+  const lim = req.method === "POST" && LIMITS[req.path];
+  if (lim && tooMany(req.path + "|" + req.ip, lim[0], lim[1])) return res.status(429).json(TOO_MANY);
+  next();
+});
+const NOT_HOSTED = /^\/(api\/(quit|password|login|logout|update\/(apply|rollback)|publisher(\/.*)?|team(\/.*)?|account\/(bring-in|retire-old))|login|publisher\.js)$/;
+if (HOSTED) {
+  process.umask(0o077);                   // every file the office makes: its own user only
+  app.set("trust proxy", "loopback");     // the address a rate limit counts is the visitor's
+  app.use((req, res, next) => NOT_HOSTED.test(req.path)
+    ? res.status(404).json({ ok: false, error: "That is not part of this program." }) : next());
+}
+app.use((req, res, next) => {
+  const host = String(req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
+  if (host && !HOSTS.has(host) && (HOSTED || !process.env.BIND_HOST)) {
     return res.status(403).type("text/plain").send(
       "Refused: this server answers to localhost only. If you meant to reach it " +
       "over the network, start it with BIND_HOST set and put a password on it.");
@@ -219,7 +305,7 @@ app.use((req, res, next) => {
     // Accounts exist, or must: the account sign-in is the front door, and the
     // old single admin password no longer applies.
     if (ACCOUNT_OPEN.has(req.path)) return next();
-    if (signedIn(req)) {
+    if (me()) {
       // Signed in with no website open yet: nothing but the account page, or
       // the office would be reading the program's ORIGINAL files — someone
       // else's agency, before it has been brought into an account.
@@ -276,9 +362,7 @@ app.post("/api/login", express.urlencoded({ extended: false }), (req, res) => {
   }
   const tok = crypto.randomBytes(32).toString("hex");
   SESSIONS.add(tok);
-  res.cookie
-    ? res.cookie(COOKIE, tok, { httpOnly: true, sameSite: "lax" })
-    : res.setHeader("Set-Cookie", `${COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/`);
+  res.setHeader("Set-Cookie", `${COOKIE}=${tok}; ${COOKIE_FLAGS}`);
   res.redirect("/");
 });
 
@@ -389,28 +473,22 @@ const SETUP_OPEN = new Set(["GET /api/connect", "POST /api/connect/check"]);
 // The pages behind the same lock. Unlocking returns you to the one you asked for.
 const SETUP_PAGES = new Set(["/setup", "/setup.html", "/engine", "/engine.html"]);
 
-function setupToken(req) {
-  const raw = req.headers.cookie || "";
-  for (const part of raw.split(";")) {
-    const i = part.indexOf("=");
-    if (i > 0 && part.slice(0, i).trim() === SETUP_COOKIE) return part.slice(i + 1).trim();
-  }
-  return "";
-}
+const setupToken = (req) => cookie(req, SETUP_COOKIE);
 
 // A fresh ticket, as a cookie. Also handed out at sign-up: the person typed
 // their new password a moment ago, and the next screen asks them to choose
 // their AI engine — asking for the password again there helps nobody.
 function setupCookie() {
   const tok = crypto.randomBytes(32).toString("hex");
-  SETUP_TICKETS.set(tok, { expires: Date.now() + SETUP_TTL_MS, navUsed: false });
-  return `${SETUP_COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SETUP_TTL_MS / 1000}`;
+  SETUP_TICKETS.set(tok, { expires: Date.now() + SETUP_TTL_MS, navUsed: false, account: (me() || {}).account });
+  return `${SETUP_COOKIE}=${tok}; ${COOKIE_FLAGS}; Max-Age=${SETUP_TTL_MS / 1000}`;
 }
 
 function setupTicket(req) {
   const t = SETUP_TICKETS.get(setupToken(req));
   if (!t) return null;
-  if (Date.now() > t.expires) { SETUP_TICKETS.delete(setupToken(req)); return null; }
+  // A ticket opens only its own person's Setup.
+  if (Date.now() > t.expires || t.account !== (me() || {}).account) { SETUP_TICKETS.delete(setupToken(req)); return null; }
   return t;
 }
 
@@ -471,7 +549,7 @@ app.use((req, res, next) => {
 app.post("/api/setup/unlock", express.urlencoded({ extended: false }), JSON_BODY, async (req, res) => {
   const supplied = (req.body && req.body.password) || "";
   const ok = accountsExist()
-    ? !!(SIGNED_IN && (await pyAccounts("check", { account: SIGNED_IN.account, password: supplied })).ok)
+    ? !!(me() && (await pyAccounts("check", { account: me().account, password: supplied })).ok)
     : passwordOk(supplied);
   const next = (req.body && req.body.next) === "/engine" ? "/engine" : "/setup";
   // The app asks for the password in place (the Users room, the Publisher
@@ -530,7 +608,7 @@ app.use((req, res, next) => {
   if (req.method !== "GET") return next();
   const ms = keepFor(req.path);
   if (!ms) return next();
-  const key = req.originalUrl, at = Date.now(), gen = KEPT_GEN, stamp = cabinetStamp();
+  const key = scope() + "|" + req.originalUrl, at = Date.now(), gen = KEPT_GEN, stamp = cabinetStamp();
   const hit = KEPT.get(key);
   if (hit && hit.gen === gen && hit.stamp === stamp && at - hit.at < ms) {
     res.set("X-Kept", "1");
@@ -582,7 +660,7 @@ app.post("/api/business", async (req, res) => {
     cwd: __dirname, input: JSON.stringify(req.body || {}), timeout: 60000,
   });
   try { return res.json(JSON.parse(String(r.stdout || "").trim().split("\n").pop())); }
-  catch (_) { return res.json({ ok: false, error: "could not save: " + String(r.stderr || "").slice(-300) }); }
+  catch (_) { return res.json({ ok: false, error: oops("could not save", r.stderr) }); }
 });
 app.post("/api/business/draft", async (req, res) => {
   const url = String((req.body || {}).url || "").trim();
@@ -614,7 +692,7 @@ async function pyConnect(args, payload, timeoutMs) {
     maxBuffer: 16 * 1024 * 1024,
   });
   try { return JSON.parse(String(r.stdout || "").trim().split("\n").pop()); }
-  catch (_) { return { ok: false, error: "could not read the answer: " + String(r.stderr || "").slice(-300) }; }
+  catch (_) { return { ok: false, error: oops("could not read the answer", r.stderr) }; }
 }
 app.get("/api/connect", async (_q, res) => res.json(await pyConnect([], null, 60000)));
 app.get("/api/connect/connector.zip", async (req, res) => {
@@ -683,7 +761,7 @@ app.post("/api/support/send", async (req, res) => {
    coordination/publisher.py and ui/publisher.js are on his computer only, never
    in a copy he gives out. Without them none of this exists: /api/publisher says
    so, and everything under it answers 404. */
-const PUBLISHER_HERE = fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));
+const PUBLISHER_HERE = !HOSTED && fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));
 const pub = (args, ms = 60000) => pyModule("coordination.publisher", args, ms);
 app.get("/api/publisher", async (_q, res) => res.json(PUBLISHER_HERE ? await pub(["--view"], 30000)
   : { ok: true, publisher: false, can_publish: false }));
@@ -732,7 +810,7 @@ app.post("/api/publisher/publish", async (req, res) => {
   try {
     fs.mkdirSync(path.dirname(publishJob()), { recursive: true });
     fs.writeFileSync(publishJob(), JSON.stringify({ running: true, stage: "Starting", at: Math.floor(Date.now() / 1000) }));
-    const child = spawn(py.cmd, args, { cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true });
+    const child = spawn(py.cmd, args, { cwd: __dirname, env: pyEnv(), detached: true, stdio: "ignore", windowsHide: true });
     child.on("error", () => {});
     child.unref();
   } catch (e) {
@@ -758,7 +836,7 @@ async function pyStdin(mod, args, payload, timeoutMs) {
     maxBuffer: 32 * 1024 * 1024,
   });
   try { return JSON.parse(String(r.stdout || "").trim().split("\n").pop()); }
-  catch (_) { return { ok: false, error: "could not read the answer: " + String(r.stderr || "").slice(-300) }; }
+  catch (_) { return { ok: false, error: oops("could not read the answer", r.stderr) }; }
 }
 const numId = (v) => (/^\d{1,9}$/.test(String(v || "")) ? String(v) : "");
 app.get("/api/mail/sent/:lead", async (req, res) => {
@@ -779,7 +857,7 @@ app.post("/api/content/write/:id", async (req, res) => {
   if (!py) return res.json({ ok: false, error: NO_PY });
   try {
     const child = spawn(py.cmd, [...py.prefix, "-m", "coordination.posts", "--write", id], {
-      cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,
+      cwd: __dirname, env: pyEnv(), detached: true, stdio: "ignore", windowsHide: true,
     });
     child.on("error", () => {});
     child.unref();
@@ -835,7 +913,7 @@ app.post("/api/check/brand", async (req, res) => {
     timeout: 30000,
   });
   try { return res.json(JSON.parse(String(r.stdout || "").trim().split("\n").pop())); }
-  catch (_) { return res.json({ ok: false, error: "could not save: " + String(r.stderr || "").slice(-300) }); }
+  catch (_) { return res.json({ ok: false, error: oops("could not save", r.stderr) }); }
 });
 app.post("/api/check/start", async (req, res) => {
   const b = req.body || {};
@@ -847,7 +925,7 @@ app.post("/api/check/start", async (req, res) => {
   let child;
   try {
     child = spawn(py.cmd, [...py.prefix, "-m", CHECK_MOD, "--run", String(made.id), "--json"], {
-      cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,
+      cwd: __dirname, env: pyEnv(), detached: true, stdio: "ignore", windowsHide: true,
     });
   } catch (e) {
     await pyModule(CHECK_MOD, ["--delete", String(made.id)], 30000);
@@ -918,22 +996,24 @@ async function pyAccounts(command, payload) {
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
   try { return JSON.parse(String(r.stdout || "").trim().split("\n").pop()); }
-  catch (_) { return { ok: false, error: "accounts: " + String(r.stderr || r.stdout || "no answer").slice(-300) }; }
+  catch (_) { return { ok: false, error: oops("accounts", r.stderr || r.stdout) }; }
 }
 
-function startSession(res, account, name, keyHex) {
-  SIGNED_IN = { account, name, key: Buffer.from(keyHex, "hex") };
-  process.env.AGENCY_KEY = keyHex;            // every program the office starts gets it
-  ACCOUNT_SESSIONS.clear();                  // one person at a time on this computer
-  SESSIONS.clear(); SETUP_TICKETS.clear();
-  const tok = crypto.randomBytes(32).toString("hex");
-  ACCOUNT_SESSIONS.add(tok);
-  res.setHeader("Set-Cookie", `${ACCOUNT_COOKIE}=${tok}; HttpOnly; SameSite=Lax; Path=/`);
+// The rest of the request that signed someone in is answered as them (CTX.enterWith).
+function startSession(res, account, name, keyHex, site) {
+  if (!HOSTED) { SESSIONS_BY_TOKEN.clear(); SESSIONS.clear(); SETUP_TICKETS.clear(); }  // one at a time here
+  const tok = crypto.randomBytes(32).toString("hex"), now = Date.now();
+  const s = { token: tok, account, name, key: Buffer.from(keyHex, "hex"), site: site || null, made: now, seen: now };
+  SESSIONS_BY_TOKEN.set(tok, s);
+  CTX.enterWith(s);
+  res.setHeader("Set-Cookie", `${ACCOUNT_COOKIE}=${tok}; ${COOKIE_FLAGS}`);
+  return s;
 }
-function endSession() {
-  SIGNED_IN = null;
-  delete process.env.AGENCY_KEY;
-  ACCOUNT_SESSIONS.clear(); SETUP_TICKETS.clear();
+function endSession(s, others = false) {
+  for (const [tok, x] of SESSIONS_BY_TOKEN) {
+    if (x.account === s.account && (others ? x !== s : x === s)) SESSIONS_BY_TOKEN.delete(tok);
+  }
+  for (const [tok, t] of SETUP_TICKETS) if (t.account === s.account && !others) SETUP_TICKETS.delete(tok);
 }
 // After signing in or switching website: build or upgrade that website's cabinet.
 async function cabinetReady() { try { await ensureDb(); } catch (_) {} }
@@ -946,17 +1026,17 @@ function strip(r) {                          // the key never goes to the browse
 
 // Open to anyone at the door, so it says nothing about anybody: not who is
 // signed in (only that it is you, with your own cookie), not what is open.
-app.get("/api/account/list", async (req, res) => {
+app.get("/api/account/list", async (_q, res) => {
   const { active: _open, ...r } = await pyAccounts("list", {});
-  res.json({ ...r, signedIn: signedIn(req) ? { account: SIGNED_IN.account, name: SIGNED_IN.name } : null,
-             someoneElse: !!SIGNED_IN && !signedIn(req) });
+  res.json({ ...r, signedIn: me() ? { account: me().account, name: me().name } : null });
 });
 
 app.post("/api/account/sign-up", async (req, res) => {
   const b = req.body || {};
-  const r = await pyAccounts("sign-up", { name: b.name, password: b.password, confirm: b.confirm });
+  const r = await pyAccounts("sign-up", { name: b.name, password: b.password, confirm: b.confirm,
+                                         invite: b.invite });
   if (!r.ok) return res.status(400).json(r);
-  startSession(res, r.account.id, r.account.name, r.key);
+  startSession(res, r.account.id, r.account.name, r.key, null);
   res.setHeader("Set-Cookie", [res.getHeader("Set-Cookie"), setupCookie()].flat());
   // The recovery key is shown ONCE, here, and kept nowhere.
   res.json(strip(r));
@@ -964,9 +1044,11 @@ app.post("/api/account/sign-up", async (req, res) => {
 
 app.post("/api/account/sign-in", async (req, res) => {
   const b = req.body || {};
-  const r = await pyAccounts("sign-in", { account: b.account, password: b.password });
-  if (!r.ok) return res.status(401).json(r);
-  startSession(res, r.account.id, r.account.name, r.key);
+  const who = "name|" + String(b.account || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if ((TRIES.get(who) || []).filter((t) => Date.now() - t < 15 * 60000).length >= 10) return res.status(429).json(TOO_MANY);
+  const r = await pyAccounts("sign-in", { account: b.account, password: b.password, code: b.code });
+  if (!r.ok) { if (!r.mfa || b.code) tooMany(who, 10, 15); return res.status(401).json(r); }
+  startSession(res, r.account.id, r.account.name, r.key, r.site);
   await cabinetReady();
   res.json(strip(r));
 });
@@ -976,73 +1058,89 @@ app.post("/api/account/recover", async (req, res) => {
   const r = await pyAccounts("recover", { account: b.account, recovery_key: b.recovery_key,
                                          password: b.password });
   if (!r.ok) return res.status(401).json(r);
-  startSession(res, r.account.id, r.account.name, r.key);
+  startSession(res, r.account.id, r.account.name, r.key, r.site);
   await cabinetReady();
   res.json(strip(r));
 });
 
-app.post("/api/account/sign-out", async (req, res) => {
-  if (!signedIn(req)) return res.json({ ok: true });     // only the person signed in can sign out
+app.post("/api/account/sign-out", async (_q, res) => {
+  if (!me()) return res.json({ ok: true });              // only the person signed in can sign out
   const st = await pyAccounts("status", {});
   if (st.run_going) {
     return res.status(409).json({ ok: false,
       error: "Today's run is still going. Let it finish or press Stop, then sign out." });
   }
-  endSession();
+  endSession(me());
   res.json({ ok: true });
 });
 
 app.get("/api/account/me", async (_q, res) => {
-  if (!SIGNED_IN) return res.json({ ok: true, signedIn: null });
+  const s = me();
+  if (!s) return res.json({ ok: true, signedIn: null });
   const [list, st] = await Promise.all([pyAccounts("list", {}), pyAccounts("status", {})]);
   // The websites come from the signed-in account itself, opened with its key.
-  const own = (st.account || {}).id === SIGNED_IN.account;
+  const own = (st.account || {}).id === s.account;
   const mine = own ? (st.sites || []) : [];
-  res.json({ ok: true, signedIn: { account: SIGNED_IN.account, name: SIGNED_IN.name },
+  res.json({ ok: true, signedIn: { account: s.account, name: s.name }, hosted: HOSTED, mfa: !!st.mfa,
              sites: mine.map((x) => ({ id: x.id, name: x.name, url: x.url })), open: own ? (st.site || {}).id || null : null,
              maxSites: list.max_sites,
              runGoing: !!st.run_going, legacyPresent: !!list.legacy_present,
              legacySite: list.legacy_site || {}, broughtIn: !!st.brought_in });
 });
 
+// Everything here acts on the signed-in person's own account, never one named in the request.
 app.post("/api/account/password", async (req, res) => {
-  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
-  const b = req.body || {};
+  const s = me(), b = req.body || {};
   if ((b.password || "") !== (b.confirm || "")) {
     return res.status(400).json({ ok: false, error: "The two passwords do not match." });
   }
-  const r = await pyAccounts("change-password", { account: SIGNED_IN.account,
-                                                  current: b.current, password: b.password });
+  const r = await pyAccounts("change-password", { account: s.account, current: b.current, password: b.password });
+  if (r.ok) endSession(s, true);                        // signed out everywhere else
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 app.post("/api/account/add-site", async (req, res) => {
-  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
-  const b = req.body || {};
-  const r = await pyAccounts("add-site", { account: SIGNED_IN.account, name: b.name, url: b.url });
-  if (r.ok) await cabinetReady();
+  const s = me(), b = req.body || {};
+  const r = await pyAccounts("add-site", { account: s.account, name: b.name, url: b.url });
+  if (r.ok && !s.site) { s.site = r.site.id; await cabinetReady(); }
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 app.post("/api/account/open-site", async (req, res) => {
-  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
-  const r = await pyAccounts("open-site", { account: SIGNED_IN.account, site: (req.body || {}).site });
-  if (r.ok) await cabinetReady();
+  const s = me(), site = String((req.body || {}).site || "");
+  const r = await pyAccounts("open-site", { account: s.account, site });
+  if (r.ok) { s.site = site; await cabinetReady(); }
   res.status(r.ok ? 200 : (r.running ? 409 : 400)).json(r);
 });
 
 app.post("/api/account/bring-in", async (req, res) => {
-  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
-  const b = req.body || {};
-  const r = await pyAccounts("bring-in", { account: SIGNED_IN.account, name: b.name, url: b.url });
-  if (r.ok) await cabinetReady();
+  const s = me(), b = req.body || {};
+  const r = await pyAccounts("bring-in", { account: s.account, name: b.name, url: b.url });
+  if (r.ok) { s.site = r.site; await cabinetReady(); }
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// TWO-STEP SIGN-IN: a code from an authenticator app as well as the password.
+// The new secret waits in this session until a code from the app confirms it.
+app.post("/api/account/mfa/start", async (_q, res) => {
+  const s = me(), r = await pyAccounts("mfa-start", { label: s.name });
+  if (r.ok) s.mfaPending = r.secret;
+  res.json(r);
+});
+app.post("/api/account/mfa/on", async (req, res) => {
+  const s = me();
+  if (!s.mfaPending) return res.status(400).json({ ok: false, error: "Start again: press Turn on." });
+  const r = await pyAccounts("mfa-on", { account: s.account, secret: s.mfaPending, code: (req.body || {}).code });
+  if (r.ok) { delete s.mfaPending; endSession(s, true); }
+  res.status(r.ok ? 200 : 400).json(r);
+});
+app.post("/api/account/mfa/off", async (req, res) => {
+  const r = await pyAccounts("mfa-off", { account: me().account, code: (req.body || {}).code });
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 app.post("/api/account/retire-old", async (req, res) => {
-  if (!SIGNED_IN) return res.status(401).json({ ok: false, error: "Sign in first." });
-  const r = await pyAccounts("retire-old", { account: SIGNED_IN.account,
-                                            confirm: !!(req.body || {}).confirm });
+  const r = await pyAccounts("retire-old", { account: me().account, confirm: !!(req.body || {}).confirm });
   res.status(r.ok ? 200 : 400).json(r);
 });
 // The two rooms, one page: /mail opens on the mail, /posts on the written pages.
@@ -1127,9 +1225,9 @@ app.post("/api/chat", async (req, res) => {
   });
   if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
   const out = String(r.stdout || "");
-  if (!out) return res.json({ ok: false, error: "agent_chat error: " + String(r.stderr || "no output") });
+  if (!out) return res.json({ ok: false, error: oops("agent_chat error", r.stderr) });
   try { return res.json(JSON.parse(out)); }
-  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+  catch (_) { return res.json({ ok: false, error: oops("bad reply", out) }); }
 });
 
 // ---- helpers ---------------------------------------------------------------
@@ -1155,16 +1253,12 @@ const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json"
 const MACHINE_CONFIG = new Set(["claude_code.local.json"]);
 const LEGACY_ENV = path.join(__dirname, ".env");
 
+// The website open for the person this request is from — nobody else's, ever.
 function activeSite() {
-  try {
-    const a = JSON.parse(fs.readFileSync(path.join(DATA_ROOT, "active.json"), "utf8"));
-    if (!a || !a.account || !a.site) return null;
-    // Only ever the signed-in person's own website: another account's, left
-    // open from before, is not theirs to work in.
-    if (SIGNED_IN && a.account !== SIGNED_IN.account) return null;
-    const dir = path.join(DATA_ROOT, "accounts", a.account, "sites", a.site);
-    return fs.existsSync(dir) ? { account: a.account, site: a.site } : null;
-  } catch (_) { return null; }
+  const s = me();
+  if (!s || !s.site) return null;
+  const a = { account: s.account, site: s.site };
+  return fs.existsSync(siteDir(a)) ? a : null;
 }
 function accountDir(a) { return path.join(DATA_ROOT, "accounts", a.account); }
 function siteDir(a) { return path.join(accountDir(a), "sites", a.site); }
@@ -1206,10 +1300,9 @@ function accountEncrypted(id) {
   } catch (_) { return false; }
 }
 function masterFor(account) {
-  if (!SIGNED_IN || SIGNED_IN.account !== account) {
-    throw new Error("this account's settings are locked — sign in first");
-  }
-  return SIGNED_IN.key;
+  const s = me();
+  if (!s || s.account !== account) throw new Error("this account's settings are locked — sign in first");
+  return s.key;
 }
 function readSecret(file) {
   const data = fs.readFileSync(file);
@@ -1395,20 +1488,36 @@ const NO_PY = "Python 3 wasn't found on this computer. Install Python 3 (python.
 // works. At most MAX_PY run at once, the rest queue, so a burst of polls
 // cannot swamp the laptop; and identical read calls already in flight are
 // shared (see pyModule) rather than started twice.
-const MAX_PY = 8;
+// Hosted, one person's burst cannot take every slot: each has at most a few.
+const MAX_PY = Number(process.env.GLASSWORK_MAX_PY) || 8;
+const PER_PERSON = HOSTED ? Math.min(3, MAX_PY) : MAX_PY;
 let PY_RUNNING = 0;
-const PY_WAITING = [];
+const PY_BY = new Map(), PY_WAITING = [];
+const busy = (who) => PY_BY.get(who) || 0;
+function _take(who) { PY_RUNNING++; PY_BY.set(who, busy(who) + 1); return who; }
 function _pySlot() {
-  if (PY_RUNNING < MAX_PY) { PY_RUNNING++; return Promise.resolve(); }
-  return new Promise((resolve) => PY_WAITING.push(resolve));
+  const who = scope().split("/")[0];
+  if (PY_RUNNING < MAX_PY && busy(who) < PER_PERSON) return Promise.resolve(_take(who));
+  return new Promise((resolve) => PY_WAITING.push({ who, resolve }));
 }
-function _pyFree() {
-  const next = PY_WAITING.shift();
-  if (next) next(); else PY_RUNNING = Math.max(0, PY_RUNNING - 1);
+function _pyFree(who) {
+  PY_RUNNING = Math.max(0, PY_RUNNING - 1);
+  PY_BY.set(who, Math.max(0, busy(who) - 1));
+  const i = PY_WAITING.findIndex((w) => busy(w.who) < PER_PERSON);
+  if (i >= 0 && PY_RUNNING < MAX_PY) { const w = PY_WAITING.splice(i, 1)[0]; w.resolve(_take(w.who)); }
+}
+// What a program started for this request gets: the person's key and open
+// website, and nothing of anybody else's. Signed out, no website at all.
+function pyEnv() {
+  const env = { ...process.env }, s = me();
+  delete env.AGENCY_KEY; delete env.AGENCY_ACCOUNT; delete env.AGENCY_SITE;
+  if (s) Object.assign(env, { AGENCY_KEY: s.key.toString("hex"), AGENCY_ACCOUNT: s.account, AGENCY_SITE: s.site || "" });
+  else if (accountRequired()) env.AGENCY_ACCOUNT = "";
+  return env;
 }
 async function spawnAsync(cmd, args, opts) {
   opts = opts || {};
-  await _pySlot();
+  const who = await _pySlot();
   return new Promise((resolve) => {
     let child, done = false, timer = null;
     const out = [], err = [];
@@ -1418,11 +1527,11 @@ async function spawnAsync(cmd, args, opts) {
       if (done) return;
       done = true;
       if (timer) clearTimeout(timer);
-      _pyFree();
+      _pyFree(who);
       resolve(r);
     };
     try {
-      child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, windowsHide: true });
+      child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env || pyEnv(), windowsHide: true });
     } catch (e) {
       return finish({ error: e, status: null, stdout: "", stderr: "" });
     }
@@ -1449,7 +1558,9 @@ async function spawnAsync(cmd, args, opts) {
 // Identical read calls already running are shared, not started again: the
 // office and the Mail room poll, and a slow answer must not stack up copies.
 const PY_INFLIGHT = new Map();
+function scope() { const s = me(); return s ? s.account + "/" + (s.site || "") : "-"; }
 function shared(key, make) {
+  key = scope() + "|" + key;
   if (PY_INFLIGHT.has(key)) return PY_INFLIGHT.get(key);
   const p = make().finally(() => PY_INFLIGHT.delete(key));
   PY_INFLIGHT.set(key, p);
@@ -1474,12 +1585,12 @@ function ensureDbSync() {
   // Accounts exist (or must) and nobody is signed in: the cabinets are locked,
   // and a fresh copy makes none in the program's folder. Each one is built and
   // upgraded when its owner signs in (see signInDone).
-  if (accountRequired() && !SIGNED_IN) return { built: true, ran: false, error: null };
+  if (accountRequired() && !me()) return { built: true, ran: false, error: null };
   const py = resolvePython();
   if (!py) return { built: dbBuilt(), ran: false, error: NO_PY };
   try {
     const r = spawnSync(py.cmd, [...py.prefix, "coordination/init_db.py"],
-                        { cwd: __dirname, timeout: 20000 });
+                        { cwd: __dirname, timeout: 20000, env: pyEnv() });
     return { built: dbBuilt(), ran: true,
              error: r.status === 0 ? null : String(r.stderr || "") };
   } catch (e) {
@@ -1511,9 +1622,9 @@ async function pyProvider(command, payload, timeoutMs) {
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
   const out = String(r.stdout || "");
-  if (!out) return { ok: false, error: "provider module error: " + String(r.stderr || "no output") };
+  if (!out) return { ok: false, error: oops("provider module error", r.stderr) };
   try { return JSON.parse(out); }
-  catch (_) { return { ok: false, error: "bad provider output: " + out.slice(0, 300) }; }
+  catch (_) { return { ok: false, error: oops("bad provider output", out) }; }
 }
 
 // Shell into any agency module the same way. Arguments go through as an ARRAY,
@@ -1531,9 +1642,9 @@ async function _pyModule(mod, args, timeoutMs) {
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
   const out = String(r.stdout || "");
-  if (!out) return { ok: false, error: mod + " error: " + String(r.stderr || "no output") };
+  if (!out) return { ok: false, error: oops(mod + " error", r.stderr) };
   try { return JSON.parse(out); }
-  catch (_) { return { ok: false, error: "bad output from " + mod + ": " + out.slice(0, 300) }; }
+  catch (_) { return { ok: false, error: oops("bad output from " + mod, out) }; }
 }
 
 // shell into the state reader (same single code path — the server reads no DB itself)
@@ -1548,9 +1659,9 @@ async function _pyState() {
   });
   if (r.error) return { ok: false, error: "Could not run Python: " + r.error.message };
   const out = String(r.stdout || "");
-  if (!out) return { ok: false, error: "state module error: " + String(r.stderr || "no output") };
+  if (!out) return { ok: false, error: oops("state module error", r.stderr) };
   try { return JSON.parse(out); }
-  catch (_) { return { ok: false, error: "bad state output: " + out.slice(0, 300) }; }
+  catch (_) { return { ok: false, error: oops("bad state output", out) }; }
 }
 
 // WHAT THE OWNER'S WEBSITE IS CALLED.
@@ -2020,7 +2131,7 @@ app.post("/api/run/start", async (req, res) => {
   let child;
   try {
     child = spawn(py.cmd, [...py.prefix, "-m", "pipelines.day_run", "--stdin", "--json"], {
-      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
+      cwd: __dirname, env: pyEnv(), detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
     });
   } catch (e) {
     return res.json({ ok: false, error: "Could not start the run: " + e.message });
@@ -2072,7 +2183,7 @@ app.post("/api/run/resume", async (_req, res) => {
                                    orders: {}, only: [] });
   try {
     const child = spawn(py.cmd, [...py.prefix, "-m", "pipelines.day_run", "--stdin", "--json"], {
-      cwd: __dirname, detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
+      cwd: __dirname, env: pyEnv(), detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
     });
     child.on("error", () => {});
     try { child.stdin.end(payload); } catch (_) {}
@@ -2165,9 +2276,9 @@ app.post("/api/approve", async (req, res) => {
   });
   if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
   const out = String(r.stdout || "");
-  if (!out) return res.json({ ok: false, error: "approve error: " + String(r.stderr || "no output") });
+  if (!out) return res.json({ ok: false, error: oops("approve error", r.stderr) });
   try { return res.json(JSON.parse(out)); }
-  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+  catch (_) { return res.json({ ok: false, error: oops("bad reply", out) }); }
 });
 
 // ---- THE REVIEW PAGE: written pages and drafted mail, read before they leave --
@@ -2224,9 +2335,9 @@ app.post("/api/review/act", async (req, res) => {
   });
   if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
   const out = String(r.stdout || "");
-  if (!out) return res.json({ ok: false, error: "review error: " + String(r.stderr || "no output") });
+  if (!out) return res.json({ ok: false, error: oops("review error", r.stderr) });
   try { return res.json(JSON.parse(out)); }
-  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+  catch (_) { return res.json({ ok: false, error: oops("bad reply", out) }); }
 });
 
 // Writing a mail per lead, writing a page, and the Releaser's test run all take
@@ -2249,7 +2360,7 @@ app.post("/api/review/start/:job", async (req, res) => {
     extra = ["--focus", focus.trim().slice(0, 200)];
   try {
     const child = spawn(py.cmd, [...py.prefix, "-m", "coordination.review", flag, ...extra], {
-      cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true,
+      cwd: __dirname, env: pyEnv(), detached: true, stdio: "ignore", windowsHide: true,
     });
     child.on("error", () => {});
     child.unref();
@@ -2284,9 +2395,9 @@ app.post("/api/release", async (req, res) => {
   });
   if (r.error) return res.json({ ok: false, error: "Could not run Python: " + r.error.message });
   const out = String(r.stdout || "");
-  if (!out) return res.json({ ok: false, error: "release error: " + String(r.stderr || "no output") });
+  if (!out) return res.json({ ok: false, error: oops("release error", r.stderr) });
   try { return res.json(JSON.parse(out)); }
-  catch (_) { return res.json({ ok: false, error: "bad reply: " + out.slice(0, 300) }); }
+  catch (_) { return res.json({ ok: false, error: oops("bad reply", out) }); }
 });
 
 // ---- the owner's standing orders, per sector --------------------------------
@@ -2411,7 +2522,7 @@ app.get("/api/settings", async (_q, res) => {
       // Name, bare host and initials for the switcher, worked out in ONE place
       // (coordination/site.py) so the office, the control room and the agents
       // cannot disagree about what the owner's website is called.
-      ...siteLabel(),
+      ...(await siteLabel()),
       apiBase: v("SITE_API_BASE"),
       apiTokenSet: set("SITE_API_TOKEN"),
     },
