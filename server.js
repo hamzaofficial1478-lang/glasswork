@@ -505,26 +505,32 @@ function setupTicket(req) {
 function unlockPage(err, next) {
   const engine = String(next || "").startsWith("/engine");
   const back = engine ? "/engine" : "/setup";
-  return `<!doctype html><meta charset="utf-8">
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${engine ? "AI engine" : "Setup"} — password required</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/botix.css">
 <style>
- body{margin:0;height:100vh;display:grid;place-items:center;background:#0c1216;
-   color:#e7eff3;font-family:system-ui,sans-serif}
- form{background:#131d23;border:1px solid #25343c;border-radius:14px;padding:28px;width:360px}
- h1{font-size:16px;margin:0 0 6px} p{font-size:12.5px;color:#7d919c;margin:0 0 18px;line-height:1.6}
- input{width:100%;padding:11px;border-radius:9px;border:1px solid #3a515b;background:#182530;
-   color:#e7eff3;font-size:14px;box-sizing:border-box}
- button{width:100%;margin-top:12px;padding:11px;border-radius:9px;border:1px solid #54cbd9;
-   background:rgba(84,203,217,.15);color:#54cbd9;font-weight:600;font-size:14px;cursor:pointer}
- a{color:#7d919c;font-size:12px;display:block;margin-top:14px;text-align:center}
- .err{color:#e5565b;font-size:12.5px;margin-top:10px;min-height:16px}
+ body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font-family:var(--font);padding:20px;box-sizing:border-box}
+ form{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:28px;width:100%;max-width:380px;box-shadow:var(--shadow)}
+ .head{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+ .head img{width:30px;height:30px}
+ h1{font-size:18px;margin:0 0 6px;letter-spacing:-.01em} p{font-size:14px;color:var(--muted);margin:0 0 18px;line-height:1.55}
+ input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);
+   color:var(--ink);font:inherit;font-size:15px;box-sizing:border-box}
+ input:focus{outline:2px solid var(--accent);outline-offset:2px}
+ button{width:100%;margin-top:12px;padding:12px;border-radius:10px;border:1px solid var(--accent);
+   background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;font-size:15px;cursor:pointer}
+ button:hover{background:var(--accent-hover)}
+ a{color:var(--muted);font-size:14px;display:block;margin-top:16px;text-align:center}
+ .err{color:var(--stuck);font-size:14px;margin-top:10px;min-height:16px}
 </style>
 <form method="POST" action="/api/setup/unlock">
-  <h1>&#128274; ${engine ? "AI engine" : "Setup"}</h1>
+  <div class="head"><img src="/logo.svg" alt=""><b>Botix</b></div>
+  <h1>${engine ? "AI engine" : "Setup"}</h1>
   <p>This screen holds ${engine ? "your AI keys" : "every API key in the agency, your model routing"} and your
-     spend cap. Being signed in is not enough &mdash; it asks each time you open it.</p>
+     spending limit, so it asks for your password each time you open it.</p>
   <input type="hidden" name="next" value="${back}">
-  <input type="password" name="password" placeholder="Your password" autofocus required>
+  <input type="password" name="password" placeholder="Your password" aria-label="Your password" autofocus required>
   <button>Open Setup</button>
   ${err ? `<div class="err">${err}</div>` : ""}
   <a href="/">&larr; Back to the office</a>
@@ -742,7 +748,7 @@ app.get("/api/product", async (_q, res) => {
 app.get("/manifest.webmanifest", async (_q, res) => {
   const p = productInfo(), name = p.name || "Botix";
   res.type("application/manifest+json").json({ name, short_name: name, description: p.tagline || "",
-    start_url: "/", scope: "/", display: "standalone", background_color: "#FFFFFF", theme_color: "#1A1512",
+    start_url: "/", scope: "/", display: "standalone", background_color: "#FFFFFF", theme_color: "#FFFFFF",
     icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" },
             { src: "/icon-512.png", sizes: "512x512", type: "image/png" }] });
 });

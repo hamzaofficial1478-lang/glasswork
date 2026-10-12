@@ -13,10 +13,14 @@ copy of Botix.
 
 ## Before it goes up
 
-1. **Confirm the prices.** The plans on `botix.html` (Startup, Growth, Pro;
-   own AI key or Botix AI) are proposals. Change any number in the
-   `<article class="panel plan">` blocks, or tell Claude what to change.
-   Delete the `PROPOSED PRICES` note above them once you are happy.
+1. **The prices** are yours, in US dollars: Starter $10 with your own AI key
+   or $30 with Botix AI, Growth $35 or $60, Pro $95 or $120. (You said
+   Growth "30 to 35"; it is set at $35. To change any number, edit
+   `data-usd-own` / `data-usd-ai` in the `<article class="plan">` blocks of
+   `botix.html`, or tell Claude.) Visitors see them in their own currency at
+   today's rate (worked out from their device's time zone, nothing sent), and
+   can pick another currency from the list. Billing is in US dollars, and the
+   page says so.
 2. **Fill in two lines** at the top of `assets/site.js`:
    - `botix:` the address where Botix runs online, e.g. `'https://app.yourdomain.com'`.
      Every "Start your 14-day trial" button then opens its sign-up page.
@@ -36,7 +40,9 @@ Upload everything inside `website/` (the four `.html` files and the `assets`
 folder) to the folder your domain shows, keeping the folder structure. Open
 the address in a browser and click through every page.
 
-The site loads its fonts from Google Fonts and its 3D drawing code from
-cdnjs; nothing else leaves the visitor's browser. There are no cookies,
+The site loads its fonts from Google Fonts, its 3D drawing code from cdnjs,
+and on the Botix page today's exchange rates from jsDelivr (a public file of
+numbers; no cookies, no page address sent); nothing else leaves the visitor's
+browser. There are no cookies,
 analytics or trackers, and the test `python -m coordination.website_tests`
 checks that this stays true.

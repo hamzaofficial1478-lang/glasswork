@@ -20,8 +20,26 @@ is protected here:
     for byte, so the website and the program can't drift apart;
   - the privacy promise is word for word the one on the sign-up page, and
     nothing on the site promises more than the program does;
-  - the Startup plan says what he set: 7 leads and 5 emails a day, 1 post of
-    300–400 words; the prices are marked as proposals until he confirms them;
+  - the Starter plan says what he set: 7 leads and 5 emails a day, 1 post of
+    300–400 words;
+
+"the prices will be in $ starter will be 10$ with our key it will be 30$ and
+ Growth will be 30 to 35 but with our api it will be 60$ and the pro will be
+ 95$ with our api it will be 120$ and prices will be automatically be
+ converted according to the location"
+
+  - the prices are his, in US dollars, and the page says people are billed in
+    US dollars;
+  - the visitor's currency is worked out on their own device (time zone, then
+    language), and today's rates come from the public rates file only, with
+    no cookies and no address of the page sent along; the privacy page says so;
+
+"there is nothing 3d that i can see no any animations ... where is the
+ animation of the program starting?"
+
+  - the opening can be played again and watched full screen, and with reduced
+    motion it waits behind a Play button instead of simply not moving;
+  - the 3D objects can be dragged round, and stop drawing off the screen;
   - all seven sectors and 21 desks are on the Botix page;
   - the website never ships inside a copy of the program.
 """
@@ -68,7 +86,7 @@ def test_the_pages():
         t = re.search(r"<title>([^<]+)</title>", h)
         check(f"{p} has a short title", bool(t) and 1 <= len(t.group(1).split()) <= 4, True)
     css = read("assets/site.css")
-    check("the background is painted, not borrowed", "body{margin:0;background:var(--bg)" in css, True)
+    check("the background is painted, not borrowed", "body{margin:0;background:var(--paper)" in css, True)
     check("reduced motion is respected", "prefers-reduced-motion:reduce" in css, True)
 
 
@@ -144,19 +162,50 @@ def test_privacy_words():
 
 
 def test_plans():
-    print("\nThe plans say what he set, and are marked as proposals:")
+    print("\nThe plans say what he set, in US dollars:")
     botix = read("botix.html")
-    plans = re.findall(r'<article class="panel plan[^"]*"[^>]*>(.*?)</article>', botix, re.S)
+    plans = re.findall(r'<article class="plan[^"]*"[^>]*>(.*?)</article>', botix, re.S)
     check("three plans", len(plans), 3)
     start = plans[0] if plans else ""
-    check("Startup: 1 website", "<h3" in start and "Startup" in start and "1 website" in start, True)
-    check("Startup: 7 leads and 5 emails a day", "7 new leads and 5 emails" in start, True)
-    check("Startup: 1 post a day of 300–400 words", "1 post a day, 300–400 words" in start, True)
+    check("Starter: 1 website", "<h3" in start and "Starter" in start and "1 website" in start, True)
+    check("Starter: 7 leads and 5 emails a day", "7 new leads and 5 emails" in start, True)
+    check("Starter: 1 post a day of 300–400 words", "1 post a day, 300–400 words" in start, True)
     check("every plan starts with the 14-day trial", all("Start your 14-day trial" in p and "data-trial" in p for p in plans), True)
-    check("each plan has both prices: own AI key and Botix AI",
-          all(re.search(r'data-own="[\d,]+" data-ai="[\d,]+"', p) for p in plans), True)
-    check("prices are marked as proposals until he confirms them", "PROPOSED PRICES" in botix, True)
-    check("prices are in dirhams, per month", "Prices in UAE dirhams, per month" in botix, True)
+    usd = [re.search(r'data-usd-own="(\d+)" data-usd-ai="(\d+)"', p) for p in plans]
+    check("his prices: Starter $10 / $30, Growth $35 / $60, Pro $95 / $120 (own key / Botix AI)",
+          [m.groups() if m else None for m in usd], [("10", "30"), ("35", "60"), ("95", "120")])
+    check("before any script runs, the prices read in dollars", all(re.search(r'>\$\d+</b>', p) for p in plans), True)
+    check("the page says people are billed in US dollars", "that is what you are billed in" in botix, True)
+    check("anyone can choose another currency", "data-cur-select" in botix and '<script src="assets/currency.js"></script>' in botix, True)
+
+
+def test_currency():
+    print("\nPrices in the visitor's own money, worked out on their device:")
+    js = read("assets/currency.js")
+    fetched = sorted(set(re.findall(r"'(https://[^']+)'", js)))
+    check("rates come only from the public rates file (and its second address)", fetched,
+          ["https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json",
+           "https://latest.currency-api.pages.dev/v1/currencies/usd.min.json"])
+    check("the rates request carries no cookies and no page address", "credentials: 'omit'" in js and "referrerPolicy: 'no-referrer'" in js, True)
+    check("the country comes from the device's time zone, then its language", "resolvedOptions().timeZone" in js and "navigator.languages" in js, True)
+    check("Pakistan's time zone means rupees", '"PK":"PKR"' in js and "Asia/Karachi" in js, True)
+    check("Saudi Arabia's means riyals", '"SA":"SAR"' in js and "Asia/Riyadh" in js, True)
+    check("the UAE's means dirhams", '"AE":"AED"' in js and "Asia/Dubai" in js, True)
+    check("if the rates can't be fetched, saved rates and their date are used", "var SAVED = { date: '" in js, True)
+    check("nothing is remembered about the visitor", "localStorage" in js or "document.cookie" in js, False)
+    priv = read("privacy.html")
+    check("the privacy page explains the exchange rates", "exchange rates" in priv and "jsDelivr" in priv, True)
+
+
+def test_motion():
+    print("\nThe 3D and the opening are there to be seen:")
+    botix, js, scene = read("botix.html"), read("assets/site.js"), read("assets/scene.js")
+    check("the opening has Play again and Full screen", "data-replay" in botix and "data-full" in botix, True)
+    check("with reduced motion the opening waits behind a Play button", "data-play" in botix and "cover.hidden = false" in js, True)
+    check("the opening can play over the whole page", "BotixOpening.full" in js and "full: function" in read("assets/opening.js"), True)
+    check("the 3D objects can be dragged round", "pointerdown" in scene and "pointermove" in scene, True)
+    check("they stop drawing off the screen", "IntersectionObserver" in scene, True)
+    check("and still show a picture where there is no WebGL", botix.count('class="still"') >= 1 and "webgl()" in scene, True)
 
 
 def test_sectors_and_desks():
@@ -190,6 +239,8 @@ def main():
     test_the_programs_own_files()
     test_privacy_words()
     test_plans()
+    test_currency()
+    test_motion()
     test_sectors_and_desks()
     test_fill_ins_and_releases()
     print()

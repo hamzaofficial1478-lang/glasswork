@@ -1,61 +1,62 @@
 /* botix.css — the colours and type every screen shares, light and dark.
-   Cool graphite with one quiet orange, from the BT mark (coordination/mark.py).
-   Buttons in light mode use the deep copper (#B4501E): white text on it reads
-   clearly, which the logo's softer orange would not. Type is Geist.
-   Light by default; dark follows the computer, or the choice in Settings
-   (data-theme on <html>). */
+   Clean neutral greys do the work; the BT mark's orange (#E8834F) is kept for
+   the few places that need it: the logo, the one main action on a screen
+   (Run today), what is waiting on you, live activity and links. Everyday
+   buttons are ink, not orange. Text on the orange is dark, so it reads.
+   Type is Geist. Light by default; dark follows the computer, or the choice
+   in Settings (data-theme on <html>). */
 :root{
-  --bg:#F4F5F7; --surface:#FFFFFF; --sunken:#F8F9FB; --hover:#F0F2F5;
-  --line:#E3E6EB; --line-soft:#EDEFF2; --line-strong:#CCD1D9;
-  --ink:#111318; --ink-2:#323743; --muted:#5B6271; --faint:#717888;
-  --accent:#B4501E; --accent-hover:#984317; --accent-ink:#FFFFFF; --accent-soft:#F8ECE4; --nav-on:#7E3612;
-  --brand:#E8834F; --tile:#15171D;
-  --done-bg:#E7F3EC; --done:#1F6A45; --wait-bg:#FAF1E1; --wait:#85570C;
-  --work-bg:#E9EEF9; --work:#2F55A6; --stuck-bg:#FAEAE8; --stuck:#A1352C;
-  --plain-bg:#F0F2F5; --plain:#5B6271; --ok-dot:#2F8A5A;
-  --note-bg:#FBF6F1; --note-line:#EEDCCB; --note-ink:#5E3517; --meter:#E9ECF0;
-  --ok-line:#BEDDCB; --bad-line:#EDC6C1; --shadow:0 1px 2px rgba(17,19,24,.04),0 6px 20px rgba(17,19,24,.05);
-  --site:#E8834F; --idle:#B9BFC9; --bar-bg:rgba(255,255,255,.92);
-  --sec-dir:#F0F2F5; --sec-dir-ink:#323743; --sec-leads:#F0F2F5; --sec-leads-ink:#323743;
-  --sec-seo:#F0F2F5; --sec-seo-ink:#323743; --sec-content:#F0F2F5; --sec-content-ink:#323743;
-  --sec-it:#F0F2F5; --sec-it-ink:#323743; --sec-sec:#F0F2F5; --sec-sec-ink:#323743; --sec-rep:#F0F2F5; --sec-rep-ink:#323743;
+  --bg:#F6F7F9; --surface:#FFFFFF; --sunken:#F9FAFB; --hover:#F1F3F6;
+  --line:#E4E7EC; --line-soft:#EEF0F3; --line-strong:#CDD2DA;
+  --ink:#111318; --ink-2:#343A46; --muted:#5E6573; --faint:#747B89;
+  --accent:#16181D; --accent-hover:#2D323C; --accent-ink:#FFFFFF; --accent-soft:#ECEEF2; --nav-on:#111318;
+  --brand:#E8834F; --brand-hover:#DD7440; --brand-ink:#1A0E06; --brand-soft:#FBEFE7; --link:#B4501E; --tile:#15171D;
+  --done-bg:#EAF4EE; --done:#22684A; --wait-bg:#FBF3E4; --wait:#86590F;
+  --work-bg:#EDF1F8; --work:#38558F; --stuck-bg:#FBECEA; --stuck:#A23A31;
+  --plain-bg:#F1F3F6; --plain:#5E6573; --ok-dot:#2F8A5A;
+  --note-bg:#F5F7FA; --note-line:#E1E5EB; --note-ink:#2E3440; --meter:#E9ECF0;
+  --ok-line:#C3DFCF; --bad-line:#EDCAC5; --shadow:0 1px 2px rgba(17,19,24,.04),0 4px 16px rgba(17,19,24,.05);
+  --site:#E8834F; --idle:#BCC2CB; --bar-bg:rgba(255,255,255,.92);
+  --sec-dir:#F1F3F6; --sec-dir-ink:#343A46; --sec-leads:#F1F3F6; --sec-leads-ink:#343A46;
+  --sec-seo:#F1F3F6; --sec-seo-ink:#343A46; --sec-content:#F1F3F6; --sec-content-ink:#343A46;
+  --sec-it:#F1F3F6; --sec-it-ink:#343A46; --sec-sec:#F1F3F6; --sec-sec-ink:#343A46; --sec-rep:#F1F3F6; --sec-rep-ink:#343A46;
   --font:'Geist',system-ui,-apple-system,'Segoe UI',sans-serif; --mono:'Geist Mono',ui-monospace,'SFMono-Regular',Consolas,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#0D0F13; --surface:#14171D; --sunken:#191C23; --hover:#1D2129;
-    --line:#252A33; --line-soft:#1D2129; --line-strong:#363C48;
-    --ink:#E7E9EE; --ink-2:#C8CCD5; --muted:#9BA2AF; --faint:#878E9B;
-    --accent:#E8834F; --accent-hover:#F09867; --accent-ink:#130D09; --accent-soft:#291D16; --nav-on:#F5C4A6;
-    --brand:#E8834F; --tile:#0A0B0E;
-    --done-bg:#13281D; --done:#80C9A0; --wait-bg:#2B2313; --wait:#DDB46B;
-    --work-bg:#162036; --work:#93ADE8; --stuck-bg:#2D1817; --stuck:#EB9D94;
-    --plain-bg:#1D2129; --plain:#A8AEBA; --ok-dot:#4CA778;
-    --note-bg:#211A14; --note-line:#45342A; --note-ink:#EFC9A8; --meter:#232831;
+    --bg:#0E1013; --surface:#16191E; --sunken:#1A1D23; --hover:#1F232A;
+    --line:#272B33; --line-soft:#1F232A; --line-strong:#383E49;
+    --ink:#E9EBEF; --ink-2:#C9CDD5; --muted:#9AA1AD; --faint:#868D99;
+    --accent:#E9EBEF; --accent-hover:#FFFFFF; --accent-ink:#0E1013; --accent-soft:#23272F; --nav-on:#FFFFFF;
+    --brand:#E8834F; --brand-hover:#F09867; --brand-ink:#170C05; --brand-soft:#2A1E17; --link:#F0A57C; --tile:#0A0B0E;
+    --done-bg:#14271D; --done:#82C9A1; --wait-bg:#2A2314; --wait:#DCB46D;
+    --work-bg:#18202F; --work:#9DB3E3; --stuck-bg:#2C1918; --stuck:#EA9F96;
+    --plain-bg:#1F232A; --plain:#A9AFBA; --ok-dot:#4CA778;
+    --note-bg:#1A1E25; --note-line:#2D333D; --note-ink:#D6DAE1; --meter:#252A32;
     --ok-line:#2A4E3A; --bad-line:#5A2F2B; --shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,.28);
-    --site:#E8834F; --idle:#5C6370; --bar-bg:rgba(20,23,29,.92);
-    --sec-dir:#1D2129; --sec-dir-ink:#C8CCD5; --sec-leads:#1D2129; --sec-leads-ink:#C8CCD5;
-    --sec-seo:#1D2129; --sec-seo-ink:#C8CCD5; --sec-content:#1D2129; --sec-content-ink:#C8CCD5;
-    --sec-it:#1D2129; --sec-it-ink:#C8CCD5; --sec-sec:#1D2129; --sec-sec-ink:#C8CCD5; --sec-rep:#1D2129; --sec-rep-ink:#C8CCD5;
+    --site:#E8834F; --idle:#5D6470; --bar-bg:rgba(22,25,30,.92);
+    --sec-dir:#1F232A; --sec-dir-ink:#C9CDD5; --sec-leads:#1F232A; --sec-leads-ink:#C9CDD5;
+    --sec-seo:#1F232A; --sec-seo-ink:#C9CDD5; --sec-content:#1F232A; --sec-content-ink:#C9CDD5;
+    --sec-it:#1F232A; --sec-it-ink:#C9CDD5; --sec-sec:#1F232A; --sec-sec-ink:#C9CDD5; --sec-rep:#1F232A; --sec-rep-ink:#C9CDD5;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#0D0F13; --surface:#14171D; --sunken:#191C23; --hover:#1D2129;
-  --line:#252A33; --line-soft:#1D2129; --line-strong:#363C48;
-  --ink:#E7E9EE; --ink-2:#C8CCD5; --muted:#9BA2AF; --faint:#878E9B;
-  --accent:#E8834F; --accent-hover:#F09867; --accent-ink:#130D09; --accent-soft:#291D16; --nav-on:#F5C4A6;
-  --brand:#E8834F; --tile:#0A0B0E;
-  --done-bg:#13281D; --done:#80C9A0; --wait-bg:#2B2313; --wait:#DDB46B;
-  --work-bg:#162036; --work:#93ADE8; --stuck-bg:#2D1817; --stuck:#EB9D94;
-  --plain-bg:#1D2129; --plain:#A8AEBA; --ok-dot:#4CA778;
-  --note-bg:#211A14; --note-line:#45342A; --note-ink:#EFC9A8; --meter:#232831;
+  --bg:#0E1013; --surface:#16191E; --sunken:#1A1D23; --hover:#1F232A;
+  --line:#272B33; --line-soft:#1F232A; --line-strong:#383E49;
+  --ink:#E9EBEF; --ink-2:#C9CDD5; --muted:#9AA1AD; --faint:#868D99;
+  --accent:#E9EBEF; --accent-hover:#FFFFFF; --accent-ink:#0E1013; --accent-soft:#23272F; --nav-on:#FFFFFF;
+  --brand:#E8834F; --brand-hover:#F09867; --brand-ink:#170C05; --brand-soft:#2A1E17; --link:#F0A57C; --tile:#0A0B0E;
+  --done-bg:#14271D; --done:#82C9A1; --wait-bg:#2A2314; --wait:#DCB46D;
+  --work-bg:#18202F; --work:#9DB3E3; --stuck-bg:#2C1918; --stuck:#EA9F96;
+  --plain-bg:#1F232A; --plain:#A9AFBA; --ok-dot:#4CA778;
+  --note-bg:#1A1E25; --note-line:#2D333D; --note-ink:#D6DAE1; --meter:#252A32;
   --ok-line:#2A4E3A; --bad-line:#5A2F2B; --shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,.28);
-  --site:#E8834F; --idle:#5C6370; --bar-bg:rgba(20,23,29,.92);
-  --sec-dir:#1D2129; --sec-dir-ink:#C8CCD5; --sec-leads:#1D2129; --sec-leads-ink:#C8CCD5;
-  --sec-seo:#1D2129; --sec-seo-ink:#C8CCD5; --sec-content:#1D2129; --sec-content-ink:#C8CCD5;
-  --sec-it:#1D2129; --sec-it-ink:#C8CCD5; --sec-sec:#1D2129; --sec-sec-ink:#C8CCD5; --sec-rep:#1D2129; --sec-rep-ink:#C8CCD5;
+  --site:#E8834F; --idle:#5D6470; --bar-bg:rgba(22,25,30,.92);
+  --sec-dir:#1F232A; --sec-dir-ink:#C9CDD5; --sec-leads:#1F232A; --sec-leads-ink:#C9CDD5;
+  --sec-seo:#1F232A; --sec-seo-ink:#C9CDD5; --sec-content:#1F232A; --sec-content-ink:#C9CDD5;
+  --sec-it:#1F232A; --sec-it-ink:#C9CDD5; --sec-sec:#1F232A; --sec-sec-ink:#C9CDD5; --sec-rep:#1F232A; --sec-rep-ink:#C9CDD5;
   color-scheme:dark;
 }
 

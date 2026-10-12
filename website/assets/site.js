@@ -27,8 +27,8 @@ var SITE = {
   $$('[data-contact]').forEach(function (box) {
     if (!SITE.email) { box.innerHTML = '<p>Our address goes up here very soon.</p>'; return; }
     box.innerHTML = '<code id="mailText"></code>'
-      + '<button class="btn ghost small" type="button" id="mailCopy">Copy</button>'
-      + '<a class="btn primary small" id="mailGo">Write to us</a>';
+      + '<button class="btn line small" type="button" id="mailCopy">Copy</button>'
+      + '<a class="btn dark small" id="mailGo">Write to us</a>';
     document.getElementById('mailText').textContent = SITE.email;
     document.getElementById('mailGo').href = 'mailto:' + SITE.email;
     var b = document.getElementById('mailCopy');
@@ -43,7 +43,7 @@ var SITE = {
     }
   });
 
-  // The menu on a phone
+  // The top bar: a line under it once the page moves, and the menu on a phone
   var nav = document.querySelector('.nav');
   var mb = document.querySelector('.menu-btn');
   if (nav && mb) {
@@ -54,51 +54,41 @@ var SITE = {
     $$('.nav nav a').forEach(function (a) { a.addEventListener('click', function () { nav.classList.remove('open'); }); });
   }
 
-  // Sections ease up a little as they arrive (they are readable before that)
-  if (!still && 'IntersectionObserver' in window) {
-    var io = new IntersectionObserver(function (es) {
-      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
-    }, { rootMargin: '0px 0px -8% 0px' });
-    $$('.rise').forEach(function (el) {
-      if (el.getBoundingClientRect().top < innerHeight) el.classList.add('in'); else io.observe(el);
-    });
-  } else $$('.rise').forEach(function (el) { el.classList.add('in'); });
-
-  // Cards that lean towards the pointer
-  if (!still && window.matchMedia && matchMedia('(hover: hover)').matches) {
-    $$('.tilt').forEach(function (el) {
-      var max = parseFloat(el.getAttribute('data-tilt') || '6');
-      el.addEventListener('pointermove', function (e) {
-        var r = el.getBoundingClientRect();
-        var x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
-        el.style.transform = 'perspective(1200px) rotateX(' + (-y * max).toFixed(2) + 'deg) rotateY(' + (x * max).toFixed(2) + 'deg)';
-      });
-      el.addEventListener('pointerleave', function () { el.style.transform = ''; });
+  // A screen that tips up into place as it comes up the page
+  var tips = $$('.rise3d');
+  var ticking = false;
+  function onScroll() {
+    ticking = false;
+    if (nav) nav.classList.toggle('edge', scrollY > 4);
+    tips.forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      var tip = Math.max(0, Math.min(1, (r.top - innerHeight * 0.18) / (innerHeight * 0.62)));
+      el.style.setProperty('--tip', still ? 0 : tip.toFixed(3));
     });
   }
+  window.addEventListener('scroll', function () { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
+  onScroll();
 
-  // Pricing: with your own AI key, or with Botix AI
-  $$('[data-price-switch] button').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var mode = b.getAttribute('data-mode');
-      $$('[data-price-switch] button').forEach(function (o) { o.setAttribute('aria-pressed', String(o === b)); });
-      $$('[data-own]').forEach(function (el) { el.textContent = el.getAttribute(mode === 'ai' ? 'data-ai' : 'data-own'); });
-      $$('[data-ai-note]').forEach(function (el) { el.hidden = mode !== 'ai'; });
-      $$('[data-own-note]').forEach(function (el) { el.hidden = mode === 'ai'; });
-    });
-  });
-
-  // The opening animation, played in its screen when it comes into view
-  var tv = document.querySelector('[data-opening]');
-  if (tv && window.BotixOpening) {
-    var logo = tv.getAttribute('data-logo') || 'assets/botix-logo.svg';
-    var played = false;
-    var go = function () { window.BotixOpening.play(tv, { logo: logo }); played = true; };
-    var again = document.querySelector('[data-replay]');
-    if (again) again.addEventListener('click', go);
-    if ('IntersectionObserver' in window) {
-      new IntersectionObserver(function (es) { if (es[0].isIntersecting && !played) go(); }, { threshold: 0.4 }).observe(tv);
-    } else go();
+  // The opening animation, the one the program plays, in its window
+  var screen = document.querySelector('[data-opening]');
+  if (screen && window.BotixOpening) {
+    var logo = screen.getAttribute('data-logo') || 'assets/botix-logo.svg';
+    var cover = document.querySelector('[data-play]');
+    var play = function (asked) {
+      if (cover) cover.hidden = true;
+      window.BotixOpening.play(screen, { logo: logo, asked: asked });
+    };
+    if (cover) cover.addEventListener('click', function () { play(true); });
+    $$('[data-replay]').forEach(function (b) { b.addEventListener('click', function () { play(true); }); });
+    $$('[data-full]').forEach(function (b) { b.addEventListener('click', function () { window.BotixOpening.full({ logo: logo }); }); });
+    if (still) {                                              // with reduced motion: the last frame, and a Play button
+      window.BotixOpening.play(screen, { logo: logo, asked: false });
+      if (cover) { screen.appendChild(cover); cover.hidden = false; }
+    }
+    else if ('IntersectionObserver' in window) {
+      var seen = false;
+      new IntersectionObserver(function (es) { if (es[0].isIntersecting && !seen) { seen = true; play(false); } }, { threshold: 0.45 }).observe(screen);
+    } else play(false);
   }
 
   // The floor of sectors: desks light up in turn, as on a working day

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Botix</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#1A1512">
+<meta name="theme-color" content="#FFFFFF">
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
@@ -21,7 +21,7 @@
 html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{font-family:'Geist',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
 .mono{font-family:'Geist Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
-a{color:var(--accent)}a:hover{color:var(--accent-hover)}
+a{color:var(--link)}a:hover{color:var(--ink)}
 h1,h2,h3{text-wrap:balance}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -62,7 +62,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .nav a:hover{background:var(--hover);color:var(--ink)}
 .nav a.on{background:var(--accent-soft);color:var(--nav-on);font-weight:600}
 .nav .rule{height:1px;background:var(--line-soft);margin:10px 4px}
-.count{font-family:'Geist Mono',monospace;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--wait-bg);color:var(--wait)}
+.count{font-family:'Geist Mono',monospace;font-size:12px;font-weight:600;padding:1px 8px;border-radius:999px;background:var(--brand);color:var(--brand-ink)}
 main{flex:1;min-width:0;padding:28px 32px 96px}
 main:focus{outline:none}
 .page{max-width:1080px;display:flex;flex-direction:column;gap:20px}
@@ -88,6 +88,7 @@ h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-.015em;line-height:1.
   border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600;font-size:15px;text-decoration:none;
   cursor:pointer;white-space:nowrap}
 .btn:hover{background:var(--accent-hover);color:var(--accent-ink)}
+.btn.go{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}.btn.go:hover{background:var(--brand-hover);border-color:var(--brand-hover);color:var(--brand-ink)}
 .btn.ghost{background:var(--surface);color:var(--accent);border-color:var(--line-strong)}
 .btn.ghost:hover{border-color:var(--accent);background:var(--sunken)}
 .btn.quiet{background:transparent;border-color:transparent;color:var(--muted)}
@@ -184,14 +185,14 @@ ol.feed li:last-child{border-bottom:0}
 .plan-desk-name{font:500 12.5px 'Geist',system-ui,sans-serif;fill:var(--ink-2)}
 .lamp-c{fill:var(--line-strong);stroke:var(--sunken);stroke-width:3}
 .lamp-c.work{fill:var(--work)} .lamp-c.done{fill:var(--done)} .lamp-c.stuck{fill:var(--stuck)} .lamp-c.wait{fill:var(--wait)}
-.beam{stroke:var(--accent);stroke-width:2;stroke-dasharray:5 6;fill:none}
+.beam{stroke:var(--brand);stroke-width:2;stroke-dasharray:5 6;fill:none}
 .beam.amber{stroke:var(--wait)}
 .beam-halo{stroke:var(--surface);stroke-width:6;fill:none;opacity:.85}
-.ah.live{fill:var(--accent)} .ah.amber{fill:var(--wait)}
+.ah.live{fill:var(--brand)} .ah.amber{fill:var(--wait)}
 .beam-g{pointer-events:stroke}
 .plan-key{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);padding:8px 4px 0}
 .plan-key>span{display:inline-flex;align-items:center;gap:6px}
-.beam-key{display:inline-block;width:22px;border-top:2px dashed var(--accent)}
+.beam-key{display:inline-block;width:22px;border-top:2px dashed var(--brand)}
 .rooms{columns:3 340px;column-gap:20px}
 .rooms>.room{break-inside:avoid;margin:0 0 20px;display:flex;flex-direction:column}
 .room-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:14px 14px 12px 20px;border-bottom:1px solid var(--line-soft)}
@@ -232,7 +233,7 @@ ol.feed li:last-child{border-bottom:0}
 .strip-room.bad{background:var(--stuck-bg)}
 .strip-room .lamps{display:flex;gap:5px;flex-wrap:wrap}
 .count.bad{background:var(--stuck-bg);color:var(--stuck)} .count.soft{background:var(--plain-bg);color:var(--plain)}
-ol.feed li.unread>span:first-child{color:var(--accent)!important;font-weight:500}
+ol.feed li.unread>span:first-child{color:var(--link)!important;font-weight:500}
 /* the side panel: one agent, one sector, or one conversation */
 .scrim{position:fixed;inset:0;background:rgba(8,16,18,.34);z-index:30;display:none}
 .scrim.open{display:block}
@@ -452,7 +453,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = (n) => '$' + Number(n || 0).toFixed(2);
 const S = {me: null, brand: null, engine: null, state: null, siteIdx: 0};
-const SITE_COLOURS = [['#EF6A0C', '#FF8A1F'], ['#3B5B8C', '#8FAEDB']];
+const SITE_COLOURS = [['#E8834F', '#E8834F'], ['#4D6A96', '#8FAEDB']];
 
 /* ---- theme: the computer's, unless chosen in Settings ---- */
 function theme(t) {
@@ -670,7 +671,7 @@ async function today(main) {
     runLine = run.head || ''; }
   const action = appr.length ? `<a class="btn" href="#waiting">Review the ${appr.length}</a>`
     : (r && r.running) ? `<button class="btn ghost" type="button" id="stopRun">Stop the run</button>`
-    : `<button class="btn" type="button" id="runNow">Run today</button>`;
+    : `<button class="btn go" type="button" id="runNow">Run today</button>`;
   const pages = (idx && idx.pages) || [];
   const onG = (idx && idx.on_google) || 0;
   const date = new Date().toLocaleDateString('en-GB', {weekday: 'long', day: 'numeric', month: 'long'});
@@ -1822,7 +1823,7 @@ async function agency(main) {
       `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">${running ? pill('work', 'Running') : ''}
         ${!running && left && left.ok && Number(left.garbage || 0) > 0 ? `<button class="btn quiet" type="button" id="tidyUp" title="Takes finished, duplicate and impossible jobs off the board, without using the AI">Clear up · ${Number(left.garbage)}</button>` : ''}
         ${canResume ? `<button class="btn ghost" type="button" id="resumeRun">Pick up where it left off · ${Number(left.waiting)}</button>` : ''}
-        ${running ? '<button class="btn ghost" type="button" id="stopRun">Stop the run</button>' : '<button class="btn" type="button" id="runNow">Run today</button>'}</div>`)}
+        ${running ? '<button class="btn ghost" type="button" id="stopRun">Stop the run</button>' : '<button class="btn go" type="button" id="runNow">Run today</button>'}</div>`)}
     <div id="runSay" class="muted" style="font-size:14px;margin-top:-8px">${running ? esc(run.head || '') : runSayHtml()}</div>
     <div class="tiles fl-tiles">
       <div class="card tile" title="${esc(m.health_why || '')}"><span class="label">Agency health</span><span class="big mono">${esc(health)}</span>
