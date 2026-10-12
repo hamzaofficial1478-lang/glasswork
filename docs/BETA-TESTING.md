@@ -22,10 +22,10 @@ on their own computer.
 
 ## Before you hand it over (once)
 
-1. **Make your Glasswork Home** — *Reports* in the menu on your own copy. It
+1. **Make your Botix Home** — *Reports* in the menu on your own copy. It
    makes your keys, and gives you one folder to upload to the program's own
    website (never a client's). Steps: `docs/RELEASING.md`, section 1.
-2. **Choose the product's name.** It is "Glasswork" for now, in
+2. **Choose the product's name.** It is "Botix" for now, in
    `config/product.json`. Changing it there changes it everywhere.
 3. **Put the first version out** — *Settings → Publisher → Put it out*, with
    the Windows installer ticked (on your Windows computer). Testers download it

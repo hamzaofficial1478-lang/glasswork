@@ -81,7 +81,7 @@ import requests
 
 from coordination import board, workspace
 
-UA = "GlassworkWebsiteCheck/1.0 (read-only report; follows robots.txt)"
+UA = "BotixWebsiteCheck/1.0 (read-only report; follows robots.txt)"
 QUICK_PAGES, FULL_PAGES = 20, 200
 QUICK_LINKS, FULL_LINKS = 40, 150
 QUICK_MINUTES, FULL_MINUTES = 8, 45
@@ -1281,7 +1281,7 @@ footer{{margin-top:28px;border-top:1px solid #D9E0E0;padding-top:10px;font-size:
 <section class="box"><h2>What is working well</h2><ul class="ok">{working or '<li>—</li>'}</ul></section>
 <h2 style="margin-top:28px">Everything that was found</h2>
 {groups or '<p class="muted">Nothing.</p>'}
-<footer>Prepared by {_e(name or 'Glasswork')}. This check only read what any visitor's browser receives: it followed the site's
+<footer>Prepared by {_e(name or 'Botix')}. This check only read what any visitor's browser receives: it followed the site's
 robots.txt, read at most one page a second, and changed nothing. Security was checked passively — nothing was probed or tested.
 Scores summarise the findings; each finding names the page it was seen on.</footer>
 </div><button class="print" onclick="window.print()">Print or save as PDF</button></body></html>"""

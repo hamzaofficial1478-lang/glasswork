@@ -10,7 +10,10 @@
 ; before deleting that folder, and the answer that is offered first is No.
 
 #ifndef AppName
-  #define AppName "Glasswork"
+  #define AppName "Botix"
+#endif
+#ifndef AppPublisher
+  #define AppPublisher "TECH DUO"
 #endif
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -31,13 +34,13 @@ AppId={{6C1E8F2A-5B7D-4E3A-9F1C-2D8B7A4E6F01}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher={#AppName}
+AppPublisher={#AppPublisher}
 ; Not signed, by choice: no certificate subscription. Windows shows "Windows
 ; protected your PC" the first time; More info → Run anyway installs it. These
 ; lines at least give the file its own name and version in that box and in
 ; the file's Properties.
 VersionInfoVersion={#AppVersion}
-VersionInfoCompany={#AppName}
+VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} Setup
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}

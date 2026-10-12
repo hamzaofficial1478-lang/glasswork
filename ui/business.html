@@ -6,27 +6,20 @@
 <title>Your business</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/botix.css">
 <style>
-/* The office's tokens (ui/office.html), as on the account page. */
-:root{
-  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
-  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
-  --text:#e7eff3; --muted:#8a9ea9; --faint:#54666f;
-  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.14);
-  --amber:#eaa543; --amber-dim:rgba(234,165,67,.13);
-  --danger:#e5565b; --danger-dim:rgba(229,86,91,.13); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
-}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);
-  font-family:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
 body{padding:28px 16px 120px}
 main{max-width:760px;margin:0 auto;display:grid;gap:16px}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
 .top a{color:var(--glass);text-decoration:none;font-size:14px}
 h1{font-size:26px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
 .lead{color:var(--muted);font-size:14.5px;line-height:1.6;margin:0}
-section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 22px 24px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 22px 24px}
 h2{font-size:16px;font-weight:600;margin:0 0 4px}
 .hint{color:var(--muted);font-size:13px;line-height:1.55;margin:0 0 6px}
 label{display:block;font-size:12.5px;color:var(--etch);margin:14px 0 6px}
@@ -36,15 +29,15 @@ textarea{min-height:84px;resize:vertical;line-height:1.5}
 input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
 @media (max-width:620px){.two{grid-template-columns:1fr}}
-.btn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass);color:#06222a;
+.btn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass);color:var(--accent-ink);
   font:inherit;font-weight:600;font-size:15px;cursor:pointer}
 .btn.quiet{background:transparent;color:var(--glass)}
 .btn.small{padding:7px 11px;font-size:13px}
 .btn[disabled]{opacity:.55;cursor:progress}
 .note{padding:12px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;
-  background:var(--amber-dim);border:1px solid rgba(234,165,67,.35);color:#f2cf9b}
-.note.ok{background:var(--ok-dim);border-color:rgba(92,192,136,.35);color:#a9e2c1}
-.note.bad{background:var(--danger-dim);border-color:rgba(229,86,91,.35);color:#f3a7aa}
+  background:var(--note-bg);border:1px solid var(--note-line);color:var(--note-ink)}
+.note.ok{background:var(--ok-dim);border-color:var(--ok-line);color:var(--done)}
+.note.bad{background:var(--danger-dim);border-color:var(--bad-line);color:var(--stuck)}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .chip{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border-radius:999px;
   border:1px solid var(--line2);background:var(--panel2);font-size:13px;cursor:pointer;user-select:none}
@@ -55,7 +48,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .svc .row input{flex:1}
 .svc .x{background:none;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px}
 .svc .chips .chip{background:var(--panel)}
-.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(12,18,22,.94);border-top:1px solid var(--line);
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--bar-bg);border-top:1px solid var(--line);
   padding:12px 16px;backdrop-filter:blur(6px)}
 .bar .in{max-width:760px;margin:0 auto;display:flex;gap:12px;align-items:center;justify-content:space-between}
 .bar .msg{font-size:13.5px;color:var(--muted)}
@@ -68,8 +61,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
   <div class="top">
     <div>
       <h1>Your business</h1>
-      <p class="lead">What the agency needs to know to work for this website: what you do, where,
-        what you sell and who buys it. Every desk reads this — the lead finders, the writers, SEO.</p>
+      <p class="lead">What you do, where, what you sell and who buys it. Every desk reads this.</p>
     </div>
     <a href="/">← Back to the office</a>
   </div>

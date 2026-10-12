@@ -390,7 +390,7 @@ someone else's in read-only mode:
   - **Terms of use and privacy policy**, written in plain English and marked
     as drafts for a lawyer to check. Sign-up links to them.
   - **The product's name** lives in one place, `config/product.json`
-    ("Glasswork" for now, your choice). A customer's account shows that name,
+    ("Botix" for now, your choice). A customer's account shows that name,
     never yours.
   - **Help and feedback:** a support report to copy and send, with nothing
     private in it.
@@ -451,7 +451,7 @@ someone else's in read-only mode:
     deletes the person's work without a yes. Built and tested on a real Windows
     machine by `.github/workflows/windows-installer.yml` (build, silent install,
     open, check, remove) before anyone gets it.
-  - **Glasswork Home** on your own website (`publish-to-your-site/glasswork-home`):
+  - **Botix Home** on your own website (`publish-to-your-site/glasswork-home`):
     reports from people using the program arrive there (and by email); you
     answer them in *Reports from users* and they read the answer in *Help and
     reports*; every version you put out is kept there, signed; and it is the

@@ -44,7 +44,13 @@ def check(secret: str, code, last_step=0, now=None) -> tuple:
     return False, 0
 
 
-def uri(secret: str, label: str, issuer="Glasswork") -> str:
-    """What an authenticator app reads: otpauth://totp/…"""
+def uri(secret: str, label: str, issuer="") -> str:
+    """What an authenticator app reads: otpauth://totp/… The issuer is the program's name."""
+    if not issuer:
+        try:
+            from . import product
+            issuer = product.name()
+        except Exception:
+            issuer = "Botix"
     return (f"otpauth://totp/{urllib.parse.quote(issuer)}:{urllib.parse.quote(label)}"
             f"?secret={secret}&issuer={urllib.parse.quote(issuer)}&period={STEP}&digits=6")

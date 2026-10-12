@@ -44,13 +44,11 @@ import io
 import json
 import os
 import shutil
-import struct
 import subprocess
 import sys
 import tarfile
 import urllib.request
 import zipfile
-import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -233,46 +231,11 @@ def node_libraries(app: Path) -> None:
 # an icon and a licence
 # ---------------------------------------------------------------------------
 
-def _png(size: int) -> bytes:
-    """The program's mark: four panes of glass in a deep green tile."""
-    bg, glass, edge = (31, 95, 79), (214, 236, 228), (31, 95, 79)
-    r = size * 0.18
-    rows = []
-    for y in range(size):
-        row = bytearray([0])
-        for x in range(size):
-            cx = min(x, size - 1 - x)
-            cy = min(y, size - 1 - y)
-            inside = not (cx < r and cy < r and (r - cx) ** 2 + (r - cy) ** 2 > r * r)
-            if not inside:
-                row += bytes((0, 0, 0, 0))
-                continue
-            pad, gap = size * 0.2, max(1, size // 24)
-            mid = size / 2
-            in_frame = pad <= x < size - pad and pad <= y < size - pad
-            in_gap = abs(x - mid) < gap / 2 + 0.5 or abs(y - mid) < gap / 2 + 0.5
-            c = glass if in_frame and not in_gap else (edge if in_frame else bg)
-            row += bytes((*c, 255))
-        rows.append(bytes(row))
-    raw = zlib.compress(b"".join(rows), 9)
-
-    def chunk(kind, data):
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
-            + chunk(b"IDAT", raw) + chunk(b"IEND", b""))
-
-
 def write_icon(path: Path) -> None:
-    sizes = (16, 32, 48, 256)
-    pngs = [_png(s) for s in sizes]
-    head = struct.pack("<HHH", 0, 1, len(sizes))
-    offset = 6 + 16 * len(sizes)
-    entries = b""
-    for s, data in zip(sizes, pngs):
-        entries += struct.pack("<BBBBHHII", s % 256, s % 256, 0, 0, 1, 32, len(data), offset)
-        offset += len(data)
+    """The BT tile (coordination/mark.py) at the sizes Windows asks for."""
+    from coordination import mark
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(head + entries + b"".join(pngs))
+    path.write_bytes(mark.ico())
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +271,7 @@ def compile_setup(app: Path, out: Path, version: str, name: str) -> Path:
         raise ValueError("Inno Setup 6 is needed to make Setup.exe — install it from jrsoftware.org "
                          "(or with: winget install JRSoftware.InnoSetup) and build again")
     base = f"{name.lower()}-{version}-setup"
-    cmd = [iscc, f"/DAppName={name}", f"/DAppVersion={version}", f"/DSourceDir={app}", f"/DOutputDir={out}",
+    cmd = [iscc, f"/DAppName={name}", f"/DAppPublisher={product.info().get('company') or name}", f"/DAppVersion={version}", f"/DSourceDir={app}", f"/DOutputDir={out}",
            f"/DOutputBase={base}", str(ROOT / "installer" / "glasswork.iss")]
     say("compiling Setup.exe")
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
@@ -326,7 +289,7 @@ def build(out_dir, product_json="", stage_only=False, cache=None) -> dict:
     app.mkdir(parents=True)
     cache = Path(cache or (Path.home() / ".glasswork-build-cache"))
     version = stage_program(app, product_json)
-    name = json.loads((app / "config" / "product.json").read_text(encoding="utf-8")).get("name") or "Glasswork"
+    name = json.loads((app / "config" / "product.json").read_text(encoding="utf-8")).get("name") or "Botix"
     write_icon(app / "installer" / "glasswork.ico")
     py = python_runtime(app, cache)
     python_libraries(app)

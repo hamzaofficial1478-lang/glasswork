@@ -3,52 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Glasswork</title>
+<title>Botix</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#1f5f4f">
-<link rel="icon" href="/icon-192.png">
+<meta name="theme-color" content="#1A1512">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/botix.css">
 <style>
 /* THE NEW DESIGN — the prototype he approved, built on the agency's real data.
    Light by default; dark follows the computer, or the choice in Settings. */
-:root{
-  --bg:#F3F5F5; --surface:#FFFFFF; --sunken:#F6F8F8; --hover:#EEF2F2;
-  --line:#D9E0E0; --line-soft:#EEF2F2; --line-strong:#BCC7C7;
-  --ink:#142022; --ink-2:#33464A; --muted:#4A5A5D; --faint:#5F7074;
-  --accent:#1F5F66; --accent-hover:#174C52; --accent-ink:#FFFFFF; --accent-soft:#E1EEEE; --nav-on:#123E43;
-  --done-bg:#E3F2EA; --done:#1E6642; --wait-bg:#FBEFD9; --wait:#7D4B00;
-  --work-bg:#E4ECFA; --work:#244C99; --stuck-bg:#F9E3E1; --stuck:#97241C;
-  --plain-bg:#EEF2F2; --plain:#4A5A5D; --ok-dot:#2E8A5B;
-  --note-bg:#FFF9EE; --note-line:#EFD9AE; --meter:#E6EBEB;
-  --site:#1F5F66; --idle:#B3BFBF;
-}
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#0E1415; --surface:#151D1F; --sunken:#1B2527; --hover:#1B2527;
-    --line:#283436; --line-soft:#1F2A2B; --line-strong:#3A4A4D;
-    --ink:#E3EAEA; --ink-2:#C2CFD0; --muted:#A7B5B7; --faint:#93A3A5;
-    --accent:#7FC4C7; --accent-hover:#96D1D3; --accent-ink:#0B1213; --accent-soft:#1E3335; --nav-on:#C6E8E9;
-    --done-bg:#173A2A; --done:#8FDDB0; --wait-bg:#3D2E12; --wait:#F2C46D;
-    --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
-    --plain-bg:#1F2A2B; --plain:#B4C2C3; --ok-dot:#49B37B;
-    --note-bg:#2B2414; --note-line:#5A4A26; --meter:#26322F;
-    --site:#3E8F95; --idle:#62767A;
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#0E1415; --surface:#151D1F; --sunken:#1B2527; --hover:#1B2527;
-  --line:#283436; --line-soft:#1F2A2B; --line-strong:#3A4A4D;
-  --ink:#E3EAEA; --ink-2:#C2CFD0; --muted:#A7B5B7; --faint:#93A3A5;
-  --accent:#7FC4C7; --accent-hover:#96D1D3; --accent-ink:#0B1213; --accent-soft:#1E3335; --nav-on:#C6E8E9;
-  --done-bg:#173A2A; --done:#8FDDB0; --wait-bg:#3D2E12; --wait:#F2C46D;
-  --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
-  --plain-bg:#1F2A2B; --plain:#B4C2C3; --ok-dot:#49B37B;
-  --note-bg:#2B2414; --note-line:#5A4A26; --meter:#26322F;
-  --site:#3E8F95; --idle:#62767A;
-}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
@@ -198,19 +165,20 @@ ol.feed li:last-child{border-bottom:0}
 @keyframes lampPulse{0%,100%{opacity:1}50%{opacity:.35}}
 @keyframes beamFlow{to{stroke-dashoffset:-22}}
 @media (prefers-reduced-motion:no-preference){.lamp.pulse,.lamp-c.pulse{animation:lampPulse 1.6s ease-in-out infinite}.beam{animation:beamFlow 1.2s linear infinite}}
+.fl-tiles{grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
 .fl-tiles button.tile{font:inherit;text-align:left;cursor:pointer;border:1px solid var(--line)}
 .fl-tiles .tile:hover{border-color:var(--line-strong)}
 .tile.bad{background:var(--stuck-bg);border-color:transparent} .tile.bad .big{color:var(--stuck)}
 .plan-card{padding:14px 16px 12px}
 .plan{display:block;width:100%;height:auto}
 .plan-room{cursor:pointer}
-.plan-room>rect{fill:var(--sunken);stroke:var(--line);stroke-width:1.5}
+.plan-room>rect{fill:var(--tb,var(--sunken));fill-opacity:.55;stroke:var(--line);stroke-width:1.5}
 .plan-room:hover>rect{stroke:var(--line-strong)}
 .plan-room:focus{outline:none}
 .plan-room:focus-visible>rect{stroke:var(--accent);stroke-width:2.5}
 .plan-room.bad>rect{stroke:var(--stuck);stroke-width:2}
 .plan-room.off{opacity:.5}
-.plan-name{font:600 12px 'Instrument Sans',system-ui,sans-serif;letter-spacing:.08em;fill:var(--faint)}
+.plan-name{font:600 12px 'Instrument Sans',system-ui,sans-serif;letter-spacing:.08em;fill:var(--ti,var(--faint))}
 .plan-desk{cursor:pointer}
 .plan-desk.dim{opacity:.22}
 .plan-desk-name{font:500 12.5px 'Instrument Sans',system-ui,sans-serif;fill:var(--ink-2)}
@@ -237,7 +205,7 @@ ol.feed li:last-child{border-bottom:0}
 .desk{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"av who st" "av what what";column-gap:12px;row-gap:3px;
   align-items:center;width:100%;padding:10px;border:0;border-radius:10px;background:none;color:var(--ink);text-align:left;cursor:pointer;font:inherit}
 .desk:hover{background:var(--hover)}
-.desk .av{grid-area:av;align-self:start}
+.desk .dt{grid-area:av;align-self:start}
 .desk .who{grid-area:who;display:flex;flex-direction:column;min-width:0;line-height:1.3}
 .desk .who b{font-weight:600;font-size:15px}
 .desk .who small{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -247,10 +215,6 @@ ol.feed li:last-child{border-bottom:0}
 .desk.st-failed .what,.desk.st-stalled .what,.desk.st-held .what,.desk.st-blocked .what{color:var(--stuck)}
 .desk.st-idle .who b,.desk.st-off .who b{color:var(--ink-2)}
 .desk.dim{opacity:.3}
-.av{position:relative;display:inline-grid;place-items:center;width:38px;height:38px;border-radius:50%;background:var(--accent-soft);
-  color:var(--nav-on);font-weight:700;font-size:13.5px;letter-spacing:.02em;flex:none}
-.av .lamp{position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border:2px solid var(--surface)}
-.av.big{width:46px;height:46px;font-size:16px}
 .room-board{padding:4px 20px 12px;display:flex;flex-direction:column;gap:6px}
 .bl{display:flex;gap:10px;align-items:baseline;font-size:14px;line-height:1.45}
 .room-f{padding:10px 20px 14px;border-top:1px solid var(--line-soft);font-size:13px;color:var(--faint)}
@@ -354,30 +318,32 @@ details.more summary{cursor:pointer;color:var(--accent);font-weight:500;font-siz
 .checklist li::before{content:"";flex:none;width:9px;height:9px;border-radius:50%;transform:translateY(-1px)}
 .checklist li.ok::before{background:var(--done)} .checklist li.no::before{background:var(--stuck)}
 .checklist li.no{color:var(--ink-2)}
-/* agents, not dots */
-.agent .ag-head,.agent .ag-body{fill:var(--idle)}
-.agent.work .ag-head,.agent.work .ag-body{fill:var(--work)}
-.agent.done .ag-head,.agent.done .ag-body{fill:var(--done)}
-.agent.stuck .ag-head,.agent.stuck .ag-body{fill:var(--stuck)}
-.agent.wait .ag-head,.agent.wait .ag-body{fill:var(--wait)}
-.agent.off{opacity:.45}
-.ag-screen{fill:var(--surface);stroke:var(--idle);stroke-width:1.4}
-.agent.work .ag-screen{fill:var(--work-bg);stroke:var(--work)}
-.agent.stuck .ag-screen{fill:var(--stuck-bg);stroke:var(--stuck)}
-.agent.done .ag-screen{stroke:var(--done)} .agent.wait .ag-screen{stroke:var(--wait)}
-.ag-desk{fill:var(--idle)}
-.ag-line{fill:var(--work)}
-.ag-alert{font:700 10px 'Instrument Sans',system-ui,sans-serif;fill:var(--stuck)}
-.ag-alert.wait{fill:var(--wait)}
-.ag-tick{fill:none;stroke:var(--done);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-@keyframes typing{0%,100%{opacity:1}50%{opacity:.25}}
-@media (prefers-reduced-motion:no-preference){.ag-line.l1{animation:typing 1.1s ease-in-out infinite}.ag-line.l2{animation:typing 1.1s ease-in-out .35s infinite}
-  .ag-line.l3{animation:typing 1.1s ease-in-out .7s infinite}}
-.person{fill:var(--idle);flex:none}
-.person.work{fill:var(--work)} .person.done{fill:var(--done)} .person.stuck{fill:var(--stuck)} .person.wait{fill:var(--wait)}
-.av.work{background:var(--work-bg)} .av.done{background:var(--done-bg)} .av.stuck{background:var(--stuck-bg)} .av.wait{background:var(--wait-bg)}
-.av.plain{background:var(--plain-bg)}
-@media (prefers-reduced-motion:no-preference){.av.busy .person{animation:lampPulse 1.6s ease-in-out infinite}}
+/* desks: an icon for what each one does, in its sector's colour; a badge says how it is */
+.tone-Director{--tb:var(--sec-dir);--ti:var(--sec-dir-ink)} .tone-Leads{--tb:var(--sec-leads);--ti:var(--sec-leads-ink)}
+.tone-SEO{--tb:var(--sec-seo);--ti:var(--sec-seo-ink)} .tone-Content{--tb:var(--sec-content);--ti:var(--sec-content-ink)}
+.tone-IT{--tb:var(--sec-it);--ti:var(--sec-it-ink)} .tone-Security{--tb:var(--sec-sec);--ti:var(--sec-sec-ink)}
+.tone-Report{--tb:var(--sec-rep);--ti:var(--sec-rep-ink)}
+.dt{position:relative;display:inline-grid;place-items:center;width:40px;height:40px;border-radius:11px;flex:none;
+  background:var(--tb,var(--plain-bg));color:var(--ti,var(--plain))}
+.dt svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.dt.big{width:50px;height:50px;border-radius:13px} .dt.big svg{width:27px;height:27px}
+.dt.sm{width:28px;height:28px;border-radius:8px} .dt.sm svg{width:17px;height:17px}
+.dt.st-idle svg,.dt.st-queued svg{opacity:.55}
+.dt.st-off{opacity:.45;filter:grayscale(1)}
+.dt.st-working{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--work)}
+.bd{position:absolute;right:-5px;top:-5px;min-width:17px;height:17px;padding:0 3px;border-radius:9px;border:2px solid var(--surface);
+  display:grid;place-items:center;font:700 10px/1 'Instrument Sans',system-ui,sans-serif;color:#fff}
+.bd.done{background:var(--done)} .bd.stuck{background:var(--stuck)} .bd.wait{background:var(--wait)} .bd.work{background:var(--work)}
+.ptile .pt-bg{fill:var(--surface);stroke:var(--ti);stroke-opacity:.35;stroke-width:1.5}
+.ptile .pt-ico{fill:none;stroke:var(--ti);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ptile.st-idle .pt-ico,.ptile.st-queued .pt-ico{opacity:.55}
+.ptile.st-off{opacity:.4}
+.ptile .pt-ring{fill:none;stroke:var(--work);stroke-width:2.5}
+.pt-bd{stroke:var(--surface);stroke-width:2} .pt-bd.done{fill:var(--done)} .pt-bd.stuck{fill:var(--stuck)} .pt-bd.wait{fill:var(--wait)} .pt-bd.work{fill:var(--work)}
+.pt-bd-t{font:700 9.5px 'Instrument Sans',system-ui,sans-serif;fill:#fff}
+@keyframes ringTurn{to{stroke-dashoffset:-28}}
+@media (prefers-reduced-motion:no-preference){.ptile .pt-ring{stroke-dasharray:9 5;animation:ringTurn 1.2s linear infinite}
+  .bd.work{animation:lampPulse 1.6s ease-in-out infinite}}
 /* the shelf button, glowing while a tool is in use */
 .fl-sep{width:1px;align-self:stretch;background:var(--line);margin:4px 4px}
 .shelf-btn{gap:8px;font-weight:600}
@@ -426,10 +392,11 @@ details.ck .row{padding-left:40px}
 </style>
 </head>
 <body>
+<script src="/opening.js"></script>
 <header class="top">
-  <a class="brand" href="#today" aria-label="Glasswork, back to Today">
-    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x="2" y="2" width="22" height="22" rx="5" stroke="var(--accent)" stroke-width="2"></rect><path d="M8 18 L18 8" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"></path><path d="M13 20 L20 13" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" opacity="0.4"></path></svg>
-    <b id="brandName">Glasswork</b>
+  <a class="brand" href="#today" aria-label="Botix, back to Today">
+    <img class="bt" src="/logo.svg" alt="" width="28" height="28">
+    <b id="brandName">Botix</b>
   </a>
   <div style="position:relative;min-width:0">
     <button class="switch" id="siteBtn" type="button" aria-haspopup="true" aria-expanded="false">
@@ -485,7 +452,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = (n) => '$' + Number(n || 0).toFixed(2);
 const S = {me: null, brand: null, engine: null, state: null, siteIdx: 0};
-const SITE_COLOURS = [['#1F5F66', '#3E8F95'], ['#7A4E8C', '#B58BC4']];
+const SITE_COLOURS = [['#EF6A0C', '#FF8A1F'], ['#3B5B8C', '#8FAEDB']];
 
 /* ---- theme: the computer's, unless chosen in Settings ---- */
 function theme(t) {
@@ -569,7 +536,7 @@ async function loadShell() {
     const sites = me.sites || [];
     S.siteIdx = Math.max(0, sites.findIndex((x) => x.id === me.open));
     const open = sites[S.siteIdx] || {};
-    shown = host(open.url) || open.name || 'Your website';
+    shown = open.name || host(open.url) || 'Your website';
     sub = `Website ${S.siteIdx + 1} of ${sites.length || 1} · switch`;
   } else {
     const w = (brand && brand.website) || {};
@@ -812,7 +779,7 @@ async function waiting(main) {
   const st = await state();
   const appr = (st && st.approvals) || [];
   main.innerHTML = `<div class="page narrow">${head('Waiting on you',
-    'Nothing here goes out, gets published or touches your website until you say yes. Each one says what happens next.')}
+    'Nothing goes out, gets published or touches your website until you say yes.')}
     <div id="apprList" style="display:flex;flex-direction:column;gap:14px">${appr.length ? appr.map(card).join('')
       : `<div class="card">${empty('All clear', 'Nothing is waiting for your yes.')}</div>`}</div></div>`;
   main.querySelectorAll('[data-yes],[data-no]').forEach((b) => b.onclick = () => decide(b));
@@ -852,7 +819,7 @@ async function orders(main, desk) {
   const todayKey = new Date().toLocaleDateString('en-CA');   // YYYY-MM-DD, this computer's day
   const mine = rows.find((r) => r.day === todayKey && r.sector === desk && r.origin === 'order box');
   main.innerHTML = `<div class="page narrow">${head('Your orders',
-    'Tell a desk what you want today, in your own words. The Managing Director plans the day around your orders and asks you before anything goes out. No order, no day: Run today only checks the desks.')}
+    'Tell a desk what you want today, in your own words. Without an order, Run today only checks the desks.')}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <span style="font-weight:600">Which desk?</span>
       <div role="group" aria-label="Desk" style="display:flex;flex-wrap:wrap;gap:8px">${DESKS.map(([k, n]) =>
@@ -913,7 +880,7 @@ async function leads(main) {
   const tabs = [['leads', 'Leads', (d && d.leads || []).length], ['mail', 'Your mail', ''], ['send', 'Send', g.ready.length],
     ['sent', 'Sent mail', g.sent.length]];
   main.innerHTML = `<div class="page">${head('Leads',
-    'Businesses that buy what you sell. Write one mail for all of them, send it to the ones you tick, and read every mail that went out. Security checks every lead first, and nobody is written to twice.',
+    'Businesses that might buy from you. Each one is checked first, and nobody is emailed twice.',
     '<button class="btn ghost" type="button" id="moreLeads">Find more leads</button>')}
     <div class="tabbar" role="tablist" aria-label="Leads">${tabs.map(([k, n, count]) =>
       `<button type="button" role="tab" class="tabbtn ${LD.tab === k ? 'on' : ''}" aria-selected="${LD.tab === k}" data-tab="${k}">${n}${
@@ -1189,7 +1156,7 @@ async function content(main) {
   const moving = (x) => x.moving ? `<span class="muted" style="font-size:13.5px">${x.moving.status === 'failed' ? '<span class="bad-t">Did not go: ' + esc(x.moving.note || '') + '</span>'
     : x.moving.what === 'removing' ? 'Being taken off your website…' : x.moving.what === 'reposting' ? 'Being updated on your website…' : 'Going on your website…'}</span>` : '';
   main.innerHTML = `<div class="page">${head('Content',
-    'Posts for your website, written with SEO’s keyword plan, checked by the Auditor, and original. Choose today’s topic, read and edit every post, and decide what goes up.',
+    'Posts for your website. Pick today’s topic, read and edit each post, and choose what goes up.',
     '<button class="btn ghost" type="button" id="jobOrder">Tell Content about a job</button>')}
     <section class="card">
       <div class="card-h" style="flex-wrap:wrap"><div><h2>What to write next</h2><span class="muted" style="font-size:14px">${esc((t && t.head) || '')}</span></div>
@@ -1203,7 +1170,7 @@ async function content(main) {
         <label for="ownTopic" style="font-weight:600">${topics.length ? 'Or type your own topic' : 'Type a topic'}</label>
         <div style="display:flex;flex-wrap:wrap;gap:10px"><input id="ownTopic" type="text" maxlength="120" placeholder="${esc(((t && t.services) || [])[0] ? 'For example: how long it takes to fit ' + t.services[0].toLowerCase() : 'For example: how long fitting takes')}" style="flex:1 1 320px;min-width:0">
           <button class="btn" type="button" id="writeTopic" ${writing ? 'disabled' : ''}>${writing ? 'Content is writing…' : 'Write this post'}</button></div>
-        <span class="muted" style="font-size:13.5px">SEO plans the keywords for it, then the writer writes about 1,000 words in your voice. It takes a few minutes and is checked for copying before you see it.</span></div>
+        <span class="muted" style="font-size:13.5px">SEO picks the keywords, then the writer writes about 1,000 words in your voice. It takes a few minutes and is checked for copying before you see it.</span></div>
       ${waitingWrite.length ? `<div class="row" style="flex-direction:column;align-items:stretch;gap:6px"><span class="label">Waiting to be written</span>
         ${waitingWrite.map((w) => `<div class="bl" style="align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><b style="font-weight:600">${esc(w.title)}</b>
           <span class="muted"> · ${w.held_for_seo ? 'waiting on SEO' : w.chosen_by_you ? 'your choice' : 'next in line'}</span></span>
@@ -1306,7 +1273,7 @@ async function post(main) {
           <span class="tsep"></span>${tb('link', 'Link', 'Link the selected words')}${tb('unlink', 'Unlink', 'Remove the link')}${tb('image', 'Picture', 'Add a picture from your computer')}${tb('imageUrl', 'Picture URL', 'Add a picture from a web address')}
           <span class="tsep"></span><select id="edSize" aria-label="Text size">${SIZES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select>
           <select id="edFont" aria-label="Font">${FONTS.map(([v, n]) => `<option value="${esc(v)}">${n}</option>`).join('')}</select>
-          <label class="tb colour" title="Text colour"><span aria-hidden="true">A</span><input id="edColour" type="color" value="#1f5f66" aria-label="Text colour"></label>
+          <label class="tb colour" title="Text colour"><span aria-hidden="true">A</span><input id="edColour" type="color" value="#1c1916" aria-label="Text colour"></label>
           <label class="tb colour" title="Highlight"><span aria-hidden="true" style="background:#fff3a8;color:#142022;padding:0 3px;border-radius:3px">H</span><input id="edMark" type="color" value="#fff3a8" aria-label="Highlight colour"></label>
           <span class="tsep"></span>${tb('justifyLeft', '⯇', 'Align left')}${tb('justifyCenter', '≡', 'Centre')}${tb('justifyRight', '⯈', 'Align right')}
           <span class="tsep"></span>${tb('removeFormat', 'Clear', 'Clear formatting')}${tb('undo', '↶', 'Undo')}${tb('redo', '↷', 'Redo')}
@@ -1431,7 +1398,7 @@ function scorePanel(rep, keyword) {
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><b style="font-weight:600">Reads like a person</b>${h.ok === false ? pill('wait', (h.problems || []).length + ' to fix') : pill('done', 'Yes')}</div>
       ${(h.problems || []).length ? `<ul class="plain-list">${h.problems.map((x) => `<li>${esc(sentence(x))}</li>`).join('')}</ul>` : '<span class="muted" style="font-size:13.5px">No machine-sounding phrases; sentences vary; headings and bold words in place.</span>'}
     </section>
-    <p class="muted" style="margin:0;font-size:13px">Google does not mark a page down for being written with AI — it rewards pages that are original, useful and written for people. These three checks are about exactly that.</p>`;
+    <p class="muted" style="margin:0;font-size:13px">Google rewards pages that are original, useful and written for people. These three checks look at exactly that.</p>`;
 }
 
 /* ======================= WEBSITE ======================= */
@@ -1446,7 +1413,7 @@ async function website(main) {
     : conn.mode === 'full' ? `<b style="font-weight:600">Connected — full access.</b> <span class="muted">${conn.kind === 'wordpress' ? 'Through WordPress.' : 'Through the connector on your website. Your admin and settings folders are never opened.'}</span>`
     : '<b style="font-weight:600">Read-only.</b> <span class="muted">The agency changes nothing on your website; each change is handed to you.</span>';
   main.innerHTML = `<div class="page">${head('Website',
-    'IT watches your website every day and fixes what it finds — always on a copy first. Only the Releaser puts a change live, after the tests pass.',
+    'Checked every day. Fixes are tried on a copy first and go live only after the tests pass.',
     '<button class="btn" type="button" id="lookNow">Check it now</button>')}
     <section class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between">
       <div style="display:flex;gap:12px;align-items:center"><span class="dot${conn.on && conn.mode === 'full' ? '' : ' off'}" style="width:10px;height:10px"></span><span>${connLine}</span></div>
@@ -1543,7 +1510,7 @@ async function check(main) {
   const shown = pick && pick.status === 'done' ? await api(`/api/check/${Number(pick.id)}`) : null;
   const last = (shown && shown.ok && shown) || pick || {};
   main.innerHTML = `<div class="page narrow">${head('Website Check',
-    'A report on any website — yours, a rival’s, or one belonging to a business you want to win. Every desk looks at it and scores what it finds. It only reads what any visitor’s browser sees: it never changes the site, and never probes it.')}
+    'A report on any website: yours, a rival’s, or one you’d like to win. It reads the pages the way a visitor would, and changes nothing.')}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <label for="checkUrl" style="font-weight:600">Website address</label>
       <div style="display:flex;flex-wrap:wrap;gap:10px"><input id="checkUrl" type="url" inputmode="url" autocomplete="url" placeholder="www.example.com" value="${esc(last.url || '')}" style="flex:1 1 300px;min-width:0">
@@ -1851,7 +1818,7 @@ async function agency(main) {
   const running = !!(r && r.running);
   const canResume = !running && left && left.ok && left.resumable && Number(left.waiting || 0) > 0;
   main.innerHTML = `<div class="page wide">
-    ${head('Your agency', `${rooms.length} sectors and ${desks.length} desks. A desk lights up as it works; red means it stopped, and it tells you why. Click any desk to see its work and talk to it.`,
+    ${head('Your agency', `${rooms.length} sectors, ${desks.length} desks. Each desk shows when it is working, done, or stopped and why. Click one to see its work.`,
       `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">${running ? pill('work', 'Running') : ''}
         ${!running && left && left.ok && Number(left.garbage || 0) > 0 ? `<button class="btn quiet" type="button" id="tidyUp" title="Takes finished, duplicate and impossible jobs off the board, without using the AI">Clear up · ${Number(left.garbage)}</button>` : ''}
         ${canResume ? `<button class="btn ghost" type="button" id="resumeRun">Pick up where it left off · ${Number(left.waiting)}</button>` : ''}
@@ -1890,7 +1857,7 @@ function roomHtml(r) {
   return `<section class="card room${off ? ' is-off' : ''}" id="room-${esc(r.key)}">
     <div class="room-h">
       <div style="min-width:0;display:flex;flex-direction:column;gap:4px">
-        <h2><button type="button" class="linkish" data-sector="${esc(r.key)}">${esc(L.name || r.name)}</button></h2>
+        <h2 style="display:flex;align-items:center;gap:10px">${sectorTile(r.key)}<button type="button" class="linkish" data-sector="${esc(r.key)}">${esc(L.name || r.name)}</button></h2>
         <span class="room-sub">${off ? '<span class="lamp plain"></span>Switched off' : rl ? `<span class="lamp ${rl[0]}"></span>${esc(rl[1])}` : ''}
           ${score != null ? `<span>·</span><span>health <b class="mono" style="font-weight:500">${score}</b></span>` : ''}</span>
       </div>
@@ -1905,7 +1872,7 @@ function deskHtml(d) {
   const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
   const t = d.f && d.f.t && k !== 'idle' ? sentence(d.f.t) : '';
   return `<li><button type="button" class="desk st-${k}" data-agent="${esc(d.id)}" data-grp="${groupOf(k)}">
-    <span class="av ${lk[0]}${k === 'working' ? ' busy' : ''}" aria-hidden="true">${personIcon(k, 22)}</span>
+    ${deskTile(d, k)}
     <span class="who"><b>${esc(d.n)}</b><small>${esc(d.role)}</small></span>
     ${pill(lk[0], lk[1])}
     ${t ? `<span class="what">${esc(t)}</span>` : ''}
@@ -1926,25 +1893,51 @@ function planEdge(b, tx, ty) {
   const s = Math.min(dx ? (b[2] / 2 + 2) / Math.abs(dx) : Infinity, dy ? (b[3] / 2 + 2) / Math.abs(dy) : Infinity);
   return [cx + dx * s, cy + dy * s];
 }
-/* An agent at a desk: a person behind a monitor. The person takes the desk's
-   colour — working, done, stopped, waiting on you, idle — and the screen says
-   the rest: typing while it works, an exclamation mark when it has stopped. */
-function agentFigure(cx, cy, k) {
+/* A desk is drawn as what it does: a flag for the Director, a target for the
+   Hunter, a paper plane for Outreach, a wrench for the Fixer. Each sector has
+   its own colour; a small badge says how the desk is — working, done, stopped,
+   or waiting on you. 24 x 24 line drawings, so they stay sharp at any size. */
+const DESK_ICON = {
+  director: '<path d="M6 21V4"/><path d="M6 4h11l-2.5 3.5L17 11H6"/>',
+  critic: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/><path d="M8 10.6l1.8 1.8 3.2-3.4"/>',
+  hunter: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  scanner: '<path d="M4 5h16l-6 7v6l-4 2v-8z"/>',
+  outreach: '<path d="M21 3L3 10.5l7 2.5 2.5 7z"/><path d="M10 13L21 3"/>',
+  responder: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
+  auditor: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.8h6V4"/><path d="M8.5 13l2.4 2.4 4.6-4.6"/>',
+  strategist: '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h5a3 3 0 0 0 0-6h-2a3 3 0 0 1 0-6h5"/>',
+  rival: '<circle cx="7" cy="15.5" r="3.5"/><circle cx="17" cy="15.5" r="3.5"/><path d="M10.5 15.5h3M4.5 13l2-7.5h3l1 5M19.5 13l-2-7.5h-3l-1 5"/>',
+  backlinks: '<path d="M10 14a4 4 0 0 1 0-5.7l2.8-2.8a4 4 0 0 1 5.7 5.7l-1.4 1.4"/><path d="M14 10a4 4 0 0 1 0 5.7l-2.8 2.8a4 4 0 0 1-5.7-5.7l1.4-1.4"/>',
+  answers: '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6l-5.4 2.9 1.2-6-4.5-4.2 6.1-.7z"/>',
+  writer: '<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/>',
+  illustrator: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>',
+  publisher: '<path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 20h14"/>',
+  watcher: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+  fixer: '<path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L4 17l3 3 5.2-5.2a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5z"/>',
+  releaser: '<path d="M12 3c3 2 5 5 5 9l-2 3H9l-2-3c0-4 2-7 5-9z"/><circle cx="12" cy="10" r="1.6"/><path d="M9.5 15.5l-1.5 4M14.5 15.5l1.5 4"/>',
+  search: '<circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/>',
+  screener: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  guard: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  reporter: '<path d="M5 20v-9M10 20V5M15 20v-7M20 20V9"/>',
+};
+const SECTOR_ICON = {Director: 'director', Leads: 'hunter', SEO: 'strategist', Content: 'writer', IT: 'watcher', Security: 'screener', Report: 'reporter'};
+const BADGE = {done: '✓', stuck: '!', wait: '?', work: ''};
+function deskTile(d, k, size) {
   const tone = (ST_LOOK[k] || ['plain'])[0];
-  const bad = PROBLEM.includes(k);
-  const screen = k === 'working' ? '<rect class="ag-line l1" x="-6" y="-2.5" width="9" height="1.6" rx=".8"></rect><rect class="ag-line l2" x="-6" y="0.6" width="12" height="1.6" rx=".8"></rect><rect class="ag-line l3" x="-6" y="3.7" width="7" height="1.6" rx=".8"></rect>'
-    : bad ? '<text class="ag-alert" x="0" y="4.2" text-anchor="middle">!</text>'
-    : k === 'done' ? '<path class="ag-tick" d="M-4 0.8 L-1.2 3.4 L4.2 -2.4"></path>'
-    : k === 'waiting' ? '<text class="ag-alert wait" x="0" y="4.2" text-anchor="middle">?</text>' : '';
-  return `<g class="agent ${tone}${k === 'off' ? ' off' : ''}" transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})">
-    <circle class="ag-head" cx="0" cy="-15.5" r="6.4"></circle>
-    <path class="ag-body" d="M-12 3 Q-12 -8.5 0 -8.5 Q12 -8.5 12 3 Z"></path>
-    <rect class="ag-screen" x="-9.5" y="-5.5" width="19" height="12.5" rx="2.2"></rect>${screen}
-    <rect class="ag-desk" x="-18" y="7" width="36" height="4" rx="2"></rect></g>`;
+  const badge = BADGE[tone] !== undefined ? `<i class="bd ${tone}">${BADGE[tone]}</i>` : '';
+  return `<span class="dt${size ? ' ' + size : ''} tone-${esc(d.room)} st-${k}" aria-hidden="true"><svg viewBox="0 0 24 24">${DESK_ICON[d.slot] || DESK_ICON.director}</svg>${badge}</span>`;
 }
-function personIcon(k, size) {
+function sectorTile(key) {
+  return `<span class="dt sm tone-${esc(key)}" aria-hidden="true"><svg viewBox="0 0 24 24">${DESK_ICON[SECTOR_ICON[key]] || DESK_ICON.director}</svg></span>`;
+}
+function planTile(cx, cy, k, slot) {
   const tone = (ST_LOOK[k] || ['plain'])[0];
-  return `<svg class="person ${tone}" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4.2"></circle><path d="M3.8 21.5c0-4.6 3.7-7.6 8.2-7.6s8.2 3 8.2 7.6z"></path></svg>`;
+  const badge = tone === 'plain' ? '' : `<circle class="pt-bd ${tone}" cx="16" cy="-16" r="7.5"></circle>`
+    + (BADGE[tone] ? `<text class="pt-bd-t" x="16" y="-12.6" text-anchor="middle">${BADGE[tone]}</text>` : '');
+  return `<g class="ptile st-${k}" transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})">
+    ${k === 'working' ? '<rect class="pt-ring" x="-22" y="-22" width="44" height="44" rx="13"></rect>' : ''}
+    <rect class="pt-bg" x="-18" y="-18" width="36" height="36" rx="10"></rect>
+    <g class="pt-ico" transform="translate(-11 -11) scale(.9167)">${DESK_ICON[slot] || DESK_ICON.director}</g>${badge}</g>`;
 }
 function planSvg(rooms) {
   const beams = (((FL.comms || {}).beams) || []).filter((b) => PLAN[b.from_room] && PLAN[b.to_room] && b.from_room !== b.to_room
@@ -1970,11 +1963,11 @@ function planSvg(rooms) {
     const step = w / r.desks.length;
     const lamps = r.desks.map((d, i) => {
       const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
-      const cx = x + step * (i + 0.5), cy = y + h * 0.56;
-      return `<g class="plan-desk" data-agent="${esc(d.id)}">${agentFigure(cx, cy, k)}
-        <text class="plan-desk-name" x="${cx.toFixed(1)}" y="${(cy + 29).toFixed(1)}" text-anchor="middle">${esc(d.n)}</text><title>${esc(d.n)} — ${esc(lk[1])}</title></g>`;
+      const cx = x + step * (i + 0.5), cy = y + h * 0.5;
+      return `<g class="plan-desk" data-agent="${esc(d.id)}">${planTile(cx, cy, k, d.slot)}
+        <text class="plan-desk-name" x="${cx.toFixed(1)}" y="${(cy + 38).toFixed(1)}" text-anchor="middle">${esc(d.n)}</text><title>${esc(d.n)} — ${esc(lk[1])}</title></g>`;
     }).join('');
-    return `<g class="plan-room${bad ? ' bad' : ''}${off ? ' off' : ''}" data-sector="${esc(r.key)}" tabindex="0" role="button" aria-label="${esc(L.name || r.name)}: open the sector">
+    return `<g class="plan-room tone-${esc(r.key)}${bad ? ' bad' : ''}${off ? ' off' : ''}" data-sector="${esc(r.key)}" tabindex="0" role="button" aria-label="${esc(L.name || r.name)}: open the sector">
       <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12"></rect>
       <text class="plan-name" x="${x + 16}" y="${y + 26}">${esc((L.name || r.name).toUpperCase())}</text>${lamps}</g>`;
   }).join('');
@@ -2120,7 +2113,7 @@ async function openAgent(id) {
   if (!d) return;
   const k = deskState(d.f), lk = ST_LOOK[k] || ['plain', k];
   const room = (roomLive(d.room) || {}).name || d.room;
-  const av = `<span class="av big ${lk[0]}${k === 'working' ? ' busy' : ''}" aria-hidden="true">${personIcon(k, 26)}</span>`;
+  const av = deskTile(d, k, 'big');
   openPanel(`${panelHead(d.n, room + ' · ' + d.role, av)}
     <div class="dr-body" id="drBody">
       <section class="dr-sec"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${pill(lk[0], lk[1])}
@@ -2282,7 +2275,7 @@ async function activity(main, local) {
   const filtered = ACT.room !== 'all' || ACT.problems;
   const scroll = window.scrollY;
   main.innerHTML = `<div class="page narrow">${head('Activity',
-    'Every line is something a desk actually did — written by the work itself, never summarised by this screen.',
+    'Everything the desks have done.',
     `<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="btn ghost small" type="button" id="actRead">Mark all read</button>
       <button class="btn quiet small" type="button" id="actClear">Hide what’s read</button>${a.hidden ? `<button class="btn quiet small" type="button" id="actAll">Show all ${Number(a.hidden)} hidden</button>` : ''}</div>`)}
     ${ACT.err ? `<div class="note">${esc(ACT.err)}${ACT.data ? ' Showing what was read last.' : ''}</div>` : ''}
@@ -2320,7 +2313,7 @@ async function help(main) {
   const m = await api('/api/support/mine');
   const mine = (m && m.reports) || [];
   main.innerHTML = `<div class="page narrow">${head('Help and reports',
-    'Something not working? Tell the people who make this program. Your report is sealed before it is sent, so only they can read it, and their answer appears below.')}
+    'Something not working? Tell us. Only we can read your report, and our answer appears here.')}
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <h2 style="margin:0;font-size:18px">Report a problem</h2>
       ${m && m.home === false ? '<div class="note">This copy cannot send reports by itself yet. Write it below and press Send — you get a support report to copy into an email instead.</div>' : ''}
@@ -2376,7 +2369,7 @@ async function results(main) {
   const d = await api('/api/results' + (RES.days ? '?days=' + RES.days : ''));
   const secs = (d && d.sectors) || [];
   main.innerHTML = `<div class="page">${head('Results',
-    'What each sector actually produced — the rows themselves, not a count of effort. A sector that ran and made nothing says why.',
+    'What each sector produced. If one made nothing, it says why.',
     `<div role="group" aria-label="Period" style="display:flex;gap:8px">${[[0, 'Today'], [7, '7 days'], [30, '30 days']].map(([n, l]) =>
       `<button type="button" class="seg ${RES.days === n ? 'on' : ''}" aria-pressed="${RES.days === n}" data-days="${n}">${l}</button>`).join('')}</div>`)}
     ${d && d.ok ? '' : `<div class="note">${esc((d && d.error) || 'The results could not be read.')}</div>`}
@@ -2406,7 +2399,7 @@ function agencyStrip(st) {
       const bad = ks.filter((k) => PROBLEM.includes(k)).length, work = ks.filter((k) => k === 'working').length;
       const off = r.live && r.live.enabled === false;
       return `<a class="strip-room${bad ? ' bad' : ''}" href="#agency"><b style="font-weight:600">${esc((r.live && r.live.name) || r.name)}</b>
-        <span class="lamps">${ks.map((k) => personIcon(k, 15)).join('')}</span>
+        <span class="lamps">${ks.map((k) => `<span class="lamp ${(ST_LOOK[k] || ['plain'])[0]}"></span>`).join('')}</span>
         <span class="muted" style="font-size:13px">${off ? 'switched off' : bad ? bad + ' failed or stuck' : work ? work + ' working' : 'quiet'}</span></a>`; }).join('')}</div></section>`;
 }
 
@@ -2418,9 +2411,7 @@ function settings(main) {
     <span class="grow"><b style="font-weight:600">${esc(title)}</b><span class="muted" style="font-size:14px">${esc(line)}</span></span><span style="font-size:14px;font-weight:500;color:var(--accent)">Open</span></a>`;
   const many = (me.sites || []).length > 1;
   main.innerHTML = `<div class="page narrow">${head('Settings',
-    'Everything is kept encrypted with your password. ' + (many
-      ? 'Each website has its own settings; what is yours — the AI, your phone, your password — is shared by both.'
-      : 'What is yours — the AI, your phone, your password — stays the same if you add a second website.'))}
+    many ? 'Each website has its own settings. Your AI, phone and password are shared by both.' : '')}
     <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This website</h2><div class="card">
       ${row('/business', 'Your business', 'What you do, where, what you sell and who buys it')}
       ${row('/setup', 'Website and connection', 'Its address, and how the agency reaches it')}
@@ -2435,11 +2426,11 @@ function settings(main) {
       <div class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
         <span>Light or dark</span><div role="group" aria-label="Theme" style="display:flex;gap:8px">${[['system', 'Like this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) =>
           `<button type="button" class="seg ${k === t ? 'on' : ''}" aria-pressed="${k === t}" data-theme-pick="${k}">${n}</button>`).join('')}</div></div>
-      <div class="card">${row('/classic', 'The classic office', 'The previous screens, with every panel, while the rest move across')}</div>
+      <div class="card" id="classicRow">${row('/classic', 'The classic office', 'The older screens, with every panel')}</div>
     </section>
     <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This program</h2>
       <div class="card">
-        <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600" id="prodName">${esc((S.brand && S.brand.product) || 'Glasswork')}</b>
+        <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600" id="prodName">${esc((S.brand && S.brand.product) || 'Botix')}</b>
           <span class="muted" style="font-size:14px" id="prodVer">Version ${esc((S.brand && S.brand.version) || '')}</span></span>
           <button class="btn ghost small" type="button" id="updCheck">Check for a new version</button>
           <button class="btn quiet small" type="button" id="quitApp" hidden>Close the program</button></div>
@@ -2459,6 +2450,7 @@ function settings(main) {
     <section id="pubBox" hidden style="display:flex;flex-direction:column;gap:8px"></section></div>`;
   EXTRA.settings.forEach((f) => f());
   ask('/api/product').then((p) => {
+    if (p && p.hosted && $('#classicRow')) $('#classicRow').hidden = true;
     if (p && p.hosted && $('#updCheck')) { $('#updCheck').hidden = true; $('#prodVer').textContent += ' · always the newest, kept up to date for you'; }
     const q = $('#quitApp'); if (!q || !(p && p.installed)) return; q.hidden = false;
     q.onclick = async () => { if (!confirm('Close the program? Nothing is lost — open it again from the Start menu or the desktop.')) return;
@@ -2515,7 +2507,7 @@ async function undoUpdate() {
   toast(j.why || j.error || (j.ok ? 'Done.' : 'Nothing to go back to.'));
 }
 
-/* INSTALL THE APP. On the hosted office a browser can install Glasswork as an
+/* INSTALL THE APP. On the hosted office a browser can install Botix as an
    app — its own window and icon, the same account. Browsers that offer it give
    us a prompt to show; on an iPhone it is Share, then Add to Home Screen. */
 let INSTALL = null;
@@ -2531,7 +2523,7 @@ async function installRow() {
       $('#appSay').textContent = c && c.outcome === 'accepted' ? 'Installed. Open it from your desktop, Start menu or home screen.' : 'Not installed — you can do it any time.'; };
   } else {
     $('#appSay').textContent = /iPhone|iPad/.test(navigator.userAgent) ? 'On iPhone or iPad: tap Share, then Add to Home Screen.'
-      : 'In Chrome or Edge: the install icon at the right of the address bar, or the menu → Install Glasswork.';
+      : 'In Chrome or Edge: the install icon at the right of the address bar, or the menu → Install Botix.';
   }
 }
 

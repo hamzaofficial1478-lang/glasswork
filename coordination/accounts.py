@@ -123,7 +123,14 @@ def cmd_check(d):
 
 
 def cmd_recover(d):
-    r = workspace.recover(d.get("account"), d.get("recovery_key"), d.get("password"))
+    return _opened(workspace.recover(d.get("account"), d.get("recovery_key"), d.get("password"), d.get("code")))
+
+
+def cmd_lost_phone(d):
+    return _opened(workspace.lost_phone(d.get("account"), d.get("password"), d.get("recovery_key")))
+
+
+def _opened(r):
     if r.get("ok"):
         r["site"] = _open_first(r["account"]["id"])
         r["sites"] = _sites(workspace.account(r["account"]["id"]), r.get("key"))
@@ -200,7 +207,14 @@ def cmd_retire_old(d):
 def cmd_mfa_start(d):
     """A new authenticator secret, for the app. Nothing is kept until a code from it is confirmed."""
     secret = totp.new_secret()
-    return {"ok": True, "secret": secret, "uri": totp.uri(secret, d.get("label") or "your account")}
+    uri = totp.uri(secret, d.get("label") or "your account")
+    out = {"ok": True, "secret": secret, "uri": uri}
+    try:                                   # a picture to scan; without the library, the key and link still work
+        import segno
+        out["qr"] = segno.make(uri, error="m").svg_data_uri(scale=5, border=2)
+    except Exception:
+        pass
+    return out
 
 
 def cmd_mfa_on(d):
@@ -222,7 +236,7 @@ def cmd_status(_):
 
 COMMANDS = {
     "list": cmd_list, "sign-up": cmd_sign_up, "sign-in": cmd_sign_in, "check": cmd_check,
-    "recover": cmd_recover, "change-password": cmd_change_password,
+    "recover": cmd_recover, "lost-phone": cmd_lost_phone, "change-password": cmd_change_password,
     "add-site": cmd_add_site, "open-site": cmd_open_site, "bring-in": cmd_bring_in,
     "retire-old": cmd_retire_old, "status": cmd_status,
     "mfa-start": cmd_mfa_start, "mfa-on": cmd_mfa_on, "mfa-off": cmd_mfa_off,

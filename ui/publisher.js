@@ -8,7 +8,7 @@
 
    The reports and his answers are kept on this computer
    (coordination/publisher.py). Opening the room collects what is waiting in
-   his Glasswork Home: sealed envelopes the website itself cannot read, deleted
+   his Botix Home: sealed envelopes the website itself cannot read, deleted
    there once they are here. Nothing counts or lists the people using it. */
 
 const PUB = {filter: 'open', collecting: false, lastSay: ''};
@@ -103,7 +103,7 @@ async function reports(main) {
     main.innerHTML = `<div class="page narrow">${head('Reports',
       'Problem reports from the people using your program, kept here on this computer. Your program\'s own website only carries a postbox and the download page: a report is sealed on their computer so only this one can open it, and it leaves the website as soon as you collect it.')}
       <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
-        <h2 style="margin:0;font-size:18px">${p.publisher ? 'Make your Glasswork Home again' : 'Make your Glasswork Home'}</h2>
+        <h2 style="margin:0;font-size:18px">${p.publisher ? 'Make your Botix Home again' : 'Make your Botix Home'}</h2>
         <label for="homeSite" style="font-weight:600">Your program's own website</label>
         <span class="muted" style="font-size:14px;margin-top:-6px">A website that belongs to you and the program — not a client's website the agency looks after. People download the program from it.</span>
         <input id="homeSite" placeholder="https://www.yourprogram.com" value="${esc(site)}">
@@ -124,7 +124,7 @@ async function reports(main) {
     return;
   }
   if (!p.home_ok_at) {
-    main.innerHTML = `<div class="page narrow">${head('Reports', 'Your Glasswork Home is made. One more thing: it has to be on your website before people can reach it.')}
+    main.innerHTML = `<div class="page narrow">${head('Reports', 'Your Botix Home is made. One more thing: it has to be on your website before people can reach it.')}
       <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
         <h2 style="margin:0;font-size:18px">Put your Home on your website</h2>
         ${homeSteps(p.home_url)}</section></div>`;
@@ -245,7 +245,7 @@ async function publisherCard() {
   box.hidden = false;
   box.innerHTML = `<h2 class="label" style="margin:0">Publisher — for whoever makes this program</h2>
     <div class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:12px">
-      ${p.ready ? `<div><b style="font-weight:600">Your Glasswork Home</b> <span class="muted mono" style="font-size:13px">${esc(p.home_url)}</span></div>
+      ${p.ready ? `<div><b style="font-weight:600">Your Botix Home</b> <span class="muted mono" style="font-size:13px">${esc(p.home_url)}</span></div>
         <p class="muted" style="margin:0;font-size:14px">A postbox and a download page on your program's own website. The reports are kept on this computer, not there. Every version you put out goes there for people to update to.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn ghost small" type="button" id="pubCheck">Check it</button>
           <button class="btn quiet small" type="button" id="pubAgain">Download it again</button><a class="btn quiet small" href="#reports">Open Reports</a>

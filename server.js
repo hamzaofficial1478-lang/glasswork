@@ -183,11 +183,11 @@ const SESSION_IDLE_MS = (HOSTED ? 2 : 12) * 3600 * 1000;   // signed out after t
 const SESSION_MAX_MS = 7 * 24 * 3600 * 1000;               // and after a week, whatever happens
 function me() { return CTX.getStore() || null; }
 const ACCOUNT_OPEN = new Set(["/account", "/api/account/list", "/api/account/sign-in",
-  "/api/account/sign-up", "/api/account/recover", "/api/ping",
+  "/api/account/sign-up", "/api/account/recover", "/api/account/lost-phone", "/api/ping",
   // Read before an account exists: the terms are agreed at sign-up.
   "/terms", "/privacy", "/api/product",
   // What a browser needs to install it as an app, before anyone signs in.
-  "/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png",
+  "/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png", "/logo.svg", "/opening.js", "/botix.css",
   // The developer's own count of how many use it (its own key, below).
   "/api/owner/stats"]);
 
@@ -286,7 +286,7 @@ function tooMany(key, max, minutes) {
   if (TRIES.size > 10000) for (const [k, v] of TRIES) if (!v.some((t) => now - t < 3600000)) TRIES.delete(k);
   return list.length > max;
 }
-const LIMITS = { "/api/account/sign-in": [30, 15], "/api/account/sign-up": [10, 60], "/api/account/recover": [10, 15],
+const LIMITS = { "/api/account/sign-in": [30, 15], "/api/account/sign-up": [10, 60], "/api/account/recover": [10, 15], "/api/account/lost-phone": [10, 15],
   "/api/setup/unlock": [15, 15], "/api/login": [15, 15], "/api/account/mfa/on": [10, 15],
   "/api/account/mfa/off": [10, 15], "/api/support/send": [10, 60] };
 const TOO_MANY = { ok: false, error: "Too many tries. Wait a few minutes, then try again." };
@@ -341,7 +341,7 @@ app.use((req, res, next) => {
 
 app.get("/login", async (_q, res) => {
   res.type("html").send(`<!doctype html><meta charset="utf-8">
-<title>Glasswork</title>
+<title>Botix</title>
 <style>
  body{margin:0;height:100vh;display:grid;place-items:center;background:#0c1216;
    color:#e7eff3;font-family:system-ui,sans-serif}
@@ -354,7 +354,7 @@ app.get("/login", async (_q, res) => {
  .err{color:#e5565b;font-size:12.5px;margin-top:10px;min-height:16px}
 </style>
 <form method="POST" action="/api/login">
-  <h1>Glasswork</h1>
+  <h1>Botix</h1>
   <p>This machine's copy is locked. Enter your admin password.</p>
   <input type="password" name="password" placeholder="Password" autofocus required>
   <button>Unlock</button>
@@ -731,7 +731,7 @@ function productInfo() {
 }
 app.get("/api/product", async (_q, res) => {
   const p = productInfo();
-  res.json({ ok: true, name: p.name || "Glasswork", version: p.version || "", tagline: p.tagline || "",
+  res.json({ ok: true, name: p.name || "Botix", company: p.company || "TECH DUO", version: p.version || "", tagline: p.tagline || "",
              support_email: p.support_email || "", installed: process.env.GLASSWORK_INSTALLED === "1",
              hosted: HOSTED });
 });
@@ -740,11 +740,11 @@ app.get("/api/product", async (_q, res) => {
 // app: its own window and icon on the desktop or the phone, signing in with
 // the same account. The program itself stays on the server.
 app.get("/manifest.webmanifest", async (_q, res) => {
-  const p = productInfo(), name = p.name || "Glasswork";
+  const p = productInfo(), name = p.name || "Botix";
   res.type("application/manifest+json").json({ name, short_name: name, description: p.tagline || "",
-    start_url: "/", scope: "/", display: "standalone", background_color: "#F3F5F5", theme_color: "#1f5f4f",
+    start_url: "/", scope: "/", display: "standalone", background_color: "#FFFFFF", theme_color: "#1A1512",
     icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-            { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }] });
+            { src: "/icon-512.png", sizes: "512x512", type: "image/png" }] });
 });
 
 /* ---- HOW MANY PEOPLE USE IT ---------------------------------------------------
@@ -1153,7 +1153,16 @@ app.post("/api/account/sign-in", async (req, res) => {
 app.post("/api/account/recover", async (req, res) => {
   const b = req.body || {};
   const r = await pyAccounts("recover", { account: b.account, recovery_key: b.recovery_key,
-                                         password: b.password });
+                                         password: b.password, code: b.code });
+  if (!r.ok) return res.status(401).json(r);
+  startSession(res, r.account.id, r.account.name, r.key, r.site);
+  await cabinetReady();
+  res.json(strip(r));
+});
+// Two-step sign-in on and the phone lost: the password and the recovery key together.
+app.post("/api/account/lost-phone", async (req, res) => {
+  const b = req.body || {};
+  const r = await pyAccounts("lost-phone", { account: b.account, password: b.password, recovery_key: b.recovery_key });
   if (!r.ok) return res.status(401).json(r);
   startSession(res, r.account.id, r.account.name, r.key, r.site);
   await cabinetReady();
@@ -1290,7 +1299,7 @@ app.get("/api/ping", async (_q, res) => {
 app.get("/api/brand", async (_q, res) => {
   const p = productInfo();
   res.json({ ok: true, agencyName: (readEnv().AGENCY_NAME || "").trim(),
-             website: await siteLabel(), product: p.name || "Glasswork", version: p.version || "" });
+             website: await siteLabel(), product: p.name || "Botix", version: p.version || "" });
 });
 
 // STATE — the Control Room's snapshot. Reads the filing cabinet via Python

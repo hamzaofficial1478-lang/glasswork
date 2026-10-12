@@ -1,0 +1,74 @@
+/* botix.css — the colours every screen shares, light and dark.
+   Charcoal and orange, from the BT mark (coordination/mark.py). The orange on
+   buttons is the deep one (#C2410C): white text on it reads clearly, which the
+   bright logo orange would not. Light by default; dark follows the computer,
+   or the choice in Settings (data-theme on <html>). */
+:root{
+  --bg:#F5F4F2; --surface:#FFFFFF; --sunken:#F8F7F5; --hover:#F0EDEA;
+  --line:#E2DDD7; --line-soft:#EFEBE7; --line-strong:#C6BEB5;
+  --ink:#1C1916; --ink-2:#3B3530; --muted:#5A524B; --faint:#6C635B;
+  --accent:#C2410C; --accent-hover:#9A3412; --accent-ink:#FFFFFF; --accent-soft:#FCEBDD; --nav-on:#7C2D12;
+  --brand:#FF8A1F; --tile:#1A1512;
+  --done-bg:#E3F2EA; --done:#1E6642; --wait-bg:#FBEFD9; --wait:#7D4B00;
+  --work-bg:#E4ECFA; --work:#244C99; --stuck-bg:#F9E3E1; --stuck:#97241C;
+  --plain-bg:#F0EDEA; --plain:#5A524B; --ok-dot:#2E8A5B;
+  --note-bg:#FFF8EC; --note-line:#EFD6A8; --note-ink:#5C3A00; --meter:#ECE8E3;
+  --ok-line:#B9DEC9; --bad-line:#EBC0BB; --shadow:0 1px 2px rgba(28,25,22,.05),0 8px 24px rgba(28,25,22,.06);
+  --site:#1A1512; --idle:#BDB5AD; --bar-bg:rgba(255,255,255,.94);
+  --sec-dir:#FCE6D4; --sec-dir-ink:#9A3412; --sec-leads:#E0E9F8; --sec-leads-ink:#2A4F94;
+  --sec-seo:#DDEFE4; --sec-seo-ink:#1F6440; --sec-content:#F2E2EF; --sec-content-ink:#7A2E6E;
+  --sec-it:#DDEBEE; --sec-it-ink:#23595F; --sec-sec:#F5DFDB; --sec-sec-ink:#8E2B22; --sec-rep:#F8ECCD; --sec-rep-ink:#7A5200;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#12100E; --surface:#1A1714; --sunken:#211D19; --hover:#25201C;
+    --line:#2F2A25; --line-soft:#25211D; --line-strong:#4A423B;
+    --ink:#EEE9E4; --ink-2:#D5CDC5; --muted:#B2A89E; --faint:#9D9389;
+    --accent:#FF9A45; --accent-hover:#FFB16E; --accent-ink:#1A1512; --accent-soft:#3A2516; --nav-on:#FFD3AF;
+    --brand:#FF8A1F; --tile:#0E0C0A;
+    --done-bg:#173A2A; --done:#8FDDB0; --wait-bg:#3D2E12; --wait:#F2C46D;
+    --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
+    --plain-bg:#25211D; --plain:#BDB3A9; --ok-dot:#49B37B;
+    --note-bg:#2B2414; --note-line:#5A4A26; --note-ink:#F2D49E; --meter:#2C2722;
+    --ok-line:#2E5C43; --bad-line:#6B312C; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+    --site:#FF8A1F; --idle:#6E655D; --bar-bg:rgba(26,23,20,.94);
+    --sec-dir:#3A2516; --sec-dir-ink:#FFC08A; --sec-leads:#1C2A44; --sec-leads-ink:#A9C2F2;
+    --sec-seo:#17321F; --sec-seo-ink:#9ED9B5; --sec-content:#36203A; --sec-content-ink:#E2AEDB;
+    --sec-it:#17302F; --sec-it-ink:#9BD1D6; --sec-sec:#3E1F1C; --sec-sec-ink:#F2ABA3; --sec-rep:#3A2E14; --sec-rep-ink:#F2CF7F;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12100E; --surface:#1A1714; --sunken:#211D19; --hover:#25201C;
+  --line:#2F2A25; --line-soft:#25211D; --line-strong:#4A423B;
+  --ink:#EEE9E4; --ink-2:#D5CDC5; --muted:#B2A89E; --faint:#9D9389;
+  --accent:#FF9A45; --accent-hover:#FFB16E; --accent-ink:#1A1512; --accent-soft:#3A2516; --nav-on:#FFD3AF;
+  --brand:#FF8A1F; --tile:#0E0C0A;
+  --done-bg:#173A2A; --done:#8FDDB0; --wait-bg:#3D2E12; --wait:#F2C46D;
+  --work-bg:#1C2C4A; --work:#9DB8F2; --stuck-bg:#43201D; --stuck:#F4A49B;
+  --plain-bg:#25211D; --plain:#BDB3A9; --ok-dot:#49B37B;
+  --note-bg:#2B2414; --note-line:#5A4A26; --note-ink:#F2D49E; --meter:#2C2722;
+  --ok-line:#2E5C43; --bad-line:#6B312C; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  --site:#FF8A1F; --idle:#6E655D; --bar-bg:rgba(26,23,20,.94);
+  --sec-dir:#3A2516; --sec-dir-ink:#FFC08A; --sec-leads:#1C2A44; --sec-leads-ink:#A9C2F2;
+  --sec-seo:#17321F; --sec-seo-ink:#9ED9B5; --sec-content:#36203A; --sec-content-ink:#E2AEDB;
+  --sec-it:#17302F; --sec-it-ink:#9BD1D6; --sec-sec:#3E1F1C; --sec-sec-ink:#F2ABA3; --sec-rep:#3A2E14; --sec-rep-ink:#F2CF7F;
+  color-scheme:dark;
+}
+
+/* The names the account, business and AI screens were written with, pointed
+   at the same colours, so those screens match the office. */
+:root{
+  --panel:var(--surface); --panel2:var(--sunken); --raise:var(--hover);
+  --line2:var(--line-strong); --etch:var(--muted); --text:var(--ink);
+  --glass:var(--accent); --glass-dim:var(--accent-soft);
+  --amber:var(--wait); --amber-dim:var(--note-bg);
+  --danger:var(--stuck); --danger-dim:var(--stuck-bg); --ok:var(--done); --ok-dim:var(--done-bg);
+}
+
+/* The mark beside the name, wherever it appears. */
+.bt{display:inline-block;width:28px;height:28px;flex:none;border-radius:6px}
+.bt-word{display:inline-flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none}
+.bt-word b{font-weight:700;font-size:17px;letter-spacing:-.01em}
+.bt-word small{font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}

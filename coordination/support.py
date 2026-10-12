@@ -11,7 +11,7 @@ answer. The side every copy has.
 
 A report is SEALED here with the publisher's public key (coordination/sealed.py)
 before it leaves, so only his own computer can open it. It waits in his
-Glasswork Home — a postbox on his website that cannot read it — until his
+Botix Home — a postbox on his website that cannot read it — until his
 program collects it. Each report carries a mailbox number and key of its own,
 made for that report alone: his answer comes back sealed to it, and nothing
 links one report to another or to the person's other reports.
@@ -59,7 +59,7 @@ def can_send() -> bool:
 
 
 def _ask(do, method="GET", body=None, key="", base=None, timeout=TIMEOUT, path=None) -> dict:
-    """One request to a Glasswork Home (or, with path, to another page of a server of his). Always a dict."""
+    """One request to a Botix Home (or, with path, to another page of a server of his). Always a dict."""
     base = (base or home_url()).rstrip("/")
     if not base:
         return {"ok": False, "no_home": True, "error": "this copy has no address to send reports to yet"}

@@ -53,3 +53,8 @@ phonenumbers>=8.13
 # are reached with `requests`, above. Without it: Claude Code on this computer
 # works exactly as before; only the Claude-by-API-key choice says to install it.
 anthropic>=1.12
+
+# A PICTURE TO SCAN when someone adds an authenticator app (coordination/accounts.py).
+# Pure Python, nothing else needed. Without it the key and the "open in my app"
+# link still work; only the picture is missing.
+segno>=1.6

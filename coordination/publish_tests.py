@@ -285,7 +285,7 @@ def test_putting_a_version_out():
         again = publisher.publish("Again.")
         check("the same version cannot go out twice", (again.get("ok"), "already out" in again.get("error", "")), (False, True))
         page = h.raw("/glasswork-home/")[1]
-        check("the download page is there for new people", "Glasswork" in page, True)
+        check("the download page is there for new people", product.name() in page, True)
 
 
 def main():

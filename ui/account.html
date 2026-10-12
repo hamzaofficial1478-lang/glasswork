@@ -3,95 +3,95 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sign in</title>
+<title>Sign in · Botix</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#1f5f4f">
-<link rel="icon" href="/icon-192.png">
+<meta name="theme-color" content="#1A1512">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/botix.css">
 <style>
-/* The office's own tokens (ui/office.html), so signing in feels like the same
-   building. The redesign (phase 4) revisits these for every screen at once. */
-:root{
-  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
-  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
-  --text:#e7eff3; --muted:#8a9ea9; --faint:#54666f;
-  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.14);
-  --amber:#eaa543; --amber-dim:rgba(234,165,67,.13);
-  --danger:#e5565b; --danger-dim:rgba(229,86,91,.13); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
-}
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--text);
-  font-family:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
-body{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:48px 16px 64px;
-  background:radial-gradient(1200px 500px at 50% -10%,rgba(84,203,217,.07),transparent 60%),var(--bg)}
-.mark{display:flex;align-items:center;gap:10px;margin-bottom:28px;color:var(--etch);
-  font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase}
-.pane{width:22px;height:22px;border-radius:5px;border:1.5px solid var(--glass);position:relative;
-  background:linear-gradient(135deg,rgba(84,203,217,.25),transparent 55%)}
-.pane:after{content:"";position:absolute;inset:4px 9px 4px 4px;border-right:1.5px solid rgba(84,203,217,.6)}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+body{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:44px 16px 56px}
+.head{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+.head img{width:40px;height:40px;border-radius:9px}
+.head b{display:block;font-size:20px;font-weight:700;letter-spacing:-.01em;line-height:1.1}
+.head small{display:block;font-size:10.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
 main{width:100%;max-width:440px}
-section{display:none;background:var(--panel);border:1px solid var(--line);border-radius:16px;
-  padding:28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+section{display:none;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:28px 26px;box-shadow:var(--shadow)}
 section.on{display:block}
-h1{font-size:22px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
-h2{font-size:15px;font-weight:600;margin:0 0 4px}
-p.lead{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px}
-label{display:block;font-size:12.5px;color:var(--etch);margin:14px 0 6px}
-input[type=text],input[type=password],input[type=url],select{width:100%;padding:12px 13px;border-radius:10px;
-  border:1px solid var(--line2);background:var(--panel2);color:var(--text);font:inherit;font-size:15px}
-main p a{color:var(--glass)}
-input:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
-.btn{display:block;width:100%;margin-top:20px;padding:12px 14px;border-radius:10px;border:1px solid var(--glass);
-  background:var(--glass);color:#06222a;font:inherit;font-weight:600;font-size:15px;cursor:pointer;text-align:center;text-decoration:none}
-.btn:hover{filter:brightness(1.08)}
+h1{font-size:23px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:15.5px;font-weight:600;margin:0 0 4px}
+p.lead{color:var(--muted);font-size:14.5px;line-height:1.6;margin:0 0 18px}
+label{display:block;font-size:13px;font-weight:500;color:var(--ink-2);margin:14px 0 6px}
+label .opt{font-weight:400;color:var(--faint)}
+input[type=text],input[type=password],input[type=url],select{width:100%;min-height:46px;padding:11px 13px;border-radius:9px;
+  border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font:inherit;font-size:15px}
+input::placeholder{color:var(--faint)}
+main a{color:var(--accent)}
+input:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:46px;margin-top:20px;padding:0 16px;border-radius:9px;
+  border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;font-size:15px;
+  cursor:pointer;text-align:center;text-decoration:none}
+.btn:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .btn[disabled]{opacity:.55;cursor:progress}
-.btn.quiet{background:transparent;color:var(--glass)}
-.btn.small{display:inline-block;width:auto;margin:0;padding:8px 12px;font-size:13px}
-.links{display:flex;justify-content:space-between;gap:12px;margin-top:18px;font-size:13px}
-.links a,.link{color:var(--glass);text-decoration:none;cursor:pointer;background:none;border:0;font:inherit;padding:0}
+.btn.quiet{background:var(--surface);color:var(--accent);border-color:var(--line-strong)}
+.btn.quiet:hover{border-color:var(--accent);background:var(--sunken)}
+.btn.small{display:inline-flex;width:auto;min-height:36px;margin:0;padding:0 12px;font-size:13.5px}
+.links{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px 14px;margin-top:18px;font-size:14px}
+.links a,.link{color:var(--accent);text-decoration:none;cursor:pointer;background:none;border:0;font:inherit;padding:0}
 .links a:hover,.link:hover{text-decoration:underline}
-.err{display:none;margin-top:14px;padding:10px 12px;border-radius:9px;background:var(--danger-dim);
-  border:1px solid rgba(229,86,91,.35);color:#f3a7aa;font-size:13.5px;line-height:1.5}
+.err{display:none;margin-top:14px;padding:10px 12px;border-radius:8px;background:var(--stuck-bg);
+  border:1px solid var(--bad-line);color:var(--stuck);font-size:14px;line-height:1.5}
 .err.on{display:block}
-.note{padding:12px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;margin:0 0 16px;
-  background:var(--amber-dim);border:1px solid rgba(234,165,67,.35);color:#f2cf9b}
-.note.ok{background:var(--ok-dim);border-color:rgba(92,192,136,.35);color:#a9e2c1}
-.key{font-family:'IBM Plex Mono',monospace;font-size:clamp(14px,4.2vw,18.5px);letter-spacing:.03em;text-align:center;
-  padding:18px 10px;border-radius:12px;border:1px dashed var(--glass);background:var(--panel2);
+.note{padding:12px 14px;border-radius:9px;font-size:14px;line-height:1.55;margin:0 0 16px;
+  background:var(--note-bg);border:1px solid var(--note-line);color:var(--note-ink)}
+.note.ok{background:var(--done-bg);border-color:var(--ok-line);color:var(--done)}
+.promise{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:9px;background:var(--sunken);
+  border:1px solid var(--line);font-size:14px;line-height:1.55;color:var(--ink-2);margin:0 0 6px}
+.promise svg{flex:none;margin-top:2px;color:var(--accent)}
+.key{font-family:'IBM Plex Mono',monospace;font-size:clamp(14px,4.2vw,18px);letter-spacing:.03em;text-align:center;
+  padding:16px 10px;border-radius:10px;border:1px dashed var(--line-strong);background:var(--sunken);color:var(--ink);
   white-space:nowrap;overflow-x:auto;user-select:all;margin:6px 0 12px;font-variant-numeric:tabular-nums}
 .row{display:flex;gap:10px}
 .row .btn{margin-top:0}
-.check{display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-size:14px;line-height:1.5;color:var(--text)}
-.check input{margin-top:3px;accent-color:var(--glass);width:16px;height:16px;flex:none}
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-size:14px;line-height:1.5;color:var(--ink)}
+.check input{margin-top:3px;accent-color:var(--accent);width:16px;height:16px;flex:none}
+.qr{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 4px}
+.qr img{width:168px;height:168px;border-radius:8px;border:1px solid var(--line);background:#fff;padding:4px}
+.qr .side{flex:1 1 160px;min-width:0;font-size:14px;color:var(--muted);line-height:1.55}
+.steps{margin:0 0 10px;padding-left:20px;color:var(--ink-2);font-size:14px;line-height:1.6}
 .sites{display:grid;gap:10px;margin:14px 0 6px}
-.site{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--line2);background:var(--panel2)}
-.site .fav{width:30px;height:30px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;
-  font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--glass-dim);border:1px solid var(--glass);color:var(--glass)}
+.site{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--sunken)}
+.site .fav{width:30px;height:30px;border-radius:7px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;background:var(--accent-soft);color:var(--nav-on)}
 .site .nm{flex:1;min-width:0}
 .site .nm b{display:block;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.site .nm small{display:block;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px;
+.site .nm small{display:block;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11.5px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.chip{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
-  padding:4px 8px;border-radius:999px;background:var(--ok-dim);color:var(--ok);border:1px solid rgba(92,192,136,.35)}
-.block{border-top:1px solid var(--line);margin-top:22px;padding-top:18px}
-.block p{color:var(--muted);font-size:13.5px;line-height:1.6;margin:4px 0 0}
+.chip{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--done-bg);color:var(--done)}
+.block{border-top:1px solid var(--line-soft);margin-top:22px;padding-top:18px}
+.block p{color:var(--muted);font-size:14px;line-height:1.6;margin:4px 0 0}
 .who{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px}
-.who small{color:var(--muted);font-size:13px}
-.choice{display:block;width:100%;text-align:left;margin-top:12px;padding:14px 16px;border-radius:12px;border:1px solid var(--line2);
-  background:var(--panel2);color:var(--text);font:inherit;cursor:pointer}
-.choice:hover{border-color:var(--glass)}
+.choice{display:block;width:100%;text-align:left;margin-top:12px;padding:14px 16px;border-radius:10px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}
+.choice:hover{border-color:var(--accent);background:var(--sunken)}
 .choice b{display:block;font-size:15px;margin-bottom:3px}
-.choice span{color:var(--muted);font-size:13px;line-height:1.5}
-footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-width:440px;line-height:1.6}
+.choice span{color:var(--muted);font-size:13.5px;line-height:1.5}
+footer{margin-top:22px;color:var(--faint);font-size:13px;text-align:center;max-width:440px;line-height:1.6}
+footer a{color:var(--faint)}
 @media (prefers-reduced-motion:no-preference){section.on{animation:rise .25s ease-out}
   @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}}
 </style>
 </head>
 <body>
-<div class="mark"><span class="pane" aria-hidden="true"></span><span id="product">Your agency</span></div>
+<script src="/opening.js"></script>
+<div class="head"><img src="/logo.svg" alt="" width="40" height="40"><span><b id="product">Botix</b><small id="company">by TECH DUO</small></span></div>
 <main>
 
   <section id="loading" class="on"><p class="lead" style="margin:0">One moment…</p></section>
@@ -99,7 +99,7 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
   <!-- SIGN IN -->
   <section id="signin">
     <h1>Sign in</h1>
-    <p class="lead">Your websites and everything the agency knows about them are encrypted. Your password opens them.</p>
+    <p class="lead">Welcome back.</p>
     <form onsubmit="signIn(event)">
       <label for="siWho">Your name</label>
       <input id="siWho" type="text" autocomplete="username" required maxlength="60">
@@ -111,24 +111,25 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
       <div class="err" id="siErr"></div>
     </form>
     <div class="links"><button class="link" onclick="show('recover')">Forgot your password?</button>
+      <button class="link" onclick="show('lostphone')">Lost your phone?</button>
       <button class="link" onclick="show('signup')">Make a new account</button></div>
   </section>
 
   <!-- MAKE AN ACCOUNT -->
   <section id="signup">
     <h1>Make your account</h1>
-    <p class="lead">Each person has their own account, locked with their own password. Nobody else can open yours — not another account, not even the people who make the program.</p>
+    <p class="promise"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span>Keep your password and recovery key safe and private. Your account is encrypted with your password. We don't keep your password, and we can't open your account without it.</span></p>
     <div class="note" id="cipherNote" style="display:none"></div>
     <form onsubmit="signUp(event)">
       <label for="suName">Your name</label>
       <input id="suName" type="text" autocomplete="name" required maxlength="60">
       <div id="suInviteBox" style="display:none"><label for="suInvite">Invitation code</label>
         <input id="suInvite" type="text" autocomplete="off" maxlength="80"></div>
-      <label for="suPw">Password <span style="color:var(--faint)">— at least 8 characters, not your name</span></label>
+      <label for="suPw">Password <span class="opt">· 8 characters or more, not your name</span></label>
       <input id="suPw" type="password" autocomplete="new-password" required minlength="8">
       <label for="suPw2">Password again</label>
       <input id="suPw2" type="password" autocomplete="new-password" required minlength="8">
-      <p style="font-size:13.5px;color:var(--faint);margin:4px 0 0">By making an account you agree to the
+      <p style="font-size:13.5px;color:var(--muted);margin:14px 0 0">By making an account you agree to the
         <a href="/terms" target="_blank" rel="noopener">terms of use</a> and the
         <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>.</p>
       <button class="btn" id="suBtn">Make my account</button>
@@ -139,28 +140,64 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
 
   <!-- THE RECOVERY KEY, SHOWN ONCE -->
   <section id="recovery">
-    <h1>Write down your recovery key</h1>
-    <p class="lead">If you ever forget your password, this key is the only way back in. It is shown once and kept nowhere — not here, not by us.</p>
+    <h1>Save your recovery key</h1>
+    <p class="lead">If you forget your password, this key gets you back in. We show it once and don't keep a copy.</p>
     <div class="key" id="rkKey">—</div>
     <div class="row">
       <button class="btn quiet" onclick="copyKey()" id="rkCopy">Copy</button>
       <button class="btn quiet" onclick="saveKey()">Save as a file</button>
     </div>
     <label class="check"><input type="checkbox" id="rkDone" onchange="$('#rkNext').disabled=!this.checked">
-      <span>I have written it down or saved it somewhere safe, away from this device.</span></label>
+      <span>I've saved it somewhere safe, away from this device.</span></label>
     <button class="btn" id="rkNext" disabled onclick="afterKey()">Continue</button>
+  </section>
+
+  <!-- THE AUTHENTICATOR, ASKED FOR STRAIGHT AFTER SIGN-UP -->
+  <section id="twostep">
+    <h1>Add your authenticator</h1>
+    <p class="lead">You'll type a code from it each time you sign in, so your password alone is never enough.</p>
+    <ol class="steps"><li>Open Google Authenticator, Microsoft Authenticator or any authenticator app.</li>
+      <li>Scan this code, or type the key below it.</li><li>Type the six-digit code the app shows.</li></ol>
+    <div class="qr"><img id="tsQr" alt="Code to scan with your authenticator app" hidden>
+      <div class="side">On this phone? <a id="tsLink" href="#">Open it in your authenticator app</a>.</div></div>
+    <div class="key" id="tsKey" style="white-space:normal;word-spacing:.2em;font-size:15px">—</div>
+    <label for="tsCode">Six-digit code</label>
+    <input id="tsCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+    <button class="btn" id="tsBtn" onclick="twoStepOn()">Turn it on</button>
+    <div class="err" id="tsErr"></div>
+    <div class="links"><button class="link" onclick="twoStepLater()">Do this later</button><span></span></div>
+  </section>
+
+  <!-- LOST PHONE: THE PASSWORD AND THE RECOVERY KEY TOGETHER -->
+  <section id="lostphone">
+    <h1>Lost your phone?</h1>
+    <p class="lead">Your password and your recovery key together turn off the authenticator and let you in. You can add it again on your new phone.</p>
+    <form onsubmit="lostPhone(event)">
+      <label for="lpWho">Your name</label>
+      <input id="lpWho" type="text" autocomplete="username" required maxlength="60">
+      <label for="lpPw">Password</label>
+      <input id="lpPw" type="password" autocomplete="current-password" required>
+      <label for="lpKey">Recovery key</label>
+      <input id="lpKey" type="text" autocomplete="off" spellcheck="false" required
+             style="font-family:'IBM Plex Mono',monospace;letter-spacing:.05em" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX">
+      <button class="btn" id="lpBtn">Let me in</button>
+      <div class="err" id="lpErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('signin')">Back to sign in</button><span></span></div>
   </section>
 
   <!-- RECOVER WITH THE KEY -->
   <section id="recover">
-    <h1>Use your recovery key</h1>
-    <p class="lead">Type the key you wrote down when you made your account, and choose a new password.</p>
+    <h1>Forgot your password?</h1>
+    <p class="lead">Use the recovery key you saved when you made your account, then choose a new password.</p>
     <form onsubmit="recover(event)">
       <label for="reWho">Your name</label>
       <input id="reWho" type="text" autocomplete="username" required maxlength="60">
       <label for="reKey">Recovery key</label>
       <input id="reKey" type="text" autocomplete="off" spellcheck="false" required
              style="font-family:'IBM Plex Mono',monospace;letter-spacing:.05em" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX">
+      <div id="reCodeBox" style="display:none"><label for="reCode">Code from your authenticator app</label>
+        <input id="reCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></div>
       <label for="rePw">New password</label>
       <input id="rePw" type="password" autocomplete="new-password" required minlength="8">
       <label for="rePw2">New password again</label>
@@ -174,13 +211,13 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
   <!-- FIRST WEBSITE -->
   <section id="start">
     <h1>Which website first?</h1>
-    <p class="lead">An account holds two websites. The agency works on one at a time, and you switch between them from the office.</p>
+    <p class="lead">You can add a second one later.</p>
     <button class="choice" id="startBring" onclick="bringIn()" style="display:none">
       <b id="startBringName">Bring in your current website</b>
-      <span>Everything the agency has for it today — leads, orders, approvals, settings — is copied into your account and encrypted. Your original files stay where they are until you remove them.</span>
+      <span>Its leads, orders, approvals and settings are copied into your account and encrypted.</span>
     </button>
     <button class="choice" onclick="show('addfirst')"><b>Start with a new website</b>
-      <span>Give it a name and its address. You connect it on the Setup screen after.</span></button>
+      <span>Its name and address. You connect it afterwards.</span></button>
     <div class="err" id="stErr"></div>
   </section>
 
@@ -209,13 +246,13 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
 
     <div class="block" id="mgBring" style="display:none">
       <h2 id="mgBringTitle">Bring in your current website</h2>
-      <p>Everything the agency has for it today — leads, orders, approvals, settings — is copied into this account and encrypted. Your original files stay where they are until you remove them.</p>
+      <p>Its leads, orders, approvals and settings are copied into this account and encrypted.</p>
       <button class="btn quiet" id="mgBringBtn" onclick="bringIn()">Bring it in</button>
     </div>
 
     <div class="block" id="mgRetire" style="display:none">
       <h2>Remove the original, unencrypted copy</h2>
-      <p>Your website is in your account now, encrypted. The program's original files are still in its folder, unencrypted. Once you have checked the office shows everything as it should, remove them so nothing readable is left behind. This cannot be undone.</p>
+      <p>Your website is in your account now, encrypted, but the old unencrypted files are still in the program's folder. Once the office looks right, remove them. This can't be undone.</p>
       <label class="check"><input type="checkbox" id="rtYes"><span>I have checked my website in the office, and I want the original copy removed.</span></label>
       <button class="btn quiet" id="rtBtn" onclick="retireOld()">Remove the original copy</button>
     </div>
@@ -234,11 +271,12 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
 
     <div class="block" id="mgMfa">
       <h2>Two-step sign-in</h2>
-      <p id="mfaSay">Ask for a code from an authenticator app (Google Authenticator, Microsoft Authenticator, Authy…) as well as your password. Someone who learns your password still cannot sign in.</p>
+      <p id="mfaSay">A code from your authenticator app as well as your password.</p>
       <div id="mfaSetup" style="display:none">
-        <p>In your authenticator app, add an account and type this key (or open the link on your phone):</p>
+        <p>Scan this with your authenticator app, or type the key:</p>
+        <div class="qr"><img id="mfaQr" alt="Code to scan with your authenticator app" hidden></div>
         <div class="key" id="mfaKey" style="white-space:normal;word-spacing:.2em">—</div>
-        <p style="margin:0"><a id="mfaLink" href="#" style="color:var(--glass)">Open in my authenticator app</a></p>
+        <p style="margin:0"><a id="mfaLink" href="#">Open it in my authenticator app</a></p>
         <label for="mfaCode">The six-digit code the app now shows</label>
         <input id="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
       </div>
@@ -263,13 +301,13 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
     </div>
   </section>
 </main>
-<footer>Your data is encrypted and opened only with your password — nobody else can read it, not even the people who make the program. Forget the password and lose the recovery key, and nobody can open it again.</footer>
+<footer><span id="footName">Botix</span> by <span id="footCompany">TECH DUO</span> · <a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></footer>
 
 <script>
 const $ = (q) => document.querySelector(q);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let LIST = null, ME = null, RECOVERY = '', ACCOUNT_NAME = '', AFTER_KEY = '';
+let LIST = null, ME = null, RECOVERY = '', ACCOUNT_NAME = '', AFTER_KEY = '', THEN_TWOSTEP = false;
 
 function show(id) {
   document.querySelectorAll('section').forEach((s) => s.classList.toggle('on', s.id === id));
@@ -296,7 +334,15 @@ function initials(s) {
   return (t.slice(0, 2) || '··').toUpperCase();
 }
 
+async function names() {
+  const p = await call('/api/product');
+  if (!p || !p.ok) return;
+  for (const [id, v] of [['product', p.name], ['footName', p.name], ['company', p.company && 'by ' + p.company], ['footCompany', p.company]])
+    if (v && $('#' + id)) $('#' + id).textContent = v;
+}
+
 async function boot() {
+  names();
   LIST = await call('/api/account/list');
   if (LIST.cipher_problem) {
     $('#cipherNote').textContent = 'Encryption is not ready on this computer yet: ' + LIST.cipher_problem;
@@ -331,7 +377,7 @@ async function signUp(e) {
   busy('suBtn', false);
   if (!j.ok) return fail('suErr', j.error || 'That did not work.');
   $('#suPw').value = $('#suPw2').value = '';
-  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name;
+  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; THEN_TWOSTEP = true;
   $('#rkKey').textContent = RECOVERY;
   show('recovery');
 }
@@ -350,8 +396,37 @@ function saveKey() {
 }
 async function afterKey() {
   RECOVERY = ''; $('#rkKey').textContent = '—';
+  if (THEN_TWOSTEP) { THEN_TWOSTEP = false; return twoStep(); }
   if (AFTER_KEY) return (location.href = AFTER_KEY);
   LIST = await call('/api/account/list'); firstSite();
+}
+
+/* Straight after the recovery key: the authenticator. "Do this later" is
+   allowed, and it can be added from the account page at any time. */
+async function twoStep() {
+  fail('tsErr', '');
+  const j = await call('/api/account/mfa/start', {});
+  if (!j.ok) return twoStepLater();
+  $('#tsKey').textContent = j.secret.replace(/(.{4})/g, '$1 ').trim();
+  $('#tsLink').href = j.uri;
+  if (j.qr) { $('#tsQr').src = j.qr; $('#tsQr').hidden = false; } else $('#tsQr').hidden = true;
+  $('#tsCode').value = '';
+  show('twostep');
+}
+async function twoStepOn() {
+  fail('tsErr', '');
+  busy('tsBtn', true, 'Checking…');
+  const j = await call('/api/account/mfa/on', {code: $('#tsCode').value.trim()});
+  busy('tsBtn', false);
+  if (!j.ok) return fail('tsErr', j.error || 'That code is not right. Type the newest one.');
+  twoStepLater();
+}
+async function twoStepLater() {
+  if (AFTER_KEY) return (location.href = AFTER_KEY);
+  LIST = await call('/api/account/list');
+  ME = await call('/api/account/me');
+  if (ME && ME.open) return (location.href = '/');
+  firstSite();
 }
 
 function firstSite() {
@@ -388,12 +463,28 @@ async function recover(e) {
   if ($('#rePw').value !== $('#rePw2').value) return fail('reErr', 'The two passwords do not match.');
   busy('reBtn', true, 'Opening your account…');
   const j = await call('/api/account/recover', {account: $('#reWho').value,
-    recovery_key: $('#reKey').value, password: $('#rePw').value});
+    recovery_key: $('#reKey').value, password: $('#rePw').value, code: $('#reCode').value.trim() || undefined});
   busy('reBtn', false);
+  if (j.mfa) { $('#reCodeBox').style.display = 'block'; $('#reCode').value = ''; $('#reCode').focus(); }
   if (!j.ok) return fail('reErr', j.error || 'That did not work.');
-  $('#reKey').value = $('#rePw').value = $('#rePw2').value = '';
+  $('#reKey').value = $('#rePw').value = $('#rePw2').value = $('#reCode').value = '';
   // The key just used is finished with: here is its replacement, shown once.
   RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; AFTER_KEY = j.site ? '/' : '';
+  $('#rkKey').textContent = RECOVERY; $('#rkDone').checked = false; $('#rkNext').disabled = true;
+  show('recovery');
+}
+
+/* Phone lost: the password and the recovery key turn the authenticator off.
+   A new recovery key is shown, then the chance to add the new phone. */
+async function lostPhone(e) {
+  e.preventDefault(); fail('lpErr', '');
+  busy('lpBtn', true, 'Opening your account…');
+  const j = await call('/api/account/lost-phone', {account: $('#lpWho').value, password: $('#lpPw').value,
+                                                  recovery_key: $('#lpKey').value});
+  busy('lpBtn', false);
+  if (!j.ok) return fail('lpErr', j.error || 'That did not work.');
+  $('#lpPw').value = $('#lpKey').value = '';
+  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; AFTER_KEY = j.site ? '/' : ''; THEN_TWOSTEP = true;
   $('#rkKey').textContent = RECOVERY; $('#rkDone').checked = false; $('#rkNext').disabled = true;
   show('recovery');
 }
@@ -418,8 +509,8 @@ async function manage(happy) {
   $('#mgAdd h2').textContent = sites.length ? 'Add your second website' : 'Add a website';
   $('#mfaSetup').style.display = 'none'; $('#mfaOffBox').style.display = ME.mfa ? 'block' : 'none';
   $('#mfaBtn').textContent = ME.mfa ? 'Turn off' : 'Turn on';
-  $('#mfaSay').textContent = ME.mfa ? 'On: signing in asks for a code from your authenticator app as well as your password.'
-    : 'Ask for a code from an authenticator app (Google Authenticator, Microsoft Authenticator, Authy…) as well as your password. Someone who learns your password still cannot sign in.';
+  $('#mfaSay').textContent = ME.mfa ? 'On. Signing in asks for a code from your authenticator app as well as your password.'
+    : 'Off. Turn it on so your password alone is never enough to sign in.';
   show('manage');
 }
 
@@ -435,6 +526,7 @@ async function mfaStep() {
     const j = await call('/api/account/mfa/start', {});
     if (!j.ok) return fail('mfaErr', j.error || 'That did not work.');
     $('#mfaKey').textContent = j.secret.replace(/(.{4})/g, '$1 ').trim(); $('#mfaLink').href = j.uri;
+    if (j.qr) { $('#mfaQr').src = j.qr; $('#mfaQr').hidden = false; }
     $('#mfaSetup').style.display = 'block'; $('#mfaBtn').textContent = 'Confirm and turn on'; $('#mfaCode').focus();
     return;
   }

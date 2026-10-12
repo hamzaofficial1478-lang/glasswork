@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / "config" / "product.json"
-# THE PUBLISHER'S OWN COPY. Where his Glasswork Home is and the public half of
+# THE PUBLISHER'S OWN COPY. Where his Botix Home is and the public half of
 # his signing key are written here, on his computer, and not into product.json:
 # his copy updates itself from git, and a changed tracked file would stop that.
 # A release carries them inside its own product.json (coordination/updates).
@@ -32,7 +32,7 @@ def publisher_file() -> Path:
 # his keys — one checks his signature on updates, one seals what a copy sends
 # him. Neither can be used to sign or to open anything.
 PUBLIC_KEYS = ("home_url", "update_url", "update_key", "postbox_key", "support_email")
-DEFAULTS = {"name": "Glasswork", "version": "0.0.0", "tagline": "", "support_email": "",
+DEFAULTS = {"name": "Botix", "company": "TECH DUO", "version": "0.0.0", "tagline": "", "support_email": "",
             "update_url": "", "update_key": "", "postbox_key": "", "home_url": ""}
 
 # HIS SIDE OF THE PROGRAM — his Reports room, putting versions out, the

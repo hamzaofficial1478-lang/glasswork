@@ -250,6 +250,27 @@ def test_two_people_at_once():
                                                              "password": "another long phrase"})
         check("  the old one opens nothing any more", st, 401)
 
+        # With two-step sign-in on, every way back in takes two things
+        st, j, delta, _ = h.req("POST", "/api/account/sign-up", {"name": "Delta", "password": "harbour violet kite",
+                                                                 "confirm": "harbour violet kite", "invite": INVITE})
+        d_key = j.get("recovery_key")
+        st, j, _, _ = h.req("POST", "/api/account/mfa/start", {}, delta)
+        check("the authenticator step offers a picture to scan", str(j.get("qr", "")).startswith("data:image/svg+xml"), True)
+        d_secret, now = j.get("secret", ""), int(time.time() // 30)
+        h.req("POST", "/api/account/mfa/on", {"code": totp.code_at(d_secret, now)}, delta)
+        st, j, _, _ = h.req("POST", "/api/account/recover", {"account": "Delta", "recovery_key": d_key, "password": "linen cobalt tide"})
+        check("forgot password with two-step on: the recovery key alone is not enough", (st, j.get("mfa")), (401, True))
+        st, j, _, _ = h.req("POST", "/api/account/recover", {"account": "Delta", "recovery_key": d_key,
+                                                             "password": "linen cobalt tide", "code": totp.code_at(d_secret, now + 1)})
+        check("  the recovery key and a code set a new password", (st, bool(j.get("recovery_key"))), (200, True))
+        d_key = j.get("recovery_key")
+        st, j, _, _ = h.req("POST", "/api/account/lost-phone", {"account": "Delta", "password": "wrong but long", "recovery_key": d_key})
+        check("lost phone: a wrong password with the recovery key opens nothing", st, 401)
+        st, j, _, _ = h.req("POST", "/api/account/lost-phone", {"account": "Delta", "password": "linen cobalt tide", "recovery_key": d_key})
+        check("  the password and the recovery key together let you in, with a new key", (st, j.get("recovery_key") != d_key), (200, True))
+        st, j, _, _ = h.req("POST", "/api/account/sign-in", {"account": "Delta", "password": "linen cobalt tide"})
+        check("  and the authenticator is off until it is added again", st, 200)
+
         # Changing the password signs out everywhere else
         st, j, beta2, _ = h.req("POST", "/api/account/sign-in", {"account": "Beta", "password": B_PW})
         h.req("POST", "/api/account/password", {"current": B_PW, "password": "copper lantern fog",

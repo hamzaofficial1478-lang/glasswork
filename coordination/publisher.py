@@ -15,7 +15,7 @@ it to a copy, or to any other report.
     His records (the reports and his answers) are in data/publisher/records.locked,
     locked with a key made from his postbox key. Nothing readable is on his website.
 
-    His Glasswork Home (publish-to-your-site/glasswork-home) is a postbox on the
+    His Botix Home (publish-to-your-site/glasswork-home) is a postbox on the
     PROGRAM'S OWN website — never one the program looks after for a client
     (setup() refuses those). It holds sealed envelopes until collect() takes
     them home, and then deletes them.
@@ -179,7 +179,7 @@ def setup(site, email="") -> dict:
                    "support_email": p["email"] or (p.get("public") or {}).get("support_email", "")}
     _save_pub(p)
     return {"ok": True, "home_url": home, "keys_folder": str(keyfile.parent),
-            "head": ("Your Glasswork Home is ready to upload. Download it, unzip it, and put the "
+            "head": ("Your Botix Home is ready to upload. Download it, unzip it, and put the "
                      "glasswork-home folder in your website's main folder. Then press Check.")}
 
 
@@ -567,7 +567,7 @@ def upload(path, name=None, chunk=4 * 1024 * 1024, progress=None) -> dict:
 #
 # One button on his own copy: zip this version, sign it, build the Windows
 # installer if asked (installer/build_windows.py — on Windows), send them to his
-# Glasswork Home in pieces, and only then put the signed manifest out.
+# Botix Home in pieces, and only then put the signed manifest out.
 
 def publish(notes="", installer=False, say=None) -> dict:
     say = say or (lambda stage, **kw: None)

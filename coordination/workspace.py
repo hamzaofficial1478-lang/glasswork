@@ -420,8 +420,12 @@ def sign_in(who, password, code=None) -> dict:
     return {"ok": True, "account": public(acct, master), "key": vault.as_env(master)}
 
 
-def recover(who, recovery_key, new_password) -> dict:
-    """Forgotten password: the recovery key opens the account and a new password is set."""
+def recover(who, recovery_key, new_password, code=None) -> dict:
+    """
+    Forgotten password: the recovery key opens the account and a new password is
+    set. With two-step sign-in on, the authenticator's code is needed as well —
+    always two things, so a recovery key found in a drawer is not enough alone.
+    """
     from . import vault
     acct = find_account(who)
     master = vault.open_with(acct["keys"], "recovery", recovery_key or "", acct["id"]) if acct.get("keys") else None
@@ -430,10 +434,38 @@ def recover(who, recovery_key, new_password) -> dict:
     bad = vault.password_problem(new_password, account_name(acct, master))
     if bad:
         return {"ok": False, "error": bad}
-    # A recovery key that has been used is replaced: whoever might have seen it cannot use it again.
+    if acct.get("mfa"):
+        if not code:
+            return {"ok": False, "mfa": True, "error": "Two-step sign-in is on: type the code from your authenticator app too."}
+        if not _mfa_ok(acct, master, code):
+            return {"ok": False, "mfa": True, "error": "That code is not right, or was used already. Try the next one."}
+    return _reopen(acct, master, new_password)
+
+
+def lost_phone(who, password, recovery_key) -> dict:
+    """
+    Two-step sign-in on and the phone lost: the password AND the recovery key
+    together turn it off and open the account. The recovery key is replaced.
+    """
+    from . import vault
+    acct = find_account(who)
+    keys, aid = (acct or {}).get("keys"), (acct or {}).get("id", "")
+    by_pw = vault.open_with(keys, "password", password or "", aid) if keys else None
+    by_rk = vault.open_with(keys, "recovery", recovery_key or "", aid) if keys else None
+    if by_pw is None or by_rk is None or by_pw != by_rk:
+        return {"ok": False, "error": "That name, password and recovery key do not open an account on this computer."}
+    acct.pop("mfa", None)
+    return _reopen(acct, by_pw)
+
+
+def _reopen(acct, master, new_password=None) -> dict:
+    """After a recovery: a new recovery key (whoever saw the old one cannot use it again), and the account opened."""
+    from . import vault
     fresh = vault.new_recovery_key()
-    acct["keys"] = vault.relock(vault.relock(acct["keys"], master, "password", new_password, acct["id"]),
-                                master, "recovery", fresh, acct["id"])
+    keys = acct["keys"]
+    if new_password is not None:
+        keys = vault.relock(keys, master, "password", new_password, acct["id"])
+    acct["keys"] = vault.relock(keys, master, "recovery", fresh, acct["id"])
     seal_sites(acct, master)
     if acct.get("name"):
         _seal_name(acct, master, acct["name"])

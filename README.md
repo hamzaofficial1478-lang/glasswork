@@ -1,8 +1,8 @@
-# Glasswork
+# Botix by TECH DUO
 
-**Your online growth agency, on your own computer.**
+**Your online growth agency — online, as an app, or on your own computer.**
 
-Glasswork runs a small digital agency for a business: a team of AI desks that
+Botix runs a small digital agency for a business: a team of AI desks that
 look after its website, find leads, write content, watch how it does on Google,
 and ask before anything leaves the building. It runs entirely on the computer
 it is installed on.
@@ -38,7 +38,7 @@ The security checklist, point by point: `docs/SECURITY.md`.
 
 ## How people get it, and new versions
 
-From the developer's **Glasswork Home** — one folder on the program's own
+From the developer's **Botix Home** — one folder on the program's own
 website (never a client's): a sealed postbox for reports, the signed updates,
 and the download page people install from. Setting it up and putting a version
 out are in `docs/RELEASING.md`.
@@ -90,7 +90,7 @@ pipelines/             what each desk does: website health and fixes, SEO, leads
                        outreach, content, Google indexing, Website Check
 providers/             the AI engines (Claude, OpenAI, Gemini) and paid tools
 paste-into-your-site/  the website connector (agency-api.php)
-publish-to-your-site/  the Glasswork Home (developer only)
+publish-to-your-site/  the Botix Home (developer only)
 installer/             the Windows Setup (build_windows.py, glasswork.iss)
 ```
 

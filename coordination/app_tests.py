@@ -85,10 +85,13 @@ def test_every_address_it_asks_for_exists():
 
 def test_light_and_dark():
     print("\nLight and dark, following the computer, background painted in both:")
-    check("the light palette is the default", ":root{" in APP and "--bg:#F3F5F5" in APP, True)
+    css = (ROOT / "ui" / "botix.css").read_text(encoding="utf-8")
+    check("every screen takes its colours from one file", all('href="/botix.css"' in (ROOT / "ui" / f).read_text(encoding="utf-8")
+          for f in ("app.html", "account.html", "business.html", "engine.html")), True)
+    check("the light palette is the default", ":root{" in css and "--bg:#F5F4F2" in css, True)
     check("dark follows the computer unless light was chosen",
-          '@media (prefers-color-scheme:dark){\n  :root:not([data-theme="light"])' in APP, True)
-    check("and dark can be chosen outright", ':root[data-theme="dark"]{' in APP, True)
+          '@media (prefers-color-scheme:dark){\n  :root:not([data-theme="light"])' in css, True)
+    check("and dark can be chosen outright", ':root[data-theme="dark"]{' in css, True)
     check("the page paints its own background", "html,body{margin:0;background:var(--bg)" in APP, True)
 
 
@@ -96,7 +99,7 @@ def test_nothing_from_elsewhere():
     print("\nIt loads nothing from anywhere but Google Fonts:")
     srcs = re.findall(r'<script[^>]+src="([^"]+)"', APP)
     links = re.findall(r'<link[^>]+href="(https?://[^"]+)"', APP)
-    check("no outside scripts", srcs, [])
+    check("no outside scripts", [s for s in srcs if s.startswith(("http", "//"))], [])
     check("only Google Fonts", all(u.startswith("https://fonts.g") for u in links), True)
 
 
@@ -195,7 +198,10 @@ def test_mail_content_and_the_shelf():
         check(f"  and change text with {ctl}", f'id="{ctl}"' in tools, True)
     check("each post shows its SEO score, originality and voice",
           all(w in APP for w in ("SEO score", "Original", "Reads like a person")), True)
-    check("the floor draws agents, not dots", "agentFigure(cx, cy, k)" in APP and 'class="lamp-c' not in APP, True)
+    slots = set(re.findall(r"\['[a-z-]+', '([a-z]+)', '[A-Z][^']*', '", APP))
+    icons = set(re.findall(r"^  ([a-z]+): '<", APP, flags=re.M))
+    check("the floor draws each desk as what it does", ("planTile(cx, cy, k, d.slot)" in APP and len(slots) >= 20
+          and slots <= icons and 'class="lamp-c' not in APP), True)
     sb = APP[APP.index("function shelfButton"):APP.index("function shelfBody")]
     check("the shelf is a button that glows while a tool is in use, with the count",
           "busy ? ' glow' : ''" in sb and '<span class="n mono">${busy}</span>' in sb, True)

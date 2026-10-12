@@ -1,6 +1,6 @@
 <?php
 /**
- * Glasswork Home — a sealed postbox, the program's updates, and a download page.
+ * Botix Home — a sealed postbox, the program's updates, and a download page.
  *
  *   https://yourprogram.com/glasswork-home/        the download page for new people
  *   ...?do=latest      (anyone)  is there a new version (nothing about the asker is recorded)
@@ -156,7 +156,7 @@ if (!is_array($body)) { refuse(400, 'that arrived incomplete'); }
 // --- the download page -------------------------------------------------------
 if ($do === '' && $method === 'GET') {
     while (ob_get_level() > 0) { ob_end_clean(); }
-    $name = htmlspecialchars((string)(config()['product'] ?? 'Glasswork'), ENT_QUOTES);
+    $name = htmlspecialchars((string)(config()['product'] ?? 'Botix'), ENT_QUOTES);
     $m = manifest();
     $ver = $m ? htmlspecialchars((string)($m['version'] ?? ''), ENT_QUOTES) : '';
     $exe = $m && !empty($m['installer']) ? htmlspecialchars(here() . '/updates/' . basename((string)$m['installer']), ENT_QUOTES) : '';
@@ -207,7 +207,7 @@ if ($do === 'drop' && $method === 'POST') {
     $c = config();
     // One email when the postbox stops being empty, not one per report: a burst cannot flood his inbox.
     if (!$files && !empty($c['owner_email']) && filter_var($c['owner_email'], FILTER_VALIDATE_EMAIL)) {
-        @mail((string)$c['owner_email'], '[' . ($c['product'] ?? 'Glasswork') . '] A problem report is waiting',
+        @mail((string)$c['owner_email'], '[' . ($c['product'] ?? 'Botix') . '] A problem report is waiting',
               "Someone using your program sent a problem report.\n\nIt is sealed — only your program can open it. Open your program and go to Reports.\n",
               'From: no-reply@' . preg_replace('/[^a-z0-9.-]/i', '', (string)($_SERVER['HTTP_HOST'] ?? 'localhost')));
     }

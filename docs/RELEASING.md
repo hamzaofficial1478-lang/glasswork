@@ -8,7 +8,7 @@ permission.
 
 ---
 
-## 1. Once: your Glasswork Home (about five minutes)
+## 1. Once: your Botix Home (about five minutes)
 
 **The program is yours; the websites it looks after are your clients'.**
 `worlddealtechnicalservices.com` is a client's website you manage — it is not

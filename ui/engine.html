@@ -6,27 +6,20 @@
 <title>Your AI engine</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/botix.css">
 <style>
-/* The office's tokens (ui/office.html), as on the account and business pages. */
-:root{
-  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
-  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
-  --text:#e7eff3; --muted:#8a9ea9; --faint:#54666f;
-  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.14);
-  --amber:#eaa543; --amber-dim:rgba(234,165,67,.13);
-  --danger:#e5565b; --danger-dim:rgba(229,86,91,.13); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
-}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);
-  font-family:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
 body{padding:28px 16px 120px}
 main{max-width:760px;margin:0 auto;display:grid;gap:16px}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
 .top a{color:var(--glass);text-decoration:none;font-size:14px}
 h1{font-size:26px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
 .lead{color:var(--muted);font-size:14.5px;line-height:1.6;margin:0;max-width:62ch}
-section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 22px 24px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 22px 24px}
 h2{font-size:16px;font-weight:600;margin:0 0 4px}
 .hint{color:var(--muted);font-size:13px;line-height:1.55;margin:0 0 6px}
 .hint a,.note a{color:var(--glass)}
@@ -35,16 +28,16 @@ input[type=text],input[type=password],input[type=number],select{width:100%;paddi
   border:1px solid var(--line2);background:var(--panel2);color:var(--text);font:inherit;font-size:15px}
 input:focus,select:focus,button:focus-visible,.pick:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
 .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
-.btn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass);color:#06222a;
+.btn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass);color:var(--accent-ink);
   font:inherit;font-weight:600;font-size:15px;cursor:pointer}
 .btn.quiet{background:transparent;color:var(--glass)}
 .btn.small{padding:7px 11px;font-size:13px}
 .btn.danger{border-color:var(--line2);background:transparent;color:var(--muted)}
 .btn[disabled]{opacity:.55;cursor:progress}
 .note{padding:12px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;
-  background:var(--amber-dim);border:1px solid rgba(234,165,67,.35);color:#f2cf9b}
-.note.ok{background:var(--ok-dim);border-color:rgba(92,192,136,.35);color:#a9e2c1}
-.note.bad{background:var(--danger-dim);border-color:rgba(229,86,91,.35);color:#f3a7aa}
+  background:var(--note-bg);border:1px solid var(--note-line);color:var(--note-ink)}
+.note.ok{background:var(--ok-dim);border-color:var(--ok-line);color:var(--done)}
+.note.bad{background:var(--danger-dim);border-color:var(--bad-line);color:var(--stuck)}
 .note.plain{background:var(--panel2);border-color:var(--line2);color:var(--muted)}
 
 /* the three engines */
@@ -58,7 +51,7 @@ input:focus,select:focus,button:focus-visible,.pick:focus-visible{outline:2px so
 .pick .ft{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:4px;font-size:12.5px}
 .tag{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12px;
   border:1px solid var(--line2);color:var(--muted)}
-.tag.ok{color:#a9e2c1;border-color:rgba(92,192,136,.45);background:var(--ok-dim)}
+.tag.ok{color:var(--done);border-color:var(--ok-line);background:var(--ok-dim)}
 .tag.now{color:var(--glass);border-color:var(--glass)}
 
 /* key row */
@@ -93,7 +86,7 @@ input:focus,select:focus,button:focus-visible,.pick:focus-visible{outline:2px so
 .meter i.hot{background:var(--amber)} .meter i.over{background:var(--danger)}
 @media (max-width:620px){.money{grid-template-columns:1fr}}
 
-.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(12,18,22,.94);border-top:1px solid var(--line);
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--bar-bg);border-top:1px solid var(--line);
   padding:12px 16px;backdrop-filter:blur(6px)}
 .bar .in{max-width:760px;margin:0 auto;display:flex;gap:12px;align-items:center;justify-content:space-between}
 .bar .msg{font-size:13.5px;color:var(--muted)}
@@ -105,9 +98,8 @@ input:focus,select:focus,button:focus-visible,.pick:focus-visible{outline:2px so
   <div class="top">
     <div>
       <h1>How your agency thinks</h1>
-      <p class="lead">Every desk — the Managing Director, the writers, SEO, the lead finders — asks an AI
-        to think for it. Choose which company that is. You pay them directly for what the agency uses,
-        and the agency stops before it passes your daily limit.</p>
+      <p class="lead">Every desk uses an AI to think. Pick the company and paste your key. You pay them
+        directly, and the agency stops before it goes over your daily limit.</p>
     </div>
     <a href="/" id="backLink">← Back to the office</a>
   </div>
@@ -119,8 +111,7 @@ input:focus,select:focus,button:focus-visible,.pick:focus-visible{outline:2px so
     <p class="hint">Each one does the same work. They differ in price and in how they write.
       You can change your mind at any time.</p>
     <div class="picks" id="picks"></div>
-    <p class="hint" style="margin-top:14px">Signing in with a ChatGPT, Claude or Gemini subscription is not offered:
-      each company's rules have to allow a program like this one to use it, and that is still being checked.</p>
+    <p class="hint" style="margin-top:14px">Signing in with a ChatGPT, Claude or Gemini subscription isn't offered yet.</p>
   </section>
 
   <section id="keyBox" style="display:none">
@@ -152,9 +143,8 @@ input:focus,select:focus,button:focus-visible,.pick:focus-visible{outline:2px so
 
   <section>
     <h2>Daily spending limit</h2>
-    <p class="hint">Before each paid step — every AI call, and every paid tool — the agency checks what has been
-      spent today. If the next one would pass this limit, it is not made, and you are told. It covers every
-      website in your account.</p>
+    <p class="hint">The agency checks before every paid step. If the next one would go over, it stops and tells you.
+      It covers every website in your account.</p>
     <label for="cap">Limit per day, in US dollars</label>
     <input type="number" id="cap" min="0.5" max="10000" step="0.5" style="max-width:200px">
     <div class="meter"><i id="meter" style="width:0"></i></div>

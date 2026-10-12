@@ -25,11 +25,11 @@ nav{display:flex;gap:18px;flex-wrap:wrap;font-size:15px;margin-bottom:28px}
 <body><div class="wrap">
 <nav><a href="/">Back to the program</a><a href="/privacy">Privacy</a></nav>
 <h1>Terms of use</h1>
-<p class="muted"><span class="pname">Glasswork</span> · version <span class="pver"></span></p>
+<p class="muted"><span class="pname">Botix</span> by <span class="pcompany">TECH DUO</span> · version <span class="pver"></span></p>
 <div class="note"><b>Draft for review.</b> These terms have not yet been checked by a lawyer. They say plainly how the program works and what it expects of you.</div>
 
 <h2>What this is</h2>
-<p><span class="pname">Glasswork</span> is a program you install and run on your own computer. It runs the online growth of your business with a team of AI agents — finding leads, writing pages and posts, looking after your website and your place on Google — and asks you before anything leaves your computer.</p>
+<p><span class="pname">Botix</span> is made by <span class="pcompany">TECH DUO</span>. You use it online at its address, as an app installed from your browser, or as a program on your own computer. It runs the online growth of your business with a team of AI agents — finding leads, writing pages and posts, looking after your website and your place on Google — and asks you before anything goes out.</p>
 
 <h2>Your account and your data</h2>
 <ul>
@@ -63,7 +63,7 @@ nav{display:flex;gap:18px;flex-wrap:wrap;font-size:15px;margin-bottom:28px}
 <p>When a new version is out, the program offers it. It is installed only when you press Update, and only if it is signed by the publisher; your work and settings are kept, and you can go back to the version before.</p>
 
 <h2>The licence</h2>
-<p>The program belongs to its publisher; all rights are reserved. You may install and use the copy you were given, for your own business. You may not copy, share, sell or change it, or try to recover its source code, without the publisher’s written permission. It is provided as it is, without any warranty, to the extent the law allows. The full notice comes with the program, in the file called LICENSE.</p>
+<p>The program belongs to <span class="pcompany">TECH DUO</span>; all rights are reserved. You may install and use the copy you were given, for your own business. You may not copy, share, sell or change it, or try to recover its source code, without the publisher’s written permission. It is provided as it is, without any warranty, to the extent the law allows. The full notice comes with the program, in the file called LICENSE.</p>
 
 <h2>Responsibility</h2>
 <p>To the extent the law allows, the program’s authors are not responsible for indirect losses, lost profits or lost data arising from using the program, or for what third-party services do with what you send them. Nothing here limits responsibility that the law does not allow to be limited.</p>
@@ -76,6 +76,7 @@ fetch('/api/product').then((r) => r.json()).then((p) => {
   if (!p || !p.ok) return;
   document.querySelectorAll('.pname').forEach((e) => { e.textContent = p.name; });
   document.querySelectorAll('.pver').forEach((e) => { e.textContent = p.version; });
+  if (p.company) document.querySelectorAll('.pcompany').forEach((e) => { e.textContent = p.company; });
   if (p.support_email) document.querySelectorAll('.pmail').forEach((e) => { e.textContent = p.support_email; });
   document.title = 'Terms of use — ' + p.name;
 }).catch(() => {});

@@ -103,7 +103,7 @@ def _req_once(s, path, method, body, query, timeout):
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", _auth(s))
     req.add_header("Accept", "application/json")
-    req.add_header("User-Agent", "Glasswork agency (WordPress connection)")
+    req.add_header("User-Agent", "Botix agency (WordPress connection)")
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
@@ -424,7 +424,7 @@ def picture_add(s, data_b64, name="picture") -> dict:
     req.add_header("Authorization", _auth(s))
     req.add_header("Content-Type", kind[1])
     req.add_header("Content-Disposition", f'attachment; filename="{fname}"')
-    req.add_header("User-Agent", "Glasswork agency (WordPress connection)")
+    req.add_header("User-Agent", "Botix agency (WordPress connection)")
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             out = json.loads(r.read().decode("utf-8", "replace") or "{}")

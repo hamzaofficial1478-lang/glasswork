@@ -1,4 +1,4 @@
-# Running Glasswork from your own server — the owner's guide
+# Running Botix from your own server — the owner's guide
 
 "the program brain to be in my control fully ... the user will only be able to
 use the program nothing else"
@@ -19,7 +19,7 @@ that company directly. You supply no AI.
   run it — the program is Node and Python, and runs long jobs.
 - A domain or subdomain for it, such as `app.yourprogram.com`, pointed at the
   VPS (an A record). Never a client's website.
-- Your Glasswork Home stays where it is, for problem reports.
+- Your Botix Home stays where it is, for problem reports.
 
 ## Privacy, said plainly
 
@@ -87,7 +87,7 @@ exit
 
 ```ini
 [Unit]
-Description=Glasswork (hosted)
+Description=Botix (hosted)
 After=network-online.target
 
 [Service]
@@ -177,7 +177,7 @@ Merging to `main` is then the same as publishing.
 ## What the person sees
 
 A web address — and, if they like, an app. In Chrome or Edge (and on Android)
-the address bar offers **Install Glasswork**; Settings → *Install the app* says
+the address bar offers **Install Botix**; Settings → *Install the app* says
 where. It then opens in its own window with its own icon, on the desktop or the
 phone's home screen, and they sign in with the same account. Nothing of the
 program is downloaded: the app is a window onto your server, so it is always
