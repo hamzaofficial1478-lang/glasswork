@@ -1,6 +1,6 @@
 <?php
 /**
- * agency-api.php — FULL ACCESS for worlddealtechnicalservices.com  (version 8)
+ * agency-api.php — FULL ACCESS for YOUR-WEBSITE  (version 8)
  *
  * This is the door. Put this ONE file on your server and the agency can read
  * and edit your pages itself, instead of handing you homework.
@@ -18,7 +18,7 @@
  *         -join ((48..57)+(97..122) | Get-Random -Count 48 | % {[char]$_})
  *     Paste the result into token.txt and save. Share it with nobody.
  *  5. On the agency setup screen choose Full access and enter:
- *         Admin API address:  https://www.worlddealtechnicalservices.com/agency-api
+ *         Admin API address:  https://YOUR-WEBSITE/agency-api
  *         Admin API token:    the exact line from token.txt
  *
  * That is it. Nothing else on your site changes.

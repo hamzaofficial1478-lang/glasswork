@@ -60,9 +60,9 @@ def _legacy_site():
 def cmd_list(_):
     a = workspace.active()
     url, name = _legacy_site()
-    # Read before anyone signs in: who can sign in, and nothing about their websites.
-    return {"ok": True,
-            "accounts": [{"id": x["id"], "name": x.get("name")} for x in workspace.accounts()],
+    # Read before anyone signs in: whether there is any account here, and
+    # nothing about them — not how many, not their names, not their websites.
+    return {"ok": True, "accounts": bool(workspace.accounts()),
             "active": a, "max_sites": workspace.MAX_SITES,
             "legacy_present": workspace.legacy_present(),
             "legacy_site": {"url": url, "name": name},

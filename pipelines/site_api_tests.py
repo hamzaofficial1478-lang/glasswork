@@ -14,7 +14,6 @@ placeholder address published to the world, or a change with no way back.
 Nothing here touches the network or his real site. The HTTP layer is replaced
 throughout; what is tested is the decisions either side of it.
 """
-import json
 import sqlite3
 import sys
 import tempfile

@@ -176,13 +176,6 @@ def objections(since=0):
             "SELECT * FROM task_objections WHERE at>=? ORDER BY at DESC", (since,))]
 
 
-def objected_task_ids():
-    """Tasks a sector has pushed back on — the MD must not simply re-post these."""
-    board.ensure_schema()
-    with sqlite3.connect(board.DB, timeout=30) as c:
-        return {r[0] for r in c.execute("SELECT DISTINCT task_id FROM task_objections")}
-
-
 # ---------------------------------------------------------------------------
 # THE OWNER'S ORDERS, PER SECTOR
 # ---------------------------------------------------------------------------

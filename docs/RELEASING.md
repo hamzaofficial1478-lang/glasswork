@@ -1,60 +1,158 @@
-# Putting a new version out — the maintainer's guide
+# Putting your program out — the owner's guide
 
-Glasswork is open source. New versions are published on the program's GitHub
-release page, and each copy stays on its own computer: nothing is collected
-about the people using it, and no copy contacts anyone on its own.
+This guide is for your own copy only. It is left out of every copy you give
+people, along with the rest of your side of the program (see *What people get*
+below). The program is closed source: the repository is private and the
+`LICENSE` file says nobody may copy, share or change it without your written
+permission.
 
 ---
 
-## 1. Once: make the repository public
+## 1. Once: your Glasswork Home (about five minutes)
 
-People can only download the Setup from the release page if the repository is
-public. On GitHub: **Settings → General → Danger Zone → Change repository
-visibility → Public**.
+**The program is yours; the websites it looks after are your clients'.**
+`worlddealtechnicalservices.com` is a client's website you manage — it is not
+the program's, and the program's Home never goes on it (the program refuses
+any website it looks after). The Home needs a website that belongs to the
+program: a domain you buy for it (for example `yourprogram.com`), or a
+subdomain of a website you personally own (`app.yourcompany.com`). Any ordinary
+hosting plan with PHP will do — the Home is one PHP file and a few folders.
+When you move to a VPS later, the same folder goes on it unchanged.
 
-Before you do, remember that a public repository shows its **whole history**,
-not just today's files. Look through it for anything you would not want public
-— for example a client's details in `paste-into-your-site/` or in tests. No
-keys, passwords or `.env` files have ever been committed (they are kept out by
-`.gitignore`).
+Your Home is one folder on the program's own website. It does three jobs:
+
+- **A sealed postbox for problem reports.** A report is sealed on the sender's
+  computer so that only *your* computer can open it. It waits in the postbox,
+  unreadable, until your program collects it, and is then deleted from the
+  website.
+- **Updates.** Every version you put out is kept there, and every copy asks
+  for the newest one.
+- **A download page.** The address you give new people to get the program.
+
+**Nothing tracks the people using it.** No copy has a number, nothing counts
+the copies in use, and nobody registers. Looking for an update sends nothing
+about the person; a report carries only what they wrote, the version and the
+kind of computer, and two reports from the same person cannot be tied
+together.
+
+How:
+
+1. Click **Reports** in the menu on the left (on a phone: *More → Reports*).
+   Type the program's own website (`https://www.yourprogram.com`). If you like,
+   add the email that should hear "a report is waiting" (the email never says
+   what the report says). Press **Make it**, and type the password you sign in
+   with when it asks.
+2. Press **Download glasswork-home.zip**. Unzip it (right-click → *Extract All*).
+3. In that website's hosting **File Manager**, open its main folder (the one
+   with its home page in it, usually `public_html`) and upload the
+   **glasswork-home** folder there. If there is one from before, replace it.
+4. Back in Reports, press **Check it**. It should say *Your Home answers and
+   knows you*, and the room opens.
+
+Your download page is then `https://www.yourprogram.com/glasswork-home/` — the
+only link you give people. No client's website is ever named to them.
+
+### Your three keys — back them up
+
+Made for you and kept on your computer, in the `.glasswork-publisher` folder in
+your Windows user folder (`C:\Users\<you>\.glasswork-publisher`):
+
+- **postbox.key** — opens the reports, and locks your records. Without it,
+  nobody (you included) can open your records or waiting reports.
+- **signing.key** — signs every version. Every copy refuses an update that is
+  not signed with it. Lose it and installed copies cannot be updated again.
+- Your **Home key** (in `config/publisher.local.json`) — lets your program
+  collect, answer and put versions out. The website holds only a fingerprint
+  of it, not the key itself.
+
+**Copy the `.glasswork-publisher` folder to a USB stick** and keep it safe.
+Your records are in the program's `data/publisher` folder; copy that too if you
+want a backup of the reports and your answers.
 
 ## 2. Each new version
 
-1. The version number goes up in `config/product.json` (Claude raises it with
-   each round of work) and the change is pushed.
-2. GitHub's *windows-installer* check then, on a real Windows machine:
-   builds the Setup, installs it silently, opens the program, makes an account,
-   adds a website, checks the office reads its encrypted records and wrote
-   nothing in the program's folder, and removes it again.
-3. Only if all of that passes, it creates the release **v0.x.y** on the release
-   page with the Setup attached. A version already there is never replaced —
-   the next one needs a higher number.
+When a round of work is finished, the version number goes up (it is in
+`config/product.json`; Claude raises it with each round). Then:
 
-You can watch it under **Actions → windows-installer**. Each run also keeps the
-Setup for two weeks under its *Artifacts*.
+1. Open your program as usual — it brings itself up to date first.
+2. **Settings → Publisher → Put out version 0.x.0.** Write a line about what is
+   new — people read it in the update message.
+3. Tick **Build the Windows installer too** (on your Windows computer; the first
+   time it installs Inno Setup and takes ten minutes or so, after that two or three).
+4. Press **Put it out**.
 
-## 3. What people do
+Every copy shows *"Version 0.x.0 is ready — Update now"* the next time it opens
+(and every six hours while it stays open). Only a version signed with your key
+is installed. Their data, websites and settings are never touched, and they can
+go back to the previous version from Settings.
 
-- **New people:** open the release page, download `glasswork-x.y.z-setup.exe`,
-  open it, choose **More info → Run anyway** if Windows asks (the Setup is not
-  signed with a paid certificate, by choice), and follow the steps. Everything
-  the program needs is inside the Setup.
-- **Getting a new version:** *Settings → This program → Check for a new
-  version → Download*, then run the new Setup over the old one. Their work is
-  kept in its own folder and is not touched.
-- **Help:** *Help → Make it* makes a support report with nothing private in
-  it. They read it and send it to whoever they choose — you by email, or a new
-  issue on the GitHub page.
+A version can only go out once; the next one needs a higher number.
 
-## 4. What each person sets up themselves
+## 3. New people: one link
 
-- **Their own account**, encrypted with their own password. No other account
-  on the same computer can open it.
-- **Their own AI key** (Anthropic, OpenAI or Google), paid to that company
-  directly.
-- **Their own website connection**, with its own secret: the connector folder
-  for a hand-built website, or a WordPress Application Password.
-- **Maps, Search Console, email** — their own keys, each optional.
+Send them your download page (section 1). They press **Download for Windows**,
+open the file, and follow the steps: the terms, where to install the program,
+where to keep their work, a desktop shortcut. Everything it needs is inside
+that one file — its own Python, its own Node and every library — so nothing
+else downloads and no administrator password is needed.
 
-The program walks them through it: **Today** shows *Getting started* until
-their business, AI, website and first orders are in place.
+**The blue "Windows protected your PC" box.** The installer is not signed with a
+paid certificate, by choice. The first time, people click **More info → Run
+anyway**; your download page shows these steps under the button. Updates
+installed from inside the program never show it.
+
+## 4. The reports
+
+**Reports** is in the menu on your own copy only. Each time you open it, it
+collects whatever is waiting in your postbox (or press **Check for new**), opens
+it on your computer and files it in your records.
+
+Open a report to read what they wrote, their version, the kind of computer and
+(if they ticked it) their support report — which has every key, password,
+email, web address and phone number taken out before it leaves their computer.
+There is no name unless they wrote one, and an email only if they gave one for
+a reply. Choose where it stands (*Read*, *Being worked on*, *Fixed*, *Not
+changing*), write an answer, say in which version it is fixed, and press
+**Save and send**. Your answer is sealed to that one report; they read it in
+their *Help and reports* screen, and if the fix is in a newer version than
+theirs they are told to update. If your website does not answer at that
+moment, the answer goes the next time you collect.
+
+### What "room hooks" means
+
+The Reports room lives in its own file, `ui/publisher.js`, which only your copy
+has. The main screen (`ui/app.html`) has a few small places where that file can
+plug itself in — the **room hooks**: a menu entry, a line on the phone's *More*
+page, a card in Settings, and the screen itself. On your copy the office says
+"this is the developer's copy", the main screen loads `publisher.js`, and the
+room appears. On everyone else's copy the file does not exist, so the hooks
+stay empty and the room is simply not there.
+
+## 5. What people get — and what they do not
+
+**What they get:** the program itself — the agency, its screens, its own Python
+and Node — and the *public* halves of two of your keys: one to check your
+signature on updates, one to seal a report to you. A public key can only check
+or seal; it cannot sign anything or open anything.
+
+**What they never get:** the Reports room, putting versions out, the Home's own
+code, these guides, the agency handbook you use with Claude Code, your client's
+own files, your keys, your records, your settings. None of it is in the Setup
+or in any update (`coordination/product.py`, `PUBLISHER_ONLY`). On their copy
+the office answers "That is not part of this copy" if anything asks for it.
+
+**Nothing in their copy can reach your computer, or anyone else's.** Your
+program goes to your website and collects; nothing ever calls in. Each copy's
+office listens only on the computer it runs on, and each account on that
+computer is locked with its own password.
+
+**About reading the code.** The reports and your records cannot be opened
+without your postbox key — not by guessing, not by any computer or AI. The
+program's *code* is different: any program that runs on someone's computer
+can, with enough effort, be read there, because the computer has to understand
+it to run it. That is why nothing secret is in it, and why the licence forbids
+copying it.
+
+**Each person sets up their own:** their AI key (they pay that company
+directly), their website connection with its own secret, and any maps, Search
+Console or email keys — each optional.

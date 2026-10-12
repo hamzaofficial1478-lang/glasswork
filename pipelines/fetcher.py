@@ -505,18 +505,6 @@ def _fetch_uncached(url, render, timeout, allow_paid, min_chars) -> dict:
             "error": ""}
 
 
-def fetch_many(urls, render=False, timeout=25, pause=0.25, allow_paid=True):
-    """Several pages, with the same rules and a running cost."""
-    out, spent = [], 0.0
-    for u in urls:
-        r = fetch(u, render=render, timeout=timeout, allow_paid=allow_paid)
-        spent += r["cost"]
-        out.append((u, r))
-        if r["how"] == "plain":
-            time.sleep(pause)              # only the free path needs manners
-    return out, round(spent, 4)
-
-
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser(description="Read one page, the way the agency does.")

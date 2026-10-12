@@ -22,7 +22,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from coordination import board, state, targets
+from coordination import board, targets
 from . import md_cycle as MD
 
 _fail = []

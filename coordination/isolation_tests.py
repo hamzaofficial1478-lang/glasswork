@@ -11,13 +11,18 @@ Two people sharing one computer and one copy of the program. What has to hold:
     their websites' names or addresses, not their settings or keys, not their
     cabinet — without their own password
   one person's key opens nothing of the other's
-  the sign-in screen shows who can sign in, and nothing about their websites
+  the sign-in screen names nobody, no file shows anyone's name, and trying
+    names tells you nothing
+  each person's problem reports are kept in their own account, sealed
+  nothing of the developer's own client (his email, his markup) is used on
+    anyone else's website
   a copy installed from Setup asks for an account before anything else, and
     writes nothing in the program's own folder
   signing in never leaves the other person's website open
 
 Nothing reaches the internet; everything is in temporary folders.
 """
+import hashlib
 import http.client
 import json
 import os
@@ -32,7 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from coordination import accounts, vault, workspace  # noqa: E402
+from coordination import accounts, support, vault, workspace  # noqa: E402
 
 _fail = []
 ALPHA = {"host": "alpha-glazing-marker.example", "name": "Alpha Glazing Marker", "secret": "ALPHA-KEY-7Q2X-MARKER"}
@@ -84,6 +89,7 @@ def _person(who, password):
     sdir = workspace.site_dir(acct_id, site["id"])
     workspace.write_secret(sdir / "site.env", f"SITE_URL=https://www.{who['host']}\nSITE_API_TOKEN={who['secret']}\n")
     workspace.write_secret(workspace.account_dir(acct_id) / "account.env", f"ANTHROPIC_API_KEY={who['secret']}\n")
+    support._save([{"id": "r1", "title": who["name"] + " problem report", "box": "a" * 32, "box_key": who["secret"]}])
     os.environ.pop("AGENCY_KEY", None)
     return acct_id, made["key"], site["id"]
 
@@ -98,9 +104,16 @@ def test_two_people_one_computer():
         check("a website's folder is not named after it",
               any("alpha" in p.name or "beta" in p.name for p in (place.dir / "data").rglob("site*")), False)
         listed = json.dumps(accounts.cmd_list({}))
-        check("the sign-in screen shows who can sign in", all(n in listed for n in ("Alpha", "Beta")), True)
-        check("  and nothing about their websites", any(w in listed for w in (ALPHA["host"], BETA["host"],
-                                                                             ALPHA["name"], BETA["name"])), False)
+        check("the sign-in screen names nobody: not who has an account, not their websites",
+              any(w in listed for w in ("Alpha", "Beta", ALPHA["host"], BETA["host"])), False)
+        check("  nor can anyone's name be read from the disk", readable(place.dir, ["Alpha", "Beta"]), [])
+        check("  nor is a folder named after anyone",
+              [p.name for p in (place.dir / "data" / "accounts").iterdir() if not p.name.startswith("acct-")], [])
+        check("each person signs in by typing their own name",
+              (workspace.sign_in("alpha", "alpha horse battery").get("ok"), workspace.sign_in("Alpha", "wrong").get("error")),
+              (True, workspace.NO_SUCH))
+        check("  and a name nobody has gets the very same answer", workspace.sign_in("Gamma", "alpha horse battery").get("error"),
+              workspace.NO_SUCH)
         os.environ["AGENCY_KEY"] = b_key
         theirs = workspace.sites(workspace.account(a_id))
         check("Beta's key does not open Alpha's websites", (theirs[0].get("locked"), theirs[0]["url"]), (True, ""))
@@ -112,6 +125,10 @@ def test_two_people_one_computer():
         check("  nor Alpha's settings", opened, False)
         mine = workspace.sites(workspace.account(b_id))
         check("but opens Beta's own", mine[0]["url"], "https://www." + BETA["host"])
+        check("Beta's problem reports are Beta's alone", [r["title"] for r in support._load()], [BETA["name"] + " problem report"])
+        from pipelines import offer_mail, site_api
+        check("nothing of the developer's own client reaches Beta: no default email, no drafts",
+              (offer_mail.default_email(), site_api._drafts_dir().is_relative_to(workspace.site_dir(b_id, b_site))), ("", True))
         os.environ["AGENCY_KEY"] = a_key
         check("and Alpha's key opens Alpha's", workspace.sites(workspace.account(a_id))[0]["name"], ALPHA["name"])
         os.environ.pop("AGENCY_KEY", None)
@@ -127,10 +144,23 @@ def test_websites_made_before_are_sealed_too():
         acct = workspace.account(made["account"]["id"])
         acct["sites"] = [{"id": "old-site-1", "name": ALPHA["name"], "url": "https://" + ALPHA["host"], "created": 1}]
         (workspace.site_dir(acct["id"], "old-site-1")).mkdir(parents=True)
+        # As an older version kept it: the name readable, the password through the old, lighter scrypt.
+        for k in ("name_tag", "name_salt", "name_sealed"):
+            acct.pop(k)
+        acct["name"] = "Older"
+        master = bytes.fromhex(made["key"])
+        salt = os.urandom(16)
+        old = hashlib.scrypt(b"older horse battery", salt=salt, n=2 ** 15, r=8, p=1, maxmem=64 * 1024 * 1024, dklen=32)
+        acct["keys"]["password"] = {"salt": vault._b64(salt), "scrypt": {"n": 2 ** 15, "r": 8, "p": 1},
+                                    **vault._lock(old, master, acct["id"].encode())}
         workspace._save(acct)
-        check("before: readable", bool(readable(place.dir, [ALPHA["host"]])), True)
+        check("before: readable", bool(readable(place.dir, [ALPHA["host"], "Older"])), True)
         r = workspace.sign_in("Older", "older horse battery")
-        check("after signing in: sealed", (r.get("ok"), readable(place.dir, [ALPHA["host"], ALPHA["name"]])), (True, []))
+        check("after signing in: sealed, the name too",
+              (r.get("ok"), readable(place.dir, [ALPHA["host"], ALPHA["name"], "Older"])), (True, []))
+        check("  and the password moved up to the stronger key stretch",
+              vault.outdated(workspace.account(acct["id"])["keys"], "password"), False)
+        check("  which still opens it", workspace.sign_in("older", "older horse battery").get("ok"), True)
         os.environ["AGENCY_KEY"] = r["key"]
         check("  and still theirs to see", workspace.sites(workspace.account(acct["id"]))[0]["url"], "https://" + ALPHA["host"])
         os.environ.pop("AGENCY_KEY", None)
@@ -219,10 +249,23 @@ def test_an_installed_copy():
         check("  and adds a website", (st, j.get("ok")), (200, True))
         st, j, _ = o.req("GET", "/api/state", cookie=alpha)
         check("  and the office opens on it", st, 200)
+        st, j, _ = o.req("GET", "/api/account/list")
+        check("while Alpha is signed in, someone else at the door learns nothing of it",
+              (j.get("signedIn"), "Alpha" in json.dumps(j), "active" in j), (None, False, False))
+        st, j, _ = o.req("POST", "/api/account/sign-out", {})
+        st, j, _ = o.req("GET", "/api/state", cookie=alpha)
+        check("  and cannot sign Alpha out", st, 200)
+        st, j, _ = o.req("GET", "/api/support/mine", cookie=alpha)
+        check("  where the report form works", (st, j.get("ok"), j.get("reports")), (200, True, []))
+        st, j, _ = o.req("GET", "/api/publisher", cookie=alpha)
+        check("the developer's Reports room is not in a copy given out", (st, j.get("can_publish")), (200, False))
+        check("  nor anything under it, nor its screen",
+              [o.req("GET", u, cookie=alpha)[0] for u in ("/api/publisher/inbox", "/api/publisher/job", "/publisher.js")],
+              [404, 404, 404])
         o.req("POST", "/api/account/sign-out", {}, alpha)
         st, j, _ = o.req("GET", "/api/account/list")
-        check("signed out, the sign-in screen names nobody's website",
-              any(w in json.dumps(j) for w in (ALPHA["host"], ALPHA["name"])), False)
+        check("signed out, the sign-in screen names nobody, and no website",
+              any(w in json.dumps(j) for w in ("Alpha", ALPHA["host"], ALPHA["name"])), False)
         st, j, beta = o.req("POST", "/api/account/sign-up", {"name": "Beta", "password": "beta staple correct",
                                                              "confirm": "beta staple correct"})
         st, me, _ = o.req("GET", "/api/account/me", cookie=beta)

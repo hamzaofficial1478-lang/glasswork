@@ -111,21 +111,31 @@ def test_data_is_escaped():
     check("every agency field inside the markup goes through esc()", risky, [])
 
 
-def test_nothing_is_sent_to_the_makers():
+def test_reports_and_updates_without_tracking():
     """
-    "now i don't want the users data ... each program on pc is remains to itself
-     and that pc not to anything else"
+    "do not remove these report-sending form ... i do not want to track the user
+     that using my program ... how user will get the updates and the room hooks"
     """
-    print("\nNothing about the person leaves the computer for the makers:")
-    for gone in ("/api/support/send", "/api/support/register", "/api/support/counting", "/api/publisher",
-                 "publisher.js", "Your users"):
-        check(f"the app has no {gone}", gone in APP, False)
-    check("the office has no routes for reports, registrations or a users list",
-          any(r in SERVER for r in ('"/api/support/', '"/api/publisher')), False)
-    check("a new version is looked for only when the button is pressed",
-          "updateBanner" not in APP and "id=\"updCheck\"" in APP, True)
-    check("Help makes a support report the person reads and sends themselves",
-          "api('/api/diagnostics')" in APP and "Nothing is sent from here" in APP, True)
+    print("\nReports and updates, and nothing that counts anyone:")
+    check("the person can send a report and read the answer",
+          all(w in APP for w in ("api('/api/support/send'", "api('/api/support/mine')")), True)
+    check("  and nothing registers or counts them", any(w in APP + SERVER for w in ("support/register", "support/counting",
+                                                                                     "Your users", "/api/publisher/users")), False)
+    check("a signed version is offered on its own, and can be undone",
+          all(w in APP for w in ("updateBanner();", "'/api/update/apply'", "'/api/update/rollback'")), True)
+    check("the Reports room loads only when the office says this copy is the developer's",
+          "p && p.ok && p.can_publish" in APP and "s.src = '/publisher.js'" in APP, True)
+    check("  which it says only where his side of the program is",
+          'const PUBLISHER_HERE = fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));' in SERVER
+          and 'app.use("/api/publisher", (_q, res, next) => PUBLISHER_HERE ? next()' in SERVER, True)
+    pubjs = ROOT / "ui" / "publisher.js"
+    if not pubjs.exists():
+        print("  SKIP  this copy has no Reports room, as a copy given out should not")
+        return
+    room = pubjs.read_text(encoding="utf-8")
+    check("the room keeps the reports on this computer, and collects when opened",
+          "Kept on this computer — not on your website." in room and "api('/api/publisher/collect', {})" in room, True)
+    check("  and lists no people", any(w in room for w in ("openUser", "/api/publisher/users", "data-user")), False)
 
 
 def test_the_connection_summary():
@@ -199,7 +209,7 @@ def main():
     test_light_and_dark()
     test_nothing_from_elsewhere()
     test_data_is_escaped()
-    test_nothing_is_sent_to_the_makers()
+    test_reports_and_updates_without_tracking()
     test_the_connection_summary()
     test_the_agency_floor()
     test_mail_content_and_the_shelf()

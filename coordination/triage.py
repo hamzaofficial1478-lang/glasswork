@@ -274,7 +274,7 @@ def queue(sector, limit=DEFAULT_LIMIT, now=None) -> dict:
             r["position"] = i + 1
 
         nxt, rest = scored[:max(0, int(limit))], scored[max(0, int(limit)):]
-        head = (f"nothing waiting" if not scored else
+        head = ("nothing waiting" if not scored else
                 f"{len(scored)} waiting"
                 + (f", dealing with {len(nxt)} this pass" if rest else ""))
         return {"ok": True, "sector": sector, "now": now, "next": nxt,

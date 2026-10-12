@@ -21,7 +21,6 @@ import socket
 import sqlite3
 import tempfile
 import threading
-import time
 import http.client
 import urllib.error
 import urllib.request

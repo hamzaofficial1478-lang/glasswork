@@ -143,7 +143,7 @@ def connector_zip(new_secret=False) -> dict:
         return {"ok": False, "error": saved.get("error") or "could not save the connection"}
 
     src = CONNECTOR.read_text(encoding="utf-8")
-    src = src.replace("FULL ACCESS for worlddealtechnicalservices.com", f"FULL ACCESS for {host}", 1)
+    src = src.replace("YOUR-WEBSITE", host)
     day = time.strftime("%d %B %Y")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:

@@ -209,7 +209,6 @@ def scan(base="", timeout=TIMEOUT, checks=None) -> dict:
 
 def main():
     import argparse
-    import sys
     ap = argparse.ArgumentParser(
         description="What of yours can a stranger download right now?")
     ap.add_argument("--url", default="", help="check this address instead")

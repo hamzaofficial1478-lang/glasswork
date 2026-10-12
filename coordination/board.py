@@ -2641,29 +2641,6 @@ def decide_outreach(qid, decision, note=""):
         return c.total_changes > 0
 
 
-def outreach_armed() -> bool:
-    """
-    Has the owner ever approved a mail?
-
-    This used to switch outreach to sending on its own after his first yes. It
-    no longer does — every draft waits for his tick (pipelines/leads_outreach,
-    EVERY MAIL IS HIS CALL) — and this is kept only as a fact the screens can
-    report.
-
-    Read from the record rather than a config flag on purpose: the thing that
-    arms it is him actually approving mail, which is a row, not a setting
-    somebody could flip without meaning to.
-    """
-    with _conn() as c:
-        _migrate(c)
-        try:
-            r = c.execute("SELECT 1 FROM outreach_queue"
-                          " WHERE status IN ('approved','sent') LIMIT 1").fetchone()
-            return bool(r)
-        except Exception:
-            return False
-
-
 def mark_outreach_sent(qid, ok=True, note=""):
     with _conn() as c:
         _migrate(c)

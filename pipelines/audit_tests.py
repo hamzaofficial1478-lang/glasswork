@@ -19,7 +19,6 @@ Three promises, and the first is the one an audit most often breaks:
 
 Nothing here touches the network. Pages are built from HTML strings.
 """
-import json
 import sqlite3
 import sys
 import tempfile

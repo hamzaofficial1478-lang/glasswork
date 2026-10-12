@@ -10,8 +10,14 @@ Each account has one random master key. It is never written down as it is.
 It is stored twice, LOCKED: once with a key made from the password, once with
 a key made from the recovery key. Either opens it; neither is stored anywhere.
 
-    password ──scrypt──▶ key A ──AES-GCM──▶ master key, locked copy 1
-    recovery ──scrypt──▶ key B ──AES-GCM──▶ master key, locked copy 2
+    password ──Argon2id──▶ key A ──AES-GCM──▶ master key, locked copy 1
+    recovery ──Argon2id──▶ key B ──AES-GCM──▶ master key, locked copy 2
+
+Argon2id is the memory-hard stretch recommended today for passwords; where
+the installed encryption library is too old to have it, scrypt at 128 MiB is
+used instead. Each locked copy keeps the settings it was made with, so an
+older account still opens, and is moved up to the stronger stretch the next
+time its owner signs in.
 
 From the master key every website gets its own cabinet key, and the account's
 settings and files get their own file key (HKDF), so no key is used for two
@@ -38,10 +44,11 @@ import secrets
 MAGIC = b"GLASSWORK-SEALED-1\n"
 MIN_PASSWORD = 8
 
-# scrypt at 32 MiB of memory per guess: a few tenths of a second to sign in,
-# and very expensive for anyone trying passwords against a copied folder.
-SCRYPT = {"n": 2 ** 15, "r": 8, "p": 1}
-_MAXMEM = 64 * 1024 * 1024
+# A few tenths of a second to sign in, and very expensive for anyone trying
+# passwords against a copied folder: every guess costs 128 MiB of memory.
+ARGON2 = {"kdf": "argon2id", "t": 3, "m": 128 * 1024, "p": 4}
+SCRYPT = {"kdf": "scrypt", "n": 2 ** 17, "r": 8, "p": 1}
+_MAXMEM = 256 * 1024 * 1024
 
 
 class Locked(Exception):
@@ -65,10 +72,40 @@ def _unb64(s: str) -> bytes:
     return base64.b64decode(s.encode("ascii"))
 
 
-def _stretch(secret: str, salt: bytes, params=None) -> bytes:
-    p = params or SCRYPT
-    return hashlib.scrypt(secret.encode("utf-8"), salt=salt, n=int(p["n"]),
-                          r=int(p["r"]), p=int(p["p"]), maxmem=_MAXMEM, dklen=32)
+def _argon2():
+    try:
+        from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+        return Argon2id
+    except ImportError:
+        return None
+
+
+def kdf() -> dict:
+    """The key stretch new locks are made with on this computer."""
+    return dict(ARGON2 if _argon2() else SCRYPT)
+
+
+def _stretch(secret: str, salt: bytes, params: dict) -> bytes:
+    if params.get("kdf") == "argon2id":
+        a = _argon2()
+        if a is None:
+            raise Locked("this account needs a newer encryption library — run: pip install -r requirements.txt")
+        return a(salt=salt, length=32, iterations=int(params["t"]), lanes=int(params["p"]),
+                 memory_cost=int(params["m"])).derive(secret.encode("utf-8"))
+    return hashlib.scrypt(secret.encode("utf-8"), salt=salt, n=int(params["n"]),
+                          r=int(params["r"]), p=int(params["p"]), maxmem=_MAXMEM, dklen=32)
+
+
+def _box(secret: str, master: bytes, aad: bytes) -> dict:
+    """The master key locked with one secret, and the settings to open it again."""
+    salt, params = secrets.token_bytes(16), kdf()
+    return {"salt": _b64(salt), "kdf": params, **_lock(_stretch(secret, salt, params), master, aad)}
+
+
+def outdated(keys: dict, which: str) -> bool:
+    """Was this copy of the master key locked with a weaker stretch than this computer now uses?"""
+    box = (keys or {}).get(which)
+    return bool(box) and box.get("kdf") != kdf()
 
 
 def _lock(kek: bytes, master: bytes, aad: bytes) -> dict:
@@ -132,9 +169,7 @@ def create(password: str, account_id: str):
     aad = account_id.encode("utf-8")
     keys = {"v": 1, "check": check_of(master)}
     for which, secret in (("password", password), ("recovery", _tidy_recovery(recovery))):
-        salt = secrets.token_bytes(16)
-        keys[which] = {"salt": _b64(salt), "scrypt": dict(SCRYPT),
-                       **_lock(_stretch(secret, salt), master, aad)}
+        keys[which] = _box(secret, master, aad)
     return keys, master, recovery
 
 
@@ -145,8 +180,9 @@ def open_with(keys: dict, which: str, secret: str, account_id: str):
         return None
     if which == "recovery":
         secret = _tidy_recovery(secret)
-    master = _open(_stretch(secret or "", _unb64(box["salt"]), box.get("scrypt")), box,
-                   account_id.encode("utf-8"))
+    # Older locks kept their settings under "scrypt", without saying so.
+    params = box.get("kdf") or {"kdf": "scrypt", **(box.get("scrypt") or {"n": 2 ** 15, "r": 8, "p": 1})}
+    master = _open(_stretch(secret or "", _unb64(box["salt"]), params), box, account_id.encode("utf-8"))
     if master is None or not hmac.compare_digest(check_of(master), keys.get("check", "")):
         return None
     return master
@@ -160,11 +196,7 @@ def relock(keys: dict, master: bytes, which: str, secret: str, account_id: str) 
             raise ValueError(bad)
     else:
         secret = _tidy_recovery(secret)
-    salt = secrets.token_bytes(16)
-    out = dict(keys)
-    out[which] = {"salt": _b64(salt), "scrypt": dict(SCRYPT),
-                  **_lock(_stretch(secret, salt), master, account_id.encode("utf-8"))}
-    return out
+    return {**keys, which: _box(secret, master, account_id.encode("utf-8"))}
 
 
 # ---------------------------------------------------------------------------

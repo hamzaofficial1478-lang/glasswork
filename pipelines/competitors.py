@@ -160,11 +160,6 @@ def host_verdict(host: str) -> tuple:
     return True, ""
 
 
-def _is_public_host(host: str) -> bool:
-    """False for anything that resolves to a loopback, private or link-local IP."""
-    return host_verdict(host)[0]
-
-
 def safe_url(url: str) -> tuple:
     """(ok, why). The one gate every fetch in this module goes through."""
     try:

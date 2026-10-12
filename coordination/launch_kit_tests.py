@@ -40,6 +40,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from coordination import diagnostics, product, updates  # noqa: E402
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+
+# Making a release is the publisher's side, which a copy he gives out does not
+# have; the release test steps aside there. Everything a copy does — check,
+# verify, install, undo — is tested everywhere.
+try:
+    from coordination import publisher  # noqa: E402
+except ImportError:
+    publisher = None
 
 _fail = []
 
@@ -55,27 +65,74 @@ def check(name, got, want):
 class _Copy:
     """A copy of the program in a folder of its own, with its own product.json."""
 
-    def __init__(self, version="0.6.0", repository="someone/glasswork"):
-        self.version, self.repository = version, repository
+    def __init__(self, version="0.6.0", key="", url="https://updates.example/manifest.json"):
+        self.version, self.key, self.url = version, key, url
 
     def __enter__(self):
         self.dir = Path(tempfile.mkdtemp(prefix="copy-"))
         (self.dir / "config").mkdir()
-        made = json.dumps({"name": "Glasswork", "version": self.version, "repository": self.repository})
+        made = json.dumps({"name": "Glasswork", "version": self.version, "update_url": self.url, "update_key": self.key})
         (self.dir / "config" / "product.json").write_text(made, encoding="utf-8")
-        self.saved = (updates.ROOT, product.ROOT, product.FILE)
+        (self.dir / "config" / "mine.local.json").write_text('{"secret": "mine"}', encoding="utf-8")
+        (self.dir / "run.py").write_text("print('old')\n", encoding="utf-8")
+        (self.dir / "server.js").write_text("// old\n", encoding="utf-8")
+        (self.dir / ".env").write_text("ANTHROPIC_API_KEY=keep-me\n", encoding="utf-8")
+        (self.dir / "data").mkdir()
+        (self.dir / "data" / "account.json").write_text('{"me": 1}', encoding="utf-8")
+        self.saved = (updates.ROOT, product.ROOT, product.FILE, publisher.ROOT if publisher else None)
         updates.ROOT = product.ROOT = self.dir
+        if publisher:
+            publisher.ROOT = self.dir
         product.FILE = self.dir / "config" / "product.json"
         return self
 
     def __exit__(self, *a):
-        updates.ROOT, product.ROOT, product.FILE = self.saved
+        updates.ROOT, product.ROOT, product.FILE = self.saved[:3]
+        if publisher:
+            publisher.ROOT = self.saved[3]
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
-def _release(tag, exe_url="https://github.com/someone/glasswork/releases/download/v0.7.0/glasswork-0.7.0-setup.exe"):
-    return json.dumps({"tag_name": tag, "body": "Better floor.", "html_url": "https://github.com/someone/glasswork/releases/tag/" + tag,
-                       "assets": [{"name": "glasswork-0.7.0-setup.exe", "browser_download_url": exe_url}]}).encode()
+def _keypair(tmp):
+    k = Ed25519PrivateKey.generate()
+    (tmp / "signing.key").write_bytes(k.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+                                                      serialization.NoEncryption()))
+    pub = k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return base64.b64encode(pub).decode(), tmp / "signing.key"
+
+
+def _sign(m, key_file):
+    k = Ed25519PrivateKey.from_private_bytes(Path(key_file).read_bytes())
+    return base64.b64encode(k.sign(updates._signed_text(m))).decode()
+
+
+def _zip(files, top="glasswork-0.7.0/"):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, text in files.items():
+            z.writestr(top + name if top is not None else name, text)
+    return buf.getvalue()
+
+
+def _release(data, version, key_file, zip_url="https://updates.example/glasswork-0.7.0.zip"):
+    m = {"version": version, "zip": zip_url, "sha256": hashlib.sha256(data).hexdigest(), "notes": "Better floor."}
+    m["signature"] = _sign(m, key_file)
+    return m
+
+
+def _fetcher(table):
+    def fetch(url, limit, timeout=30):
+        if not url.startswith("https://"):
+            raise ValueError("updates are only fetched over https://")
+        if url not in table:
+            raise OSError("not found")
+        return table[url]
+    return fetch
+
+
+GOOD_FILES = {"run.py": "print('new')\n", "server.js": "// new\n", "coordination/new_module.py": "X = 1\n",
+              ".env": "ANTHROPIC_API_KEY=stolen\n", "data/account.json": '{"me": 0}',
+              "config/mine.local.json": '{"secret": "replaced"}', "config/product.json": '{"name": "Glasswork", "version": "0.7.0"}'}
 
 
 def test_versions():
@@ -86,34 +143,106 @@ def test_versions():
     check("nonsense reads as 0.0.0", product.parse_version("latest!"), (0, 0, 0))
 
 
-def test_a_new_version():
-    """
-    "each program on pc is remains to itself and that pc not to anything else"
-    """
-    print("\nA new version is looked for only when asked, from the program's GitHub page, with nothing about the copy:")
-    asked = []
-    with _Copy():
-        found = updates.check(lambda url, limit=0, timeout=0: asked.append(url) or _release("v0.7.0"))
-        check("it asks the program's public release page, and only that",
-              asked, ["https://api.github.com/repos/someone/glasswork/releases/latest"])
-        check("it sees the new version, and offers the Setup to download",
-              (found["available"], found["latest"], found["download_url"].endswith("glasswork-0.7.0-setup.exe")),
-              (True, "0.7.0", True))
+def test_a_signed_update_installs_and_undoes():
+    print("\nA signed update installs, keeps what it replaced, and can be undone:")
+    tmp = Path(tempfile.mkdtemp(prefix="keys-"))
+    pub, key_file = _keypair(tmp)
+    data = _zip(GOOD_FILES)
+    m = _release(data, "0.7.0", key_file)
+    with _Copy(key=pub) as c:
+        fetch = _fetcher({c.url: json.dumps(m).encode(), m["zip"]: data})
+        found = updates.check(fetch)
+        check("it sees the new version", (found["available"], found["latest"], found["signed"], found["can_install"]),
+              (True, "0.7.0", True, True))
         check("  with its notes", found["notes"], "Better floor.")
-        odd = updates.check(lambda url, limit=0, timeout=0: _release("v0.7.0", "https://evil.example/setup.exe"))
-        check("a download from anywhere but GitHub is never offered", odd["download_url"], "")
-        same = updates.check(lambda url, limit=0, timeout=0: _release("v0.6.0"))
-        check("the same version is not offered", (same["available"], "newest" in same["why"]), (False, True))
-        down = updates.check(lambda url, limit=0, timeout=0: (_ for _ in ()).throw(OSError("offline")))
-        check("an unreachable page says so, and where to look", (down["ok"], down.get("page_url")),
-              (False, "https://github.com/someone/glasswork/releases"))
-    with _Copy(repository=""):
-        check("with no place set, it asks nobody", updates.check(lambda *a, **k: asked.append("!") or b"{}")["available"]
-              or "!" in asked, False)
-    check("a git copy is told it updates from git", "git" in updates.check()["why"], True)
-    src = (ROOT / "ui" / "app.html").read_text(encoding="utf-8")
-    check("the app never looks for one by itself", "setInterval(updateBanner" not in src and "updateBanner()" not in src, True)
-    check("  nor does the program when it starts", "updates.check()" not in (ROOT / "run.py").read_text(encoding="utf-8"), True)
+        r = updates.apply(fetch, install_deps=False)
+        check("it installs", (r["ok"], r.get("installed"), r.get("version")), (True, True, "0.7.0"))
+        check("the program's files are the new ones", (c.dir / "run.py").read_text(encoding="utf-8"), "print('new')\n")
+        check("a new file arrives", (c.dir / "coordination" / "new_module.py").exists(), True)
+        check("the version moves on", product.version(), "0.7.0")
+        check(".env is never touched", (c.dir / ".env").read_text(encoding="utf-8"), "ANTHROPIC_API_KEY=keep-me\n")
+        check("nor the person's data", (c.dir / "data" / "account.json").read_text(encoding="utf-8"), '{"me": 1}')
+        check("nor any *.local.json", (c.dir / "config" / "mine.local.json").read_text(encoding="utf-8"), '{"secret": "mine"}')
+        backup = c.dir / r["backup"]
+        check("the old run.py is kept", (backup / "run.py").read_text(encoding="utf-8"), "print('old')\n")
+        back = updates.rollback()
+        check("it can be undone", (back["ok"], back["version"]), (True, "0.6.0"))
+        check("  the old file is back", (c.dir / "run.py").read_text(encoding="utf-8"), "print('old')\n")
+        check("  the file it added is gone", (c.dir / "coordination" / "new_module.py").exists(), False)
+        check("  and so is the version", product.version(), "0.6.0")
+        check("undoing twice finds nothing more to undo", updates.rollback()["ok"], False)
+
+
+def test_what_is_refused():
+    print("\nUnsigned, wrongly signed, tampered, http:// and escaping updates are refused, changing nothing:")
+    tmp = Path(tempfile.mkdtemp(prefix="keys-"))
+    pub, key_file = _keypair(tmp)
+    other_pub, other_key = _keypair(Path(tempfile.mkdtemp(prefix="keys-")))
+    data = _zip(GOOD_FILES)
+    signed = _release(data, "0.7.0", key_file)
+    for label, key, manifest, zipped in (
+            ("with no key on this copy", "", signed, data),
+            ("signed with another key", pub, _release(data, "0.7.0", other_key), data),
+            ("whose download was tampered with", pub, signed, data + b"tampered")):
+        with _Copy(key=key) as c:
+            fetch = _fetcher({c.url: json.dumps(manifest).encode(), manifest["zip"]: zipped})
+            r = updates.apply(fetch, install_deps=False)
+            check(f"an update {label} is refused", r["ok"], False)
+            check("  and nothing changed", (c.dir / "run.py").read_text(encoding="utf-8"), "print('old')\n")
+    _ = other_pub
+    try:
+        updates._fetch("http://updates.example/manifest.json", 100)
+        got = "fetched"
+    except ValueError:
+        got = "refused"
+    check("a plain http:// address is never fetched", got, "refused")
+    with _Copy(key=pub) as c:
+        for label, files in (("writes outside the program folder", {"../../escaped.txt": "x", "run.py": "y"}),
+                             ("is not this program", {"readme.txt": "hello"})):
+            evil = _zip(files, top=None)
+            try:
+                r = updates.install_zip(evil, "0.7.0", install_deps=False)
+            except ValueError as e:
+                r = {"ok": False, "error": str(e)}
+            check(f"a zip that {label} is refused", r["ok"], False)
+        check("  nothing escaped", (c.dir.parent / "escaped.txt").exists() or (c.dir / "escaped.txt").exists(), False)
+        check("  and run.py is untouched", (c.dir / "run.py").read_text(encoding="utf-8"), "print('old')\n")
+    with _Copy(key=pub, version="0.7.0") as c:
+        fetch = _fetcher({c.url: json.dumps(signed).encode(), signed["zip"]: data})
+        found = updates.check(fetch)
+        check("the same version is not offered again", (found["available"], "latest" in found.get("why", "")), (False, True))
+    with _Copy(key=pub) as c:
+        (c.dir / ".git").mkdir()
+        check("a git copy is told it updates from git", "git" in updates.check()["why"], True)
+        check("  and the zip installer refuses it", updates.apply()["ok"], False)
+
+
+def test_a_release_has_only_tracked_files():
+    print("\nA release holds only tracked files — never a .env — and verifies:")
+    if not shutil.which("git"):
+        print("  SKIP  git is not installed here")
+        return
+    if publisher is None:
+        print("  SKIP  releases are made on the publisher's own copy")
+        return
+    tmp = Path(tempfile.mkdtemp(prefix="keys-"))
+    pub, key_file = _keypair(tmp)
+    with _Copy(key=pub) as c:
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "init", "-q"], ["git", "add", "run.py", "server.js", "config/product.json", ".env"],
+                    ["git", "commit", "-q", "-m", "x"]):
+            subprocess.run(cmd, cwd=c.dir, capture_output=True, text=True, encoding="utf-8", env=env, check=True)
+        out = Path(tempfile.mkdtemp(prefix="release-"))
+        r = publisher.make_release(out, key_file, "https://updates.example")
+        check("it is made", r["ok"], True)
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        check("its signature verifies with the copy's key", updates.verify(m, pub), True)
+        check("its checksum is the zip's", m["sha256"], hashlib.sha256(Path(r["zip"]).read_bytes()).hexdigest())
+        names = zipfile.ZipFile(r["zip"]).namelist()
+        check("it holds the program", any(n.endswith("/run.py") for n in names), True)
+        check("never a .env, even a tracked one", any(n.endswith(".env") for n in names), False)
+        check("nor an untracked file", any(n.endswith("mine.local.json") for n in names), False)
 
 
 def test_the_support_report():
@@ -201,7 +330,9 @@ def test_terms_and_privacy():
 
 def main():
     test_versions()
-    test_a_new_version()
+    test_a_signed_update_installs_and_undoes()
+    test_what_is_refused()
+    test_a_release_has_only_tracked_files()
     test_the_support_report()
     test_a_customer_sees_the_product_name()
     test_the_installers()

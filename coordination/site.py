@@ -49,7 +49,6 @@ setup between machines by hand.
 import json
 import os
 import re
-from pathlib import Path
 
 from . import workspace as _workspace
 

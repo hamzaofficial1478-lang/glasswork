@@ -77,7 +77,7 @@ def agency_banner() -> str:
         from coordination import site
         return site.agency_name().upper() + " — BACK OFFICE"
     except Exception:
-        return "WORLD DEAL TECHNICAL AGENCY — BACK OFFICE"
+        return "GLASSWORK — BACK OFFICE"
 
 
 def head(title):

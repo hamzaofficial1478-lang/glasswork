@@ -55,9 +55,9 @@ import urllib.parse
 import urllib.request
 
 try:
-    from . import board, notify
+    from . import board
 except ImportError:  # pragma: no cover
-    import board, notify
+    import board
 
 UA = "glasswork-agency/1.0"
 

@@ -1078,9 +1078,9 @@ def right_email() -> str:
     try:
         from . import offer_mail
         from .mail import setting
-        return (setting("BUSINESS_EMAIL") or "").strip() or offer_mail.DEFAULT_EMAIL
+        return (setting("BUSINESS_EMAIL") or "").strip() or offer_mail.default_email()
     except Exception:
-        return "teamworlddeal@worlddealtechnicalservices.com"
+        return ""
 
 
 def _brand(s=None) -> str:
@@ -1870,8 +1870,13 @@ def save_address(street, city="") -> dict:
 
 
 def _drafts_dir():
+    """This website's own drafts: his in paste-into-your-site, anyone else's in their website's folder."""
     from pathlib import Path
-    return Path(__file__).parents[1] / "paste-into-your-site"
+    from coordination import workspace
+    a = workspace.active()
+    if workspace.is_original_site() or not a:
+        return Path(__file__).parents[1] / "paste-into-your-site"
+    return workspace.site_dir(a["account"], a["site"]) / "drafts"
 
 
 def _one_block(text) -> str:
@@ -2078,7 +2083,6 @@ def head_holder(candidates, s=None) -> str:
         got = read_page(pg, s=s)
         if not got.get("ok"):
             continue
-        import re
         for m in re.findall(r"""include(?:_once)?\s*\(?\s*['"]([^'"]+\.php)['"]""",
                             got.get("html") or "", re.I):
             seen.add(m.lstrip("./"))

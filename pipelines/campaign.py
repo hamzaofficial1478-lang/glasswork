@@ -141,7 +141,7 @@ def contact(camp=None) -> dict:
            ("site", "phone", "whatsapp", "email")}
     out["wa_digits"] = re.sub(r"\D", "", out["whatsapp"] or out["phone"] or "")
     if offer_mail.DEAD_DOMAIN in (out["email"] or "").lower():
-        out["email"] = offer_mail.DEFAULT_EMAIL
+        out["email"] = offer_mail.default_email()
     return out
 
 

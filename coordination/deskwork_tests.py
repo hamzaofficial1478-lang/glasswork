@@ -23,7 +23,6 @@ Throwaway cabinet, no network.
 import sqlite3
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 from . import board, deskwork

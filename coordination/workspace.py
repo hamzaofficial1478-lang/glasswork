@@ -67,7 +67,8 @@ ACCOUNT_KEYS = frozenset({
 # computer (where Claude Code is installed — nobody's in particular). Every
 # other config file is about one website.
 ACCOUNT_CONFIG = frozenset({"providers.local.json", "claude_team.local.json",
-                            "engine.local.json", "report-brand.local.json"})
+                            "engine.local.json", "report-brand.local.json",
+                            "support-reports.local.json"})
 MACHINE_CONFIG = frozenset({"claude_code.local.json"})
 
 
@@ -173,11 +174,6 @@ def logs_dir() -> Path:
 # accounts and websites
 # ---------------------------------------------------------------------------
 
-def _slug(text, fallback) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:24].strip("-")
-    return f"{s or fallback}-{secrets.token_hex(2)}"
-
-
 def _host(url) -> str:
     u = (url or "").strip().lower()
     u = re.sub(r"^[a-z]+://", "", u).split("/")[0]
@@ -204,11 +200,48 @@ def _save(acct: dict) -> None:
     _write_json(_accounts_dir() / acct["id"] / "account.json", acct)
 
 
+# "the users should not be able to track other users" — an account's name is
+# kept sealed with its own key, beside a salted fingerprint that lets the name
+# its owner types find it. Nothing on the disk, and nothing on the sign-in
+# screen, says who has an account on this computer.
+
+def _norm(name) -> str:
+    return " ".join(str(name or "").split()).casefold()
+
+
+def _name_tag(name, salt) -> str:
+    import hashlib
+    import hmac
+    return hmac.new(str(salt).encode("ascii"), _norm(name).encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _seal_name(acct: dict, master: bytes, name: str) -> None:
+    from . import vault
+    acct["name_salt"] = secrets.token_hex(16)
+    acct["name_tag"] = _name_tag(name, acct["name_salt"])
+    acct["name_sealed"] = vault.seal(master, name.encode("utf-8"), "account.json#name").decode("ascii")
+    acct.pop("name", None)
+
+
+def account_name(acct: dict, master=None) -> str:
+    """The account's name as its owner sees it ('' to anyone without its key)."""
+    if not acct.get("name_sealed"):
+        return acct.get("name") or ""
+    from . import vault
+    m = master if master is not None else master_key(acct.get("id"))
+    try:
+        return vault.unseal(m, acct["name_sealed"].encode("ascii"), "account.json#name").decode("utf-8") if m else ""
+    except Exception:
+        return ""
+
+
 def find_account(who) -> dict:
-    """An account by its id or its name (any case)."""
+    """An account by its id, or by the name its owner types (any case)."""
+    import hmac
     who = (who or "").strip()
     for a in accounts():
-        if a["id"] == who or a.get("name", "").strip().lower() == who.lower():
+        if a["id"] == who or (a.get("name") and _norm(a["name"]) == _norm(who)) or (
+                a.get("name_tag") and hmac.compare_digest(a["name_tag"], _name_tag(who, a.get("name_salt", "")))):
             return a
     return {}
 
@@ -225,25 +258,31 @@ def create_account(name, password=None) -> dict:
         return {"ok": False, "error": "an account needs a name"}
     if find_account(name):
         return {"ok": False, "error": f"there is already an account called {name} on this computer"}
-    acct = {"id": _slug(name, "account"), "name": name,
-            "created": int(time.time()), "sites": []}
-    out = {"ok": True}
+    # The folder is a random number, not the name.
+    acct = {"id": "acct-" + secrets.token_hex(5), "name": name, "created": int(time.time()), "sites": []}
+    out, master = {"ok": True}, None
     if password is not None:
         try:
             keys, master, recovery = vault.create(password, acct["id"])
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         acct["keys"] = keys
+        _seal_name(acct, master, name)
         out.update(key=vault.as_env(master), recovery_key=recovery)
     (_accounts_dir() / acct["id"] / "config").mkdir(parents=True, exist_ok=True)
     _save(acct)
-    out["account"] = public(acct)
+    out["account"] = public(acct, master)
     return out
 
 
-def public(acct: dict) -> dict:
-    """An account as it may be shown: never its keys."""
-    return {k: v for k, v in (acct or {}).items() if k != "keys"}
+SECRET_FIELDS = ("keys", "name_tag", "name_salt", "name_sealed")
+
+
+def public(acct: dict, master=None) -> dict:
+    """An account as it may be shown: never its keys, and its name only to its owner."""
+    out = {k: v for k, v in (acct or {}).items() if k not in SECRET_FIELDS}
+    out["name"] = account_name(acct or {}, master)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -329,36 +368,50 @@ def locked() -> bool:
     return bool(a) and encrypted(a["account"]) and master_key(a["account"]) is None
 
 
+NO_SUCH = "That name and password do not open an account on this computer."
+
+
 def sign_in(who, password) -> dict:
     """The master key for this account and password, or why not."""
     from . import vault
     acct = find_account(who)
-    if not acct or not acct.get("keys"):
-        return {"ok": False, "error": "no account by that name on this computer"}
-    master = vault.open_with(acct["keys"], "password", password or "", acct["id"])
+    master = vault.open_with(acct["keys"], "password", password or "", acct["id"]) if acct.get("keys") else None
     if master is None:
-        return {"ok": False, "error": "that password does not open this account"}
-    if seal_sites(acct, master):
+        # One answer for both, so nobody can find out by trying who has an account here.
+        return {"ok": False, "error": NO_SUCH}
+    changed = seal_sites(acct, master)
+    if acct.get("name"):
+        _seal_name(acct, master, acct["name"])          # kept readable by an older version
+        changed = True
+    if vault.outdated(acct["keys"], "password"):
+        try:
+            acct["keys"] = vault.relock(acct["keys"], master, "password", password, acct["id"])
+            changed = True                               # moved up to the stronger key stretch
+        except ValueError:
+            pass                                         # a password from before the length rule
+    if changed:
         _save(acct)
-    return {"ok": True, "account": public(acct), "key": vault.as_env(master)}
+    return {"ok": True, "account": public(acct, master), "key": vault.as_env(master)}
 
 
 def recover(who, recovery_key, new_password) -> dict:
     """Forgotten password: the recovery key opens the account and a new password is set."""
     from . import vault
     acct = find_account(who)
-    if not acct or not acct.get("keys"):
-        return {"ok": False, "error": "no account by that name on this computer"}
-    master = vault.open_with(acct["keys"], "recovery", recovery_key or "", acct["id"])
+    master = vault.open_with(acct["keys"], "recovery", recovery_key or "", acct["id"]) if acct.get("keys") else None
     if master is None:
-        return {"ok": False, "error": "that recovery key does not open this account"}
+        return {"ok": False, "error": "That name and recovery key do not open an account on this computer."}
     try:
         acct["keys"] = vault.relock(acct["keys"], master, "password", new_password or "", acct["id"])
+        if vault.outdated(acct["keys"], "recovery"):
+            acct["keys"] = vault.relock(acct["keys"], master, "recovery", recovery_key, acct["id"])
     except ValueError as e:
         return {"ok": False, "error": str(e)}
     seal_sites(acct, master)
+    if acct.get("name"):
+        _seal_name(acct, master, acct["name"])
     _save(acct)
-    return {"ok": True, "account": public(acct), "key": vault.as_env(master)}
+    return {"ok": True, "account": public(acct, master), "key": vault.as_env(master)}
 
 
 def change_password(who, current, new_password) -> dict:
@@ -610,6 +663,18 @@ def legacy_present() -> bool:
     return (ROOT / "coordination" / "agency.db").exists() or (ROOT / ".env").exists()
 
 
+def is_original_site() -> bool:
+    """
+    Is the website open the one this copy looked after before accounts — his
+    own? Defaults that are his (his working email, his drafts) apply there and
+    nowhere else, so nobody else's website ever carries them.
+    """
+    a = active()
+    if not a:
+        return legacy_present()
+    return (account(a["account"]).get("brought_in") or {}).get("site") == a["site"]
+
+
 # ---------------------------------------------------------------------------
 
 def describe() -> dict:
@@ -622,7 +687,7 @@ def describe() -> dict:
         out.update(brought_in=bool(acct.get("brought_in")),
                    retired_original=bool(acct.get("retired_original")),
                    encrypted=bool(acct.get("keys")))
-        out.update(account={"id": acct.get("id"), "name": acct.get("name")},
+        out.update(account={"id": acct.get("id"), "name": account_name(acct)},
                    sites=sites(acct),
                    site=next((s for s in sites(acct) if s["id"] == a["site"]), {}),
                    site_dir=str(site_dir()), account_dir=str(account_dir()))

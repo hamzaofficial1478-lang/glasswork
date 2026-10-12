@@ -31,7 +31,6 @@ That split is the whole reason a finder can never silently ship.
     python -m pipelines.it_health        (python3 on macOS/Linux)
 """
 import json
-import os
 import re
 import sqlite3
 import time

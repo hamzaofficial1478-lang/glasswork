@@ -284,8 +284,6 @@ GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 
 def gsc_ready():
     """(ok, why_not) — is Search Console actually usable right now?"""
-    from pathlib import Path
-    root = Path(__file__).parents[1]
     try:
         from providers import integrations
         prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
@@ -396,7 +394,6 @@ def _gsc_session(scope=GSC_SCOPE):
     ok, why = gsc_ready()
     if not ok:
         return None, "", why
-    from pathlib import Path
     import google.auth.transport.requests
     from google.oauth2 import service_account
     from providers import integrations
@@ -668,12 +665,10 @@ def gsc_queries(days=90, limit=500):
     ok, why = gsc_ready()
     if not ok:
         return [], why
-    from pathlib import Path
     import google.auth.transport.requests
     from google.oauth2 import service_account
     import requests
 
-    root = Path(__file__).parents[1]
     from providers import integrations
     prop = (integrations.read_env().get("GSC_PROPERTY") or "").strip()
 
@@ -1351,7 +1346,7 @@ def ask_for_help(con, built, top) -> list:
             "is the one signal no competitor can copy. There are no replies on "
             "file, so that part of the ranking is idle. This may simply be where "
             "the business is, in which case it is not worth anyone's time.",
-            [f"replies on file to read: 0",
+            ["replies on file to read: 0",
              f"phrases shortlisted without any customer wording: {len(top)}"],
             "No customer wording on file yet",
             "The strongest signal we have that nobody else can copy is the words "

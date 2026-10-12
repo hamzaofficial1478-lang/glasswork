@@ -379,6 +379,8 @@ const SETUP_API = [
   "/api/engine",
   // The website connection: the connector download carries the website's secret.
   "/api/connect",
+  // The developer's Home: making it and its download carry his key.
+  "/api/publisher/setup", "/api/publisher/home.zip", "/api/publisher/publish",
 ];
 // Two connection calls carry no secret — how the website is connected, and a
 // knock to test it — so the Website screen may use them without the lock. The
@@ -642,8 +644,7 @@ function productInfo() {
 app.get("/api/product", async (_q, res) => {
   const p = productInfo();
   res.json({ ok: true, name: p.name || "Glasswork", version: p.version || "", tagline: p.tagline || "",
-             support_email: p.support_email || "", support_url: p.support_url || "",
-             installed: process.env.GLASSWORK_INSTALLED === "1" });
+             support_email: p.support_email || "", installed: process.env.GLASSWORK_INSTALLED === "1" });
 });
 // CLOSE THE PROGRAM. An installed copy runs with no window to close, so the
 // office closes itself: it answers, then stops; the launcher stops with it.
@@ -656,9 +657,93 @@ app.post("/api/quit", async (_q, res) => {
   res.json({ ok: true, why: "Closing. Open it again from the Start menu or the desktop whenever you like." });
   setTimeout(() => process.exit(0), 400);
 });
-// Only when he presses "Check for a new version": nothing is looked up on its own.
+// A new version: asked plainly, installed only when signed with the developer's key.
 app.get("/api/update", async (_q, res) => res.json(await pyModule("coordination.updates", ["--check", "--json"], 60000)));
+app.post("/api/update/apply", async (_q, res) =>
+  res.json(await pyModule("coordination.updates", ["--apply", "--json"], 900000)));
+app.post("/api/update/rollback", async (_q, res) =>
+  res.json(await pyModule("coordination.updates", ["--rollback", "--json"], 120000)));
 app.get("/api/diagnostics", async (_q, res) => res.json(await pyModule("coordination.diagnostics", ["--json"], 90000)));
+
+/* ---- PROBLEM REPORTS, AND THE ANSWERS (coordination/support.py) ---------------
+   "how user will send us reports about the program failure" — sealed on this
+   computer so only the developer's own computer can open it. Nothing else is
+   sent: no count, no registration, no number for this copy. */
+const textField = (v, n) => String(v || "").slice(0, n);
+const reportId = (v) => String(v || "").replace(/[^a-z0-9-]/gi, "").slice(0, 40);
+app.get("/api/support/mine", async (_q, res) => res.json(await pyModule("coordination.support", ["--mine"], 60000)));
+app.get("/api/support/preview", async (_q, res) => res.json(await pyModule("coordination.support", ["--preview"], 90000)));
+app.post("/api/support/send", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.support", ["--send"], { title: textField(b.title, 200),
+    text: textField(b.text, 20000), contact: textField(b.contact, 200), attach: b.attach !== false }, 120000));
+});
+
+/* ---- HIS SIDE: the reports, his answers, putting a version out -----------------
+   coordination/publisher.py and ui/publisher.js are on his computer only, never
+   in a copy he gives out. Without them none of this exists: /api/publisher says
+   so, and everything under it answers 404. */
+const PUBLISHER_HERE = fs.existsSync(path.join(__dirname, "coordination", "publisher.py"));
+const pub = (args, ms = 60000) => pyModule("coordination.publisher", args, ms);
+app.get("/api/publisher", async (_q, res) => res.json(PUBLISHER_HERE ? await pub(["--view"], 30000)
+  : { ok: true, publisher: false, can_publish: false }));
+app.use("/api/publisher", (_q, res, next) => PUBLISHER_HERE ? next()
+  : res.status(404).json({ ok: false, error: "That is not part of this copy of the program." }));
+app.post("/api/publisher/setup", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.publisher", ["--setup"], { site: textField(b.site, 300), email: textField(b.email, 200) }, 60000));
+});
+app.get("/api/publisher/home.zip", async (_q, res) => {
+  const r = await pub(["--home-zip"]);
+  if (!r.ok || !r.zip) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", 'attachment; filename="glasswork-home.zip"');
+  res.setHeader("Cache-Control", "no-store");
+  res.send(Buffer.from(r.zip, "base64"));
+});
+app.post("/api/publisher/check", async (_q, res) => res.json(await pub(["--check-home"])));
+app.post("/api/publisher/collect", async (_q, res) => res.json(await pub(["--collect"], 300000)));
+app.get("/api/publisher/inbox", async (_q, res) => res.json(await pub(["--inbox"])));
+app.get("/api/publisher/read/:id", async (req, res) => res.json(await pub(["--read", reportId(req.params.id)])));
+app.post("/api/publisher/remove", async (req, res) => res.json(await pub(["--remove", reportId((req.body || {}).id)])));
+app.post("/api/publisher/answer", async (req, res) => {
+  const b = req.body || {};
+  const body = { id: reportId(b.id) };
+  if (typeof b.status === "string") body.status = b.status.slice(0, 20);
+  if (typeof b.reply === "string") body.reply = b.reply.slice(0, 5000);
+  if (typeof b.fixed_in === "string") body.fixed_in = b.fixed_in.slice(0, 40);
+  res.json(await pyStdin("coordination.publisher", ["--answer"], body, 60000));
+});
+// PUTTING A VERSION OUT takes minutes when the installer is built, longer than
+// a request may be held open — so it runs on its own and leaves its progress in
+// a file this route reads.
+const publishJob = () => path.join(DATA_ROOT, "publish-job.local.json");
+app.post("/api/publisher/publish", async (req, res) => {
+  const py = resolvePython();
+  if (!py) return res.json({ ok: false, error: NO_PY });
+  try {
+    const now = JSON.parse(fs.readFileSync(publishJob(), "utf8"));
+    if (now && now.running && Date.now() / 1000 - (now.at || 0) < 1800)
+      return res.json({ ok: false, busy: true, error: "A version is being put out already — " + (now.stage || "working") });
+  } catch (_) { /* no job yet */ }
+  const b = req.body || {};
+  const args = [...py.prefix, "-m", "coordination.publisher", "--publish", "--job", publishJob(),
+    "--notes", textField(b.notes, 2000)].concat(b.installer === true ? ["--installer"] : []);
+  try {
+    fs.mkdirSync(path.dirname(publishJob()), { recursive: true });
+    fs.writeFileSync(publishJob(), JSON.stringify({ running: true, stage: "Starting", at: Math.floor(Date.now() / 1000) }));
+    const child = spawn(py.cmd, args, { cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => {});
+    child.unref();
+  } catch (e) {
+    return res.json({ ok: false, error: "Could not start: " + e.message });
+  }
+  res.json({ ok: true, started: true });
+});
+app.get("/api/publisher/job", async (_q, res) => {
+  try { res.json({ ok: true, ...JSON.parse(fs.readFileSync(publishJob(), "utf8")) }); }
+  catch (_) { res.json({ ok: true, running: false, none: true }); }
+});
 
 /* ---- READING A SENT MAIL, AND THE CONTENT SCREEN'S CONTROLS -------------------
    "we cannot read the sent mails" — coordination/review.py --sent-mail.
@@ -859,9 +944,12 @@ function strip(r) {                          // the key never goes to the browse
   return out;
 }
 
-app.get("/api/account/list", async (_q, res) => {
-  const r = await pyAccounts("list", {});
-  res.json({ ...r, signedIn: SIGNED_IN ? { account: SIGNED_IN.account, name: SIGNED_IN.name } : null });
+// Open to anyone at the door, so it says nothing about anybody: not who is
+// signed in (only that it is you, with your own cookie), not what is open.
+app.get("/api/account/list", async (req, res) => {
+  const { active: _open, ...r } = await pyAccounts("list", {});
+  res.json({ ...r, signedIn: signedIn(req) ? { account: SIGNED_IN.account, name: SIGNED_IN.name } : null,
+             someoneElse: !!SIGNED_IN && !signedIn(req) });
 });
 
 app.post("/api/account/sign-up", async (req, res) => {
@@ -893,8 +981,8 @@ app.post("/api/account/recover", async (req, res) => {
   res.json(strip(r));
 });
 
-app.post("/api/account/sign-out", async (_q, res) => {
-  if (!SIGNED_IN) return res.json({ ok: true });
+app.post("/api/account/sign-out", async (req, res) => {
+  if (!signedIn(req)) return res.json({ ok: true });     // only the person signed in can sign out
   const st = await pyAccounts("status", {});
   if (st.run_going) {
     return res.status(409).json({ ok: false,
@@ -984,7 +1072,7 @@ const API_CAPABILITIES = [
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
   "account", "business", "engine", "connect", "check", "product", "update", "diagnostics",
-  "quit",
+  "support", "publisher", "quit",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 // Which copy of the program this is, without saying where it lives: run.py
@@ -1063,7 +1151,7 @@ const ACCOUNT_KEYS = new Set([
   "PORT",
 ]);
 const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json", "engine.local.json",
-  "report-brand.local.json"]);
+  "report-brand.local.json", "support-reports.local.json"]);
 const MACHINE_CONFIG = new Set(["claude_code.local.json"]);
 const LEGACY_ENV = path.join(__dirname, ".env");
 
@@ -1669,10 +1757,6 @@ app.post("/api/integration", async (req, res) => {
   }
 });
 
-// ---- Search Console: ask Google now --------------------------------------
-// "i had integrated the Google search console then why i see the same message
-//  again and again" — Setup never asked Google; this does, the same way the
-// keyword pass does, and says what Google answered.
 // Every order he gave and what became of it (coordination/orders_view).
 // "there is no any room where i can see that the commands i gave how much work
 //  get done what remains and why"
@@ -1686,6 +1770,10 @@ app.get("/api/index-status", async (_q, res) =>
 app.post("/api/index-check", async (_q, res) =>
   res.json(await pyModule("pipelines.seo_index", ["--now", "--json"], 300000)));
 
+// ---- Search Console: ask Google now --------------------------------------
+// "i had integrated the Google search console then why i see the same message
+//  again and again" — Setup never asked Google; this does, the same way the
+// keyword pass does, and says what Google answered.
 app.post("/api/integrations/test-gsc", async (_q, res) =>
   res.json(await pyModule("pipelines.seo_intel", ["--check-gsc"], 120000)));
 
@@ -2204,10 +2292,8 @@ app.post("/api/release", async (req, res) => {
 // ---- the owner's standing orders, per sector --------------------------------
 // The same boxes the Run panel shows, settable without starting a day. One
 // form, one store: an order saved here is the order the MD reads when the day
-// runs, so there is no second place for the two to disagree.
-app.get("/api/orders", async (_q, res) =>
-  res.json(await pyModule("coordination.proposals", ["--json"], 60000)));
-
+// runs, so there is no second place for the two to disagree. (Reading them is
+// GET /api/orders above, with what became of each.)
 app.post("/api/orders", async (req, res) => {
   const py = resolvePython();
   if (!py) return res.json({ ok: false, error: NO_PY });

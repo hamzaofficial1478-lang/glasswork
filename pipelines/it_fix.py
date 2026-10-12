@@ -439,12 +439,6 @@ def _wrong_domain_in(text, right):
     return ""
 
 
-def _dead_email_in(text):
-    for a in _EMAIL.findall(text or ""):
-        return a
-    return ""
-
-
 def fix_title(issue, ctx):
     """
     A page with no <title>.

@@ -218,10 +218,6 @@ def get_tool(tid: str):
     return next((t for t in _load().get("tools", []) if t["id"] == tid), None)
 
 
-def list_tools() -> list:
-    return list(_load().get("tools", []))
-
-
 def tools_on_shelf(shelf: str) -> list:
     """Enabled tools on a shelf, best (lowest priority number) first — the
     fallback order the cabinet hands back when an agent borrows that shelf."""

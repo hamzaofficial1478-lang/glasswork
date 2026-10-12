@@ -472,7 +472,7 @@ def _brief(agent, max_briefs, draft_allowance, job=None):
                        "problem, not a Content one — see what 'SEO finds the "
                        "gaps' said in today's run.")
             elif job and asked_about and not narrowed:
-                why = (f"Nothing to brief on that subject: no tracked phrase mentions "
+                why = ("Nothing to brief on that subject: no tracked phrase mentions "
                        + ", ".join(asked_about[:4])
                        + ". SEO has to find the phrases before Content can build a page "
                          "on them — or say it plainly and I will write it from the job "

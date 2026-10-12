@@ -10,7 +10,6 @@ plan from on day one. Safe to run more than once: it never inserts a duplicate.
 import sqlite3
 
 from . import uae
-from pathlib import Path
 
 DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()   # the open website's
 

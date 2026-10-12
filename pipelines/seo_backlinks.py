@@ -53,11 +53,6 @@ from urllib.parse import urlparse
 
 from coordination import board, cabinet, deskwork
 
-try:
-    from . import services
-except ImportError:  # pragma: no cover
-    import services
-
 AGENT = "seo-backlinks"
 
 # ---------------------------------------------------------------------------
@@ -174,14 +169,6 @@ def _host(u):
     if "://" not in u:
         u = "https://" + u
     return (urlparse(u).netloc or "").replace("www.", "")
-
-
-def _our_domain():
-    try:
-        from coordination import site
-        return _host(site.status().get("url") or "")
-    except Exception:
-        return ""
 
 
 # ---------------------------------------------------------------------------

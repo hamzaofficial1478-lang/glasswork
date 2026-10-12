@@ -23,7 +23,6 @@ own server against a throwaway site with a blog table in it, and is skipped
 (saying so) on a machine without PHP.
 """
 import json
-import os
 import shutil
 import socket
 import sqlite3

@@ -41,6 +41,27 @@ website, so nothing is lost.
 - **New versions** are published by the GitHub check, once per version, after
   the Setup has been built, installed and tested on Windows.
 
+## Decided (12 October) — replaces parts of 10 October
+
+- **Reports and updates come back; tracking does not.** "do not remove these
+  report-sending form ... i do not want to track the user." People send problem
+  reports from Help and reports, sealed to his key; he reads and answers them in
+  his Reports room. Nothing counts copies, nobody registers, no copy has a
+  number, and two reports from one person cannot be linked.
+- **Updates from his own Home again**, signed with his key: the banner offers
+  each new version, Update now installs it, and the version before is kept. The
+  GitHub release step is gone from the Windows check.
+- **Closed source.** "it is my hardwork of months i will not hand over to any
+  one free." The repository is private and the licence reserves all rights.
+  His side of the program, these guides, the agency handbook and his client's
+  own files are left out of every copy given out.
+- **Stronger privacy between people on one computer.** Argon2id for the
+  password; account names sealed and never listed (you type your own); account
+  folders named by random numbers; one answer for a wrong name or a wrong
+  password; nobody at the door can see who is signed in.
+- **His client's details never reach anyone else's copy** — not the client's
+  email as a default, not the client's markup, not in the connector template.
+
 ---
 
 ## What we are building

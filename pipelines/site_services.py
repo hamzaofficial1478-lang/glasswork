@@ -28,7 +28,6 @@ Read-only: GETs the owner's own pages and nothing else.
 """
 import argparse
 import json
-import os
 import re
 import time
 import urllib.parse

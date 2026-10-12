@@ -279,13 +279,19 @@ DEFAULT_EMAIL = "teamworlddeal@worlddealtechnicalservices.com"
 DEAD_DOMAIN = "worlddealtechnicalservices.ae"
 
 
+def default_email() -> str:
+    """His working address — for his own website only. Anyone else's has none until they set BUSINESS_EMAIL."""
+    from coordination import workspace
+    return DEFAULT_EMAIL if workspace.is_original_site() else ""
+
+
 def contact_of(html="") -> dict:
     """His phone, WhatsApp, email and site. Settings first, his page second."""
     g = lambda k: (mail.setting(k) or "").strip()      # noqa: E731
     site = g("SITE_URL").rstrip("/")
     phone = g("BUSINESS_PHONE")
     wa = g("BUSINESS_WHATSAPP") or phone
-    email = g("BUSINESS_EMAIL") or DEFAULT_EMAIL
+    email = g("BUSINESS_EMAIL") or default_email()
     if html:
         if not phone:
             m = re.search(r'href="tel:([^"]+)"', html)
@@ -296,7 +302,7 @@ def contact_of(html="") -> dict:
             wa = m.group(1).strip() if m else phone
     # Belt and braces: whatever else happens, the dead domain never goes out.
     if DEAD_DOMAIN in (email or "").lower():
-        email = DEFAULT_EMAIL
+        email = default_email()
     return {"site": site, "phone": phone, "whatsapp": wa, "email": email,
             "wa_digits": re.sub(r"\D", "", wa or "")}
 

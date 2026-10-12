@@ -22,12 +22,12 @@ import os
 import struct
 import sys
 import tempfile
-import urllib.error
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "installer"))
 import build_windows as bw  # noqa: E402
+from coordination import product  # noqa: E402
 
 _fail = []
 
@@ -55,6 +55,11 @@ def test_what_goes_in():
     private = [p.relative_to(app).as_posix() for p in app.rglob("*")
                if p.name == ".env" or p.name.endswith((".local.json", ".db")) or p.relative_to(app).parts[0] in ("data", ".git")]
     check("  and no settings, keys, records or history ride along", private, [])
+    his = sorted(p.relative_to(app).as_posix() for p in app.rglob("*")
+                 if p.is_file() and product.publisher_only(p.relative_to(app).as_posix()))
+    check("  nor the developer's own side: his Reports room, publishing, the Home's code, his guides", his, [])
+    check("  but a copy can still seal a report to him", (app / "coordination" / "sealed.py").exists()
+          and (app / "coordination" / "support.py").exists(), True)
 
 
 def test_the_icon():

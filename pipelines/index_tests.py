@@ -22,11 +22,9 @@ What has to hold:
 
 A throwaway cabinet and a stand-in website. Nothing leaves this machine.
 """
-import json
 import sqlite3
 import sys
 import tempfile
-import time
 import types
 from pathlib import Path
 

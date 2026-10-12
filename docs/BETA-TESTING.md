@@ -22,41 +22,28 @@ on their own computer.
 
 ## Before you hand it over (once)
 
-1. **Make your signing key**, on your own computer, and keep it outside the
-   program folder:
-
-       python -m coordination.updates --new-key C:\Users\you\glasswork-signing.key
-
-   It prints an `update_key`. Put that into `config/product.json`.
-2. **Choose where updates live.** Any https address you control works, such as
-   GitHub Releases or your own hosting. Put the address of `manifest.json` into
-   `update_url` in `config/product.json`.
-3. **Put your support email** into `support_email` in the same file, so the
-   report screen tells testers where to send things.
-4. **Choose the product's name.** It is "Glasswork" for now, in
+1. **Make your Glasswork Home** — *Reports* in the menu on your own copy. It
+   makes your keys, and gives you one folder to upload to the program's own
+   website (never a client's). Steps: `docs/RELEASING.md`, section 1.
+2. **Choose the product's name.** It is "Glasswork" for now, in
    `config/product.json`. Changing it there changes it everywhere.
-5. **Make the first release** (see "Sending an update" below) and give each
-   tester the zip.
+3. **Put the first version out** — *Settings → Publisher → Put it out*, with
+   the Windows installer ticked (on your Windows computer). Testers download it
+   from your Home's download page.
 
 ## What the tester does
 
-1. **Unzip the folder** somewhere they will keep it, such as Documents.
-2. **Install:**
-   - Windows: double-click `install\Install-Windows.bat`.
-   - Mac: double-click `install/Install-Mac.command`. If the Mac refuses,
-     right-click it, choose Open, then Open again.
-
-   It installs Python and Node if they are missing (it asks first), sets
-   everything up inside the folder, and puts the program on the desktop.
-3. **Open it** from the desktop and make an account. Write down the recovery
-   key.
-4. **Choose how the agency thinks** (Claude, OpenAI or Gemini) with their own
+1. **Download the Setup** from your Home's download page and open it (on a
+   Mac, run it from source — see the README). If Windows says it protected
+   their PC: **More info → Run anyway**.
+2. **Open it** and make an account. Write down the recovery key.
+3. **Choose how the agency thinks** (Claude, OpenAI or Gemini) with their own
    key, and set a small daily limit, such as $2.
-5. **Fill in Your business,** or let it draft from their website.
-6. **Connect their website**, or choose read-only.
-7. **Run today** and watch **Your agency**: the floor shows every desk, and a
+4. **Fill in Your business,** or let it draft from their website.
+5. **Connect their website**, or choose read-only.
+6. **Run today** and watch **Your agency**: the floor shows every desk, and a
    red desk says why it stopped.
-8. **Try Website Check** on their own site and on a competitor's.
+7. **Try Website Check** on their own site and on a competitor's.
 
 ## What to watch for in the first week
 
@@ -71,31 +58,31 @@ on their own computer.
 
 ## How they report a problem
 
-**Help → Make it → Copy it**, then paste it into an email to you (or a new
-issue on the program's GitHub page, if they are happy for it to be public).
-Nothing is ever sent from the program itself.
+**Help and reports → Report a problem.** It is sealed on their computer so only
+yours can open it, and you read it in **Reports**. Your answer appears in their
+Help screen. Nothing else is ever sent: no count of copies, no number for their
+copy, no registration.
 
-The report lists the program's version, which desks failed and why, open
-faults, and what stops any sector from running. It has no keys, passwords,
-email addresses, phone numbers, web addresses or lead details in it, and they
-can read every line before copying it.
+If they tick it, the report carries a support report — the version, which
+desks failed and why, open faults — with every key, password, email address,
+phone number, web address and lead detail taken out. They can read it first.
 
 ## Sending a new version
 
-1. Change `version` in `config/product.json` (for example `0.9.0` → `0.9.1`)
-   and push. (Claude does this with each round of work.)
-2. GitHub builds the Windows Setup on a real Windows machine, installs it,
-   opens it, makes an account, adds a website, checks the office reads it,
-   removes it again — and only then puts the Setup on the program's release
-   page, once per version.
-3. Testers press **Settings → This program → Check for a new version →
-   Download**, and run the new Setup over the old one. The same install is
-   updated and their work — kept in its own folder — is not touched.
+1. Change `version` in `config/product.json` (for example `0.10.0` → `0.10.1`)
+   and push. (Claude does this with each round of work.) GitHub's Windows
+   check builds the Setup, installs it, opens it and removes it again, so a
+   broken one is caught before anyone sees it.
+2. On your own copy: **Settings → Publisher → Put it out.**
+3. Every tester's copy shows *"Version 0.10.1 is ready — Update now"*. Only a
+   version signed with your key is installed; their work is kept, and they can
+   go back to the version before from Settings.
 
 ## Good to know
 
 - **Windows shows "Windows protected your PC"** for the Setup, because it is
   not signed with a paid certificate. **More info → Run anyway** opens it.
 - **Mac and Linux** run the program from source (see the README).
-- **Nothing installs itself, and nothing is looked up on its own.** A new
-  version is looked for only when the person presses the button.
+- **Nothing installs itself.** The program asks your Home whether a new version
+  is out — a plain question with nothing about them in it — and installs it
+  only when they press Update now.

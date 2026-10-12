@@ -917,7 +917,7 @@ def test_it_works_the_valuable_segments_first_and_only_reachable_businesses():
     check("banks are not first any more", covered[0] != "bank", True)
 
     print("\n...and the day's call asks for reachable businesses only:")
-    import argparse, inspect
+    import inspect
     check("run() defaults to contactable",
           inspect.signature(O.run).parameters["contactable_only"].default, True)
     src = inspect.getsource(O.main)

@@ -151,7 +151,6 @@ def _env(name, default=""):
     except Exception:
         pass
     try:
-        from pathlib import Path
         from . import workspace
         p = workspace.env_path_for(name)
         if p.exists():

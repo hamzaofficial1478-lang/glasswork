@@ -19,7 +19,6 @@ What has to hold:
 
 Throwaway cabinet. No network, no model.
 """
-import json
 import os
 import sqlite3
 import subprocess

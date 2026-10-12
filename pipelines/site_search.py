@@ -41,7 +41,6 @@ import argparse
 import json
 import os
 import re
-import sqlite3
 import time
 import urllib.error
 import urllib.parse
@@ -273,7 +272,6 @@ def build_records(url, max_pages=40, timeout=15):
     # reason and found the /contact.php no guess list contained.
     seen = [base]
     queue = own_pages(home, base)
-    linked = len(queue)
     queue += [base + p for p in getattr(site_services, "LIKELY_PATHS", ())
               if base + p not in queue]
 

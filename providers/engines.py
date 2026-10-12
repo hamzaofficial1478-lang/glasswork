@@ -279,10 +279,6 @@ def engine() -> str:
     return ""
 
 
-def is_api() -> bool:
-    return engine() in API_ENGINES
-
-
 def key(eng=None) -> str:
     eng = eng or engine()
     return _setting(KEY_SETTING[eng]) if eng in KEY_SETTING else ""

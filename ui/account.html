@@ -96,8 +96,8 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
     <h1>Sign in</h1>
     <p class="lead">Your websites and everything the agency knows about them are encrypted. Your password opens them.</p>
     <form onsubmit="signIn(event)">
-      <label for="siWho">Account</label>
-      <select id="siWho"></select>
+      <label for="siWho">Your name</label>
+      <input id="siWho" type="text" autocomplete="username" required maxlength="60">
       <label for="siPw">Password</label>
       <input id="siPw" type="password" autocomplete="current-password" required>
       <button class="btn" id="siBtn">Sign in</button>
@@ -147,8 +147,8 @@ footer{margin-top:22px;color:var(--faint);font-size:12px;text-align:center;max-w
     <h1>Use your recovery key</h1>
     <p class="lead">Type the key you wrote down when you made your account, and choose a new password.</p>
     <form onsubmit="recover(event)">
-      <label for="reWho">Account</label>
-      <select id="reWho"></select>
+      <label for="reWho">Your name</label>
+      <input id="reWho" type="text" autocomplete="username" required maxlength="60">
       <label for="reKey">Recovery key</label>
       <input id="reKey" type="text" autocomplete="off" spellcheck="false" required
              style="font-family:'IBM Plex Mono',monospace;letter-spacing:.05em" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX">
@@ -248,7 +248,7 @@ let LIST = null, ME = null, RECOVERY = '', ACCOUNT_NAME = '';
 
 function show(id) {
   document.querySelectorAll('section').forEach((s) => s.classList.toggle('on', s.id === id));
-  const f = id === 'signin' ? $('#siPw') : document.querySelector('#' + id + ' input, #' + id + ' select');
+  const f = document.querySelector('#' + id + ' input');
   if (f && id !== 'manage') setTimeout(() => f.focus(), 30);
 }
 function fail(id, msg) { const e = $('#' + id); e.textContent = msg || ''; e.classList.toggle('on', !!msg); }
@@ -266,10 +266,6 @@ function busy(btn, on, label) {
   if (on) { b.dataset.label = b.textContent; b.textContent = label || 'One moment…'; b.disabled = true; }
   else { b.textContent = b.dataset.label || b.textContent; b.disabled = false; }
 }
-function fillAccounts(sel) {
-  const accts = (LIST && LIST.accounts) || [];
-  $(sel).innerHTML = accts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
-}
 function initials(s) {
   const t = String(s || '').replace(/^https?:\/\//, '').replace(/^www\./, '');
   return (t.slice(0, 2) || '··').toUpperCase();
@@ -282,9 +278,8 @@ async function boot() {
     $('#cipherNote').style.display = 'block';
   }
   if (LIST.signedIn) return manage();
-  const accts = LIST.accounts || [];
-  if (!accts.length) { $('#suBack').style.display = 'none'; return show('signup'); }
-  fillAccounts('#siWho'); fillAccounts('#reWho');
+  // Nobody's name is listed: each person types their own.
+  if (!LIST.accounts) { $('#suBack').style.display = 'none'; return show('signup'); }
   show('signin');
 }
 

@@ -53,7 +53,6 @@ is a collector that eventually mails the wrong company.
 """
 import re
 import time
-import urllib.parse
 
 from . import fetcher
 
@@ -332,7 +331,6 @@ def fill_in(cands, limit=25, timeout=12, deadline=None) -> dict:
 def main():
     import argparse
     import json
-    import sys
     ap = argparse.ArgumentParser(
         description="Find a UAE business's own website from its name alone.")
     ap.add_argument("company", nargs="+")

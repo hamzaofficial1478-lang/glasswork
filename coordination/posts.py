@@ -364,7 +364,7 @@ def _keep_pictures(html):
     problems = []
 
     def one(m):
-        mime, data = m.group(1).lower(), m.group(2)
+        data = m.group(2)
         try:
             raw = base64.b64decode(data, validate=True)
         except Exception:

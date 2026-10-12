@@ -217,10 +217,9 @@ def update():
     head("Checking for updates")
     code, out = sh(["git", "rev-parse", "--is-inside-work-tree"])
     if code != 0:
-        # An installed copy: no git. It asks nobody anything at start-up — a new
-        # version is looked for only when the person presses "Check for a new
-        # version" in Settings (coordination/updates.py).
-        say("  Not a git copy — look for a new version from Settings → This program.")
+        # An installed copy: no git. The office says when a signed version is
+        # out, and installs it only when asked (coordination/updates.py).
+        say("  Not a git copy — new versions are offered in the program itself.")
         return
 
     code, dirty = sh(["git", "status", "--porcelain"])
@@ -503,6 +502,7 @@ def tests():
             "coordination.workspace_tests", "coordination.launch_tests", "coordination.app_tests",
             "coordination.launch_kit_tests", "coordination.posts_tests",
             "coordination.speed_tests", "pipelines.connector_tests",
+            "coordination.publish_tests", "coordination.sealed_tests",
             "coordination.installer_tests", "coordination.isolation_tests",
             "coordination.account_tests",
             "coordination.profile_tests",

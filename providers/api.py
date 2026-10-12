@@ -118,17 +118,6 @@ def cmd_resolve_shelf(a):
     return {"ok": True, "resolved": store.resolve_shelf(a.get("shelf", ""))}
 
 
-def _smtp_configured() -> bool:
-    """Is there a real mail route, even though it does not live on the shelf?"""
-    try:
-        from . import integrations
-        env = integrations.read_env()
-        return all((env.get(k) or "").strip()
-                   for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS"))
-    except Exception:
-        return False
-
-
 def cmd_shelves(_):
     """
     The shelf board: every shelf, what's on it (catalogue), and its live state

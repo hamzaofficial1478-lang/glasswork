@@ -527,16 +527,6 @@ def tests_pass(timeout=TEST_TIMEOUT) -> dict:
             "why": "all suites green" if p.returncode == 0 else head}
 
 
-def confirm(page, needle, s=None) -> bool:
-    """
-    Read the page back and look for what we just wrote.
-
-    'The server returned ok' and 'the change is on the page' are different
-    claims. Only the second one is worth telling him, and it costs one GET.
-    """
-    return bool(_read_back(page, needle, s=s))
-
-
 def _read_back(page, needle, s=None):
     """True: it is on the page. False: it is not. None: the site did not
     answer, so nobody can say — which must not be read as "it is not there"

@@ -261,7 +261,7 @@ def step_canonical(url, max_pages=10):
     Google to drop the page it is reading. No amount of markup, content or
     keywords outranks a page asking not to be indexed.
     """
-    from . import fetcher, harvest, site_search
+    from . import fetcher, site_search
     import socket
     import urllib.parse
     try:

@@ -32,13 +32,14 @@ google-auth>=2.29
 # PRIVATE ACCOUNTS — each person's data encrypted on this computer.
 #
 # cryptography locks each account's master key with the password and the
-# recovery key, and seals the settings files. sqlcipher3-wheels is SQLite with
+# recovery key (Argon2id, which needs version 44 or later), and seals the
+# settings files. sqlcipher3-wheels is SQLite with
 # encryption built in, for each website's cabinet (coordination/cipher.py);
 # it ships ready-built for Windows, Mac and Linux.
 #
 # Without these: the program runs exactly as before. Making an account is what
 # needs them, and the account screen says so.
-cryptography>=41
+cryptography>=44
 sqlcipher3-wheels>=0.5
 
 # PHONE NUMBERS IN ANY COUNTRY — Google's numbering rules, so "0161 496 0000"

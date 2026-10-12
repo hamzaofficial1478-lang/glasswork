@@ -11,7 +11,10 @@ build_windows.py — makes the one-click Windows installer, Setup.exe.
 
 WHAT GOES IN
 
-  the program          every file git tracks (so nothing private rides along)
+  the program          every file git tracks (so nothing private rides along),
+                       less the publisher's own side (product.PUBLISHER_ONLY),
+                       with the release's product.json — the publisher's Home
+                       address and public keys — in place of this copy's
   its own Python       a complete, private Python 3.12 (python-build-standalone,
                        the build uv uses), with the program's libraries installed
                        into it — nothing is added to the computer's own Python
@@ -51,6 +54,9 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from coordination import product  # noqa: E402
+
 PY_SERIES = "3.12"
 NODE_MAJOR = "22"
 PBS_API = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
@@ -114,6 +120,9 @@ def stage_program(app: Path, product_json: str) -> str:
     for rel in program_files():
         top = rel.split("/")[0]
         if top in LEFT_OUT or rel.endswith((".local.json", ".db")) or rel == ".env":
+            continue
+        # His side — users room, publishing, the Home's code, his guides — never goes to anyone.
+        if product.publisher_only(rel):
             continue
         src = ROOT / rel
         if not src.is_file():

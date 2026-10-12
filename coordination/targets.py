@@ -32,7 +32,6 @@ import json
 import sqlite3
 import sys
 import time
-from pathlib import Path
 
 # the open website's cabinet; the test run's own when AGENCY_DB is set
 DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()

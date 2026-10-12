@@ -1057,7 +1057,7 @@ def as_text() -> str:
         where = r["routed_to"] or "not routed"
         L.append(f" {flag} [{r['id']:>3}] {r['kind']:<10} {r['what'][:88]}")
         L.append(f"      → {where}"
-                 + (f", MD told" if r["escalated_at"] else "")
+                 + (", MD told" if r["escalated_at"] else "")
                  + f", seen {r['seen_count']}x")
     if s["open"] == 0:
         L.append("  (nothing — no agent is stalled, crashed or sitting on work)")
