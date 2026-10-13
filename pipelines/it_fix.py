@@ -817,10 +817,58 @@ def fix_reindex_asked(issue, ctx):
             "undo": f"python -m pipelines.site_api --undo --page {sitemap.PAGE}"}
 
 
+def _call_waiting(call) -> bool:
+    """A change running this routine is already waiting for his yes, from any desk."""
+    try:
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            for (d,) in c.execute("SELECT detail FROM site_queue WHERE status IN ('pending','approved')"):
+                if re.search(r'"(run|call)"\s*:\s*"' + re.escape(call) + '"', str(d or "")):
+                    return True
+    except sqlite3.Error:
+        pass
+    return _waiting(call)
+
+
+def fix_blueprint(issue, ctx):
+    """
+    A gap from the website blueprint (pipelines/site_blueprint.py): something a
+    complete website has that this one does not.
+
+    Kind 'blueprint' stops here, like the audit's kind 'seo'. The four with one
+    right answer — robots.txt, llms.txt, the sitemap, the business markup —
+    become a change for his yes. The rest need a picture, a decision or the
+    person who built the site, so they go to him as steps, not as a guess.
+    """
+    if issue.get("kind") != "blueprint":
+        return None
+    from . import site_blueprint as bp
+    text = issue.get("detail") or ""
+    m = re.search(r"\[blueprint:([^\]]+)\]", text)
+    code = m.group(1) if m else ""
+    why = re.search(r"Why it matters:\s*(.*)$", text, re.S)
+    why = why.group(1).strip() if why else text[:300]
+    call = bp.CALLS.get(code)
+    if call:
+        if _call_waiting(call):
+            return {"how": "already_right", "why": "the same change is already waiting for your yes"}
+        page = {"put_robots": "robots.txt", "put_llms": "llms.txt", "publish_sitemap": "sitemap.php"}.get(call, "")
+        return {"how": "call", "call": call, "pages": [page] if page else [], "why": why,
+                "undo": (f"python -m pipelines.site_api --undo --page {page}" if page
+                         else "python -m pipelines.site_api --undo-schema")}
+    steps = bp.ADVICE.get(code)
+    if not steps:
+        return None
+    return _advice(why, steps, needs="you" if code in ("favicon_missing", "og_missing") else
+                   "the person who built your site, or your hosting company")
+
+
 RECIPES = (
     # Before everything: an audit ticket must never reach a recipe that only
     # matches on its wording. See fix_seo_finding.
     fix_seo_finding,
+    # And a blueprint gap, for the same reason: "sitemap" in its wording must
+    # not be read as his order to publish one.
+    fix_blueprint,
     fix_unreachable,
     # Before fix_canonical: a wrong domain in a canonical tag is a wrong domain
     # EVERYWHERE, and rewriting only the canonical leaves it in every link and

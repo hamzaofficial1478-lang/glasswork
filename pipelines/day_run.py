@@ -110,12 +110,10 @@ LOCK_HOLDER = "owner-run-button"
 # the thing that makes a primary slow in the first place.
 
 STEPS = [
-    # ---- 'open': the three that must happen before anything else ----------
-    # Read the phone FIRST. An approval he gave last night is a decision the
-    # agency should already be acting on this morning — not one it discovers
-    # after planning the day around him not having answered.
-    ("Read your answers from the phone", "coordination.ntfy_replies", "Director", "open"),
-    # Then the Overseer, still BEFORE the MD plans. The MD reasons from the live
+    # ---- 'open': the two that must happen before anything else ------------
+    # (His answers need no step of their own: he approves in the app, on his
+    # computer or phone, and that is written straight to the cabinet.)
+    # The Overseer goes first, BEFORE the MD plans. The MD reasons from the live
     # state of the business, and "SEO's strategist has been dead since Tuesday"
     # is part of that state — planning a day of SEO work around a desk that is
     # not answering is exactly the mistake this is here to stop. It also closes
@@ -126,6 +124,12 @@ STEPS = [
 
     # ---- three lanes that need nothing from each other --------------------
     ("IT checks the site", "pipelines.it_health", "IT", "it"),
+    # Then the whole picture: does the site have everything a complete website
+    # for this business has — robots.txt, sitemap, llms.txt, markup, a page per
+    # service, projects, reviews. What is IT's is filed for the Fixer below;
+    # what is SEO's or Content's goes to the MD with the evidence. It reads the
+    # site at most every few days and is a quick no-op in between.
+    ("IT checks what the site is missing", "pipelines.site_blueprint", "IT", "it"),
     # AFTER the check, in the same lane, because it works the tickets the check
     # just filed. It was missing entirely: there was an it-fixer desk, an
     # it-fixer agent card and an it-fixer light on the office floor, and no
@@ -316,6 +320,28 @@ LONGER = {
 
 FOLLOW_UP_ROUNDS = 4
 FOLLOW_UP_BUDGET = 2 * 3600
+
+# CARRY ON — HIS ORDERS ARE NOT DROPPED AT A ROUND LIMIT.
+#
+# "the program should not stop until the given orders did not get completed"
+#
+# The limits above stop a bug spending all day; they also stopped HIS orders
+# while they were still moving — twelve of his twenty leads found, a round
+# limit reached, and the rest left for tomorrow. So when the rounds run out
+# while a desk is still getting through his own orders (his order on the board,
+# his leads number, a change he approved), the day rests CARRY_ON_REST and goes
+# again — up to CARRY_ON_PASSES times. The rest gives his website, the AI
+# provider and his spending a breather between passes.
+#
+# It still stops, and says why, when his orders are done or waiting on him;
+# when a pass moved nothing (no recipe, no key, nothing left to find — another
+# pass would spend tokens saying the same thing); when today's spending limit is
+# reached; after CARRY_ON_PASSES passes; and the moment he presses Stop, rest
+# or no rest. Anything still open is carried into tomorrow's run (see
+# carried_orders), so an order is finished, refused with a reason, or still on
+# the list — never quietly forgotten.
+CARRY_ON_PASSES = 6
+CARRY_ON_REST = 15 * 60
 # Extra steps are numbered from here, well clear of STEPS, so nothing that
 # reads a step by its place in STEPS (resume, the preflight) ever mistakes one.
 FOLLOW_UP_SEQ = 1000
@@ -325,7 +351,7 @@ FOLLOW_UP_LANE = "more"
 
 # Which steps work each desk's jobs, in the order they run.
 DESK_STEPS = {
-    "it-watcher": ("pipelines.it_health",),
+    "it-watcher": ("pipelines.it_health", "pipelines.site_blueprint"),
     "it-fixer": ("pipelines.it_fix",),
     "it-releaser": ("pipelines.it_release",),
     "it-search": ("pipelines.site_search",),
@@ -641,8 +667,7 @@ def _preskipped(rid) -> set:
 # second plan on top of an unfinished first is the double load he means.
 
 # Cheap, and about the agency as a whole: they run on every resume.
-ALWAYS_ON_RESUME = ("coordination.ntfy_replies", "coordination.faults",
-                    "pipelines.report_daily")
+ALWAYS_ON_RESUME = ("coordination.faults", "pipelines.report_daily")
 
 # Steps that do their own fresh work rather than working a queue. A sector
 # with jobs waiting does not re-run these just because of the queue.
@@ -1005,7 +1030,7 @@ def what_is_left() -> dict:
         with sqlite3.connect(board.DB, timeout=30) as c:
             c.row_factory = sqlite3.Row
             out["jobs"] = [dict(r) for r in c.execute(
-                "SELECT id, sector, title, desk FROM tasks WHERE status='open'"
+                "SELECT id, sector, title, desk, created_by FROM tasks WHERE status='open'"
                 " AND COALESCE(risk,'green')='green'"
                 " AND COALESCE(about,'') NOT LIKE 'faults:%' ORDER BY created_at")]
             out["approved"] = c.execute(
@@ -1211,6 +1236,73 @@ def _still_open(left, stopped_rooms, only) -> list:
     return lines
 
 
+def _his_work_open(left) -> bool:
+    """Is any of what is left HIS — his order, his leads number, a change he approved?"""
+    if left.get("leads_short") or left.get("approved"):
+        return True
+    try:
+        from coordination import desks
+        return any(desks.is_owner_order(j) for j in left.get("jobs") or [])
+    except Exception:
+        return False
+
+
+def _spend_left() -> bool:
+    """False once today's spending limit is reached."""
+    try:
+        from coordination import cabinet
+        cap = cabinet.daily_spend_cap()
+        return not cap or cabinet.spent_today() < cap
+    except Exception:
+        return True
+
+
+def _rest(rid, seconds, stop, label) -> bool:
+    """A visible rest between passes. Returns False if he pressed Stop during it."""
+    seq = _add_rows(rid, [(label, "")])[0]
+    _step(rid, seq, status="running", started_at=_now(),
+          summary=f"resting until {time.strftime('%H:%M', time.localtime(time.time() + seconds))}")
+    end, held = time.time() + seconds, time.time()
+    while time.time() < end:
+        if stop is not None and stop.is_set():
+            _step(rid, seq, status="stopped", ended_at=_now(), summary="you pressed Stop during the rest")
+            _tick(rid)
+            return False
+        if time.time() - held > 300:
+            _hold_the_day(rid)
+            held = time.time()
+        time.sleep(min(2.0, max(0.0, end - time.time())))
+    _step(rid, seq, status="ok", ended_at=_now(), code=0, summary="rested — carrying on with your orders")
+    _tick(rid)
+    return True
+
+
+def carried_orders(today=None) -> dict:
+    """
+    {sector: title} — his orders from earlier days still open on the board.
+
+    "No orders, no day" is about not spending tokens on a day nobody asked for.
+    An order he gave on Monday that is still open on Tuesday IS an order: the
+    day starts for it, and it stays on the list until it is done or refused
+    with a reason.
+    """
+    today = today or time.strftime("%Y-%m-%d")
+    start = int(time.mktime(time.strptime(today, "%Y-%m-%d")))
+    out = {}
+    try:
+        from coordination import desks
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            c.row_factory = sqlite3.Row
+            for r in c.execute("SELECT sector, title, created_by, created_at FROM tasks"
+                               " WHERE status IN ('open','in_progress') AND created_at < ?"
+                               " AND COALESCE(risk,'green')='green' ORDER BY created_at", (start,)):
+                if desks.is_owner_order(dict(r)) and r["sector"] not in out:
+                    out[r["sector"]] = r["title"]
+    except Exception:
+        pass
+    return out
+
+
 def _keep_going(rid, stop=None, slots=None) -> dict:
     """
     The extra rounds. See KEEP GOING at the top of this file. Returns what they
@@ -1221,6 +1313,28 @@ def _keep_going(rid, stop=None, slots=None) -> dict:
     only = _only_for(rid)
     t0 = time.time()
     in_play, gave_up, rounds, why = None, {}, 0, ""
+    passes, total_rounds = 1, 0
+
+    def carry_on(limit_why):
+        """Rest and go again while his orders are still moving. True = go again."""
+        nonlocal passes, rounds, t0, why
+        if passes >= CARRY_ON_PASSES or not in_play or stopping():
+            return False
+        if not _his_work_open(left):
+            return False
+        if not _spend_left():
+            why = limit_why + "; today's spending limit is reached, so the rest carries on tomorrow"
+            return None
+        mins = CARRY_ON_REST // 60
+        if not _rest(rid, CARRY_ON_REST, stop,
+                     f"Pass {passes + 1} of {CARRY_ON_PASSES} · resting {mins} minutes, "
+                     "then carrying on with your orders"):
+            why = "you pressed Stop"
+            return None
+        passes += 1
+        rounds, t0 = 0, time.time()
+        return True
+
     while True:
         if stopping():
             why = "you pressed Stop"
@@ -1235,12 +1349,18 @@ def _keep_going(rid, stop=None, slots=None) -> dict:
                    "the last round moved nothing more, so running it again would "
                    "only spend tokens to say the same thing")
             break
-        if rounds >= FOLLOW_UP_ROUNDS:
-            why = f"{FOLLOW_UP_ROUNDS} extra rounds is the most one day takes"
-            break
-        if time.time() - t0 >= FOLLOW_UP_BUDGET:
-            why = (f"the extra rounds used their {FOLLOW_UP_BUDGET // 60} minutes — "
-                   "the rest carries on tomorrow, or press Resume")
+        if rounds >= FOLLOW_UP_ROUNDS or time.time() - t0 >= FOLLOW_UP_BUDGET:
+            limit = (f"{FOLLOW_UP_ROUNDS} extra rounds is the most one pass takes"
+                     if rounds >= FOLLOW_UP_ROUNDS else
+                     f"the extra rounds used their {FOLLOW_UP_BUDGET // 60} minutes")
+            go = carry_on(limit)
+            if go:
+                continue
+            if go is None:
+                break
+            why = (limit + (f", and {CARRY_ON_PASSES} passes is the most one day takes"
+                            if passes >= CARRY_ON_PASSES else "")
+                   + " — what is still open carries into tomorrow's run, or press Resume")
             break
         plan = round_plan(left, rooms)
         md_inbox = "Director" in rooms and bool(left.get("md_questions"))
@@ -1248,6 +1368,7 @@ def _keep_going(rid, stop=None, slots=None) -> dict:
             why = "nothing left that a desk can work on today"
             break
         rounds += 1
+        total_rounds += 1
         _hold_the_day(rid)
         since = _now()
         # A round is a run of its own for the one-job-per-sector rule — see
@@ -1258,7 +1379,7 @@ def _keep_going(rid, stop=None, slots=None) -> dict:
         # Questions in the MD's own inbox: it answers them, as it does each
         # morning, without planning the day again.
         if md_inbox:
-            seq = _add_rows(rid, [(f"Round {rounds + 1} · The MD answers the "
+            seq = _add_rows(rid, [(f"Round {total_rounds + 1} · The MD answers the "
                                    f"{left['md_questions']} question(s) waiting for it",
                                    "pipelines.md_cycle")])[0]
             with slots:
@@ -1270,14 +1391,14 @@ def _keep_going(rid, stop=None, slots=None) -> dict:
         # one that says what is still to go. Its own step, so the run panel
         # shows the MD asking rather than work appearing from nowhere.
         if "Leads" in rooms and left.get("leads_short"):
-            seq = _add_rows(rid, [(f"Round {rounds + 1} · The MD asks for the "
+            seq = _add_rows(rid, [(f"Round {total_rounds + 1} · The MD asks for the "
                                    f"{left['leads_short']} leads still to find",
                                    "pipelines.md_cycle")])[0]
             with slots:
                 _work_step(rid, seq, "pipelines.md_cycle", "Director", stop,
                            args=("--top-up", "--json"))
 
-        chains = {name: _add_rows(rid, [(f"Round {rounds + 1} · {_label_of(m)}", m)
+        chains = {name: _add_rows(rid, [(f"Round {total_rounds + 1} · {_label_of(m)}", m)
                                         for m in mods])
                   for name, mods in plan.items()}
         mods_of = {seq: m for name, mods in plan.items()
@@ -1311,10 +1432,11 @@ def _keep_going(rid, stop=None, slots=None) -> dict:
         moved = _got_through(since)
         in_play = {r for r in rooms if moved.get(r, 0) > 0}
         for r in rooms - in_play:
-            gave_up[r] = (f"round {rounds + 1} moved nothing — see its steps above "
+            gave_up[r] = (f"round {total_rounds + 1} moved nothing — see its steps above "
                           "for what it said")
     left = what_is_left()
-    return {"rounds": rounds, "why": why, "left": _still_open(left, gave_up, only),
+    return {"rounds": total_rounds, "passes": passes, "why": why,
+            "left": _still_open(left, gave_up, only),
             "minutes": round((time.time() - t0) / 60, 1)}
 
 
@@ -1621,7 +1743,7 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
     # NO ORDERS, NO DAY — see todays_orders. After the lock on purpose, so a
     # second press while a day runs still hears "already running"; and before
     # the clear-up, because a check means nothing on the board moves.
-    if not resume and not todays_orders(orders):
+    if not resume and not todays_orders(orders) and not carried_orders():
         board.release_lock(LOCK, LOCK_HOLDER)
         return no_orders(pre, quick=True)
 

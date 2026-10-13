@@ -173,13 +173,13 @@ def test_it_stops_when_a_round_moves_nothing():
         for i in range(6):
             _job(cab, f"t{i}", "IT", f"Owner's order: job {i}", "it-fixer")
         rid = day_run._open_run("ceiling", False, [])
-        real = day_run.FOLLOW_UP_ROUNDS
-        day_run.FOLLOW_UP_ROUNDS = 2
+        real = day_run.FOLLOW_UP_ROUNDS, day_run.CARRY_ON_PASSES
+        day_run.FOLLOW_UP_ROUNDS, day_run.CARRY_ON_PASSES = 2, 1
         try:
             with _Steps({"pipelines.it_fix": _FINISH_ONE.format(sector="IT")}):
                 more = day_run._keep_going(rid)
         finally:
-            day_run.FOLLOW_UP_ROUNDS = real
+            day_run.FOLLOW_UP_ROUNDS, day_run.CARRY_ON_PASSES = real
         check("two rounds and no more", more["rounds"], 2)
         check("and it says it was the ceiling", "most one day takes" in more["why"], True)
         check("what is left is listed", "4 job(s) still open" in " ".join(more["left"]), True)
@@ -192,6 +192,94 @@ def test_it_stops_when_a_round_moves_nothing():
             more = day_run._keep_going(rid)
         check("no round for a sector not in this run", (more["rounds"], steps.ran), (0, []))
         check("and it says why it is still open", "not in this run" in " ".join(more["left"]), True)
+
+
+class _Limits:
+    """Small limits and no real rest, for the carry-on tests."""
+    def __init__(self, rounds=2, passes=3, spend=True):
+        self.want = (rounds, passes, 0.05, spend)
+
+    def __enter__(self):
+        self.real = (day_run.FOLLOW_UP_ROUNDS, day_run.CARRY_ON_PASSES, day_run.CARRY_ON_REST,
+                     day_run._spend_left)
+        r, p, rest, spend = self.want
+        day_run.FOLLOW_UP_ROUNDS, day_run.CARRY_ON_PASSES, day_run.CARRY_ON_REST = r, p, rest
+        day_run._spend_left = lambda: spend
+        return self
+
+    def __exit__(self, *a):
+        (day_run.FOLLOW_UP_ROUNDS, day_run.CARRY_ON_PASSES, day_run.CARRY_ON_REST,
+         day_run._spend_left) = self.real
+
+
+def test_his_orders_carry_on_past_the_round_limit():
+    print("\nSix of his jobs, two rounds a pass: it rests and carries on until all six are done:")
+    with _Cabinet() as cab:
+        for i in range(6):
+            _job(cab, f"t{i}", "IT", f"Owner's order: job {i}", "it-fixer")
+        rid = day_run._open_run("carry on", False, [])
+        with _Limits(rounds=2, passes=3), _Steps({"pipelines.it_fix": _FINISH_ONE.format(sector="IT")}):
+            more = day_run._keep_going(rid)
+        check("all six done", cab.sql("SELECT count(*) n FROM tasks WHERE status='open'")[0]["n"], 0)
+        check("over three passes of two rounds", (more["passes"], more["rounds"]), (3, 6))
+        check("  and it says why it stopped", "everything you asked for today is done" in more["why"], True)
+        rests = cab.sql("SELECT label, status FROM day_steps WHERE run_id=? AND label LIKE '%resting%'", (rid,))
+        check("each rest is on the run panel", [r["label"][:13] for r in rests], ["Pass 2 of 3 ·", "Pass 3 of 3 ·"])
+        check("  and finished", {r["status"] for r in rests}, {"ok"})
+        labels = [r["label"] for r in cab.sql("SELECT label FROM day_steps WHERE run_id=? AND label LIKE 'Round%'", (rid,))]
+        check("round numbers keep counting across passes", "Round 7 · IT patches what it found" in labels, True)
+
+    print("\n...but not past the passes, the spending limit, or work that is not his:")
+    with _Cabinet() as cab:
+        for i in range(6):
+            _job(cab, f"t{i}", "IT", f"Owner's order: job {i}", "it-fixer")
+        rid = day_run._open_run("passes", False, [])
+        with _Limits(rounds=2, passes=2), _Steps({"pipelines.it_fix": _FINISH_ONE.format(sector="IT")}):
+            more = day_run._keep_going(rid)
+        check("two passes and no more", (more["passes"], more["rounds"]), (2, 4))
+        check("  it says so, and that the rest carries into tomorrow",
+              "most one day takes" in more["why"] and "tomorrow" in more["why"], True)
+    with _Cabinet() as cab:
+        for i in range(4):
+            _job(cab, f"t{i}", "IT", f"Owner's order: job {i}", "it-fixer")
+        rid = day_run._open_run("money", False, [])
+        with _Limits(rounds=2, passes=3, spend=False), _Steps({"pipelines.it_fix": _FINISH_ONE.format(sector="IT")}):
+            more = day_run._keep_going(rid)
+        check("today's spending limit stops it", (more["passes"], "spending limit" in more["why"]), (1, True))
+    with _Cabinet() as cab:
+        for i in range(4):
+            _job(cab, f"a{i}", "IT", f"Check the site's speed {i}", "it-fixer")
+        rid = day_run._open_run("agency", False, [])
+        with _Limits(rounds=2, passes=3), _Steps({"pipelines.it_fix": _FINISH_ONE.format(sector="IT")}):
+            more = day_run._keep_going(rid)
+        check("the agency's own jobs do not keep the day going", more["passes"], 1)
+    with _Cabinet() as cab:
+        for i in range(4):
+            _job(cab, f"t{i}", "IT", f"Owner's order: job {i}", "it-fixer")
+        rid = day_run._open_run("stop in rest", False, [])
+
+        def is_set():
+            # Stop is pressed once the first rest has begun.
+            return bool(cab.sql("SELECT 1 FROM day_steps WHERE run_id=? AND label LIKE '%resting%'", (rid,)))
+        stop = types.SimpleNamespace(is_set=is_set, note=lambda: "stopped by you")
+        with _Limits(rounds=2, passes=3), _Steps({"pipelines.it_fix": _FINISH_ONE.format(sector="IT")}):
+            more = day_run._keep_going(rid, stop)
+        check("Stop during a rest ends it there", (more["passes"], more["why"]), (1, "you pressed Stop"))
+
+
+def test_yesterdays_orders_still_count():
+    print("\nAn order from yesterday still open is an order today; done or agency work is not:")
+    with _Cabinet() as cab:
+        old = int(time.time()) - 2 * 86400
+        cab.sql("INSERT INTO tasks(id,sector,title,status,risk,created_by,created_at) VALUES"
+                " ('o1','Leads','Owner''s order: collect 20 leads','open','green','MD',?),"
+                " ('o2','IT','Owner''s order: change the number','done','green','MD',?),"
+                " ('o3','SEO','Find the gaps','open','green','MD',?)", (old, old, old))
+        check("only his open order carries over", day_run.carried_orders(),
+              {"Leads": "Owner's order: collect 20 leads"})
+        cab.sql("INSERT INTO tasks(id,sector,title,status,risk,created_by,created_at) VALUES"
+                " ('o4','Content','Owner''s order: write a post','open','green','MD',?)", (int(time.time()),))
+        check("  and one given today is today's, not carried", "Content" in day_run.carried_orders(), False)
 
 
 def test_his_leads_number_is_met():
@@ -694,6 +782,8 @@ def test_search_console_api_switched_off_is_named():
 def main():
     for t in (test_the_day_keeps_going_until_his_jobs_are_done,
               test_it_stops_when_a_round_moves_nothing,
+              test_his_orders_carry_on_past_the_round_limit,
+              test_yesterdays_orders_still_count,
               test_his_leads_number_is_met,
               test_the_md_asks_only_for_what_is_still_to_go,
               test_a_website_change_reaches_it_whichever_box,

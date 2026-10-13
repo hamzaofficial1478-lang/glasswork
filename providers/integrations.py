@@ -1,32 +1,28 @@
 """
-integrations.py — the channels the agency talks through: ntfy and Telegram for
-reaching the owner, SMTP for reaching customers.
+integrations.py — the channels the agency talks through: the app itself (and
+Telegram, if it was set up) for reaching the owner, SMTP for reaching customers.
 
 These live in .env rather than the provider store, so they were the one part of
 the setup with no test at all. You could have a dead token and not find out
 until the night an agent needed a decision from you.
 
-NONE OF THESE IS A CUSTOMER CHANNEL EXCEPT SMTP. ntfy and Telegram are the
-owner's own approval line — the way an agent stops and asks before doing
-anything amber. Five agents depend on it (MD, Overseer, Reporter, Security,
-Leads-Responder), and every red line in the handbook ends in "owner approval",
-which arrives here. Everything routes through one function, send_message(), so
-switching the owner's channel is a config change and not a code change.
-
-ntfy is the default when NTFY_TOPIC is set: no bot to create, no token to leak,
-no chat id to hunt down. Telegram stays as the fallback so an existing setup
-does not go silent. The ntfy trade-off is stated where it lives — a topic on
-the public server is readable by anyone who guesses the name.
+NONE OF THESE IS A CUSTOMER CHANNEL EXCEPT SMTP. The owner's alerts — the way
+an agent stops and asks before doing anything amber — live in the app now: the
+app is on his computer and on his Android phone, so what needs him is waiting
+there with the approval button next to it. The old phone-topic channel was
+removed ("not needed any more as now we have program for android too").
+Telegram is still used if a bot was already set up, as an extra. Everything
+routes through one function, send_message(), so the route is a config change
+and not a code change.
 
 THE RULE HERE: prove the credential, send nothing. Every check below is a
 read-only or auth-only call:
-  ntfy      poll the topic     — reads the feed, publishes nothing
   Telegram  getMe + getChat    — reads the bot and the chat, posts no message
   SMTP      connect + login    — authenticates and hangs up, no mail leaves
 
 A test that spams the owner (or worse, a customer) to prove it works is a test
 you stop running. You can ask for a real notification with notify=True, and it
-only ever goes to the owner's own topic or chat.
+only ever goes to the owner's own chat.
 
 (The WhatsApp Cloud API used to live here. It was removed because the owner
 takes WhatsApp enquiries through the widget on the site and answers them
@@ -84,7 +80,6 @@ ENV_KEYS = {
     "SITE_URL", "SITE_MODE", "SITE_NAME", "AGENCY_NAME",
     "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
     "OUTREACH_DOMAIN", "OUTREACH_DAILY_CAP", "WHATSAPP_DAILY_CAP",
-    "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
     "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
     "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GSC_PROPERTY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
@@ -367,139 +362,24 @@ def send_telegram(text, env=None, timeout=20) -> dict:
     return _result("telegram", True, "Delivered.")
 
 
-# ---- ntfy -------------------------------------------------------------------
-# The owner's chosen notification route. Simpler than Telegram in the way that
-# matters here: a topic is just a name, so there is no bot to create, no token
-# to leak and no chat id to hunt down in /getUpdates.
-#
-# The trade-off is real and worth stating: a topic on the public ntfy.sh is
-# readable by ANYONE who guesses its name. Nothing secret should go through it.
-# Pick a long unguessable topic, and self-host ntfy if the digest ever carries
-# customer detail.
-
-_NTFY_DEFAULT = "https://ntfy.sh"
-
-
-def _agency_title() -> str:
-    """Whose notification this is. Set AGENCY_NAME in .env to change it."""
-    try:
-        from coordination import site
-        return site.agency_name()
-    except Exception:
-        return "World Deal Technical Agency"
-
-
-def _ntfy_conf(env):
-    server = (env.get("NTFY_SERVER") or _NTFY_DEFAULT).strip().rstrip("/")
-    topic = (env.get("NTFY_TOPIC") or "").strip().lstrip("/")
-    return server, topic
-
-
-def _ntfy_headers(env, title=None, priority=None, tags=None, actions=None):
-    """
-    ntfy takes its options as headers. Values must be latin-1 clean, because a
-    header carrying an em-dash raises inside requests and the notification is
-    lost — which is exactly the moment you needed it.
-    """
-    def _ascii(v):
-        return (str(v).replace("—", "-").replace("–", "-").replace("’", "'")
-                .encode("ascii", "replace").decode("ascii"))
-
-    h = {}
-    if title:
-        h["Title"] = _ascii(title)[:200]
-    if priority:
-        h["Priority"] = _ascii(priority)
-    if tags:
-        h["Tags"] = _ascii(",".join(tags) if isinstance(tags, (list, tuple)) else tags)
-    if actions:
-        # each action: "http, Approve, https://host/api/approve/12, method=POST"
-        h["Actions"] = _ascii("; ".join(actions))[:1900]
-    token = (env.get("NTFY_TOKEN") or "").strip()
-    if token:                      # only needed for a protected/self-hosted topic
-        h["Authorization"] = f"Bearer {token}"
-    return h
-
-
-def test_ntfy(env=None, notify=False, timeout=20) -> dict:
-    """
-    Prove the topic is reachable WITHOUT publishing to it. Polling the topic's
-    json feed is a read: it returns whatever is cached and posts nothing. Pass
-    notify=True to send a real, clearly-labelled test notification.
-    """
-    env = env if env is not None else read_env()
-    server, topic = _ntfy_conf(env)
-    if not topic:
-        return _result("ntfy", None, "Not configured — no NTFY_TOPIC in .env.")
-    if len(topic) < 8:
-        return _result("ntfy", False,
-                       f"Topic {topic!r} is too short to be private. Anyone who guesses "
-                       "the name reads your notifications — use a long random topic.",
-                       server=server, topic=topic)
-    try:
-        r = requests.get(f"{server}/{topic}/json", params={"poll": "1"}, timeout=timeout,
-                         headers=_ntfy_headers(env))
-    except Exception as e:
-        return _result("ntfy", False, f"Could not reach {server}: {e}", server=server)
-    if not (200 <= r.status_code < 300):
-        return _result("ntfy", False,
-                       f"{server} answered {r.status_code} for topic {topic}.",
-                       server=server, topic=topic, status=r.status_code)
-
-    detail = (f"Topic {topic} on {server} is reachable. Nothing was published. "
-              "Subscribe on your phone: install ntfy, add this topic.")
-    if notify:
-        s = send_ntfy("Agency check: this is the channel you'll be asked to approve on.",
-                      title=_agency_title(), tags=["white_check_mark"], env=env,
-                      timeout=timeout)
-        if not s["ok"]:
-            return _result("ntfy", False,
-                           f"Topic reads fine but publishing failed: {s['detail']}",
-                           server=server, topic=topic)
-        detail = f"Topic {topic} is live — a test notification has just been sent."
-    return _result("ntfy", True, detail, server=server, topic=topic)
-
-
-def send_ntfy(text, title=None, priority=None, tags=None, actions=None,
-              env=None, timeout=20) -> dict:
-    """Publish one notification to the owner's topic."""
-    env = env if env is not None else read_env()
-    server, topic = _ntfy_conf(env)
-    if not topic:
-        return _result("ntfy", False,
-                       "Not configured — no NTFY_TOPIC in .env. Nothing went out.")
-    try:
-        r = requests.post(f"{server}/{topic}",
-                          data=(text or "").encode("utf-8")[:4000],
-                          headers=_ntfy_headers(env, title, priority, tags, actions),
-                          timeout=timeout)
-    except Exception as e:
-        return _result("ntfy", False, f"Could not reach {server}: {e}", server=server)
-    if not (200 <= r.status_code < 300):
-        return _result("ntfy", False, f"{server} rejected it ({r.status_code}).",
-                       server=server, status=r.status_code)
-    return _result("ntfy", True, "Delivered.", server=server, topic=topic)
-
-
 def send_message(text, env=None, timeout=20, **kw) -> dict:
     """
     The agency's one way of reaching the owner. Everything that notifies him
     goes through here — the daily digest, approval requests, the Overseer.
 
-    ntfy wins when a topic is set, because that is the owner's stated choice;
-    Telegram is kept as the fallback so an existing setup does not go silent the
-    day this lands. If neither is configured it says so plainly and sends
-    nothing, rather than failing quietly and leaving him uninformed.
+    The app is the route: the alert is kept in the cabinet (coordination/notify
+    records it) and shown in the app, on his computer and on his phone, next to
+    the button that answers it. Telegram, if a bot was set up before, also gets
+    a copy. Nothing is lost when Telegram is not set up — the app has it.
     """
     env = env if env is not None else read_env()
-    _server, topic = _ntfy_conf(env)
-    if topic:
-        return send_ntfy(text, env=env, timeout=timeout, **kw)
     if (env.get("TELEGRAM_BOT_TOKEN") or "").strip():
-        return send_telegram(text, env=env, timeout=timeout)
-    return _result("none", False,
-                   "No notification route configured — set NTFY_TOPIC in .env "
-                   "(or Telegram). Nothing went out, and nobody was told.")
+        r = send_telegram(text, env=env, timeout=timeout)
+        if r.get("ok"):
+            return r
+        return _result("app", True, "Kept in the app (Telegram did not take it: "
+                       + str(r.get("detail") or "")[:120] + ").")
+    return _result("app", True, "Kept in the app.")
 
 
 # ---- SMTP -------------------------------------------------------------------
@@ -628,8 +508,7 @@ def test_algolia(env=None, timeout=15) -> dict:
     return _result("algolia", True, detail, app=app, index=index, pages=n)
 
 
-ALL = {"ntfy": test_ntfy, "telegram": test_telegram, "email": test_email,
-       "algolia": test_algolia}
+ALL = {"telegram": test_telegram, "email": test_email, "algolia": test_algolia}
 
 
 def test_all(env=None, notify=False) -> list:
@@ -639,7 +518,7 @@ def test_all(env=None, notify=False) -> list:
     for name, fn in ALL.items():
         try:
             out.append(fn(env=env, notify=notify)
-                       if name in ("ntfy", "telegram") else fn(env=env))
+                       if name == "telegram" else fn(env=env))
         except Exception as e:  # a broken check must never take the sweep down
             out.append(_result(name, False, f"The check itself errored: {e}"))
     return out

@@ -5,7 +5,7 @@ connector_tests.py — run: python -m pipelines.connector_tests   (python3 on ma
      to be more strong more fast more reliable errors free ... so the user will
      not face the error while he will be doing the multiple tasks with webiste"
 
-The connector file (paste-into-your-site/agency-api.php, version 8) on a real
+The connector file (paste-into-your-site/agency-api.php, version 9) on a real
 PHP server on this machine, driven through pipelines/site_api exactly as the
 agency drives it. What has to hold:
 
@@ -16,6 +16,20 @@ agency drives it. What has to hold:
   a request too big for the host is refused in words, and nothing changes
   a page in an old encoding is read, and never garbled by a rewrite
   a host that drops the line once does not fail the request
+
+"how much data does travel on the api ... we should have to expand the api
+ reading, writing, and the data carrier abilities" — version 9:
+
+  answers are packed (gzip) when big, and a big change goes packed too, and
+    the saving is counted, not claimed
+  many page changes go in one request, all of them or none: a page changed
+    under the agency stops the lot, and a write that fails half-way puts
+    every page it had changed back
+  robots.txt and llms.txt can be read and written — plain text only, and never
+    a robots.txt that shuts every search engine out
+  the list of pages is remembered for a minute and forgotten on every write
+  a page busy with another change answers "busy" within seconds instead of
+    holding one of the host's workers
 
 Nothing reaches the internet; the website is a temporary folder.
 """
@@ -119,7 +133,7 @@ def test_one_request_reads_many_pages():
     print("\nMany pages come back in one request:")
     with Site() as w:
         h = S.health(s=w.s)
-        check("the connector says it is version 8", h.get("connector"), 8)
+        check("the connector says it is version 9", h.get("connector"), 9)
         check("  and what the host allows", bool((h.get("limits") or {}).get("post_max_size")), True)
         sent, undo = _counting()
         try:
@@ -253,19 +267,153 @@ def test_a_dropped_line_is_tried_again():
               (False, True, None))
 
 
+def test_packed_both_ways_and_counted():
+    print("\nBig answers and big changes travel packed, and the saving is counted:")
+    import gzip as _gz
+    import urllib.request as _u
+    from coordination import site_traffic
+    with Site() as w:
+        big = "<html><head><title>Big</title></head><body>" + ("<p>Toughened glass, 10 mm, polished edges.</p>" * 900) + "</body></html>"
+        (w.web / "big.php").write_text(big, encoding="utf-8")
+        h = S.health(s=w.s)
+        check("the connector says it can pack", "gzip" in (h.get("can") or []), True)
+        req = _u.Request(w.s["base"] + "/index.php?do=pages&page=big.php",
+                         headers={"Authorization": "Bearer " + TOKEN, "Accept-Encoding": "gzip"})
+        with _u.urlopen(req, timeout=20) as r:
+            wire = r.read()
+            enc = r.headers.get("Content-Encoding")
+        check("  a big answer comes back packed", enc, "gzip")
+        check("  and is far smaller on the wire", len(wire) * 5 < len(_gz.decompress(wire)), True)
+        got = S.read_page("big.php", s=w.s)
+        check("the agency reads it unpacked, exactly", got.get("html"), big)
+        S.connector_version(w.s)
+        seen = []
+        real = S._send
+
+        def watch(url, data, method, token, timeout, packed=False):
+            seen.append(packed)
+            return real(url, data, method, token, timeout, packed=packed)
+        S._send = watch
+        try:
+            r = S.put_page("big.php", big.replace("10 mm", "12 mm"), s=w.s, before=big)
+        finally:
+            S._send = real
+        check("a big change is sent packed", seen[-1:], [True])
+        check("  and lands whole", (r.get("ok"), w.file("big.php").decode("utf-8")), (True, big.replace("10 mm", "12 mm")))
+        t = site_traffic.summary()["today"]
+        check("today's requests are counted", t["requests"] >= 3, True)
+        check("  and the packing saving is a number", t["saved_by_packing_mb"] > 0, True)
+
+
+def test_many_changes_all_or_none():
+    print("\nMany changes go in one request, all of them or none:")
+    with Site() as w:
+        S.connector_version(w.s)
+        pages = S.read_pages(["about.php", "contact.php"], s=w.s)
+        about, contact = pages["about.php"]["html"], pages["contact.php"]["html"]
+        sent, undo = _counting()
+        try:
+            r = S.put_pages([{"page": "about.php", "html": about.replace("About us", "About us, since 2014"), "before": about},
+                             {"page": "contact.php", "html": contact.replace("Call us", "Call or WhatsApp us"), "before": contact}],
+                            s=w.s, summary="test batch")
+        finally:
+            undo()
+        check("both pages written", (r.get("ok"), r.get("written")), (True, 2))
+        check("  in one request", sent.count("pages-batch"), 1)
+        check("  both on the site", ("since 2014" in w.file("about.php").decode(), "WhatsApp" in w.file("contact.php").decode()), (True, True))
+
+        about2 = w.file("about.php").decode()
+        contact2 = w.file("contact.php").decode()
+        S.read_pages(["about.php", "contact.php"], s=w.s)
+        (w.web / "about.php").write_text(about2.replace("since 2014", "since 2013"), encoding="utf-8")   # he edits it
+        r = S.put_pages([{"page": "about.php", "html": about2 + "<!-- x -->", "before": about2},
+                         {"page": "contact.php", "html": contact2 + "<!-- y -->", "before": contact2}], s=w.s)
+        check("a page he changed stops the whole batch", (r.get("ok"), [x.get("page") for x in r.get("stale") or []]),
+              (False, ["about.php"]))
+        check("  and nothing was written", ("since 2013" in w.file("about.php").decode(),
+                                             w.file("contact.php").decode() == contact2), (True, True))
+
+        (w.web / "zzz.php").mkdir()                  # a "page" that cannot be written
+        before = w.file("contact.php").decode()
+        S.read_pages(["contact.php"], s=w.s)
+        r = S.put_pages([{"page": "contact.php", "html": before.replace("WhatsApp", "email"), "before": before},
+                         {"page": "zzz.php", "html": "<p>new</p>"}], s=w.s)
+        check("a write that fails half-way fails the batch", r.get("ok"), False)
+        check("  and the page it had already changed is put back", w.file("contact.php").decode(), before)
+        check("  and it says so", "put back" in str(r.get("error")), True)
+
+
+def test_robots_and_llms_files():
+    print("\nrobots.txt and llms.txt, plain text only:")
+    with Site() as w:
+        S.connector_version(w.s)
+        check("no robots.txt yet", S.read_text_file("robots.txt", s=w.s).get("exists"), False)
+        good = "User-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.php\n"
+        r = S.put_text_file("robots.txt", good, s=w.s)
+        check("a robots.txt goes up", (r.get("ok"), w.file("robots.txt").decode()), (True, good))
+        r = S.put_text_file("robots.txt", "User-agent: *\nDisallow: /\n", s=w.s)
+        check("one that shuts every search engine out is refused", (r.get("ok"), "shuts every search engine out" in str(r.get("error"))), (False, True))
+        check("  and the good one stays", w.file("robots.txt").decode(), good)
+        r = S.put_text_file("llms.txt", "<?php echo 'hello'; ?>", s=w.s)
+        check("code is never a text file", (r.get("ok"), "plain text" in str(r.get("error"))), (False, True))
+        r = S.put_text_file("llms.txt", "# Glass shop\n\n> Glass and aluminium work.\n", s=w.s)
+        check("an llms.txt goes up", r.get("ok"), True)
+        check("no other text file can be written", S.put_text_file("notes.txt", "hello", s=w.s).get("ok"), False)
+        check("nor read through the page door", S.read_page("secret.txt", s=w.s).get("ok"), False)
+
+
+def test_listing_is_remembered_but_never_stale():
+    print("\nThe list of pages is remembered for a minute, and forgotten on every write:")
+    with Site() as w:
+        first = S.pages(s=w.s)
+        second = S.pages(s=w.s)
+        check("the second listing is the remembered one", (bool(first.get("cached")), bool(second.get("cached"))), (False, True))
+        check("  and it says whether robots.txt and llms.txt are there", sorted(f["file"] for f in second.get("files") or []), ["llms.txt", "robots.txt"])
+        S.put_page("services.php", "<html><head><title>Services</title></head><body>Services</body></html>", s=w.s)
+        third = S.pages(s=w.s)
+        check("a write makes it look again", (bool(third.get("cached")), "services.php" in [x.get("page") for x in third.get("pages") or []]), (False, True))
+
+
+def test_a_busy_page_answers_quickly():
+    print("\nA page busy with another change says so within seconds:")
+    if os.name == "nt":
+        print("  ..  skipped on Windows (holds the lock with fcntl)")
+        return
+    import fcntl
+    import hashlib as _h
+    with Site() as w:
+        S.put_page("about.php", "<html><head><title>About</title></head><body>About</body></html>", s=w.s)
+        full = os.path.realpath(str(w.web)) + "/about.php"
+        hold = w.web / "agency-api" / "backups" / (".hold-" + _h.md5(full.encode()).hexdigest())
+        f = open(hold, "a+")
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            t0 = time.time()
+            r = S._send(w.s["base"] + "/index.php?do=pages", b'{"page":"about.php","html":"<p>x</p>"}', "POST", TOKEN, 30)
+            took = time.time() - t0
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+            f.close()
+        check("it answers busy", (r.get("status"), "still being made" in str(r.get("error"))), (423, True))
+        check("  within a few seconds, not forever", took < 15, True)
+        check("  and busy is something the agency tries again", r.get("_passing"), True)
+
+
 def main():
     if not shutil.which("php"):
         print("SKIPPED: PHP is not installed here, so the connector cannot be run.")
         return 0
     for t in (test_one_request_reads_many_pages, test_a_change_is_whole_and_never_overwrites_his,
               test_two_changes_at_once_both_land, test_too_big_is_said_and_changes_nothing,
-              test_an_old_encoding_is_read_but_not_garbled, test_a_dropped_line_is_tried_again):
+              test_an_old_encoding_is_read_but_not_garbled, test_a_dropped_line_is_tried_again,
+              test_packed_both_ways_and_counted, test_many_changes_all_or_none, test_robots_and_llms_files,
+              test_listing_is_remembered_but_never_stale, test_a_busy_page_answers_quickly):
         t()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: " + ", ".join(_fail))
         return 1
-    print("connector: all good — whole changes, nothing overwritten, many pages in one go.")
+    print("connector: all good — whole changes, nothing overwritten, many pages and changes in one go, packed.")
     return 0
 
 

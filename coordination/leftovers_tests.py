@@ -272,8 +272,7 @@ def test_a_resume_runs_only_what_is_left():
         check("the unfinished steps run", {"SEO finds the gaps", "SEO watches the rivals",
                                             "Content writes the pages"} <= runs, True)
         check("Leads has work waiting, so Leads works it", "Leads collects" in runs, True)
-        check("the cheap bookends run", {"Read your answers from the phone",
-                                          "The Overseer checks the agency itself",
+        check("the cheap bookends run", {"The Overseer checks the agency itself",
                                           "Report scores the day"} <= runs, True)
         check("what finished last time is not repeated", "IT checks the site" in runs, False)
         check("the MD does not plan again on top", "The MD plans the day" in runs, False)

@@ -184,32 +184,21 @@ def sweep(quick=False, notify=False) -> dict:
             warn.append("nothing was actually called, so no model is proven — "
                         "only that the accounts are signed in")
 
-    # Approvals need ONE working route to the owner, not a specific one. ntfy is
-    # the route now and Telegram is the fallback an owner mid-switch still has,
-    # so this asks "can he be reached at all" rather than naming a product.
-    routes = [c for c in chan if c["integration"] in ("ntfy", "telegram")]
-    live = sorted(c["integration"] for c in routes if c["ok"] is True)
-    broken = sorted(c["integration"] for c in routes if c["ok"] is False)
-    # A WARNING, NOT A STOP. "Not resumed. ntfy and telegram failed" — the
-    # whole day refused to start or resume because his phone alerts were down,
-    # while every approval also waits for him in the office under "Waiting on
-    # you", where he answers them anyway. A dead alert route means he is not
-    # buzzed; it does not mean nothing can be approved.
-    if not live:
-        warn.append(
-            f"{' and '.join(broken)} failed — you will not get phone alerts; approvals "
-            "wait for you in the office under Waiting on you"
-            if broken else
-            "No phone alerts are set up — approvals wait for you in the office under "
-            "Waiting on you (set NTFY_TOPIC on Setup to be buzzed as well)")
+    # Alerts and approvals live in the app, on his computer and his phone, so
+    # the owner can always be reached. Telegram is an optional extra copy: a
+    # broken one is worth a line, never a stop — "Not resumed. ... failed" once
+    # refused the whole day over an alert route while every approval was
+    # waiting for him in the app anyway.
+    broken = sorted(c["integration"] for c in chan
+                    if c["integration"] == "telegram" and c["ok"] is False)
+    if broken:
+        warn.append(f"{' and '.join(broken)} failed — alerts still wait for you in the app "
+                    "under Waiting on you")
 
     warn += [f"shelf '{s['shelf']}' has one API and no fallback"
              for s in shelf if s["cover"] == SINGLE]
     warn += [f"shelf '{s['shelf']}' is configured but every API on it failed"
              for s in shelf if s["cover"] == DOWN]
-    if live and broken:
-        warn.append(f"{' and '.join(broken)} failed, but {' and '.join(live)} "
-                    "works — you will still be reached")
 
     return {"ok": True, "quick": quick, "at": int(time.time()),
             "team": {"accounts": st["accounts"], "ready": st["ready"],

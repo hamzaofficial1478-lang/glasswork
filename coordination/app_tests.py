@@ -209,6 +209,39 @@ def test_mail_content_and_the_shelf():
     check("the shelf is no longer a card on the floor", 'id="floor-shelf"' not in APP, True)
 
 
+def test_alerts_wait_in_the_app():
+    print("\nAlerts live in the app now (the phone-topic channel is gone):")
+    notify = (ROOT / "coordination" / "notify.py").read_text(encoding="utf-8")
+    kinds = set(re.findall(r'"key": f"([a-z]+):', notify))
+    go = APP[APP.index("const ALERT_GO"):APP.index("const alertKind")]
+    shown = set(re.findall(r"([a-z]+): \['", go))
+    check("Today reads the same alert list the notifier builds", "api('/api/notify/preview')" in APP and "${alertsCard(alerts)}" in APP, True)
+    check("every alert kind is either an approval or has a screen to open",
+          sorted(kinds - shown), ["change", "outreach", "task"])
+    check("  and approvals are not shown twice (they live in Waiting on you)",
+          "a.urgency !== 'digest' && ALERT_GO[alertKind(a)]" in APP, True)
+    card = APP[APP.index("function alertsCard"):APP.index("const ALERTED")]
+    check("alert words are escaped", "${esc(a.title)}" in card and "${esc(a.body)}" in card, True)
+    dev = APP[APP.index("async function allowAlerts"):APP.index("/* \"with out any order")]
+    check("device pop-ups only after he says yes, once per alert",
+          "Notification.requestPermission()" in dev and "Notification.permission !== 'granted'" in dev
+          and "seen.has(a.key)" in dev, True)
+    check("  and remembering them never breaks the page", dev.count("try {") >= 2 and "catch {}" in dev, True)
+    sw = (ROOT / "ui" / "sw.js").read_text(encoding="utf-8")
+    check("tapping an alert opens the right screen", "notificationclick" in sw and "openWindow(go)" in sw, True)
+    check("no trace of the old channel in the app or the server", "ntfy" in (APP + SERVER).lower(), False)
+
+
+def test_what_the_website_is_missing():
+    print("\nThe Website screen says what the site is missing, and who has each gap:")
+    check("it reads the last check, which sends nothing to the website",
+          "api('/api/site/blueprint')" in APP and '"--stored", "--json"' in SERVER, True)
+    check("Check again looks afresh", "api('/api/site/blueprint/check', {})" in APP and '"--now", "--json"' in SERVER, True)
+    card = APP[APP.index("function blueprintCard"):APP.index("/* What travels between")]
+    check("each gap shows its desk and where it is", "esc(g.sector" in card and "esc(g.where" in card, True)
+    check("  escaped", "${esc(g.title)}" in card and "${esc(g.why || '')}" in card, True)
+
+
 def main():
     test_the_front_door()
     test_every_address_it_asks_for_exists()
@@ -219,6 +252,8 @@ def main():
     test_the_connection_summary()
     test_the_agency_floor()
     test_mail_content_and_the_shelf()
+    test_alerts_wait_in_the_app()
+    test_what_the_website_is_missing()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: " + ", ".join(_fail))

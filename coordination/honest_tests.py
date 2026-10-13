@@ -160,19 +160,18 @@ def test_a_model_that_does_not_answer_is_a_warning_not_a_stop():
 
 def test_phone_alerts_failing_does_not_stop_the_day():
     """
-    "Not resumed. ntfy and telegram failed — you cannot be asked to approve
-     anything" — he approves in the office; a dead alert route is a warning.
+    "Not resumed. ... failed — you cannot be asked to approve anything" — he
+    approves in the app; a dead Telegram copy is a warning, never a stop.
     """
-    print("\nPhone alerts failing is a warning, not a stop:")
+    print("\nAn extra alert route failing is a warning, not a stop:")
     real = preflight.integrations.test_all
-    preflight.integrations.test_all = lambda notify=False: [
-        {"integration": "ntfy", "ok": False}, {"integration": "telegram", "ok": False}]
+    preflight.integrations.test_all = lambda notify=False: [{"integration": "telegram", "ok": False}]
     try:
         r, _ = _sweep(_team_status())
     finally:
         preflight.integrations.test_all = real
-    check("the day is not stopped over it", any("ntfy" in b for b in r["blocking"]), False)
-    check("and he is told approvals wait in the office",
+    check("the day is not stopped over it", any("telegram" in b for b in r["blocking"]), False)
+    check("and he is told alerts still wait in the app",
           any("Waiting on you" in w for w in r["warnings"]), True)
 
 

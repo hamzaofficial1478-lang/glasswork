@@ -72,7 +72,8 @@ h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-.015em;line-height:1.
 .label{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
 .muted{color:var(--muted)}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
-.card-h{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line-soft)}
+.card-h{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 12px;padding:16px 20px;border-bottom:1px solid var(--line-soft)}
+.card-h>h2{flex:0 0 auto}
 .card-h h2{margin:0;font-size:17px;font-weight:600}
 .row{display:flex;flex-wrap:wrap;gap:10px 18px;padding:16px 20px;border-top:1px solid var(--line-soft);align-items:flex-start}
 .row:first-child{border-top:0}
@@ -226,7 +227,7 @@ ol.feed li:last-child{border-bottom:0}
 .rowbtn:hover{background:var(--sunken)}
 .counts{display:flex;flex-wrap:wrap;gap:6px 18px;padding:14px 20px;font-size:14px;color:var(--muted)}
 .counts b{font-size:17px;color:var(--ink);font-weight:500}
-.strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));border-radius:0 0 12px 12px;overflow:hidden}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));border-radius:0 0 12px 12px;overflow:hidden}
 .strip-room{display:flex;flex-direction:column;gap:7px;padding:14px 16px;background:var(--surface);text-decoration:none;color:var(--ink);
   box-shadow:inset -1px -1px 0 var(--line-soft)}
 .strip-room:hover{background:var(--sunken);color:var(--ink)}
@@ -657,8 +658,9 @@ function gettingStarted(biz, con, ord, r) {
     <p class="muted" style="margin:6px 0 0;font-size:14px">Then press <b style="font-weight:600">Run today</b>. Nothing leaves the building without your yes.</p></section>`;
 }
 async function today(main) {
-  const [st, run, idx, leads, biz, con, ord] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all'),
-    api('/api/business'), api('/api/connect'), api('/api/orders')]);
+  const [st, run, idx, leads, biz, con, ord, np] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all'),
+    api('/api/business'), api('/api/connect'), api('/api/orders'), api('/api/notify/preview')]);
+  const alerts = alertsFor(np);
   const appr = (st && st.approvals) || [];
   const ev = ((st && st.activity) || {}).events || [];
   const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
@@ -690,6 +692,7 @@ async function today(main) {
         ${appr.length && !(r && r.running) ? '<button class="btn ghost" type="button" id="runNow">Run today</button>' : ''}</div>
     </section>
     ${setup}
+    ${alertsCard(alerts)}
     ${agencyStrip(st)}
     <div class="tiles">
       <a href="#leads" class="card tile"><span class="label">Leads waiting</span><span class="big mono">${esc((leads && leads.total) || 0)}</span>
@@ -716,6 +719,58 @@ async function today(main) {
     </div></div>`;
   const rb = $('#runNow'); if (rb) rb.onclick = runToday; wireRunSay();
   const sb = $('#stopRun'); if (sb) sb.onclick = async () => { const j = await api('/api/run/stop', {}); toast(j.why || j.head || (j.ok ? 'Stopping.' : j.error || 'Could not stop it.')); route(); };
+  const al = $('#alertsAllow'); if (al) al.onclick = () => allowAlerts(alerts);
+}
+/* ALERTS — what used to go to a phone topic now waits here, and on the device
+   if he lets it. Approvals already have Waiting on you; this is the rest: the
+   enquiry path broken, a lead replying, the spend limit, a desk stopped. */
+const ALERT_GO = {site: ['#website', 'See the website'], reply: ['#leads', 'Read the reply'], cap: ['/engine', 'See spending'],
+  quota: ['/engine', 'See spending'], fault: ['#agency', 'See the desk']};
+const alertKind = (a) => String((a && a.key) || '').split(':')[0];
+function alertsFor(np) {
+  return ((np && np.alerts) || []).filter((a) => a.urgency !== 'digest' && ALERT_GO[alertKind(a)]);
+}
+function alertsCard(list) {
+  if (!list.length) return '';
+  const allow = 'Notification' in window && Notification.permission === 'default'
+    ? '<button class="btn quiet small" type="button" id="alertsAllow">Alert me on this device</button>' : '';
+  return `<section class="card"><div class="card-h"><h2>For you</h2>${allow}</div>
+    <div>${list.slice(0, 5).map((a) => { const g = ALERT_GO[alertKind(a)];
+      return `<div class="row"><div class="grow"><span style="font-weight:600">${esc(a.title)}</span>
+        <span class="muted" style="font-size:13.5px">${esc(a.body)}</span></div>
+        <span style="display:flex;gap:10px;align-items:center">${a.urgency === 'now' ? pill('stuck', 'Now') : ''}<a class="btn ghost small" href="${g[0]}">${esc(g[1])}</a></span></div>`; }).join('')}</div></section>`;
+}
+// Keys already shown on this device, so each alert pops up once. Kept in the
+// browser only; if storage is blocked, this tab still remembers.
+const ALERTED = new Set();
+function alertedKeys() {
+  try { JSON.parse(localStorage.getItem('bx-alerted') || '[]').forEach((k) => ALERTED.add(k)); } catch {}
+  return ALERTED;
+}
+function rememberAlerted() { try { localStorage.setItem('bx-alerted', JSON.stringify([...ALERTED].slice(-200))); } catch {} }
+async function allowAlerts(now) {
+  let p = 'denied';
+  try { p = await Notification.requestPermission(); } catch {}
+  // What is already on the screen is not news; only what comes after pops up.
+  if (p === 'granted') { alertedKeys(); (now || []).forEach((a) => ALERTED.add(a.key)); rememberAlerted(); toast('Done. New alerts will pop up on this device while Botix is open.'); }
+  else toast('Alerts stay here on Today. Your browser said no to pop-ups.');
+  const b = $('#alertsAllow'); if (b) b.remove();
+}
+async function alertDevice() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const list = alertsFor(await ask('/api/notify/preview'));
+  const seen = alertedKeys(); let fresh = false;
+  for (const a of list) {
+    if (seen.has(a.key)) continue;
+    seen.add(a.key); fresh = true;
+    const opts = {body: a.body, tag: a.key, icon: '/icon-192.png', data: {go: ALERT_GO[alertKind(a)][0]}};
+    try {
+      const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+      if (reg) await reg.showNotification(a.title, opts);
+      else { const n = new Notification(a.title, opts); n.onclick = () => { window.focus(); location.href = opts.data.go; n.close(); }; }
+    } catch {}
+  }
+  if (fresh) rememberAlerted();
 }
 /* "with out any order the program will not start the day" — Run asks the
    office first. No orders saved for today and none given: the office checks
@@ -1404,7 +1459,8 @@ function scorePanel(rep, keyword) {
 
 /* ======================= WEBSITE ======================= */
 async function website(main) {
-  const [st, ch, cx] = await Promise.all([state(), api('/api/site/changes'), api('/api/connect')]);
+  const [st, ch, cx, tr, bp] = await Promise.all([state(), api('/api/site/changes'), api('/api/connect'), api('/api/site/traffic'),
+    api('/api/site/blueprint')]);
   const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
   const link = (cx && cx.ok) ? cx : {};
   const pending = ((st && st.approvals) || []).filter((a) => a.kind === 'site_change' || a.kind === 'site_resting');
@@ -1424,6 +1480,8 @@ async function website(main) {
       ${link.old_connector ? `<div class="note" style="flex-basis:100%">Your website has connector version ${Number(link.connector) || 'an older one'}. Version ${Number(link.newest)} is safer and faster: a change is written whole or not at all, a page you edited is never overwritten, and many pages are read in one go.
         <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><a class="btn small" href="/setup#connectBox">Get the new connector</a>
         <span class="muted" style="font-size:13.5px">In Connection settings, press Download your connector, then put the agency-api folder from it on your website in place of the old one. Your secret stays the same.</span></div></div>` : ''}</section>
+    ${blueprintCard(bp)}
+    ${trafficCard(tr)}
     <section class="card"><div class="card-h"><h2>Changes waiting for your yes</h2><span class="muted" style="font-size:13.5px">Found → fixed on a copy → tested → your yes → live</span></div>
       ${pending.length ? pending.map((a) => `<div class="row"><div class="grow"><span style="font-weight:600">${esc(a.text)}</span><span class="muted" style="font-size:14px">${esc(a.why || '')}</span></div>
         <div style="display:flex;gap:8px;align-items:center">${pill('wait', 'Waiting for you')}<a class="btn small" href="#waiting">Decide</a></div></div>`).join('')
@@ -1440,8 +1498,57 @@ async function website(main) {
     const j = await api('/api/connect/check', {}); tl.disabled = false;
     $('#linkSay').innerHTML = j.ok ? esc(sentence(j.head || 'Connected.')) + ' ' + linkLine(j) : '<span class="bad-t">' + esc(sentence(j.error || 'It did not answer.')) + '</span>';
   };
+  const bc = $('#bpCheck'); if (bc) bc.onclick = async () => {
+    bc.disabled = true; $('#bpSay').textContent = 'Reading your website, one page a second. This takes a minute or two…';
+    const j = await api('/api/site/blueprint/check', {}); bc.disabled = false;
+    if (!j || !j.ok) { $('#bpSay').textContent = sentence((j && j.error) || 'The check did not finish.'); return; }
+    toast(sentence(j.summary || 'Checked.')); website(main);
+  };
   $('#lookNow').onclick = async () => { $('#lookNow').disabled = true; toast('Looking at every page for changes…');
     const j = await api('/api/site/look', {}); $('#lookNow').disabled = false; toast(j.head || j.error || 'Done.'); website(main); };
+}
+
+/* What a complete website for this business has, and what this one is missing
+   (pipelines/site_blueprint). Each gap says which desk has it and where it is. */
+const GAP_LOOK = {high: ['wait', 'Matters a lot'], medium: ['plain', 'Matters'], low: ['plain', 'Worth doing']};
+function blueprintCard(bp) {
+  if (!bp || !bp.ok) return '';
+  const gaps = bp.gaps || [], have = bp.have || [], total = gaps.length + have.length;
+  const row = (g) => { const lk = GAP_LOOK[g.severity] || GAP_LOOK.low;
+    return `<div class="row"><div class="grow"><span style="font-weight:600">${esc(g.title)}</span>
+      <span class="muted" style="font-size:14px">${esc(g.why || '')}</span>
+      <span style="font-size:13px;color:var(--faint)">${esc(g.sector || '')} · ${esc(g.where || '')}</span></div>${pill(lk[0], lk[1])}</div>`; };
+  const line = bp.checked_at ? `Has ${have.length} of the ${total} things a complete website has · checked ${when(bp.checked_at)}`
+    : 'Not checked yet.';
+  const sum = 'style="padding:12px 20px;border-top:1px solid var(--line-soft)"';
+  return `<section class="card"><div class="card-h"><h2>What your website is missing</h2>
+      <button class="btn quiet small" type="button" id="bpCheck">${bp.checked_at ? 'Check again' : 'Check it'}</button></div>
+    <div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px"><span class="muted" style="font-size:14px" id="bpSay">${esc(line)}</span>
+      ${total ? `<span class="meter"><i class="${have.length / total >= 0.8 ? 'good' : have.length / total >= 0.5 ? 'mid' : 'low'}" style="width:${Math.round(have.length / total * 100)}%"></i></span>` : ''}</div>
+    ${!bp.checked_at ? '' : gaps.length ? gaps.slice(0, 6).map(row).join('')
+      + (gaps.length > 6 ? `<details class="more"><summary ${sum}>Show the other ${gaps.length - 6}</summary>${gaps.slice(6).map(row).join('')}</details>` : '')
+      : empty('Nothing missing', 'Your website has everything on the list. It is checked again every few days.')}
+    ${have.length ? `<details class="more"><summary ${sum}>What it already has (${have.length})</summary>
+      <p class="muted" style="margin:0;padding:0 20px 16px;font-size:14px">${have.map((h) => esc(h.title)).join(' · ')}</p></details>` : ''}
+  </section>`;
+}
+
+/* What travels between the agency and the website, today — counted at the one
+   door every request goes through (coordination/site_traffic). */
+function trafficCard(tr) {
+  const t = (tr && tr.ok && tr.today) || null;
+  if (!t || !t.requests) return '';
+  const mb = (n) => Number(n || 0) < 0.1 ? `<b class="mono">${Math.max(1, Math.round(Number(n || 0) * 1024))}</b> KB`
+    : `<b class="mono">${Number(n).toFixed(1)}</b> MB`;
+  return `<section class="card"><div class="card-h"><h2>What travels to your website today</h2>
+      <span class="muted" style="font-size:13.5px">One request at a time, at most one a second</span></div>
+    <div class="counts">
+      <span><b class="mono">${Number(t.requests)}</b> requests${t.failed ? ` (${Number(t.failed)} did not get through)` : ''}</span>
+      <span><b class="mono">${Number(t.busiest_minute)}</b> in the busiest minute, of 60 allowed</span>
+      <span>${mb(t.sent_mb)} sent · ${mb(t.received_mb)} back</span>
+      ${t.saved_by_packing_mb > 0 ? `<span>${mb(t.saved_by_packing_mb)} saved by packing</span>` : ''}
+      <span><b class="mono">${Number(t.average_seconds).toFixed(1)}</b> s per answer, on average</span>
+    </div></section>`;
 }
 
 function linkLine(l) {
@@ -2625,6 +2732,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   ask('/api/product').then((p) => { if (p && p.hosted && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {}); });
   setInterval(updateBanner, 6 * 3600 * 1000);
   setInterval(async () => { const e = await ask('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
+  alertDevice(); setInterval(alertDevice, 2 * 60000);
 })();
 </script>
 </body>

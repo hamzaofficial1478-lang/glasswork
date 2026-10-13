@@ -189,10 +189,10 @@ def test_it_stops_before_the_runner_kills_it():
 
 def test_a_customers_words_never_reach_a_public_topic():
     """
-    A topic on ntfy.sh is readable by anyone who guesses the name. Pasting a
-    customer's reply into it publishes their message to a channel with no access
-    control, to save the owner one tap. He gets told WHO wrote; the words stay
-    in the office.
+    An alert can be copied to a chat app outside the program (Telegram).
+    Pasting a customer's reply into it puts their message somewhere the program
+    does not control, to save the owner one tap. He gets told WHO wrote; the
+    words stay in the app.
     """
     print("\nA customer's own words must not be published to a public topic:")
     real_db = board.DB
@@ -278,7 +278,7 @@ def test_it_does_not_repeat_itself():
         import providers.integrations as ig
         real_send = ig.send_message
         ig.send_message = lambda text, **k: (sent.append(text) or
-                                             {"ok": True, "integration": "ntfy",
+                                             {"ok": True, "integration": "app",
                                               "detail": "delivered"})
         first = notify.send()
         check("the first pass sends what is waiting", first["sent"] > 0, True)
@@ -374,8 +374,8 @@ def test_preview_sends_nothing():
         board.DB = real_db
 
 
-def test_no_channel_is_reported_not_swallowed():
-    print("\nWith no topic set, nobody was told — and that must be said out loud:")
+def test_with_nothing_set_up_alerts_stay_in_the_app():
+    print("\nWith nothing else set up, every alert is kept in the app:")
     real_db = board.DB
     board.DB = _fresh_db()
     _seed_alerts(board.DB)
@@ -384,11 +384,12 @@ def test_no_channel_is_reported_not_swallowed():
         real_read = ig.read_env
         ig.read_env = lambda: {}
         out = notify.send()
-        check("it does not claim success", out["sent"], 0)
-        check("and every alert says it was not delivered",
-              all(not a["delivered"] for a in out["alerts"]), True)
-        check("naming the missing setting",
-              "NTFY_TOPIC" in out["alerts"][0]["detail"], True)
+        check("every alert is kept", out["sent"], len(out["alerts"]))
+        check("and each says where", all(a["detail"] == "Kept in the app." for a in out["alerts"]), True)
+        con = sqlite3.connect(board.DB)
+        routes = {r[0] for r in con.execute("SELECT route FROM notifications WHERE key NOT LIKE 'activity:%'")}
+        con.close()
+        check("the cabinet records them for the app", routes, {"app"})
     finally:
         ig.read_env = real_read
         board.DB = real_db
@@ -838,7 +839,7 @@ def main():
     test_digest_items_stay_off_the_phone()
     test_a_blocking_fault_does_reach_the_phone()
     test_preview_sends_nothing()
-    test_no_channel_is_reported_not_swallowed()
+    test_with_nothing_set_up_alerts_stay_in_the_app()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: " + ", ".join(_fail))

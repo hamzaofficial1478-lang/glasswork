@@ -454,8 +454,7 @@ app.post("/api/logout", async (req, res) => {
    are on it, and it dies with the session and with any password change.
 
    The API routes below are gated too, not just the page. A lock on the door
-   with the window open is not a lock: /api/settings hands back the ntfy topic
-   and the SMTP user, /api/team changes which Claude model a sector uses (and
+   with the window open is not a lock: /api/settings hands back the SMTP user, /api/team changes which Claude model a sector uses (and
    its test spends allowance), and /api/providers lists the shelf. ---------- */
 const SETUP_COOKIE = "glasswork_setup";
 const SETUP_TICKETS = new Map();      // token -> { expires, navUsed }
@@ -711,6 +710,14 @@ async function pyConnect(args, payload, timeoutMs) {
   catch (_) { return { ok: false, error: oops("could not read the answer", r.stderr) }; }
 }
 app.get("/api/connect", async (_q, res) => res.json(await pyConnect([], null, 60000)));
+// What travels to the website each day: requests, the busiest minute, bytes each
+// way and what packing saved. Counts only (coordination/site_traffic).
+app.get("/api/site/traffic", async (_q, res) => res.json(await pyModule("coordination.site_traffic", ["--json"], 20000)));
+// What a complete website for this business has and what this one is missing
+// (pipelines/site_blueprint). GET reads the last check and sends nothing to the
+// website; POST looks again, gently, through the same one-a-second queue.
+app.get("/api/site/blueprint", async (_q, res) => res.json(await pyModule("pipelines.site_blueprint", ["--stored", "--json"], 20000)));
+app.post("/api/site/blueprint/check", async (_q, res) => res.json(await pyModule("pipelines.site_blueprint", ["--now", "--json"], 300000)));
 app.get("/api/connect/connector.zip", async (req, res) => {
   const r = await pyConnect(["--zip-json"].concat(req.query.new ? ["--new-secret"] : []), null, 60000);
   if (!r.ok || !r.zip_b64) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
@@ -1278,7 +1285,7 @@ app.get("/posts", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review
 const API_CAPABILITIES = [
   "password", "activity", "activity-seen", "activity-clear", "sector", "usage",
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
-  "setup-unlock", "brand", "ping", "leads", "triage", "ntfy-replies",
+  "setup-unlock", "brand", "ping", "leads", "triage", "site-traffic", "site-blueprint",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
   "account", "business", "engine", "connect", "check", "product", "update", "diagnostics",
@@ -1298,8 +1305,8 @@ app.get("/api/ping", async (_q, res) => {
 
 /* THE BRAND, AND NOTHING ELSE.
    The office header needs the agency's name and what the website is called.
-   It used to get those from /api/settings, which also carries the ntfy topic,
-   the SMTP user and the model routing — and /api/settings is behind the setup
+   It used to get those from /api/settings, which also carries the SMTP user
+   and the model routing — and /api/settings is behind the setup
    password now. A front-of-house screen should not be asking for the key
    cupboard to learn what the firm is called, so it asks for exactly this. */
 app.get("/api/brand", async (_q, res) => {
@@ -1352,7 +1359,6 @@ const DATA_ROOT = process.env.AGENCY_DATA || path.join(__dirname, "data");
 // with ACCOUNT_KEYS in coordination/workspace.py by coordination/workspace_tests.
 const ACCOUNT_KEYS = new Set([
   "AGENCY_NAME", "ADMIN_NAME", "ADMIN_PASSWORD_HASH",
-  "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
   "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
   "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
@@ -1470,7 +1476,6 @@ const ENV_KEYS = new Set([
   "SITE_URL", "SITE_MODE", "SITE_NAME", "AGENCY_NAME",
   "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
   "OUTREACH_DOMAIN", "OUTREACH_DAILY_CAP", "WHATSAPP_DAILY_CAP",
-  "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
   "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
   "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GSC_PROPERTY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
@@ -1518,8 +1523,7 @@ function updateEnv(partial) {
   if (!merged.PORT) merged.PORT = process.env.PORT || "3000";
   const order = [
     "SITE_MODE", "SITE_URL", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD",
-    "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
-    "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
+      "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
     // Telegram keys are kept in the file if they're already there — an owner
     // mid-switch shouldn't lose his fallback — but nothing writes them now.
     "AGENCY_NAME", "SITE_NAME",
@@ -1810,9 +1814,10 @@ function readConnections() {
       // Read-only or full access, and how — never the token or password.
       mode: String(e.SITE_MODE || "readonly").toLowerCase() === "full" ? "full" : "readonly",
       kind: String(e.SITE_CONNECT || "").toLowerCase() === "wordpress" ? "wordpress" : "php" },
-    { ic: "🔔", name: "ntfy", sub: has("NTFY_TOPIC") ? "topic set" : "not set", on: has("NTFY_TOPIC") },
+    // Alerts live in the app (computer and Android). Telegram is listed only
+    // when an older setup still has a bot, as an extra copy.
     ...(has("TELEGRAM_BOT_TOKEN")
-        ? [{ ic: "✈", name: "Telegram (legacy)", sub: "still configured — ntfy is the route now", on: true }]
+        ? [{ ic: "✈", name: "Telegram (extra copy)", sub: "alerts also go here", on: true }]
         : []),
     { ic: "🔎", name: "Algolia site search",
       sub: has("ALGOLIA_APP_ID") ? (e.ALGOLIA_INDEX || "glasswork_site") : "not set",
@@ -1901,10 +1906,8 @@ app.post("/api/optional", async (req, res) => {
     // DataForSEO no longer has fields on the setup screen. A login already in
     // .env is left alone — updateEnv merges over what is there — so nobody who
     // was using it loses it; there is simply no longer a box implying he should.
-    // ntfy is the owner's route. Telegram keys are still READ if they exist in
-    // .env, so an older setup keeps working, but they are no longer offered.
-    set("NTFY_TOPIC", b.ntfyTopic);
-    set("NTFY_SERVER", b.ntfyServer);
+    // Alerts live in the app. Telegram keys are still READ if they exist in
+    // .env, so an older setup keeps an extra copy, but they are not offered.
     set("AGENCY_NAME", b.agencyName);
     set("OUTREACH_DOMAIN", b.outreachDomain);
     // Algolia: search on the owner's OWN website. Three values with three very
@@ -2124,7 +2127,7 @@ app.post("/api/shelves/resolve", async (req, res) => res.json(await pyProvider("
 
 // ---- channels + the whole-system sweep -------------------------------------
 // Both prove credentials without sending anything. The one exception is
-// notify:true, which posts to the owner's own ntfy topic and nowhere else.
+// notify:true, which posts to the owner's own Telegram chat and nowhere else.
 app.post("/api/integrations/test", async (req, res) =>
   res.json(await pyProvider("test_integration", req.body)));
 // A full sweep calls every model and every shelf API, so it gets its own,
@@ -2639,7 +2642,6 @@ app.get("/api/settings", async (_q, res) => {
       apiTokenSet: set("SITE_API_TOKEN"),
     },
     optional: {
-      ntfyTopic: v("NTFY_TOPIC"), ntfyServer: v("NTFY_SERVER"),
       algoliaAppId: v("ALGOLIA_APP_ID"), algoliaSearchKey: v("ALGOLIA_SEARCH_KEY"),
       // the write key is reported as set / not set, never echoed back
       algoliaWriteKeySet: set("ALGOLIA_WRITE_KEY"), algoliaIndex: v("ALGOLIA_INDEX"),
@@ -2703,13 +2705,6 @@ app.get("/api/status", async (_q, res) => {
     // this agency any more — SEO runs on Search Console, autocomplete, his own
     // enquiries and rival pages. If he ever wants volumes or rank tracking it
     // goes on the seo_data shelf like any other API, and shows up there.
-    { label: "ntfy (your approvals)", optional: true, ok: has("NTFY_TOPIC"),
-      detail: has("NTFY_TOPIC")
-        ? `Sending to ${e.NTFY_TOPIC} on ${e.NTFY_SERVER || "https://ntfy.sh"}`
-        : (has("TELEGRAM_BOT_TOKEN") && has("TELEGRAM_CHAT_ID")
-            ? "Not set — falling back to your old Telegram bot"
-            : "Not set — nothing will reach your phone for approval"),
-      hint: "Pick a long, private topic name and subscribe to it in the ntfy app." },
     { label: "Sending domain", optional: true, ok: has("OUTREACH_DOMAIN"),
       detail: has("OUTREACH_DOMAIN") ? e.OUTREACH_DOMAIN : "Not set — outreach stays off",
       hint: "The domain of the address your mail is sent from — the part after the @." },
@@ -2780,7 +2775,7 @@ const PORT = process.env.PORT || 3000;
 // app.listen(PORT) with no host binds every interface, which on a laptop means
 // the setup screen is served to the whole network. On café, hotel, co-working
 // or office wifi, anyone who guessed the address could open /setup and read the
-// DataForSEO login, the ntfy topic, the site admin token and the sending
+// DataForSEO login, the SMTP login, the site admin token and the sending
 // domain, then press Run. Nothing about the app said so.
 //
 // BIND_HOST=0.0.0.0 still works for anyone deliberately hosting this on a VPS

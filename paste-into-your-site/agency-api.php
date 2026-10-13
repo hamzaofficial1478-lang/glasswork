@@ -1,6 +1,6 @@
 <?php
 /**
- * agency-api.php — FULL ACCESS for YOUR-WEBSITE  (version 8)
+ * agency-api.php — FULL ACCESS for YOUR-WEBSITE  (version 9)
  *
  * This is the door. Put this ONE file on your server and the agency can read
  * and edit your pages itself, instead of handing you homework.
@@ -35,7 +35,10 @@
  *     your home page can never be removed at all
  *   - touch any file outside your website folder
  *   - touch anything that is not a .php or .html page — except that it may
- *     save a blog post's picture into the folder your blog's pictures are in
+ *     save a blog post's picture into the folder your blog's pictures are in,
+ *     and it may write two plain-text files Google and AI assistants read at
+ *     the top of your site: robots.txt and llms.txt (plain text only, a copy
+ *     kept first, and never a robots.txt that shuts Google out of everything)
  *   - run a command, or read any other file
  *   - read or change your database, except your blog's posts table: it may add
  *     a post to it, and take away only a post it added itself
@@ -62,9 +65,27 @@ header('Content-Type: application/json');
 header('X-Content-Type-Options: nosniff');
 header('X-Robots-Tag: noindex, nofollow');   // never let Google index the door
 
-// Version 8. The program reads this from /health and uses what each version
+// Version 9. The program reads this from /health and uses what each version
 // can do — an older copy of this file still works, just without the newer parts.
-const CONNECTOR = 8;
+//
+// WHAT 9 ADDED — "how much data travels ... expand the api reading, writing and
+// the data carrier abilities":
+//   packed both ways      answers are gzip-packed when the agency asks (a page of
+//                         HTML is usually 5 to 10 times smaller on the wire), and
+//                         a big change can arrive packed too, which also keeps
+//                         it under your host's upload limit
+//   many changes, one go  /pages-batch writes up to 25 pages in one request, and
+//                         all of them or none: if one cannot be written, every
+//                         page the batch already changed is put back
+//   robots.txt, llms.txt  the two text files at the top of your site, written
+//                         the same careful way as a page
+//   kinder to your host   a change waits a few seconds at most for another change
+//                         to the same page, then says "busy" instead of holding
+//                         your website's workers; reading many pages stops after
+//                         a few seconds and hands back the rest for next time;
+//                         the list of pages is remembered for a minute instead of
+//                         walking your folders on every call
+const CONNECTOR = 9;
 
 // CLEAN ANSWERS, EVEN ON A NOISY HOST. Shared hosting often prints PHP notices
 // and warnings straight into the page, and one line of that above the JSON
@@ -96,6 +117,18 @@ define('BACKUP_DIR', __DIR__ . '/backups');
 
 // Only these can ever be read or written. A page, and nothing else.
 const ALLOWED_EXT = ['php', 'html', 'htm'];
+
+// ...and these two text files, at the top of the site only, by exact name.
+// robots.txt tells search engines what to read and where the sitemap is;
+// llms.txt is the newer, plain summary of a site that AI assistants read.
+const ROOT_TEXT = ['robots.txt', 'llms.txt'];
+const TEXT_MAX = 256 * 1024;
+
+// The most pages one batch of changes may carry (/pages-batch).
+const BATCH_MAX = 25;
+// No single read keeps one of your website's workers busy for long: after a
+// few seconds it answers with what it has, and names the rest for next time.
+const READ_BUDGET = 4.0;
 
 // Never, under any circumstances, even with a valid token.
 //
@@ -168,7 +201,24 @@ function reply(array $data, int $code = 200): void {
     // ('text_ok'), so the agency reads it but never rewrites it.
     $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
            | (defined('JSON_INVALID_UTF8_SUBSTITUTE') ? JSON_INVALID_UTF8_SUBSTITUTE : 0);
-    echo json_encode($data, $flags);
+    $json = (string)json_encode($data, $flags);
+    // PACKED WHEN ASKED. An answer carrying pages is mostly HTML, which gzip
+    // shrinks five to ten times — less to carry, and less time your server
+    // spends sending it. Only when the agency says it can unpack it, only when
+    // it is worth it, and never twice (a host already packing everything is
+    // left to do it).
+    $accept = (string)($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '');
+    if (strlen($json) > 1024 && stripos($accept, 'gzip') !== false && function_exists('gzencode')
+        && !ini_get('zlib.output_compression') && !headers_sent()) {
+        $packed = gzencode($json, 5);
+        if (is_string($packed)) {
+            header('Content-Encoding: gzip');
+            header('Vary: Accept-Encoding');
+            echo $packed;
+            exit;
+        }
+    }
+    echo $json;
     exit;
 }
 
@@ -292,6 +342,9 @@ function page_or_why(string $raw): array {
         return ['', 400, 'bad page name'];
     }
     if (is_forbidden($rel)) { return ['', 403, "$rel is off limits"]; }
+    if (in_array($rel, ROOT_TEXT, true)) {
+        return [SITE_ROOT . '/' . $rel, 200, ''];
+    }
     $ext = strtolower(pathinfo($rel, PATHINFO_EXTENSION));
     if (!in_array($ext, ALLOWED_EXT, true)) {
         return ['', 400, 'only .php, .html and .htm pages — nothing else'];
@@ -352,11 +405,66 @@ function ensure_backup_dir(): void {
  * until it is finished; the other waits its turn. Let go when the answer is
  * sent.
  */
+//
+// A SHORT WAIT, NOT AN ENDLESS ONE (version 9). A change used to wait for as
+// long as the other change took, and every waiting request is one of your
+// website's few workers doing nothing — on shared hosting there may be only a
+// handful, and visitors need them too. Now it waits a few seconds at most and
+// then answers "busy", and the agency tries again a moment later.
+const HOLD_WAIT = 8;
 function hold_page(string $full) {
     ensure_backup_dir();
     $h = @fopen(BACKUP_DIR . '/.hold-' . md5($full), 'c');
-    if ($h) { @flock($h, LOCK_EX); }
+    if (!$h) { return $h; }
+    $until = microtime(true) + HOLD_WAIT;
+    while (true) {
+        $would = 0;
+        if (@flock($h, LOCK_EX | LOCK_NB, $would)) { break; }
+        if (!$would) { break; }          // this server cannot lock files at all: carry on as before
+        if (microtime(true) >= $until) {
+            fail(423, 'another change to ' . relative_to_site($full) . ' is still being made — '
+                    . 'nothing was changed; the agency tries again in a moment');
+        }
+        usleep(100000);
+    }
     return $h;
+}
+
+// The list of pages is remembered for a minute (see /pages), and forgotten the
+// moment anything is written, so it is never out of date about the agency's own
+// changes.
+const LIST_CACHE_TTL = 60;
+function list_cache_file(): string { return BACKUP_DIR . '/.list-cache.json'; }
+function forget_listing(): void { @unlink(list_cache_file()); }
+
+/**
+ * Why this text is not fit to be robots.txt or llms.txt — '' when it is.
+ * Plain text only: nothing a server would run, nothing a browser would run.
+ */
+function text_file_problem(string $rel, string $text): string {
+    if (!in_array($rel, ROOT_TEXT, true)) { return ''; }
+    if (strlen($text) > TEXT_MAX) { return "$rel would be larger than 256 KB"; }
+    if (strpos($text, "\0") !== false || preg_match('/<\?|<script|<\/?html/i', $text)) {
+        return "$rel must be plain text — no code of any kind";
+    }
+    if (preg_match('//u', $text) !== 1) { return "$rel must be UTF-8 text"; }
+    if ($rel === 'robots.txt' && shuts_everyone_out($text)) {
+        return 'refusing a robots.txt that shuts every search engine out of the whole website';
+    }
+    return '';
+}
+
+/** Does this robots.txt tell every crawler to read nothing at all? */
+function shuts_everyone_out(string $robots): bool {
+    $groups = preg_split('/\n(?=\s*user-agent\s*:)/i', str_replace("\r", '', $robots));
+    foreach ((array)$groups as $g) {
+        if (preg_match('/^\s*user-agent\s*:\s*\*\s*$/im', $g)
+            && preg_match('/^\s*disallow\s*:\s*\/\s*$/im', $g)
+            && !preg_match('/^\s*allow\s*:\s*\/\S/im', $g)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -408,6 +516,18 @@ if ($method === 'POST' && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0 && $raw_bod
     fail(413, 'that was more than your host lets a website receive in one go (post_max_size is '
             . ini_get('post_max_size') . ') — nothing was changed');
 }
+// A big change can arrive packed (version 9): it is unpacked here, with a
+// ceiling so a small packed request can never unpack into something huge.
+if ($raw_body !== '' && stripos((string)($_SERVER['HTTP_CONTENT_ENCODING'] ?? ''), 'gzip') !== false) {
+    $plain = function_exists('gzdecode') ? @gzdecode($raw_body, 48 * 1024 * 1024) : false;
+    if (!is_string($plain)) {
+        fail(400, 'the request arrived packed but could not be unpacked — nothing was changed');
+    }
+    $raw_body = $plain;
+}
+// A write carries on to the end even if the line drops half-way, so a batch
+// is never left part-done by a dropped connection.
+if ($method === 'POST') { @ignore_user_abort(true); }
 $body = $raw_body === '' ? [] : json_decode($raw_body, true);
 if (!is_array($body)) {
     fail(400, 'the request arrived incomplete (it was not whole JSON) — nothing was changed');
@@ -451,8 +571,11 @@ if ($route === '/health' && $method === 'GET') {
            'writable' => is_writable(SITE_ROOT),
            'mode' => 'full-access', 'warnings' => $warn,
            'connector' => CONNECTOR,
-           'can' => ['pages', 'head', 'rollback', 'blog', 'remove', 'pictures', 'batch', 'safe-write', 'fingerprint'],
-           'limits' => ['post_max_size' => (string)ini_get('post_max_size'),
+           'can' => ['pages', 'head', 'rollback', 'blog', 'remove', 'pictures', 'batch', 'safe-write', 'fingerprint',
+                     'gzip', 'batch-write', 'text-files', 'short-holds'],
+           'packing' => function_exists('gzencode') && function_exists('gzdecode'),
+           'limits' => ['batch_max' => BATCH_MAX, 'read_budget_seconds' => READ_BUDGET,
+                        'post_max_size' => (string)ini_get('post_max_size'),
                         'upload_max_filesize' => (string)ini_get('upload_max_filesize'),
                         'memory_limit' => (string)ini_get('memory_limit'),
                         'max_execution_time' => (int)ini_get('max_execution_time')]]);
@@ -507,10 +630,35 @@ function list_pages(string $dir, string $prefix = '', int $depth = 0): array {
     return $out;
 }
 
+function text_files(): array {
+    $out = [];
+    foreach (ROOT_TEXT as $t) {
+        $f = SITE_ROOT . '/' . $t;
+        $out[] = ['file' => $t, 'exists' => is_file($f), 'bytes' => is_file($f) ? filesize($f) : 0,
+                  'changed' => is_file($f) ? date('c', (int)filemtime($f)) : ''];
+    }
+    return $out;
+}
+
 if ($route === '/pages' && $method === 'GET') {
+    // Remembered for a minute: walking every folder on every call was the
+    // single heaviest thing the agency asked of a small host.
+    $cache = list_cache_file();
+    if (empty($_GET['fresh']) && is_file($cache) && filemtime($cache) > time() - LIST_CACHE_TTL) {
+        $kept = json_decode((string)@file_get_contents($cache), true);
+        if (is_array($kept) && isset($kept['pages'])) {
+            $kept['cached'] = true;
+            $kept['files'] = text_files();
+            reply($kept);
+        }
+    }
     $out = list_pages(SITE_ROOT);
-    reply(['ok' => true, 'pages' => $out, 'counted' => count($out),
-           'capped' => count($out) >= MAX_PAGES]);
+    $answer = ['ok' => true, 'pages' => $out, 'counted' => count($out),
+               'capped' => count($out) >= MAX_PAGES];
+    ensure_backup_dir();
+    @file_put_contents($cache, json_encode($answer, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), LOCK_EX);
+    $answer['files'] = text_files();
+    reply($answer);
 }
 
 // --- take a page away (a copy is always kept first) ---------------------------
@@ -536,6 +684,7 @@ if ($route === '/pages-remove' && $method === 'POST') {
         fail(500, 'could not keep a copy first, so the page was left where it is');
     }
     if (!@unlink($full)) { fail(500, 'could not remove the file — check the folder permissions'); }
+    forget_listing();
     reply(['ok' => true, 'page' => $rel, 'action' => 'removed', 'backup' => $backup,
            'note' => 'a copy is kept — /rollback puts it back']);
 }
@@ -565,8 +714,10 @@ if ($route === '/pages-many' && $method === 'POST') {
     $out = [];
     $more = [];
     $total = 0;
+    $t0 = microtime(true);
     foreach ($names as $i => $name) {
-        if (count($out) >= MANY_MAX || $total >= MANY_BYTES) { $more = array_slice($names, $i); break; }
+        if (count($out) >= MANY_MAX || $total >= MANY_BYTES
+            || ($out && microtime(true) - $t0 > READ_BUDGET)) { $more = array_slice($names, $i); break; }
         [$full, $code, $why] = page_or_why($name);
         if ($full === '') { $out[] = ['page' => $name, 'ok' => false, 'status' => $code, 'error' => $why]; continue; }
         if (!is_file($full)) { $out[] = ['page' => $name, 'ok' => false, 'status' => 404, 'error' => 'no such page']; continue; }
@@ -587,6 +738,8 @@ if ($route === '/pages' && $method === 'POST') {
     if ($name === '') { fail(400, 'which page?'); }
     if (trim($html) === '') { fail(400, 'refusing to write an empty page'); }
     $full = resolve_page($name);
+    $problem = text_file_problem(relative_to_site($full), $html);
+    if ($problem !== '') { fail(400, $problem . ' — nothing was changed'); }
     $hold = hold_page($full);
     $now = is_file($full) ? (string)file_get_contents($full) : null;
     // Writing the same bytes back is not a change. Skipping it keeps the
@@ -610,10 +763,90 @@ if ($route === '/pages' && $method === 'POST') {
     if (!write_whole($full, $html)) {
         fail(500, 'could not write the file — check folder permissions in cPanel');
     }
+    forget_listing();
     reply(['ok' => true, 'page' => relative_to_site($full),
            'bytes' => strlen($html), 'backup' => $backup, 'sha256' => fingerprint($html),
            'note' => $backup ? 'previous version kept — /rollback restores it'
                              : 'new page, nothing to keep']);
+}
+
+// --- write many pages in one go, all or none (version 9) --------------------
+//
+// A whole-site change — one email address put right on every page, say — used
+// to be one request per page, each its own knock on the door, and if the line
+// dropped half-way the site was left half old and half new. Now it is one
+// request carrying up to 25 pages, and it is all of them or none of them:
+//
+//   every page is checked first   names, sizes, and that each page is still the
+//                                 one the agency read (fingerprints) — one page
+//                                 changed under it and nothing is written
+//   every old page is kept        a copy in backups/, exactly as for one page
+//   if one write fails            every page this batch already changed is put
+//                                 back as it was, before the answer goes back
+if ($route === '/pages-batch' && $method === 'POST') {
+    $changes = array_values(array_filter((array)($body['changes'] ?? []), 'is_array'));
+    if (!$changes) { fail(400, 'no changes were sent'); }
+    if (count($changes) > BATCH_MAX) { fail(413, 'at most ' . BATCH_MAX . ' changes in one go — nothing was changed'); }
+    $plan = [];
+    $total = 0;
+    foreach ($changes as $i => $c) {
+        $name = (string)($c['page'] ?? '');
+        $html = (string)($c['html'] ?? '');
+        if ($name === '') { fail(400, 'change ' . ($i + 1) . ': which page? — nothing was changed'); }
+        if (trim($html) === '') { fail(400, "change " . ($i + 1) . " ($name): refusing to write an empty page — nothing was changed"); }
+        [$full, $code, $why] = page_or_why($name);
+        if ($full === '') { fail($code, "change " . ($i + 1) . " ($name): $why — nothing was changed"); }
+        $rel = relative_to_site($full);
+        $problem = text_file_problem($rel, $html);
+        if ($problem !== '') { fail(400, $problem . ' — nothing was changed'); }
+        if (isset($plan[$full])) { fail(400, "$rel is in this batch twice — nothing was changed"); }
+        $total += strlen($html);
+        $plan[$full] = ['rel' => $rel, 'html' => $html,
+                        'expect' => strtolower(trim((string)($c['expect_sha'] ?? '')))];
+    }
+    if ($total > MANY_BYTES) { fail(413, 'more than 6 MB of pages in one go — nothing was changed'); }
+    // Always the same order, so two batches can never each hold a page the
+    // other is waiting for.
+    ksort($plan);
+    $holds = [];
+    foreach (array_keys($plan) as $full) { $holds[] = hold_page($full); }
+    $stale = [];
+    foreach ($plan as $full => $p) {
+        $plan[$full]['now'] = is_file($full) ? (string)file_get_contents($full) : null;
+        $now = $plan[$full]['now'];
+        if ($p['expect'] !== '' && $now !== null && fingerprint($now) !== $p['expect']) {
+            $stale[] = ['page' => $p['rel'], 'sha256' => fingerprint($now)];
+        }
+    }
+    if ($stale) {
+        reply(['ok' => false, 'changed' => true, 'stale' => $stale,
+               'error' => 'some pages changed on your website after the agency read them, so nothing '
+                        . 'was written — the agency reads them again before changing them'], 409);
+    }
+    $done = [];
+    $out = [];
+    foreach ($plan as $full => $p) {
+        if ($p['now'] !== null && $p['now'] === $p['html']) {
+            $out[] = ['page' => $p['rel'], 'ok' => true, 'action' => 'unchanged', 'backup' => '',
+                      'sha256' => fingerprint($p['html']), 'bytes' => strlen($p['html'])];
+            continue;
+        }
+        $backup = back_up($full);
+        $kept = $p['now'] === null || ($backup !== '' && is_file(BACKUP_DIR . '/' . $backup));
+        if (!$kept || !write_whole($full, $p['html'])) {
+            foreach (array_reverse($done) as $d) {
+                if ($d['before'] === null) { @unlink($d['full']); } else { write_whole($d['full'], $d['before']); }
+            }
+            forget_listing();
+            fail(500, 'could not ' . ($kept ? 'write ' : 'keep a copy of ') . $p['rel']
+                    . ' — every page this batch had already changed was put back, so nothing changed');
+        }
+        $done[] = ['full' => $full, 'before' => $p['now']];
+        $out[] = ['page' => $p['rel'], 'ok' => true, 'action' => $p['now'] === null ? 'new' : 'written',
+                  'backup' => $backup, 'sha256' => fingerprint($p['html']), 'bytes' => strlen($p['html'])];
+    }
+    forget_listing();
+    reply(['ok' => true, 'pages' => $out, 'written' => count($done)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +897,7 @@ if ($route === '/head' && $method === 'POST') {
     if (!write_whole($full, $new)) {
         fail(500, 'could not write the file');
     }
+    forget_listing();
     reply(['ok' => true, 'page' => relative_to_site($full), 'id' => $mark,
            'action' => $what, 'backup' => $backup, 'sha256' => fingerprint($new)]);
 }
@@ -710,6 +944,7 @@ if ($route === '/rollback' && $method === 'POST') {
     back_up($full);                          // keep the bad one too, just in case
     $old = (string)file_get_contents($src);
     if (!write_whole($full, $old)) { fail(500, 'could not restore'); }
+    forget_listing();
     reply(['ok' => true, 'page' => relative_to_site($full),
            'restored_from' => $which, 'sha256' => fingerprint($old)]);
 }

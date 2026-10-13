@@ -1,3 +1,32 @@
+# Version 9 of the connector — less data, fewer knocks, all-or-nothing changes
+
+Version 9 changes nothing about what the agency may touch on your pages. It
+makes every visit lighter for your website and safer for you:
+
+- **Everything travels packed.** Big answers (pages of HTML) are gzip-packed,
+  usually five to ten times smaller, and a big change goes packed too, which
+  also keeps it under your host's upload limit. The Website screen shows how
+  much travelled each day and how much packing saved.
+- **Many changes in one go, all or none.** A whole-site change (one email
+  address put right on every page, say) is one request instead of one per
+  page — and if any page cannot be written, every page it had already changed
+  is put back. Your site is never left half old and half new.
+- **robots.txt and llms.txt.** The two text files Google and AI assistants read
+  at the top of your site can now be kept up to date, written the same careful
+  way as a page: plain text only, a copy kept first, and never a robots.txt that
+  shuts Google out of everything.
+- **Kinder to your host.** A change waits a few seconds at most for another
+  change to the same page, then says "busy" and tries again, instead of holding
+  one of your website's workers. Reading many pages stops after a few seconds
+  and hands back the rest. The list of your pages is remembered for a minute
+  instead of walking your folders on every visit.
+
+**How:** the same as before — Website screen → *Get the new connector*, unzip,
+upload the `agency-api` folder over the old one, then *Test the connection*: it
+should say connector version 9. Your secret (`token.php`) stays the same.
+
+---
+
 # Version 8 of the connector (October) — worth the three minutes
 
 The program now tells you on the Website screen when your site has an older

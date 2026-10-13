@@ -81,17 +81,17 @@ def _readiness_tests():
     real = readiness._brains
     try:
         readiness._brains = lambda task: brain(proven=False)
-        r = readiness.sector("report", "report", env={"NTFY_TOPIC": "t"}, shelf={})
+        r = readiness.sector("report", "report", env={}, shelf={})
         check("a model that has not answered today -> unchecked, not ready",
               r["state"], "unchecked")
 
         readiness._brains = lambda task: proven
-        r = readiness.sector("report", "report", env={"NTFY_TOPIC": "t"}, shelf={})
+        r = readiness.sector("report", "report", env={}, shelf={})
         check("answered today -> ready", r["state"], "ready")
         check("and it says which model", "Sonnet 5" in r["says"], True)
 
         readiness._brains = lambda task: brain(struggling="Opus 5 was too slow to answer")
-        r = readiness.sector("report", "report", env={"NTFY_TOPIC": "t"}, shelf={})
+        r = readiness.sector("report", "report", env={}, shelf={})
         check("being stepped round -> thin", r["state"], "thin")
         check("and it says what Claude is doing about it",
               any("next model down" in t for t in r["thin"]), True)

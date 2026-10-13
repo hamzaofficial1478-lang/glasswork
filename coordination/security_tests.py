@@ -325,35 +325,6 @@ def test_no_program_reaches_the_servers_own_network():
           p.stdout.strip().split(","), ["refused"] * 6)
 
 
-def test_phone_approvals_need_a_code():
-    print("\nWith two-step sign-in on, an approval from the phone needs a fresh code:")
-    from coordination import ntfy_replies, workspace
-    place = Path(tempfile.mkdtemp(prefix="phone-"))
-    saved = {k: os.environ.get(k) for k in ("AGENCY_DATA", "AGENCY_KEY", "AGENCY_ACCOUNT", "AGENCY_SITE")}
-    try:
-        os.environ["AGENCY_DATA"] = str(place)
-        made = workspace.create_account("Delta", "lemon granite bay")
-        os.environ.update(AGENCY_KEY=made["key"], AGENCY_ACCOUNT=made["account"]["id"])
-        site = workspace.add_site(made["account"]["id"], "Delta shop", "https://delta.example")["site"]["id"]
-        os.environ["AGENCY_SITE"] = site
-        check("without two-step sign-in, phone replies work as before", ntfy_replies._code_ok(None), True)
-        secret = totp.new_secret()
-        step = int(time.time() // 30)
-        workspace.mfa_on(made["account"]["id"], secret, totp.code_at(secret, step))
-        check("with it, a reply without a code is refused", ntfy_replies._code_ok(None), False)
-        good = totp.code_at(secret, step + 1)
-        check("  a fresh code is accepted", ntfy_replies._code_ok(good), True)
-        check("  and the same code twice is not", ntfy_replies._code_ok(good), False)
-        check("a reply reads its number and code", ntfy_replies.parse_coded("ok 3 123456"), ("approved", 3, "123456"))
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        shutil.rmtree(place, ignore_errors=True)
-
-
 def test_nothing_leaks_in_the_code():
     print("\nWhat the code itself shows:")
     server = (ROOT / "server.js").read_text(encoding="utf-8")
@@ -378,7 +349,7 @@ def test_nothing_leaks_in_the_code():
 
 def main():
     for t in (test_two_people_at_once, test_a_restart_counts_nobody_twice, test_no_program_reaches_the_servers_own_network,
-              test_phone_approvals_need_a_code, test_nothing_leaks_in_the_code):
+              test_nothing_leaks_in_the_code):
         t()
     print()
     if _fail:

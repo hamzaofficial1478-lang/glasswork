@@ -23,7 +23,7 @@ WHAT THIS IS, NEXT TO run.py
 
 WHERE YOUR KEYS ACTUALLY LIVE, AND WHY IT MATTERS
 
-  .env                            SMTP password, ntfy topic, site token, caps
+  .env                            SMTP password, site token, caps
   config/providers.local.json     model credentials and shelf API keys
   config/site.json                the website address (public, and git-ignored so
                                   an update can never wipe what you saved)
@@ -269,7 +269,6 @@ def where():
 
     say("  .env                       (git-ignored, this machine only)")
     for k, label in [("SITE_URL", "Website address"),
-                     ("NTFY_TOPIC", "ntfy topic"),
                      ("SMTP_HOST", "Mail host"),
                      ("SMTP_PASS", "Mail password"),
                      ("OUTREACH_DOMAIN", "Sending domain"),

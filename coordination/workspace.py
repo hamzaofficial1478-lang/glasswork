@@ -54,7 +54,6 @@ MAX_SITES = 2
 # in the old single .env is about one business and goes with that website.
 ACCOUNT_KEYS = frozenset({
     "AGENCY_NAME", "ADMIN_NAME", "ADMIN_PASSWORD_HASH",
-    "NTFY_SERVER", "NTFY_TOPIC", "NTFY_TOKEN",
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
     "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
     "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",

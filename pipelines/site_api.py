@@ -38,6 +38,7 @@ delete anything, refuses to touch a file that is not a page, refuses anything
 outside the website folder, and copies the old file before every change. See
 that file for the whole list.
 """
+import gzip
 import hashlib
 import json
 import os
@@ -49,6 +50,7 @@ import urllib.parse
 import urllib.request
 
 from coordination import board
+from coordination import site_traffic as traffic
 
 AGENT = "it-releaser"          # the only one allowed to write. Red line 1.
 SECTOR = "IT"
@@ -56,13 +58,19 @@ TIMEOUT = 25
 # The newest connector file, and what each version added. 8: whole-page writes
 # (never half a page), one change to a page at a time, fingerprints so a page
 # changed under the agency is never overwritten, and many pages in one request.
-CONNECTOR_NEWEST = 8
+# 9: everything packed (gzip) both ways, up to 25 page changes in one request
+# and all-or-nothing, robots.txt and llms.txt, and gentler on the host — a busy
+# page answers "busy" in seconds instead of holding one of its workers.
+CONNECTOR_NEWEST = 9
+# A change bigger than this goes packed to a version-9 connector. Small ones are
+# not worth the trouble of packing.
+PACK_OVER = 4096
 # "more strong more fast more reliable errors free" — a request that fails for
 # a reason that passes (a dropped line, a host briefly overloaded) is tried
 # again after these pauses, instead of failing whatever he had just pressed.
 RETRY_WAITS = (2, 5)
 # What a host says when it is busy for a moment, rather than "no".
-PASSING = {408, 429, 502, 503, 504, 508, 520, 521, 522, 523, 524}
+PASSING = {408, 423, 429, 502, 503, 504, 508, 520, 521, 522, 523, 524}
 # Requests that are safe to send twice: reading, and the writes the connector
 # makes harmless to repeat — the same page or block again is "unchanged".
 REPEATABLE_POSTS = {"pages", "head", "pages-many", "picture"}
@@ -196,9 +204,12 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
     url = target + "?" + urllib.parse.urlencode(q)
     data = json.dumps(body).encode() if body is not None else None
     repeatable = method == "GET" or bits[0] in REPEATABLE_POSTS
+    # Packed only for a connector known to unpack it — the version is the one
+    # already learned from /health, never a fresh request just to find out.
+    packed = bool(data) and len(data) > PACK_OVER and _VERSION.get(s.get("base") or "", 0) >= 9
     out = {}
     for n in range(len(RETRY_WAITS) + 1):
-        out = _send(url, data, method, s["token"], timeout)
+        out = _send(url, data, method, s["token"], timeout, packed=packed)
         again = out.pop("_passing", False)
         sure_unsent = out.pop("_unsent", False)
         if out.get("ok") or out.get("resting") or not again or n == len(RETRY_WAITS):
@@ -214,21 +225,48 @@ def call(path, method="GET", body=None, timeout=TIMEOUT, s=None) -> dict:
     return out
 
 
-def _send(url, data, method, token, timeout) -> dict:
+def _unpack(raw, headers) -> bytes:
+    """The answer's bytes, unpacked if the connector packed them."""
+    raw = raw or b""
+    try:
+        enc = str((headers or {}).get("Content-Encoding") or "").lower()
+    except Exception:
+        enc = ""
+    if "gzip" in enc or raw[:2] == b"\x1f\x8b":
+        try:
+            return gzip.decompress(raw)
+        except Exception:
+            return raw
+    return raw
+
+
+def _send(url, data, method, token, timeout, packed=False) -> dict:
     """One attempt. Marks an answer that may well be different a moment later."""
-    req = urllib.request.Request(url, data=data, method=method)
+    wire = gzip.compress(data, 6) if (packed and data) else data
+    req = urllib.request.Request(url, data=wire, method=method)
     req.add_header("Authorization", "Bearer " + token)
     # Some Apache setups drop Authorization before PHP sees it. The endpoint
     # accepts either, so send both and stop caring which host this is.
     req.add_header("X-Agency-Token", token)
     req.add_header("Accept", "application/json")
+    # The connector packs its answers when asked (version 9 and newer); an
+    # older one, or a host that packs everything itself, is read just the same.
+    req.add_header("Accept-Encoding", "gzip")
     if data is not None:
         req.add_header("Content-Type", "application/json")
+        if wire is not data:
+            req.add_header("Content-Encoding", "gzip")
+    t0 = time.time()
+    got = b""
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read().decode("utf-8", "replace")
+            got = r.read() or b""
+            raw = _unpack(got, getattr(r, "headers", None)).decode("utf-8", "replace")
+        traffic.note(len(wire or b""), len(got), len(raw.encode("utf-8")), time.time() - t0, True)
     except urllib.error.HTTPError as e:
-        raw = (e.read() or b"").decode("utf-8", "replace")
+        got = e.read() or b""
+        raw = _unpack(got, getattr(e, "headers", None)).decode("utf-8", "replace")
+        traffic.note(len(wire or b""), len(got), len(raw.encode("utf-8")), time.time() - t0, False)
         try:
             out = json.loads(raw)
         except Exception:
@@ -251,6 +289,8 @@ def _send(url, data, method, token, timeout) -> dict:
             # The connector answered — it just predates this call.
             out["old_connector"] = True
             out["error"] = OLD_CONNECTOR
+        elif e.code == 404 and str(out.get("error") or "") == "no such page":
+            pass                       # the connector answered: that page is not there
         elif e.code == 404:
             out["error"] = (f"nothing answered at {url.split('?')[0]}. Check the Admin API "
                             "address, and that agency-api/index.php really is "
@@ -268,6 +308,7 @@ def _send(url, data, method, token, timeout) -> dict:
                             + str(out.get("error") or "it asked for a moment"))
         return out
     except Exception as e:
+        traffic.note(len(wire or b""), len(got), 0, time.time() - t0, False)
         # NOT AN ANSWER — THE SITE WAS NOT THERE TO GIVE ONE. Marked, so the
         # Releaser keeps his approval and tries again, instead of calling a
         # dropped line or a resting pause a failed change and throwing his yes
@@ -702,6 +743,207 @@ def put_page(page, html, agent=AGENT, s=None, _action="page", _block="",
     return _log_write(_action, page, agent, r, html=html, block_id=_block,
                       undo_cmd=f"python -m pipelines.site_api --undo {page}",
                       before=before, summary=summary)
+
+
+def put_pages(changes, agent=AGENT, s=None, summary="") -> dict:
+    """
+    Write several pages in one go — all of them, or none.
+
+    `changes` is a list of {page, html, before} (before = the page as it was
+    read, for the fingerprint and the change log). A version-9 connector takes
+    up to 25 in one request and puts every page back if any one cannot be
+    written, so a whole-site change can never be left half done. An older
+    connector, or WordPress, gets them one at a time exactly as put_page would.
+    Releaser only, like every write.
+    """
+    s = s or settings()
+    changes = [c for c in (changes or []) if c.get("page") and c.get("html")]
+    if not changes:
+        return {"ok": True, "pages": [], "written": 0, "head": "nothing to write"}
+    for c in changes:
+        why = not_ours(c["page"])
+        if why:
+            return _log_write("page", c["page"], agent, {"ok": False, "error": why})
+    refused = _may_write(agent)
+    if refused or connector_version(s) < 9:
+        rows = [put_page(c["page"], c["html"], agent=agent, s=s, before=c.get("before"),
+                         summary=c.get("summary") or summary) for c in changes]
+        return {"ok": all(r.get("ok") for r in rows), "pages": rows,
+                "written": sum(1 for r in rows if r.get("ok")),
+                "queued": [r.get("queued") for r in rows if r.get("queued")],
+                "one_at_a_time": True}
+    out = []
+    for i in range(0, len(changes), 25):
+        part = changes[i:i + 25]
+        body = {"changes": []}
+        for c in part:
+            one = {"page": c["page"], "html": c["html"]}
+            expect = _expected(c["page"], c.get("before"), s)
+            if expect:
+                one["expect_sha"] = expect
+            body["changes"].append(one)
+        r = call("/pages-batch", "POST", body, s=s)
+        if r.get("maybe_done"):
+            # The line dropped after sending. Read the pages back: if every one
+            # is now what was sent, it landed; if none is, it did not.
+            back = read_pages([c["page"] for c in part], s=s)
+            if all(_fp((back.get(c["page"]) or {}).get("html")) == _fp(c["html"]) for c in part):
+                r = {"ok": True, "pages": [{"page": c["page"], "ok": True, "action": "written",
+                                            "sha256": (back.get(c["page"]) or {}).get("sha256", "")}
+                                           for c in part], "confirmed_by_reading": True}
+        if not r.get("ok"):
+            for c in part:
+                _log_write("page", c["page"], agent, {"ok": False, "error": r.get("error") or "not written",
+                                                      "unreachable": r.get("unreachable")})
+            return {"ok": False, "pages": out, "error": r.get("error") or "the batch was not written",
+                    "stale": r.get("stale") or [], "unreachable": r.get("unreachable"),
+                    "written": sum(1 for x in out if x.get("ok"))}
+        by_page = {x.get("page"): x for x in (r.get("pages") or [])}
+        for c in part:
+            got = by_page.get(c["page"].lstrip("/")) or by_page.get(c["page"]) or {"ok": True}
+            if got.get("ok"):
+                _SEEN[_key(c["page"], s)] = {"sha": str(got.get("sha256") or ""), "local": _fp(c["html"])}
+            out.append(_log_write("new_page" if got.get("action") == "new" else "page", c["page"], agent,
+                                  {**got, "ok": bool(got.get("ok"))}, html=c["html"], before=c.get("before"),
+                                  summary=c.get("summary") or summary,
+                                  undo_cmd=f"python -m pipelines.site_api --undo {c['page']}"))
+    return {"ok": True, "pages": out, "written": sum(1 for x in out if x.get("ok") and x.get("action") != "unchanged")}
+
+
+def _write_all(items, agent, s):
+    """
+    The pages a whole-site change touches, written together (put_pages): with a
+    version-9 connector all of them or none, so his site is never left half old
+    and half new. Returns (written, failed, unreachable_error).
+    """
+    if not items:
+        return [], [], None
+    r = put_pages([{"page": i["page"], "html": i["html"], "before": i.get("before"),
+                    "summary": i.get("summary") or ""} for i in items], agent=agent, s=s)
+    rows = r.get("pages") or []
+    written, failed = [], []
+    if r.get("one_at_a_time"):
+        for i, row in zip(items, rows):
+            if row.get("ok"):
+                written.append({**i["meta"], "backup": row.get("backup")})
+            elif row.get("unreachable"):
+                return written, failed, row.get("error") or "your website could not be reached"
+            else:
+                failed.append({"page": i["page"], "why": row.get("error")})
+        return written, failed, None
+    if not r.get("ok"):
+        if r.get("unreachable"):
+            return [], [], r.get("error") or "your website could not be reached"
+        return [], [{"page": i["page"], "why": r.get("error")} for i in items], None
+    by = {str(row.get("page") or "").lstrip("/"): row for row in rows}
+    for i in items:
+        row = by.get(i["page"].lstrip("/")) or {}
+        written.append({**i["meta"], "backup": row.get("backup")})
+    return written, failed, None
+
+
+# ---------------------------------------------------------------------------
+# THE TWO TEXT FILES AT THE TOP OF THE SITE (connector version 9)
+# ---------------------------------------------------------------------------
+#
+# robots.txt tells search engines what to read and where the sitemap is; llms.txt
+# is the newer plain summary AI assistants read. Both go through the same door
+# as a page — read for anybody, written by the Releaser only, a copy kept, and
+# the connector refuses anything that is not plain text or that would shut
+# Google out of the whole site.
+
+TEXT_FILES = ("robots.txt", "llms.txt")
+
+
+def read_text_file(name, s=None) -> dict:
+    if name not in TEXT_FILES:
+        return {"ok": False, "error": f"{name} is not one of the files the agency may read"}
+    s = s or settings()
+    if s.get("kind") == "wordpress":
+        return {"ok": False, "error": f"{name} can be read and written through the connector file; "
+                                      "a WordPress connection cannot reach it"}
+    if connector_version(s) < 9:
+        return {"ok": False, "old_connector": True,
+                "error": f"the connector file on your website is older than version 9, so it cannot reach {name}. "
+                         + OLD_CONNECTOR.split(". ", 1)[1]}
+    r = read_page(name, s=s)
+    if not r.get("ok") and r.get("status") == 404:
+        return {"ok": True, "exists": False, "file": name, "text": ""}
+    if r.get("ok"):
+        return {"ok": True, "exists": True, "file": name, "text": r.get("html") or "",
+                "sha256": r.get("sha256") or ""}
+    return r
+
+
+def put_text_file(name, text, agent=AGENT, s=None, summary="") -> dict:
+    if name not in TEXT_FILES:
+        return {"ok": False, "error": f"{name} is not one of the files the agency may write"}
+    s = s or settings()
+    was = read_text_file(name, s=s)
+    if not was.get("ok"):
+        return was
+    return put_page(name, text, agent=agent, s=s, before=(was.get("text") if was.get("exists") else None),
+                    _action="page" if was.get("exists") else "new_page",
+                    summary=summary or (f"updated {name}" if was.get("exists") else f"put {name} on your website"))
+
+
+def put_robots(agent=AGENT, s=None, dry_run=False) -> dict:
+    """
+    robots.txt that lets search engines in and names the sitemap. His own lines
+    are kept: a missing file is written fresh, an existing one only gains the
+    Sitemap line. Releaser only; anyone else's call is queued for his yes.
+    """
+    from . import site_blueprint as bp
+    refused = _may_write(agent) if not dry_run else ""
+    if refused:
+        cid = _queue_for_him(agent, "put_robots", "robots.txt", {
+            "change": {"call": "put_robots"},
+            "why": "robots.txt tells search engines they are welcome and where your sitemap is."})
+        return {"ok": False, "queued": cid, "error": refused}
+    s = s or settings()
+    was = read_text_file("robots.txt", s=s)
+    if not was.get("ok"):
+        return was
+    sm = bp.sitemap_address()
+    text = bp.robots_text(was.get("text") if was.get("exists") else None, sm)
+    if text is None:
+        return {"ok": True, "unchanged": True,
+                "head": "robots.txt already names your sitemap" if sm else
+                        "robots.txt is there; there is no sitemap yet for it to name"}
+    if dry_run:
+        return {"ok": True, "dry_run": True, "text": text, "head": "would write robots.txt"}
+    r = put_text_file("robots.txt", text, agent=agent, s=s,
+                      summary=("added your sitemap to robots.txt" if was.get("exists")
+                               else "put robots.txt on your website"))
+    if not r.get("ok"):
+        return {"ok": False, "unreachable": r.get("unreachable"),
+                "error": r.get("error") or "robots.txt could not be written"}
+    return {"ok": True, "head": ("robots.txt now names your sitemap" if was.get("exists")
+                                 else "robots.txt is on your website, letting search engines in"
+                                 + (" and naming your sitemap" if sm else ""))}
+
+
+def put_llms(agent=AGENT, s=None, dry_run=False) -> dict:
+    """
+    llms.txt: a short plain summary of the business and its main pages for AI
+    assistants, from his business profile and the pages the agency has read.
+    Only facts already on his site or in his settings. Releaser only.
+    """
+    from . import site_blueprint as bp
+    refused = _may_write(agent) if not dry_run else ""
+    if refused:
+        cid = _queue_for_him(agent, "put_llms", "llms.txt", {
+            "change": {"call": "put_llms"},
+            "why": "llms.txt tells AI assistants who you are, what you do and where."})
+        return {"ok": False, "queued": cid, "error": refused}
+    text = bp.llms_for_his_site()
+    if dry_run:
+        return {"ok": True, "dry_run": True, "text": text, "head": "would write llms.txt"}
+    r = put_text_file("llms.txt", text, agent=agent, s=s, summary="put llms.txt on your website")
+    if not r.get("ok"):
+        return {"ok": False, "unreachable": r.get("unreachable"),
+                "error": r.get("error") or "llms.txt could not be written"}
+    return {"ok": True, "head": "llms.txt is on your website for AI assistants to read"}
 
 
 def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
@@ -1184,7 +1426,7 @@ def use_one_email(agent=AGENT, s=None, dry_run=False) -> dict:
             "why": f"{agent} wants every email address on your website to be {right}. "
                    "Only the IT Releaser writes to your site, so it waits for your yes."})
         return {"ok": False, "queued": cid, "error": refused}
-    changed, failed, swapped = [], [], {}
+    changed, failed, swapped, todo = [], [], {}, []
     for name, html in _walk(s):
         if name is None:
             return {"ok": False, "unreachable": html.get("unreachable"),
@@ -1200,19 +1442,20 @@ def use_one_email(agent=AGENT, s=None, dry_run=False) -> dict:
         if dry_run:
             changed.append({"page": name, "times": times, "wrong": wrong})
             continue
-        r = put_page(name, new, agent=agent, s=s, _action="replace", before=html,
-                     summary=(f"changed the email address to {right} "
-                              f"({times} time{'s' if times != 1 else ''}: "
-                              + ", ".join(sorted(wrong)) + ")"))
-        if r.get("ok"):
-            changed.append({"page": name, "times": times, "backup": r.get("backup")})
-            for a, n in wrong.items():
-                swapped[a] = swapped.get(a, 0) + n
-        elif r.get("unreachable"):
-            return {"ok": False, "unreachable": True, "error": r.get("error"),
-                    "changed": changed}
-        else:
-            failed.append({"page": name, "why": r.get("error")})
+        todo.append({"page": name, "html": new, "before": html, "wrong": wrong,
+                     "meta": {"page": name, "times": times},
+                     "summary": (f"changed the email address to {right} "
+                                 f"({times} time{'s' if times != 1 else ''}: "
+                                 + ", ".join(sorted(wrong)) + ")")})
+    if todo:
+        written, failed, down = _write_all(todo, agent, s)
+        changed += written
+        for i in todo:
+            if any(w["page"] == i["page"] for w in written):
+                for a, n in i["wrong"].items():
+                    swapped[a] = swapped.get(a, 0) + n
+        if down:
+            return {"ok": False, "unreachable": True, "error": down, "changed": changed}
     total = sum(c["times"] for c in changed)
     head = (f"every email address on your website is now {right} — changed {total} "
             f"time(s) on {len(changed)} page(s): " + ", ".join(sorted(swapped))
@@ -1352,7 +1595,7 @@ def use_one_domain(agent=AGENT, s=None, dry_run=False) -> dict:
                    f"to be {right}. Only the IT Releaser writes to your site, so it "
                    "waits for your yes."})
         return {"ok": False, "queued": cid, "error": refused}
-    changed, failed, swapped = [], [], {}
+    changed, failed, swapped, todo = [], [], {}, []
     for name, html in _walk(s):
         if name is None:
             return {"ok": False, "unreachable": html.get("unreachable"),
@@ -1365,19 +1608,20 @@ def use_one_domain(agent=AGENT, s=None, dry_run=False) -> dict:
         if dry_run:
             changed.append({"page": name, "times": times, "wrong": wrong})
             continue
-        r = put_page(name, new, agent=agent, s=s, _action="replace", before=html,
-                     summary=(f"changed the address to {shown} ({times} "
-                              f"time{'s' if times != 1 else ''}: "
-                              + ", ".join(sorted(wrong)) + ")"))
-        if r.get("ok"):
-            changed.append({"page": name, "times": times, "backup": r.get("backup")})
-            for d, n in wrong.items():
-                swapped[d] = swapped.get(d, 0) + n
-        elif r.get("unreachable"):
-            return {"ok": False, "unreachable": True, "error": r.get("error"),
-                    "changed": changed}
-        else:
-            failed.append({"page": name, "why": r.get("error")})
+        todo.append({"page": name, "html": new, "before": html, "wrong": wrong,
+                     "meta": {"page": name, "times": times},
+                     "summary": (f"changed the address to {shown} ({times} "
+                                 f"time{'s' if times != 1 else ''}: "
+                                 + ", ".join(sorted(wrong)) + ")")})
+    if todo:
+        written, failed, down = _write_all(todo, agent, s)
+        changed += written
+        for i in todo:
+            if any(w["page"] == i["page"] for w in written):
+                for d, n in i["wrong"].items():
+                    swapped[d] = swapped.get(d, 0) + n
+        if down:
+            return {"ok": False, "unreachable": True, "error": down, "changed": changed}
     total = sum(c["times"] for c in changed)
     head = (f"your website now says {shown} everywhere — changed {total} time(s) on "
             f"{len(changed)} page(s): " + ", ".join(sorted(swapped))
@@ -1448,7 +1692,7 @@ def repair_share_buttons(agent=AGENT, s=None, dry_run=False) -> dict:
             "why": "The share buttons on your posts open a page on your own site "
                    "instead of Facebook, WhatsApp and LinkedIn."})
         return {"ok": False, "queued": cid, "error": refused}
-    changed, failed = [], []
+    changed, failed, todo = [], [], []
     for name, html in _walk(s):
         if name is None:
             return {"ok": False, "unreachable": html.get("unreachable"),
@@ -1460,15 +1704,13 @@ def repair_share_buttons(agent=AGENT, s=None, dry_run=False) -> dict:
         if dry_run:
             changed.append({"page": name, "times": n})
             continue
-        r = put_page(name, new, agent=agent, s=s, _action="replace", before=html,
-                     summary=f"put Facebook, WhatsApp and LinkedIn back in {n} share button(s)")
-        if r.get("ok"):
-            changed.append({"page": name, "times": n, "backup": r.get("backup")})
-        elif r.get("unreachable"):
-            return {"ok": False, "unreachable": True, "error": r.get("error"),
-                    "changed": changed}
-        else:
-            failed.append({"page": name, "why": r.get("error")})
+        todo.append({"page": name, "html": new, "before": html, "meta": {"page": name, "times": n},
+                     "summary": f"put Facebook, WhatsApp and LinkedIn back in {n} share button(s)"})
+    if todo:
+        written, failed, down = _write_all(todo, agent, s)
+        changed += written
+        if down:
+            return {"ok": False, "unreachable": True, "error": down, "changed": changed}
     total = sum(c["times"] for c in changed)
     return {"ok": not failed, "changed": changed, "failed": failed,
             "head": (f"the share buttons go to Facebook, WhatsApp and LinkedIn again — "
@@ -1723,24 +1965,27 @@ def replace_text(find, replace, agent=AGENT, s=None, dry_run=False) -> dict:
                     "to your site, so it waits for your yes.")})
         return {"ok": False, "queued": cid, "error": refused}
 
-    changed, failed = [], []
+    changed, failed, todo = [], [], []
+    got_all = read_pages([h["page"] for h in plan["pages"]], s=s)
     for h in plan["pages"]:
-        got = read_page(h["page"], s=s)
+        got = got_all.get(h["page"]) or {}
         if not got.get("ok"):
             failed.append({"page": h["page"], "why": got.get("error")})
             continue
         html = got["html"]
         if find not in html:
             continue                      # changed under us since the plan
-        r = put_page(h["page"], html.replace(find, replace), agent=agent, s=s,
-                     _action="replace", before=html,
-                     summary=(f"changed \u201c{find[:60]}\u201d to \u201c{replace[:60]}\u201d "
-                              f"({h['times']} time{'s' if h['times'] != 1 else ''})"))
-        if r.get("ok"):
-            changed.append({"page": h["page"], "times": h["times"],
-                            "backup": r.get("backup")})
-        else:
-            failed.append({"page": h["page"], "why": r.get("error")})
+        todo.append({"page": h["page"], "html": html.replace(find, replace), "before": html,
+                     "meta": {"page": h["page"], "times": h["times"]},
+                     "summary": (f"changed \u201c{find[:60]}\u201d to \u201c{replace[:60]}\u201d "
+                                 f"({h['times']} time{'s' if h['times'] != 1 else ''})")})
+    if todo:
+        written, more_failed, down = _write_all(todo, agent, s)
+        changed += written
+        failed += more_failed
+        if down:
+            failed += [{"page": i["page"], "why": down} for i in todo
+                       if not any(w["page"] == i["page"] for w in written)]
     return {"ok": not failed, "find": find, "replace": replace,
             "changed": changed, "failed": failed,
             "unread": plan.get("unread") or [], "looked_in": plan.get("looked_in"),

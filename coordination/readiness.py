@@ -136,7 +136,6 @@ ENV_NEEDS = {
 
 # a soft need: the sector runs, but the output goes nowhere useful
 ENV_WANTS = {
-    "report": [("NTFY_TOPIC", "the daily digest is written to a table nobody opens")],
     "leads": [("OUTREACH_DOMAIN", "outreach stays off until a sending domain is set")],
     # The AEO/GEO audit reads our OWN pages, so without an address it has
     # nothing to audit. SEO still does keyword gaps, rivals and the link list
@@ -368,10 +367,9 @@ def _slim(payload: dict) -> dict:
     """
     What is worth keeping from a check, and what must not be kept.
 
-    The full sweep carries the ntfy topic and the credential names in its
-    channel details — the topic IS the secret on ntfy, anyone holding it reads
-    the owner's notifications. It is fine in the reply to his own browser; it
-    is not fine written into a row that any later dump reads back. So only the
+    The full sweep carries the credential names and channel details. They are
+    fine in the reply to his own browser; they are not fine written into a row
+    that any later dump reads back. So only the
     verdicts are stored, and only the shape the lights need.
     """
     return {

@@ -355,13 +355,8 @@ def check():
     try:
         from providers import integrations as ig
         env = ig.read_env()
-        if (env.get("NTFY_TOPIC") or "").strip():
-            ready.append("Notifications: ntfy topic set")
-        elif (env.get("TELEGRAM_BOT_TOKEN") or "").strip():
-            ready.append("Notifications: Telegram")
-        else:
-            missing.append("Notifications: none — set NTFY_TOPIC in .env, "
-                           "or nobody hears from the agency")
+        ready.append("Alerts: in the app, on your computer and phone"
+                     + (", with a copy on Telegram" if (env.get("TELEGRAM_BOT_TOKEN") or "").strip() else ""))
         if (env.get("SMTP_HOST") or "").strip():
             ready.append("Outreach: SMTP configured")
         else:
@@ -519,7 +514,7 @@ def tests():
             "pipelines.osm_tests",
             "pipelines.offer_tests",
             "pipelines.find_site_tests", "pipelines.site_api_tests", "pipelines.connect_tests",
-            "pipelines.website_check_tests",
+            "pipelines.website_check_tests", "pipelines.blueprint_tests",
             "pipelines.secure_tests",
             "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.fix_tests",

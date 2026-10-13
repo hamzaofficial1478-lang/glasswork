@@ -310,11 +310,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
            having the box. Any login already saved in .env keeps working. -->
 
       </div>
-      <div class="row">
-        <div class="field"><label>ntfy topic</label><input id="ntfyTopic" placeholder="glasswork-a7f3k9x2q"><div class="hint">How the agency reaches you. Install the ntfy app, subscribe to this exact name. <b>Make it long and random</b> — anyone who guesses the name reads your notifications.</div></div>
-        <div class="field"><label>ntfy server <span class="dim">(optional)</span></label><input id="ntfyServer" placeholder="https://ntfy.sh"><div class="hint">Leave blank for the public server. Self-host if the digest will ever carry customer detail.</div></div>
-      </div>
-      <div class="field"><label>Your agency's name</label><input id="agencyName" placeholder="Your agency's name"><div class="hint">Shown on every screen and on the notifications you receive. This is <b>your</b> firm, not the client site you work on.</div></div>
+      <div class="field"><label>Your agency's name</label><input id="agencyName" placeholder="Your agency's name"><div class="hint">Shown on every screen and on your alerts. This is <b>your</b> firm, not the client site you work on.</div></div>
       <div class="field"><label>Outreach domain</label><input id="outreachDomain" placeholder="yourcompany.com"><div class="hint">The part after the @ in the address your mail is sent from &mdash; if your email is team@yourcompany.com, put yourcompany.com. Cold mail only ever goes out from this domain, so it must match your email account on the Integrations tab.</div></div>
 
       <!-- Algolia: search on YOUR OWN site. Three values, two very different
@@ -344,8 +340,8 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15. Crawler renders now count against this — a render is refused, not billed, once the cap is spent.</div></div>
         <div class="field"><label>Daily outreach cap</label><input id="outreachCap" type="number" min="0" step="1" placeholder="25"><div class="hint">Defaults to 25.</div></div>
       </div>
-      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testNtfy">Test ntfy</button><button class="mini" id="testAlgolia">Test search</button><button class="mini" id="ntfyPing">Notify me</button><button class="mini" id="ntfyWhat">What will I get?</button><span class="inl dim" id="optMsg"></span></div><div id="ntfyPreview"></div>
-      <div class="hint"><b>Test ntfy</b> checks the topic is reachable and publishes nothing. <b>Notify me</b> sends a real notification so you can watch it arrive on your phone. <b>What will I get?</b> lists everything the agency would put on your phone right now — and sends none of it.</div>
+      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testAlgolia">Test search</button><button class="mini" id="alertsWhat">What needs me?</button><span class="inl dim" id="optMsg"></span></div><div id="alertsPreview"></div>
+      <div class="hint">Alerts wait for you in the app, on your computer and your phone, next to the button that answers them. <b>What needs me?</b> lists what the agency would put in front of you right now.</div>
     </div>
   </section>
 
@@ -794,7 +790,6 @@ setInterval(()=>{ const a=$('#shelfAuto'); if(a&&a.checked) loadShelves(); },500
 $('#saveOptional').onclick=async()=>{
   const btn=$('#saveOptional');btn.disabled=true;inl($('#optMsg'),'dim','Saving…');
   const j=await api('POST','/api/optional',{
-    ntfyTopic:$('#ntfyTopic').value.trim(),ntfyServer:$('#ntfyServer').value.trim(),
     algoliaAppId:$('#algoliaAppId').value.trim(),algoliaSearchKey:$('#algoliaSearchKey').value.trim(),
     algoliaWriteKey:$('#algoliaWriteKey').value.trim(),algoliaIndex:$('#algoliaIndex').value.trim(),
     agencyName:$('#agencyName').value.trim(),outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim(),
@@ -939,28 +934,24 @@ $('#testGsc').onclick=async ()=>{
   if(j && j.ok) inl(msg,'ok','✓ '+(j.why||'working'));
   else inl(msg,'err','✕ '+((j&&(j.why||j.error))||'no answer'));
 };
-$('#testNtfy').onclick =()=>testChannel('ntfy',$('#testNtfy'),$('#optMsg'));
-$('#ntfyPing').onclick =()=>testChannel('ntfy',$('#ntfyPing'),$('#optMsg'),true);
-/* "What will I get?" — the answer to a fair complaint. The owner connected ntfy,
-   received one daily digest and nothing else, and concluded it was broken. It
-   was not: nothing but the digest had ever been wired to it. This lists exactly
-   what is waiting, and sends none of it. */
+/* "What needs me?" — exactly what is waiting for the owner right now, and why
+   each one is (or is not) worth his attention. Progress is not on this list. */
 const URG={now:['n','NOW — a customer or your enquiry path is affected'],
            today:['y','TODAY — the agency is waiting on you, or money is involved'],
-           digest:['q','goes in the daily digest, not to your phone']};
-$('#ntfyWhat').onclick = async ()=>{
-  const host=$('#ntfyPreview'); host.innerHTML='<p class="hint">Reading…</p>';
+           digest:['q','goes in the daily digest']};
+$('#alertsWhat').onclick = async ()=>{
+  const host=$('#alertsPreview'); host.innerHTML='<p class="hint">Reading…</p>';
   const j=await api('GET','/api/notify/preview');
   if(!j||!j.ok){ host.innerHTML='<p class="hint">Could not read it'+(j&&j.error?': '+esc(j.error):'')+'.</p>'; return; }
   const all=j.alerts||[], waiting=(j.waiting||[]).map(a=>a.key);
   const phone=all.filter(a=>a.urgency!=='digest');
-  let out='<div class="cred"><div class="cred-h"><b>What would reach your phone right now</b></div>';
+  let out='<div class="cred"><div class="cred-h"><b>What needs you right now</b></div>';
   if(!phone.length){
-    out+='<p class="hint" style="margin:0">Nothing — and that is the system working, not a broken pipe. '
-       + 'It only buzzes when the agency is stopped waiting for you, a customer is waiting, or money is involved.</p>';
+    out+='<p class="hint" style="margin:0">Nothing — and that is the system working. '
+       + 'Something lands here only when the agency is stopped waiting for you, a customer is waiting, or money is involved.</p>';
   } else {
     out+=all.map(a=>{const u=URG[a.urgency]||['q',a.urgency];
-      const dup=waiting.includes(a.key)?'':' <span class="dim">(already sent — will not repeat today)</span>';
+      const dup=waiting.includes(a.key)?'':' <span class="dim">(already shown — will not repeat today)</span>';
       return '<div class="model"><div class="model-top"><span class="'+u[0]+'">'+esc(a.urgency.toUpperCase())+'</span>'
         +'<span class="mid">'+esc(a.title)+'</span>'+dup+'</div>'
         +'<div class="caps">'+esc((a.body||'').slice(0,220))+'</div>'
@@ -969,7 +960,7 @@ $('#ntfyWhat').onclick = async ()=>{
   out+='<p class="hint" style="margin-bottom:0"><b>You get:</b> a dead contact form, a lead replying, '
      + 'anything waiting on your approval, the spend cap, a plan allowance running out.<br>'
      + '<b>You do not get:</b> progress. Briefs written, pages audited and leads found go in the one '
-     + 'daily digest — so the phone stays quiet enough that you still look when it does buzz.</p></div>';
+     + 'daily digest — so an alert stays rare enough that you still look when one arrives.</p></div>';
   host.innerHTML=out;
 };
 $('#testAlgolia').onclick=()=>testChannel('algolia',$('#testAlgolia'),$('#optMsg'));
@@ -1047,8 +1038,6 @@ async function loadSettings(){
   $('#apiBase').value=w.apiBase||'';
   if(w.apiTokenSet) $('#siteApiToken').placeholder='saved — leave blank to keep';
   if(j.configured) inl($('#siteMsg'),'ok','✓ Saved ('+(w.mode==='full'?'Full access':'Read-only')+') — edit and re-save to change');
-  $('#ntfyTopic').value=o.ntfyTopic||'';
-  $('#ntfyServer').value=o.ntfyServer||'';
   $('#algoliaAppId').value=o.algoliaAppId||'';
   $('#algoliaSearchKey').value=o.algoliaSearchKey||'';
   $('#algoliaIndex').value=o.algoliaIndex||'';

@@ -10,8 +10,8 @@ THE GAP THIS FILLS
 integrations.send_message() said in its own docstring that it carried "the daily
 digest, approval requests, the Overseer". One of those three was true. Grep the
 repo before this file existed and exactly one caller turned up: report_daily.py.
-So the owner connected ntfy, received a single digest, and reasonably concluded
-the notification setup was broken. It was not broken. It was empty.
+So the owner connected his phone, received a single digest, and reasonably
+concluded the notification setup was broken. It was not broken. It was empty.
 
 Everything else the handbook says reaches him — "amber items queue to the
 owner's Telegram", the spend cap, a lead replying, the enquiry form going down —
@@ -112,13 +112,12 @@ def collect() -> list:
         # 2. A human is waiting for a reply. Nothing else in the agency has a
         #    person on the other end of it.
         #
-        #    THE REPLY ITSELF DOES NOT GO IN THE ALERT. A topic on the public
-        #    ntfy.sh is readable by anyone who guesses the name, and pasting a
-        #    customer's message into it would publish their words and their
-        #    company to a channel with no access control — to save the owner one
-        #    tap. He gets told who wrote and roughly what kind of message it is;
-        #    the words stay in the office. Self-hosting ntfy changes the risk,
-        #    not the principle, so this does not read a setting.
+        #    THE REPLY ITSELF DOES NOT GO IN THE ALERT. An alert can be copied
+        #    to a chat app outside the program (Telegram), and pasting a
+        #    customer's message into it would put their words and their company
+        #    somewhere the program does not control — to save the owner one tap.
+        #    He gets told who wrote and roughly what kind of message it is; the
+        #    words stay in the app.
         for r in _rows(c, "SELECT o.id, o.body, o.reply_class, l.company"
                           " FROM outreach_log o LEFT JOIN leads l ON l.id=o.lead_id"
                           " WHERE o.direction='reply' AND o.needs_owner=1"
@@ -379,7 +378,7 @@ def push_activity(limit=40, dry_run=False) -> dict:
 def preview_text() -> str:
     alerts = collect()
     waiting = unsent(alerts)
-    L = ["WHAT WOULD REACH YOUR PHONE", "=" * 60]
+    L = ["WHAT WOULD BE PUT IN FRONT OF YOU", "=" * 60]
     if not alerts:
         L += ["", "  Nothing. That is a good sign, not a broken pipe —",
               "  this only fires when the agency is stopped waiting for you,",
@@ -392,9 +391,7 @@ def preview_text() -> str:
     try:
         from providers import integrations
         env = integrations.read_env()
-        route = ("ntfy → " + env["NTFY_TOPIC"]) if (env.get("NTFY_TOPIC") or "").strip() \
-            else ("Telegram" if (env.get("TELEGRAM_BOT_TOKEN") or "").strip()
-                  else "NOTHING CONFIGURED — set a topic on /setup")
+        route = "the app" + (", and a copy on Telegram" if (env.get("TELEGRAM_BOT_TOKEN") or "").strip() else "")
     except Exception:
         route = "unknown"
     L += ["", f"Route: {route}",

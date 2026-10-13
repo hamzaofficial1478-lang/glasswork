@@ -2782,8 +2782,8 @@ document.addEventListener('click',e=>{if(!e.target.closest('.site-switch'))$('#s
    the firm is one field on the setup screen rather than an edit in every file.
    The name in the markup is the default, so the page is right before this
    lands and simply corrects itself if he has chosen another. */
-/* /api/brand, not /api/settings. Settings also carries the ntfy topic, the SMTP
-   user and the model routing, and it sits behind the Setup password now — a
+/* /api/brand, not /api/settings. Settings also carries the SMTP user and the
+   model routing, and it sits behind the Setup password now — a
    front-of-house screen should not be reaching into the key cupboard to learn
    what the firm is called. /api/brand returns the name and the website label
    and nothing else. Falls back to the old route so an older server still

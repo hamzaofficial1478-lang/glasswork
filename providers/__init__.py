@@ -11,7 +11,7 @@ and never builds a client itself:
 
 The shelf in providers/store.py holds the tools that are not AI models — stock
 photos, the crawler, maps, SEO data — and providers/integrations.py the routes
-to the outside world (ntfy, Telegram, SMTP).
+to the outside world (Telegram, SMTP).
 """
 # The coordination package first: it decides which sqlite3 every module gets
 # (coordination/cipher.py), and that has to happen before routing imports one.

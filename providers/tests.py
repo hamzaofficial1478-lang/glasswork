@@ -142,7 +142,7 @@ def test_integrations_unconfigured():
     # Pinned by name, not by count, so adding a channel is a deliberate edit here
     # rather than a number that silently drifts.
     check("covers every channel", sorted(r["integration"] for r in blank),
-          ["algolia", "email", "ntfy", "telegram"])
+          ["algolia", "email", "telegram"])
 
     half = ig.test_email(env={"SMTP_HOST": "h", "SMTP_USER": "u"})
     check("half-filled SMTP is a failure, not 'unset'", half["ok"], False)
@@ -154,42 +154,29 @@ def test_integrations_unconfigured():
 
 def test_the_owner_can_always_be_reached():
     """
-    Everything that notifies the owner goes through one function, so switching
-    his channel is config and not code. The failure that matters here is a
-    silent one: if no route is configured the agency must SAY nobody was told,
-    never return quietly as though the message landed.
+    Everything that notifies the owner goes through one function. Alerts live in
+    the app (his computer and his Android phone), so the owner can always be
+    reached: with nothing else set up the alert is kept in the app, and saying
+    so is the honest answer. Telegram, if an older setup has a bot, gets a copy,
+    and a Telegram that fails never loses the alert.
     """
-    print("One route to the owner, and it never fails silently:")
+    print("One route to the owner, and nothing is lost:")
     from . import integrations as ig
 
-    none = ig.send_message("anything", env={})
-    check("no route configured -> not ok", none["ok"], False)
-    check("and it says nobody was told", "nobody was told" in none["detail"], True)
-
-    topic = {"NTFY_TOPIC": "glasswork-a7f3k9x2q"}
-    check("ntfy wins when a topic is set",
-          ig.send_message("x", env=topic)["integration"], "ntfy")
-    check("telegram is still the fallback",
-          ig.send_message("x", env={"TELEGRAM_BOT_TOKEN": "t",
-                                    "TELEGRAM_CHAT_ID": "c"})["integration"], "telegram")
-    check("and ntfy is preferred when both exist",
-          ig.send_message("x", env={**topic, "TELEGRAM_BOT_TOKEN": "t",
-                                    "TELEGRAM_CHAT_ID": "c"})["integration"], "ntfy")
-
-    # a guessable topic is a public inbox — say so rather than pretending it is fine
-    short = ig.test_ntfy(env={"NTFY_TOPIC": "glass"})
-    check("a short topic is refused as unsafe", short["ok"], False)
-    check("and explains why", "guesses" in short["detail"], True)
-    check("no topic at all -> unset, not broken", ig.test_ntfy(env={})["ok"], None)
-
-    # ntfy carries its options in HTTP headers, which are latin-1 only. The
-    # digest is full of em-dashes; one of those raises inside requests and the
-    # notification is lost at exactly the moment it mattered.
-    h = ig._ntfy_headers({}, title="Digest — 16 Aug", tags=["bell"])
-    check("a non-latin-1 title cannot break the send",
-          h["Title"].encode("latin-1") == b"Digest - 16 Aug", True)
-    for v in h.values():
-        v.encode("latin-1")     # raises if any header is unsendable
+    plain = ig.send_message("anything", env={})
+    check("with nothing set up the alert is kept in the app", (plain["ok"], plain["integration"]), (True, "app"))
+    real = ig.send_telegram
+    try:
+        ig.send_telegram = lambda text, env=None, timeout=20: {"integration": "telegram", "ok": True, "detail": "Delivered."}
+        check("an older Telegram bot still gets a copy",
+              ig.send_message("x", env={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"})["integration"], "telegram")
+        ig.send_telegram = lambda text, env=None, timeout=20: {"integration": "telegram", "ok": False, "detail": "chat not found"}
+        down = ig.send_message("x", env={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"})
+        check("a Telegram that fails never loses the alert", (down["ok"], down["integration"]), (True, "app"))
+        check("and says what Telegram said", "chat not found" in down["detail"], True)
+    finally:
+        ig.send_telegram = real
+    check("the old phone-topic channel is gone", hasattr(ig, "send_ntfy") or hasattr(ig, "test_ntfy"), False)
 
 
 def main():

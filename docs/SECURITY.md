@@ -44,7 +44,7 @@ code so each round can re-check it.
 | 26 | Rate limits | Done, tested | Per address: sign-in, sign-up, recovery, the Setup password, two-step and problem reports. Per name: 10 wrong passwords, then a 15-minute wait even for the right one (tested). The Home limits reports per address and per day. |
 | 27 | Exposed environments | Done | No route returns environment variables or the values of settings. |
 | 28 | Default credentials | Done | There are none. No built-in accounts or passwords; every key and token is generated at random when needed. |
-| 29 | Unsigned webhooks | Done, tested | Updates are Ed25519-signed and checked before install. The Home's owner actions need his key (only its hash is on the website). Phone approvals need a fresh code when two-step is on (tested). Without two-step they rely on the ntfy topic being long and secret. |
+| 29 | Unsigned webhooks | Done, tested | Updates are Ed25519-signed and checked before install. The Home's owner actions need his key (only its hash is on the website). Approvals are given only inside the signed-in app (computer or phone); no outside channel can approve anything. |
 | 30 | IDOR / BOLA | Done, tested | Every id is looked up in the requesting person's own database, so another person's numbers find nothing. Opening another person's website by its id is refused (tested). |
 | 31 | APIs + user input | Done | Validated as in 14. Programs are started with argument lists, never through a shell, so typed text cannot become a command. |
 | 32 | Exposed logs | Done | Logs live in the data folder, which is never served. |
@@ -85,5 +85,3 @@ code so each round can re-check it.
 - **Hosted, a signed-in person's key is in the server's memory** while they
   work. Someone with root on the server could take it at that moment. At rest,
   on disk and in backups, nobody can read it.
-- **Phone approvals without two-step sign-in** rely on the ntfy topic name
-  staying secret.

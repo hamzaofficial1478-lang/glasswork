@@ -456,6 +456,8 @@ ALLOWED_CALLS = {
     "publish_sitemap": "put the sitemap on his website and give it to Search Console",
     "tell_google_again": "mark the pages that changed in the sitemap and give it to "
                          "Search Console again, so Google reads them sooner",
+    "put_robots": "put robots.txt on his website, or add his sitemap to the one there",
+    "put_llms": "put llms.txt on his website for AI assistants",
 }
 
 
