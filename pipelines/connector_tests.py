@@ -5,7 +5,7 @@ connector_tests.py — run: python -m pipelines.connector_tests   (python3 on ma
      to be more strong more fast more reliable errors free ... so the user will
      not face the error while he will be doing the multiple tasks with webiste"
 
-The connector file (paste-into-your-site/agency-api.php, version 9) on a real
+The connector file (paste-into-your-site/agency-api.php, version 10) on a real
 PHP server on this machine, driven through pipelines/site_api exactly as the
 agency drives it. What has to hold:
 
@@ -30,6 +30,16 @@ agency drives it. What has to hold:
   the list of pages is remembered for a minute and forgotten on every write
   a page busy with another change answers "busy" within seconds instead of
     holding one of the host's workers
+
+"the api auto update not on every update to uplaod the api file" — version 10:
+
+  it replaces itself with a newer copy the agency sends, and with nothing
+    else: a damaged copy, an older one, something that is not this connector,
+    one that would not run, or one needing a newer PHP is refused and nothing
+    changes
+  the old copy is kept, his SITE_ROOT line and token survive, and a copy that
+    answers with an error once it is in is put straight back
+  a connector too old to update itself is told apart, with the one-time fix
 
 Nothing reaches the internet; the website is a temporary folder.
 """
@@ -133,7 +143,7 @@ def test_one_request_reads_many_pages():
     print("\nMany pages come back in one request:")
     with Site() as w:
         h = S.health(s=w.s)
-        check("the connector says it is version 9", h.get("connector"), 9)
+        check("the connector says it is version 10", h.get("connector"), 10)
         check("  and what the host allows", bool((h.get("limits") or {}).get("post_max_size")), True)
         sent, undo = _counting()
         try:
@@ -399,6 +409,99 @@ def test_a_busy_page_answers_quickly():
         check("  and busy is something the agency tries again", r.get("_passing"), True)
 
 
+def _newer(v=11, extra=""):
+    """The bundled connector, numbered as a newer version (optionally with a line added)."""
+    from . import connect
+    src = connect.connector_source("127.0.0.1")
+    src = src.replace("const CONNECTOR = 10;", f"const CONNECTOR = {v};", 1)
+    if extra:
+        src = src.replace("@ini_set('display_errors', '0');", extra + "\n@ini_set('display_errors', '0');", 1)
+    return src
+
+
+def _push(w, code, version):
+    import base64
+    import hashlib as _h
+    raw = code.encode("utf-8")
+    return S.call("/self-update", "POST", {"version": version, "code": base64.b64encode(raw).decode(),
+                                           "sha256": _h.sha256(raw).hexdigest()}, s=w.s, timeout=60)
+
+
+def test_it_updates_itself():
+    print("\nThe connector updates itself, carefully:")
+    from . import connect
+    real = (connect.connector_source, S.CONNECTOR_NEWEST)
+    with Site() as w:
+        idx = w.web / "agency-api" / "index.php"
+        mine = idx.read_text(encoding="utf-8").replace(
+            "define('SITE_ROOT', realpath(__DIR__ . '/..'));",
+            "define('SITE_ROOT', realpath(__DIR__ . '/..'));   // his own line")
+        idx.write_text(mine, encoding="utf-8")
+        token_before = (w.web / "agency-api" / "token.php").read_bytes()
+        h = S.health(s=w.s)
+        check("version 10 says it can update itself", ("self-update" in h.get("can", []), h.get("self_update")), (True, ""))
+        try:
+            newer = _newer(11)
+            connect.connector_source = lambda host: newer
+            S.CONNECTOR_NEWEST = 11
+            r = S.update_connector(agent=S.AGENT, s=w.s)
+        finally:
+            connect.connector_source, S.CONNECTOR_NEWEST = real
+        check("it took the newer copy", (r.get("ok"), r.get("from"), r.get("connector")), (True, 10, 11))
+        check("  and checked it answered", r.get("checked"), "new")
+        now = idx.read_text(encoding="utf-8")
+        check("the new copy is in", "const CONNECTOR = 11;" in now, True)
+        check("  with his own SITE_ROOT line kept", "// his own line" in now, True)
+        check("his token was not touched", (w.web / "agency-api" / "token.php").read_bytes(), token_before)
+        kept = sorted((w.web / "agency-api" / "backups").glob("connector-v10-*.php.bak"))
+        check("the old copy is kept", len(kept), 1)
+        from coordination import changelog
+        rows = [x for x in changelog.recent(20).get("changes", []) if x.get("action") == "connector"]
+        check("the update is on his change list", bool(rows), True)
+        r2 = S.update_connector(agent=S.AGENT, s=w.s)
+        check("with nothing newer, nothing is sent", (r2.get("ok"), r2.get("unchanged")), (True, True))
+        check("only the Releaser may do it", S.update_connector(agent="it-fixer", s=w.s).get("ok"), False)
+
+
+def test_it_refuses_anything_else():
+    print("\nIt refuses anything that is not a newer, whole, runnable copy of itself:")
+    with Site() as w:
+        idx = w.web / "agency-api" / "index.php"
+        before = idx.read_bytes()
+        import base64
+        import hashlib as _h
+        raw = _newer(11).encode()
+        r = S.call("/self-update", "POST", {"version": 11, "code": base64.b64encode(raw).decode(),
+                                            "sha256": "0" * 64}, s=w.s)
+        check("a damaged copy", (r.get("ok"), "damaged" in str(r.get("error"))), (False, True))
+        r = _push(w, _newer(9), 9)
+        check("an older copy changes nothing", (r.get("ok"), r.get("unchanged")), (True, True))
+        r = _push(w, "<?php\nconst CONNECTOR = 11;\necho 'hello';\n", 11)
+        check("something that is not this connector", (r.get("ok"), "not a newer copy" in str(r.get("error"))), (False, True))
+        r = _push(w, _newer(11, "function broken( {"), 11)
+        check("a copy that would not run", (r.get("ok"), "would not run" in str(r.get("error"))), (False, True))
+        r = _push(w, _newer(11).replace("const NEEDS_PHP = '8.0';", "const NEEDS_PHP = '99.0';"), 11)
+        check("a copy needing a newer PHP than the site has", (r.get("ok"), "needs PHP 99.0" in str(r.get("error"))), (False, True))
+        check("  and through all of that the connector never changed", idx.read_bytes(), before)
+        r = _push(w, _newer(11, "throw new \\RuntimeException('boom');"), 11)
+        check("a copy that breaks once it is in is put straight back",
+              (r.get("ok"), "put straight back" in str(r.get("error"))), (False, True))
+        check("  so the old one is there again", idx.read_bytes(), before)
+        check("  and it still answers", S.health(s=w.s).get("connector"), 10)
+
+
+def test_too_old_to_update_itself():
+    print("\nA connector too old to update itself is told apart, with the fix:")
+    with Site() as w:
+        idx = w.web / "agency-api" / "index.php"
+        old = idx.read_text(encoding="utf-8").replace("const CONNECTOR = 10;", "const CONNECTOR = 9;") \
+            .replace(", 'self-update'],", "],")
+        idx.write_text(old, encoding="utf-8")
+        r = S.update_connector(agent=S.AGENT, s=w.s)
+        check("it does not try", (r.get("ok"), r.get("manual"), r.get("connector")), (False, True, 9))
+        check("  and says the one-time fix", "Upload the new agency-api folder once" in str(r.get("error")), True)
+
+
 def main():
     if not shutil.which("php"):
         print("SKIPPED: PHP is not installed here, so the connector cannot be run.")
@@ -407,7 +510,8 @@ def main():
               test_two_changes_at_once_both_land, test_too_big_is_said_and_changes_nothing,
               test_an_old_encoding_is_read_but_not_garbled, test_a_dropped_line_is_tried_again,
               test_packed_both_ways_and_counted, test_many_changes_all_or_none, test_robots_and_llms_files,
-              test_listing_is_remembered_but_never_stale, test_a_busy_page_answers_quickly):
+              test_listing_is_remembered_but_never_stale, test_a_busy_page_answers_quickly,
+              test_it_updates_itself, test_it_refuses_anything_else, test_too_old_to_update_itself):
         t()
     print()
     if _fail:

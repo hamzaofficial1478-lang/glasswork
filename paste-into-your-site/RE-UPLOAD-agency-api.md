@@ -1,3 +1,30 @@
+# Version 10 of the connector — the last time you upload it
+
+From version 10 the connector **updates itself**. When a new copy of Botix
+has a newer connector, Botix sends it to your website and the connector
+replaces itself — first thing in the day's run, and whenever you press *Test
+the connection*. You never upload it again.
+
+It is careful about it, on your server:
+
+- It takes **only a newer copy of itself**, sent with your secret. Anything
+  else — an older copy, a damaged one, something that is not the connector —
+  is refused and nothing changes.
+- It checks the new copy **will run on your website** before putting it in:
+  that the PHP is whole, and that your server's PHP is new enough for it.
+- It **keeps the old copy** (in `agency-api/backups`), puts the new one in
+  whole, and asks your website for an answer. If the new copy answers with an
+  error, the **old one goes straight back**.
+- Your secret (`token.php`) is never touched, and if you changed the
+  `SITE_ROOT` line it is carried into the new copy.
+- Every update is listed under *What changed on your website*.
+
+**How (this once):** Website screen → *Get the new connector*, unzip, upload the
+`agency-api` folder over the old one, then *Test the connection*: it should say
+"connector version 10, updates itself".
+
+---
+
 # Version 9 of the connector — less data, fewer knocks, all-or-nothing changes
 
 Version 9 changes nothing about what the agency may touch on your pages. It

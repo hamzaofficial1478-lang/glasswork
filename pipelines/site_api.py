@@ -38,6 +38,7 @@ delete anything, refuses to touch a file that is not a page, refuses anything
 outside the website folder, and copies the old file before every change. See
 that file for the whole list.
 """
+import base64
 import gzip
 import hashlib
 import json
@@ -61,7 +62,9 @@ TIMEOUT = 25
 # 9: everything packed (gzip) both ways, up to 25 page changes in one request
 # and all-or-nothing, robots.txt and llms.txt, and gentler on the host — a busy
 # page answers "busy" in seconds instead of holding one of its workers.
-CONNECTOR_NEWEST = 9
+CONNECTOR_NEWEST = 10
+# The first version that can replace itself when the program has a newer one.
+SELF_UPDATING = 10
 # A change bigger than this goes packed to a version-9 connector. Small ones are
 # not worth the trouble of packing.
 PACK_OVER = 4096
@@ -482,6 +485,94 @@ def connector_version(s=None) -> int:
         except (TypeError, ValueError):
             _VERSION[k] = 0
     return _VERSION[k]
+
+
+def update_connector(agent=AGENT, s=None, force=False) -> dict:
+    """
+    Bring the connector on his website up to the one in this copy of the
+    program, without him uploading anything.
+
+    "the api auto update not on every update to uplaod the api file in the
+     website backend ... we are building the program for non IT USERS"
+
+    The connector does the careful part on his server (agency-api.php,
+    /self-update): it takes only a newer copy of itself, checks it is whole and
+    runnable there, keeps the old copy and puts it back if the new one does not
+    answer. This sends it, then asks /health itself to be sure. The connector
+    in this copy of the program is part of the tested release — the suite has
+    to be green before a release is built — and the write is the Releaser's,
+    logged on his change list like every other change to his website.
+
+    Versions before SELF_UPDATING cannot replace themselves: those need one
+    last upload by hand, and this says so instead of trying.
+    """
+    s = s or settings()
+    if s.get("kind") == "wordpress" or s.get("mode") != "full" or not s.get("base"):
+        return {"ok": True, "unchanged": True, "head": "no connector file to update on this connection"}
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    h = health(s=s)
+    if not h.get("ok"):
+        return {"ok": False, "unreachable": True, "error": h.get("error") or "your website did not answer"}
+    try:
+        have = int(h.get("connector") or 0)
+    except (TypeError, ValueError):
+        have = 0
+    if have >= CONNECTOR_NEWEST and not force:
+        return {"ok": True, "unchanged": True, "connector": have,
+                "head": f"the connector on your website is the newest (version {have})"}
+    if have < SELF_UPDATING or "self-update" not in (h.get("can") or []):
+        return {"ok": False, "manual": True, "connector": have, "newest": CONNECTOR_NEWEST,
+                "error": (f"the connector on your website is version {have or 'unknown'}, which cannot "
+                          f"update itself. Upload the new agency-api folder once (Connection settings → "
+                          f"Download your connector); from version {SELF_UPDATING} on it updates itself.")}
+    if h.get("self_update"):
+        return {"ok": False, "manual": True, "connector": have, "error": str(h["self_update"])}
+    from . import connect
+    host = urllib.parse.urlparse(s.get("site") or s.get("base") or "").netloc
+    code = connect.connector_source(host).encode("utf-8")
+    r = call("/self-update", "POST", {"version": CONNECTOR_NEWEST,
+                                      "code": base64.b64encode(code).decode("ascii"),
+                                      "sha256": hashlib.sha256(code).hexdigest()}, s=s, timeout=60)
+    _VERSION.pop(s.get("base") or "", None)
+    if not r.get("ok"):
+        out = {"ok": False, "connector": have, "unreachable": r.get("unreachable"),
+               "error": r.get("error") or "the connector did not take the new copy"}
+        _connector_log(agent, have, CONNECTOR_NEWEST, out)
+        return out
+    if r.get("unchanged"):
+        return {"ok": True, "unchanged": True, "connector": have, "head": r.get("head") or ""}
+    # Its own check may not have been possible; ask as the agency does.
+    after = health(s=s)
+    now = int(after.get("connector") or 0) if after.get("ok") else 0
+    out = {"ok": bool(after.get("ok")), "from": have, "to": CONNECTOR_NEWEST, "connector": now,
+           "checked": r.get("checked"), "kept": r.get("kept") or "",
+           "head": r.get("head") or f"the connector updated itself to version {CONNECTOR_NEWEST}"}
+    if not after.get("ok"):
+        out["error"] = ("the connector took the new copy but your website did not answer afterwards: "
+                        + str(after.get("error") or "")[:160] + ". The old copy is kept in agency-api/backups as "
+                        + (r.get("kept") or "connector-v….php.bak") + ".")
+    _connector_log(agent, have, CONNECTOR_NEWEST, out)
+    try:
+        connect._save_state(connector=now or have, checked_at=int(time.time()), checked_ok=bool(after.get("ok")),
+                            can=list(after.get("can") or []))
+    except Exception:
+        pass
+    return out
+
+
+def _connector_log(agent, have, want, r):
+    try:
+        from coordination import changelog
+        changelog.record("connector", page="agency-api/index.php", agent=agent,
+                         summary=(r.get("head") if r.get("ok") else
+                                  f"tried to update the connector from version {have} to {want} and could not: "
+                                  + str(r.get("error") or "")[:200]),
+                         backup=r.get("kept") or "", ok=bool(r.get("ok")),
+                         error="" if r.get("ok") else str(r.get("error") or "")[:300])
+    except Exception:
+        pass
 
 
 def read_pages(names, s=None) -> dict:
@@ -1372,7 +1463,27 @@ def _walk(s=None, unread=None):
         yield None, p
         return
     listed = [x["page"] for x in (p.get("pages") or [])]
-    todo = list(listed) + [n for n in LIKELY_INCLUDES + FOOTER_GUESSES if n not in listed]
+    # ONLY THE FILES HIS WEBSITE USES, when that is known for certain.
+    #
+    # "not as the blind to work on the file that is not even on website's
+    #  pages" — this walked every page file on the server: index-old.php,
+    # test.html, the copy from 2019. pipelines/site_map matches each page a
+    # visitor sees to the file that makes it; when every page was read, the
+    # walk is those files and what they pull in, and nothing else.
+    try:
+        from . import site_map
+        m = site_map.stored(site_map.FRESH)
+    except Exception:
+        m = {}
+    if m.get("complete") and m.get("kind") in ("php", "html", "mixed"):
+        known = [n for n in site_map.live_files() if n in listed]
+        if known:
+            listed = known
+            todo = list(listed)
+        else:
+            todo = list(listed) + [n for n in LIKELY_INCLUDES + FOOTER_GUESSES if n not in listed]
+    else:
+        todo = list(listed) + [n for n in LIKELY_INCLUDES + FOOTER_GUESSES if n not in listed]
     ahead = read_pages(todo, s=s)          # the known ones in one go; includes found later one by one
     seen = set()
     while todo:
@@ -2277,6 +2388,15 @@ def live_pages(s=None) -> list:
     site_search does. Returns [] if the site cannot be read, and the caller
     then falls back to the directory listing rather than doing nothing.
     """
+    # The map, when there is one: the real file behind each page, the home
+    # page's included — index.html on an HTML site, not an assumed index.php.
+    try:
+        from . import site_map
+        m = site_map.stored(site_map.FRESH)
+        if m.get("files"):
+            return sorted(m["files"], key=lambda n: (n != m.get("home_file"), n))
+    except Exception:
+        pass
     base = (s or settings())["site"]
     if not base:
         return []
@@ -2315,6 +2435,16 @@ def head_holder(candidates, s=None) -> str:
     # The admin endpoint can list the files whatever the public side is doing,
     # and the search below already ends there. So with nothing to go on, start
     # from the listing instead of giving up.
+    # The map knows which file holds the page head, read from the files
+    # themselves: the home page's own file (no include to find) or the shared
+    # header every page pulls in.
+    try:
+        from . import site_map
+        m = site_map.stored(site_map.FRESH)
+        if m.get("head_file"):
+            return "" if m["head_file"] == m.get("home_file") else m["head_file"]
+    except Exception:
+        pass
     if not candidates:
         return _from_the_listing([], s=s)
     # If a real page has its own </head>, there is no include to find.

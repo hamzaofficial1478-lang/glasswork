@@ -85,6 +85,40 @@ _LANG = {"GB": "en-GB", "IE": "en-IE", "US": "en-US", "CA": "en-CA", "AU": "en-A
          "NZ": "en-NZ", "IN": "en-IN", "ZA": "en-ZA", "DE": "de-DE", "AT": "de-AT",
          "FR": "fr-FR", "ES": "es-ES", "IT": "it-IT", "NL": "nl-NL"}
 
+# The biggest business cities, for a country the business sells into but is not
+# based in — where the lead finders look first when it has named no areas
+# there. A country not listed is searched by its own name.
+_CITIES = {
+    "AE": ("Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Al Ain"),
+    "SA": ("Riyadh", "Jeddah", "Dammam", "Mecca", "Medina", "Khobar"),
+    "QA": ("Doha", "Al Wakrah", "Al Rayyan", "Lusail"),
+    "KW": ("Kuwait City", "Hawalli", "Salmiya", "Farwaniya"),
+    "BH": ("Manama", "Muharraq", "Riffa", "Hamad Town"),
+    "OM": ("Muscat", "Seeb", "Sohar", "Salalah", "Nizwa"),
+    "PK": ("Karachi", "Lahore", "Islamabad", "Rawalpindi", "Faisalabad", "Multan"),
+    "IN": ("Mumbai", "Delhi", "Bengaluru", "Hyderabad", "Chennai", "Pune"),
+    "BD": ("Dhaka", "Chittagong", "Khulna", "Sylhet"),
+    "EG": ("Cairo", "Alexandria", "Giza", "New Cairo"),
+    "JO": ("Amman", "Zarqa", "Irbid", "Aqaba"),
+    "TR": ("Istanbul", "Ankara", "Izmir", "Bursa", "Antalya"),
+    "GB": ("London", "Manchester", "Birmingham", "Leeds", "Glasgow", "Bristol"),
+    "IE": ("Dublin", "Cork", "Galway", "Limerick"),
+    "US": ("New York", "Los Angeles", "Chicago", "Houston", "Dallas", "Miami"),
+    "CA": ("Toronto", "Vancouver", "Montreal", "Calgary", "Ottawa"),
+    "AU": ("Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide"),
+    "NZ": ("Auckland", "Wellington", "Christchurch", "Hamilton"),
+    "ZA": ("Johannesburg", "Cape Town", "Durban", "Pretoria"),
+    "DE": ("Berlin", "Hamburg", "Munich", "Cologne", "Frankfurt"),
+    "FR": ("Paris", "Lyon", "Marseille", "Toulouse", "Nice"),
+    "ES": ("Madrid", "Barcelona", "Valencia", "Seville", "Malaga"),
+    "IT": ("Milan", "Rome", "Turin", "Naples", "Bologna"),
+    "NL": ("Amsterdam", "Rotterdam", "The Hague", "Utrecht", "Eindhoven"),
+    "SG": ("Singapore",),
+    "MY": ("Kuala Lumpur", "Johor Bahru", "Penang", "Shah Alam"),
+    "NG": ("Lagos", "Abuja", "Port Harcourt", "Kano"),
+    "KE": ("Nairobi", "Mombasa", "Kisumu"),
+}
+
 ALLOWED, CONSENT, CONFIRM = "allowed", "consent", "confirm"
 _RULES = {
     "AE": (ALLOWED, "UAE PDPL and the TDRA's marketing rules: role inboxes, the sender "
@@ -146,6 +180,11 @@ def aliases(cc) -> tuple:
 def tlds(cc) -> tuple:
     cc = (cc or "").upper()
     return _TLDS.get(cc) or ((cc.lower(), "com") if cc else ("com",))
+
+
+def cities(cc) -> tuple:
+    """The biggest business cities of a country, or () when the program does not know them."""
+    return _CITIES.get((cc or "").upper(), ())
 
 
 def language(cc) -> str:

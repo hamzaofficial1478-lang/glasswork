@@ -123,6 +123,10 @@ STEPS = [
     ("The MD plans the day", "pipelines.md_cycle", "Director", "open"),
 
     # ---- three lanes that need nothing from each other --------------------
+    # First in IT's lane: the connector on his website updates itself when this
+    # copy of the program has a newer one, so nobody uploads it by hand and
+    # every desk after this talks to the newest version.
+    ("IT keeps the website connector up to date", "pipelines.connector_update", "IT", "it"),
     ("IT checks the site", "pipelines.it_health", "IT", "it"),
     # Then the whole picture: does the site have everything a complete website
     # for this business has — robots.txt, sitemap, llms.txt, markup, a page per
@@ -203,6 +207,9 @@ STEPS = [
     # minutes of nothing the owner watched. Before Report, so the digest that
     # reaches his phone includes it.
     ("The Overseer checks the agency again", "coordination.faults", "Director", "close"),
+    # Before the score: today's numbers for the progress chart (pages on Google,
+    # how complete the site is, leads) and Google's own clicks and positions.
+    ("Report writes down how the website is doing", "pipelines.site_progress", "Report", "close"),
     ("Report scores the day", "pipelines.report_daily", "Report", "close"),
 ]
 
@@ -378,6 +385,34 @@ SECTOR_STEPS = {
 # and nobody is written to until it has.
 CHAIN_OF = {"IT": "it", "SEO": "seo", "Content": "content",
             "Leads": "leads", "Security": "leads"}
+
+
+# WHICH STEPS WORK ONE MARKET AT A TIME. "in which country the user is willing
+# to plan to establish his business like user can also mention 2 or 3 or more
+# countries" — with more than one, each round's lead and keyword passes work for
+# the market that has waited longest (coordination/profile.market_for_run), so
+# the countries take turns through the day's rounds instead of one taking all.
+MARKET_STEPS = {"pipelines.leads_sources": "leads", "pipelines.leads_hunt": "leads",
+                "pipelines.leads_osm": "leads", "pipelines.seo_gap": "seo"}
+
+
+def _market_env(rid, mod):
+    """The environment for a step: its market, when it works one and there is a choice."""
+    kind = MARKET_STEPS.get(mod)
+    if not kind:
+        return None
+    try:
+        from coordination import profile
+        with sqlite3.connect(board.DB, timeout=30) as c:
+            r = c.execute("SELECT round_at FROM day_runs WHERE id=?", (rid,)).fetchone()
+        m = profile.market_for_run(kind, f"{rid}:{(r[0] if r else 0) or 0}")
+    except Exception:
+        m = ""
+    if not m:
+        return None
+    env = dict(os.environ)
+    env["AGENCY_MARKET"] = m
+    return env
 
 
 def step_timeout_for(module) -> int:
@@ -926,7 +961,7 @@ def _work_step(rid, seq, mod, room, stop=None, args=()) -> str:
         return "skipped"
 
     _step(rid, seq, status="running", started_at=_now())
-    code, out, cut_short = _run_child(mod, stop, args)
+    code, out, cut_short = _run_child(mod, stop, args, rid=rid)
     if cut_short:
         _step(rid, seq, status="stopped", ended_at=_now(), code=code,
               summary=(stop.note() if stop else "stopped")
@@ -940,7 +975,7 @@ def _work_step(rid, seq, mod, room, stop=None, args=()) -> str:
     return verdict
 
 
-def _run_child(mod, stop=None, args=()):
+def _run_child(mod, stop=None, args=(), rid=None):
     """Start the step, wait on it in short hops, return (code, output, cut_short)."""
     try:
         # Output to a file, decoded here rather than by the child pipe. encoding
@@ -957,7 +992,8 @@ def _run_child(mod, stop=None, args=()):
             # Its own process group, and no window: see console.background_flags.
             p = subprocess.Popen([PY, "-m", mod, *args], cwd=str(ROOT),
                                  stdout=sink, stderr=subprocess.STDOUT,
-                                 creationflags=console.background_flags())
+                                 creationflags=console.background_flags(),
+                                 env=_market_env(rid, mod) if rid is not None else None)
         except Exception as e:                           # pragma: no cover
             return 1, str(e), False
 

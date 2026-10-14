@@ -136,7 +136,7 @@ def pass_budget() -> int:
 # else's are the first places their profile names (coordination/uae.py).
 from coordination import profile as _profile  # noqa: E402
 
-if _profile.is_starter():
+if _profile.starter_here():
     DEFAULT_AREAS = ("Dubai", "Sharjah", "Abu Dhabi")
 else:
     _served = list(dict.fromkeys(([uae._PLACE["home"]] if uae._PLACE["home"] else [])
@@ -175,7 +175,7 @@ def box_for(area, geocode=None):
     """The box to search for this area: the owner's UAE boxes, else a remembered lookup."""
     if not area:
         return ""
-    if _profile.is_starter():
+    if _profile.starter_here():
         # The owner's UAE boxes, and only those: an emirate is a known box, a
         # name it does not know is refused rather than guessed at.
         return BBOX.get(area, "")
@@ -695,7 +695,7 @@ def find(segment, area="Dubai", limit=MAX_RESULTS, chains=False,
     bbox = box_for(area)
     if not bbox:
         return {"ok": False, "error": f"OpenStreetMap does not know where '{area}' is"
-                                      + (f". Known: {', '.join(BBOX)}" if _profile.is_starter() else
+                                      + (f". Known: {', '.join(BBOX)}" if _profile.starter_here() else
                                          " — check the spelling on Your business")}
     q = build_query(tags, bbox, limit, contactable_only=contactable_only)
     r = ask(q, deadline=deadline) if deadline else ask(q)
@@ -943,7 +943,7 @@ WIDEN_BEFORE = 0.75       # only go further afield with a quarter of the clock l
 
 # The other emirates, nearest first, for a pass that was not told where.
 WIDER_AREAS = (("Ajman", "Umm Al Quwain", "Al Ain", "Ras Al Khaimah", "Fujairah")
-               if _profile.is_starter() else
+               if _profile.starter_here() else
                tuple(a for a in dict.fromkeys(uae.served() + list(uae.CITIES)
                                                + list(uae.DISTRICTS))
                      if a not in DEFAULT_AREAS)[:8])
@@ -1094,9 +1094,9 @@ def _run(agent, segment, area, per_segment, dry_run, chains=False,
     if area is None:
         # A district first, because a map search for a district returns the
         # street and one for an emirate returns the same well-known forty.
-        area = asked.first_mention(list(BBOX) if _profile.is_starter() else [], None) or \
+        area = asked.first_mention(list(BBOX) if _profile.starter_here() else [], None) or \
             asked.first_mention(uae.search_areas(), None)
-        if area and _profile.is_starter() and area not in BBOX:
+        if area and _profile.starter_here() and area not in BBOX:
             # He named somewhere real that has no bounding box of its own —
             # Al Quoz, Mussafah. Search the emirate it sits in rather than
             # dropping the instruction on the floor.

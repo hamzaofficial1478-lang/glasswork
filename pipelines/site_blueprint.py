@@ -72,7 +72,7 @@ import urllib.parse
 from coordination import board
 
 AGENT = "it-watcher"          # it looks and files; it never writes to the site
-MOST_PAGES = 40
+MOST_PAGES = 80
 CHECK_EVERY = 72 * 3600
 UA = "Mozilla/5.0 (compatible; botix-blueprint/1.0; read-only)"
 URGENCY = {"high": 2, "medium": 4, "low": 6}
@@ -140,6 +140,11 @@ ADVICE = {
     "og_missing": ["Choose one good photograph of your work to show when someone shares your site.",
                    "IT can then add the preview tags to the header so WhatsApp, Facebook and "
                    "LinkedIn show your name, a line about you and that photograph."],
+    "noindex": ["Open each page named and look in its <head> for a robots meta tag saying 'noindex'.",
+                "If the page should be found on Google, remove that tag (or tell IT which file holds it).",
+                "If you hid it on purpose (a thank-you page, a test page), leave it."],
+    "canonical": ["IT can add the right address to each page's head once the header file is known (see How your "
+                  "website is built). Say yes when it asks, or tell IT to go ahead."],
     "sitemap_theirs_incomplete": ["Your sitemap is made by something other than the agency (a "
                                   "plugin or the site builder).",
                                   "Either let it rebuild (most plugins have a button), or tell IT to "
@@ -421,6 +426,14 @@ def assess(site) -> dict:
         else:
             ok("soft_404", "Missing pages answer 'not found'")
 
+    # ---- the basics, on every page a visitor can reach --------------------
+    #
+    # "is basic seo in code is done or not ... the main seo gaps are the main
+    #  points to cover from all over" — not the home page alone: every page
+    # read, counted, and the worst first. One gap per kind of problem, naming
+    # the pages, so a site with twelve untitled pages is one job, not twelve.
+    _basics(site, ok, miss)
+
     # ---- the business, for machines --------------------------------------
     if re.search(r'"@type"\s*:\s*\[?\s*"[^"]*(LocalBusiness|HomeAndConstructionBusiness|GeneralContractor|'
                  r'Contractor|Plumber|Electrician|Locksmith|HVACBusiness|RoofingContractor|Store|'
@@ -478,6 +491,12 @@ def assess(site) -> dict:
                      f"Searches like '{trade} in {area}' favour a page about that place, with "
                      "jobs done there.", f"no page's address, title or heading names {area}")
 
+    # ---- his markets ---------------------------------------------------------
+    # A page for each other country he sells in, and for a business selling
+    # worldwide, one that says so — the page a search from there lands on.
+    if not site.get("partial"):
+        _markets(site, ok, miss)
+
     # ---- trust -------------------------------------------------------------
     contact = next((p for p in pages if re.search(r"\bcontact\b", p["slug"] + " " + p["title"].lower())), None)
     text = _plain(hh + " " + ((contact or {}).get("html") or ""))
@@ -493,6 +512,113 @@ def assess(site) -> dict:
 
     gaps.sort(key=lambda g: (SEV_ORDER.get(g["severity"], 9), g["part"], g["code"]))
     return {"gaps": gaps, "have": have, "checked": sorted(checked)}
+
+
+def _markets(site, ok, miss):
+    try:
+        from coordination import countries, profile
+        ms, world, home = profile.markets(), profile.worldwide(), profile.home_country()
+    except Exception:
+        return
+    words = [" ".join((p["slug"], p["title"], p["h1"])).lower() for p in site.get("pages") or []]
+    for cc in [m for m in ms if m != home]:
+        name = countries.name(cc)
+        names = [w.lower() for w in (name,) + tuple(countries.aliases(cc)) + tuple(countries.cities(cc)) if w]
+        code = f"market:{cc.lower()}"
+        if any(any(n in w for n in names) for w in words):
+            ok(code, f"A page for customers in {name}")
+        else:
+            miss(code, "pages", "SEO", "low", f"A page for customers in {name}",
+                 f"You sell in {countries.in_a_sentence(cc)}. A page about your work there — the cities you "
+                 "cover, how jobs are run from where you are — is what a search from there finds.",
+                 f"no page's address, title or heading names {name} or its cities")
+    if world:
+        intl = ("international", "worldwide", "overseas", "export", "shipping", "global")
+        if any(any(n in w for n in intl) for w in words):
+            ok("worldwide", "A page for customers abroad")
+        else:
+            miss("worldwide", "pages", "SEO", "low", "A page for customers abroad",
+                 "You work with customers worldwide. One page that says how — delivery, remote work, the "
+                 "countries you have worked in — answers the first question a buyer abroad has.",
+                 "no page says the business works internationally")
+
+
+def _paths(urls, n=4):
+    shown = [urllib.parse.urlparse(u).path or "/" for u in urls[:n]]
+    return ", ".join(shown) + (f" and {len(urls) - n} more" if len(urls) > n else "")
+
+
+def _basics(site, ok, miss):
+    pages = [p for p in site.get("pages") or [] if p.get("html")]
+    n = len(pages)
+    hidden = [u for u, why in (site.get("left_out") or {}).items() if "noindex" in str(why)]
+    if hidden:
+        home_hidden = any((urllib.parse.urlparse(u).path or "/") == "/" for u in hidden)
+        miss("noindex", "basics", "IT", "high", "Pages are not hidden from Google",
+             ("Your home page tells Google not to list it, so the site cannot be found at all."
+              if home_hidden else "These pages tell Google not to list them, so nobody finds them in search."),
+             f"{len(hidden)} page(s) carry 'noindex': {_paths(hidden)}")
+    else:
+        ok("noindex", "Pages are not hidden from Google")
+    if not n:
+        return
+    untitled = [p["url"] for p in pages if not p.get("title")]
+    if untitled:
+        miss("titles", "basics", "SEO", "high", "Every page has a title",
+             "The title is the blue line in Google's results and the most important words on a page. "
+             "A page without one is shown with whatever Google guesses.",
+             f"{len(untitled)} of {n} page(s) have none: {_paths(untitled)}")
+    else:
+        ok("titles", "Every page has a title")
+    seen = {}
+    for p in pages:
+        if p.get("title"):
+            seen.setdefault(p["title"].strip().lower(), []).append(p["url"])
+    repeats = [urls for urls in seen.values() if len(urls) > 1]
+    if repeats:
+        same = sum(len(u) for u in repeats)
+        miss("titles_repeat", "basics", "SEO", "medium", "Each page's title is its own",
+             "Pages with the same title compete with each other, and Google cannot tell which one to show.",
+             f"{same} page(s) share a title with another, e.g. {_paths(repeats[0], 3)}")
+    else:
+        ok("titles_repeat", "Each page's title is its own")
+    nodesc = [p["url"] for p in pages if not re.search(r"<meta\b[^>]*name=[\"']description[\"'][^>]*content=[\"']\s*\S",
+                                                       p["html"], re.I)
+              and not re.search(r"<meta\b[^>]*content=[\"']\s*\S[^>]*name=[\"']description", p["html"], re.I)]
+    if nodesc:
+        miss("descriptions", "basics", "SEO", "medium", "Every page has a description for Google",
+             "The two lines under the title in Google's results. Without one, Google picks a sentence off the "
+             "page, often the wrong one, and fewer people click.",
+             f"{len(nodesc)} of {n} page(s) have none: {_paths(nodesc)}")
+    else:
+        ok("descriptions", "Every page has a description for Google")
+    bad_h1 = [p["url"] for p in pages if len(re.findall(r"<h1\b", p["html"], re.I)) != 1]
+    if bad_h1:
+        miss("headings", "basics", "SEO", "medium", "Every page has one main heading",
+             "One clear main heading (h1) tells people and Google what the page is about. None, or several, "
+             "blurs it.", f"{len(bad_h1)} of {n} page(s) have none or more than one: {_paths(bad_h1)}")
+    else:
+        ok("headings", "Every page has one main heading")
+    no_alt, imgs = 0, 0
+    for p in pages:
+        for tag in re.findall(r"<img\b[^>]*>", p["html"], re.I):
+            imgs += 1
+            if not re.search(r"\balt=[\"']\s*\S", tag, re.I):
+                no_alt += 1
+    if no_alt:
+        miss("image_alt", "basics", "Content", "low", "Pictures are described",
+             "A short description on each picture (its alt text) lets Google Images find your work and screen "
+             "readers describe it.", f"{no_alt} of {imgs} picture(s) have no description")
+    else:
+        ok("image_alt", "Pictures are described")
+    nocanon = [p["url"] for p in pages if not re.search(r"<link\b[^>]*rel=[\"']?canonical", p["html"], re.I)]
+    if nocanon:
+        miss("canonical", "basics", "IT", "low", "Every page names its one address",
+             "A canonical tag tells Google which address is the real one when a page can be reached several ways "
+             "(with and without www, with tracking added).",
+             f"{len(nocanon)} of {n} page(s) have no canonical tag: {_paths(nocanon)}")
+    else:
+        ok("canonical", "Every page names its one address")
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +701,8 @@ def hand_on(result, now=None, route_only=False) -> dict:
             needs = ("SEO: is the search worth a page? If yes, brief Content." if code.startswith(("service:", "area:"))
                      else "real photographs and job details from the owner" if code in ("projects", "reviews")
                      else "the owner's details, and someone to read it before it goes up" if code == "privacy"
+                     else "SEO writes the words for each page named; IT puts them in after the owner's yes"
+                     if code in ("titles", "titles_repeat", "descriptions", "headings")
                      else "")
             pending = {"sector": g["sector"], "title": g["title"], "code": code, "needs": needs,
                        "detail": (f"Found by the website blueprint check. {g['why']}"), "evidence": g["evidence"],
@@ -595,10 +723,12 @@ def _last_run(c):
     return r
 
 
-def check(home=None, get=None, plan=False, force=False, now=None) -> dict:
+def check(home=None, get=None, plan=False, force=False, now=None, map_files=None) -> dict:
     """Read the site, set it against the blueprint, and (unless plan) hand the gaps on."""
     from . import sitemap
     now = now or _now()
+    if map_files is None:
+        map_files = get is None          # stand-in sites in tests have no connector
     home = (home or sitemap.site_address() or "").rstrip("/")
     if not home:
         return {"ok": False, "error": "no website address is saved yet — add it under Website"}
@@ -618,6 +748,16 @@ def check(home=None, get=None, plan=False, force=False, now=None) -> dict:
     got = assess(site)
     out = {"ok": True, "home": site["home"], "pages": len(site["pages"]), "partial": site["partial"],
            "gaps": got["gaps"], "have": got["have"], "checked": got["checked"]}
+    # The same pages, matched to the files that make them (pipelines/site_map),
+    # when the connector can read the files — one read of the site, two uses.
+    if not plan and map_files:
+        try:
+            from . import site_api, site_map
+            if not site_api.why_cannot_read():
+                m = site_map.build(pages=site["pages"], partial=site["partial"])
+                out["map"] = {k: m.get(k) for k in ("ok", "kind", "home_file", "head_file", "error")}
+        except Exception as e:
+            out["map"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     if plan:
         out["summary"] = _summary(out)
         return out

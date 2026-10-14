@@ -718,6 +718,10 @@ app.get("/api/site/traffic", async (_q, res) => res.json(await pyModule("coordin
 // website; POST looks again, gently, through the same one-a-second queue.
 app.get("/api/site/blueprint", async (_q, res) => res.json(await pyModule("pipelines.site_blueprint", ["--stored", "--json"], 20000)));
 app.post("/api/site/blueprint/check", async (_q, res) => res.json(await pyModule("pipelines.site_blueprint", ["--now", "--json"], 300000)));
+// How the website is doing on Google, day by day (pipelines/site_progress). Reads only.
+app.get("/api/site/progress", async (_q, res) => res.json(await pyModule("pipelines.site_progress", ["--json"], 20000)));
+// Which file on the server makes each page a visitor sees (pipelines/site_map).
+app.get("/api/site/map", async (_q, res) => res.json(await pyModule("pipelines.site_map", ["--summary", "--json"], 20000)));
 app.get("/api/connect/connector.zip", async (req, res) => {
   const r = await pyConnect(["--zip-json"].concat(req.query.new ? ["--new-secret"] : []), null, 60000);
   if (!r.ok || !r.zip_b64) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
@@ -1285,7 +1289,7 @@ app.get("/posts", async (_q, r) => r.sendFile(path.join(__dirname, "ui", "review
 const API_CAPABILITIES = [
   "password", "activity", "activity-seen", "activity-clear", "sector", "usage",
   "notify-preview", "chat", "faults", "comms", "sectors", "site-name",
-  "setup-unlock", "brand", "ping", "leads", "triage", "site-traffic", "site-blueprint",
+  "setup-unlock", "brand", "ping", "leads", "triage", "site-traffic", "site-blueprint", "site-map", "site-progress",
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
   "account", "business", "engine", "connect", "check", "product", "update", "diagnostics",

@@ -1056,11 +1056,15 @@ def _default_subject() -> str:
         return "Glass & aluminium work"
 
 
-def country_rule() -> dict:
-    """{may_send, rule, why} — may this website write to a business first?"""
+def country_rule(lead=None) -> dict:
+    """
+    {may_send, rule, why} — may this website write to a business first? A lead
+    found in another of his markets is written to under THAT country's rule.
+    """
     try:
         from coordination import profile
-        r = profile.outreach()
+        cc = str((lead or {}).get("country") or "").upper()
+        r = profile.outreach_for(cc) if cc else profile.outreach()
     except Exception:
         return {"may_send": True, "rule": "allowed", "why": ""}
     if r["may_send"]:
@@ -1111,7 +1115,7 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
     # (the UAE, the UK, the US) this passes; where consent is needed first
     # (Germany, Austria) nothing goes; anywhere else nothing goes until the
     # owner has read his country's rule and confirmed it on Setup.
-    rule = country_rule()
+    rule = country_rule(lead)
     if not rule["may_send"]:
         return {"ok": False, "law": True, "error": "not sent: " + rule["why"]}
 

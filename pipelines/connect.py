@@ -119,6 +119,11 @@ To end the connection at any time, delete the agency-api folder.
 """
 
 
+def connector_source(host) -> str:
+    """The connector file for this website, as it goes on the server."""
+    return CONNECTOR.read_text(encoding="utf-8").replace("YOUR-WEBSITE", host or "your website")
+
+
 def connector_zip(new_secret=False) -> dict:
     """
     This website's connector as a zip, with the address and secret saved.
@@ -142,8 +147,7 @@ def connector_zip(new_secret=False) -> dict:
     if not saved.get("ok"):
         return {"ok": False, "error": saved.get("error") or "could not save the connection"}
 
-    src = CONNECTOR.read_text(encoding="utf-8")
-    src = src.replace("YOUR-WEBSITE", host)
+    src = connector_source(host)
     day = time.strftime("%d %B %Y")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -190,8 +194,18 @@ def check() -> dict:
                 can=list(r.get("can") or []), connector=version, latency_ms=took,
                 limits=r.get("limits") if isinstance(r.get("limits"), dict) else {})
     who = f" as {r['user']}" if r.get("user") else ""
+    # AN OLD CONNECTOR THAT CAN UPDATE ITSELF IS UPDATED NOW, not left for him
+    # to notice. One too old to do it is reported, with the one-time fix.
+    updated = None
+    if kind == "php" and saved.get("ok") and version < site_api.CONNECTOR_NEWEST \
+            and "self-update" in (r.get("can") or []):
+        updated = site_api.update_connector(agent=site_api.AGENT)
+        if updated.get("ok") and updated.get("connector"):
+            version = int(updated["connector"])
     return {"ok": bool(saved.get("ok")), "kind": kind, "mode": "full",
             "connector": version, "newest": site_api.CONNECTOR_NEWEST, "latency_ms": took,
+            "updated": updated,
+            "self_updating": kind == "php" and version >= site_api.SELF_UPDATING,
             "old_connector": kind == "php" and version < site_api.CONNECTOR_NEWEST,
             "can": list(r.get("can") or []), "warnings": list(r.get("warnings") or []),
             "head": (f"Connected{who}. IT can now fix what it finds — on a copy first, and only "
@@ -240,6 +254,7 @@ def status() -> dict:
             "checked_ok": bool(st.get("checked_ok")), "can": st.get("can") or [],
             "connector": st.get("connector") or 0, "newest": site_api.CONNECTOR_NEWEST,
             "latency_ms": st.get("latency_ms"),
+            "self_updating": kind == "php" and int(st.get("connector") or 0) >= site_api.SELF_UPDATING,
             "old_connector": kind == "php" and bool(st.get("checked_ok"))
                              and int(st.get("connector") or 0) < site_api.CONNECTOR_NEWEST}
 

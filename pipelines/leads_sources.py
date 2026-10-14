@@ -384,7 +384,7 @@ GENERIC_SOURCES = [
      "why": "Street-level businesses that are not on the big maps yet."},
 ]
 
-SOURCES = GLASS_SOURCES if _profile.is_starter() else GENERIC_SOURCES
+SOURCES = GLASS_SOURCES if _profile.starter_here() else GENERIC_SOURCES
 
 # WHICH SEGMENTS ARE "THE LOCALS"
 #
@@ -635,8 +635,11 @@ def screen_lead(c: dict) -> tuple:
     # A collector that searched INSIDE the country says so (c["country"]); a
     # map search fenced to that country cannot return a firm from another one,
     # and most map addresses never name the country at all.
-    here = (c.get("country") or "").upper() == _profile.country("AE")
-    hints = UAE_HINTS if _profile.is_starter() else ()
+    # ANY OF HIS MARKETS IS HERE. A lead found in Saudi Arabia for a business
+    # that sells there is not "outside the UAE" (coordination/profile.markets).
+    here = _profile.worldwide() or (c.get("country") or "").upper() in (
+        set(_profile.markets()) | {_profile.country("AE")})
+    hints = UAE_HINTS if _profile.starter_here() else ()
     if not here and not any(h in geo for h in hints) and not uae.is_uae(geo):
         return (False, f"outside {_where()} — not a market this business serves")
     if _profile.is_starter() and not any(r in blob.lower() for r in RELEVANT):

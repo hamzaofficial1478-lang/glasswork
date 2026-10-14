@@ -391,6 +391,26 @@ details.ck .row{padding-left:40px}
 .ck-logo img{max-height:48px;max-width:200px;display:block}
 @media (max-width:760px){.ck-score{font-size:44px} details.ck .row{padding-left:20px}}
 @media (prefers-reduced-motion:no-preference){.btn,.nav a,.chip,.switch,.seg{transition:background .15s,border-color .15s,color .15s}}
+/* Progress charts: one series each, thin line, a wash under it, recessive grid. */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.kpi{display:flex;flex-direction:column;gap:6px;padding:16px 18px}
+.kpi .v{font-size:28px;font-weight:600;line-height:1.1}
+.kpi .d{font-size:13px;display:flex;align-items:center;gap:6px}
+.kpi .d.up{color:var(--done)} .kpi .d.down{color:var(--stuck)} .kpi .d.flat{color:var(--muted)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.chart{padding:16px 18px 12px;display:flex;flex-direction:column;gap:8px}
+.chart h3{margin:0;font-size:15px;font-weight:600}
+.chart .sub{font-size:13px;color:var(--muted)}
+.plot{position:relative;height:140px;margin-left:44px;outline:none}
+.plot:focus-visible{box-shadow:0 0 0 2px var(--accent);border-radius:4px}
+.plot svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.plot .yt{position:absolute;left:-44px;width:38px;text-align:right;font-size:11.5px;color:var(--faint);transform:translateY(-50%);font-variant-numeric:tabular-nums}
+.plot .end{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--chart);box-shadow:0 0 0 2px var(--surface);transform:translate(-50%,-50%)}
+.plot .xh{position:absolute;top:0;bottom:0;width:1px;background:var(--line-strong);display:none;pointer-events:none}
+.plot .tip{position:absolute;top:-6px;transform:translate(-50%,-100%);background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:6px 9px;font-size:12.5px;white-space:nowrap;box-shadow:var(--shadow);display:none;pointer-events:none;z-index:2}
+.plot .tip b{font-size:14px;font-weight:600;display:block}
+.xl{display:flex;justify-content:space-between;margin-left:44px;font-size:11.5px;color:var(--faint)}
 </style>
 </head>
 <body>
@@ -658,8 +678,9 @@ function gettingStarted(biz, con, ord, r) {
     <p class="muted" style="margin:6px 0 0;font-size:14px">Then press <b style="font-weight:600">Run today</b>. Nothing leaves the building without your yes.</p></section>`;
 }
 async function today(main) {
-  const [st, run, idx, leads, biz, con, ord, np] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all'),
-    api('/api/business'), api('/api/connect'), api('/api/orders'), api('/api/notify/preview')]);
+  const [st, run, idx, leads, biz, con, ord, np, pg] = await Promise.all([state(), api('/api/run/status'), api('/api/index-status'), api('/api/leads?scope=all'),
+    api('/api/business'), api('/api/connect'), api('/api/orders'), api('/api/notify/preview'), api('/api/site/progress')]);
+  const pgTiles = progressTiles(pg, '#google');
   const alerts = alertsFor(np);
   const appr = (st && st.approvals) || [];
   const ev = ((st && st.activity) || {}).events || [];
@@ -693,6 +714,8 @@ async function today(main) {
     </section>
     ${setup}
     ${alertsCard(alerts)}
+    ${pgTiles ? `<section style="display:flex;flex-direction:column;gap:10px"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:17px;font-weight:600">Your website on Google</h2><a href="#google" style="font-size:14px;font-weight:500">See the charts</a></div>${pgTiles}</section>` : ''}
     ${agencyStrip(st)}
     <div class="tiles">
       <a href="#leads" class="card tile"><span class="label">Leads waiting</span><span class="big mono">${esc((leads && leads.total) || 0)}</span>
@@ -1459,8 +1482,8 @@ function scorePanel(rep, keyword) {
 
 /* ======================= WEBSITE ======================= */
 async function website(main) {
-  const [st, ch, cx, tr, bp] = await Promise.all([state(), api('/api/site/changes'), api('/api/connect'), api('/api/site/traffic'),
-    api('/api/site/blueprint')]);
+  const [st, ch, cx, tr, bp, mp] = await Promise.all([state(), api('/api/site/changes'), api('/api/connect'), api('/api/site/traffic'),
+    api('/api/site/blueprint'), api('/api/site/map')]);
   const conn = ((st && st.connections) || []).find((c) => c.name === 'Website') || {};
   const link = (cx && cx.ok) ? cx : {};
   const pending = ((st && st.approvals) || []).filter((a) => a.kind === 'site_change' || a.kind === 'site_resting');
@@ -1477,10 +1500,11 @@ async function website(main) {
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${link.kind && link.kind !== 'readonly' ? '<button class="btn quiet small" type="button" id="testLink">Test the connection</button>' : ''}
         <a href="/setup" style="font-weight:500;font-size:14px">Connection settings</a></div>
       ${link.kind && link.kind !== 'readonly' ? `<div class="muted" id="linkSay" style="flex-basis:100%;font-size:13.5px">${linkLine(link)}</div>` : ''}
-      ${link.old_connector ? `<div class="note" style="flex-basis:100%">Your website has connector version ${Number(link.connector) || 'an older one'}. Version ${Number(link.newest)} is safer and faster: a change is written whole or not at all, a page you edited is never overwritten, and many pages are read in one go.
+      ${link.old_connector && !link.self_updating ? `<div class="note" style="flex-basis:100%">Your website has connector version ${Number(link.connector) || 'an older one'}, which cannot update itself. Upload the new one once, and from then on it updates itself whenever Botix has a newer one — you will not need to do this again.
         <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><a class="btn small" href="/setup#connectBox">Get the new connector</a>
         <span class="muted" style="font-size:13.5px">In Connection settings, press Download your connector, then put the agency-api folder from it on your website in place of the old one. Your secret stays the same.</span></div></div>` : ''}</section>
     ${blueprintCard(bp)}
+    ${mapCard(mp)}
     ${trafficCard(tr)}
     <section class="card"><div class="card-h"><h2>Changes waiting for your yes</h2><span class="muted" style="font-size:13.5px">Found → fixed on a copy → tested → your yes → live</span></div>
       ${pending.length ? pending.map((a) => `<div class="row"><div class="grow"><span style="font-weight:600">${esc(a.text)}</span><span class="muted" style="font-size:14px">${esc(a.why || '')}</span></div>
@@ -1533,6 +1557,30 @@ function blueprintCard(bp) {
   </section>`;
 }
 
+/* How his website is built: which file makes each page (pipelines/site_map).
+   The agency works only on these files; the rest are listed as left alone. */
+function mapCard(mp) {
+  if (!mp || !mp.ok || !mp.known) return '';
+  const SURE = {sure: '', likely: ' (likely)', guess: ' (best guess)', none: ''};
+  const rows = (mp.pages || []).map((p) => `<div class="row" style="padding:10px 20px"><div class="grow" style="flex-direction:row;flex-wrap:wrap;gap:4px 14px;align-items:baseline">
+      <span class="mono" style="font-size:13.5px;min-width:180px">${esc(p.path)}</span>
+      <span class="muted" style="font-size:14px">${p.file ? esc(p.file) + esc(SURE[p.sure] || '') : 'made by the front file'}</span></div></div>`).join('');
+  const sum = 'style="padding:12px 20px;border-top:1px solid var(--line-soft)"';
+  return `<section class="card"><div class="card-h"><h2>How your website is built</h2>
+      <span class="muted" style="font-size:13.5px">${mp.built_at ? 'read ' + esc(when(mp.built_at)) : ''}</span></div>
+    <div class="counts">
+      <span>Made of <b>${esc(mp.kind_words || '')}</b></span>
+      ${mp.home_file ? `<span>Home page: <b class="mono" style="font-size:13.5px">${esc(mp.home_file)}</b></span>` : ''}
+      ${mp.head_file && mp.head_file !== mp.home_file ? `<span>Shared header: <b class="mono" style="font-size:13.5px">${esc(mp.head_file)}</b></span>` : ''}
+      <span><b class="mono">${Number(mp.matched) || 0}</b> of ${Number(mp.total) || 0} pages matched to their files</span>
+    </div>
+    <p class="muted" style="margin:0;padding:0 20px 14px;font-size:14px">The agency works only on the files that make your pages${(mp.shared || []).length ? ' and the parts they share' : ''}.${(mp.unused || []).length ? ` ${(mp.unused || []).length} other file(s) on your server are not used by any page, so they are left alone.` : ''}</p>
+    ${rows ? `<details class="more"><summary ${sum}>Every page and its file</summary>${rows}</details>` : ''}
+    ${(mp.unused || []).length ? `<details class="more"><summary ${sum}>Files left alone (${(mp.unused || []).length})</summary>
+      <p class="muted mono" style="margin:0;padding:0 20px 16px;font-size:13px">${mp.unused.map(esc).join(' · ')}</p></details>` : ''}
+  </section>`;
+}
+
 /* What travels between the agency and the website, today — counted at the one
    door every request goes through (coordination/site_traffic). */
 function trafficCard(tr) {
@@ -1554,15 +1602,139 @@ function trafficCard(tr) {
 function linkLine(l) {
   const bits = [];
   if (l.latency_ms != null) bits.push(`answers in ${Number(l.latency_ms) < 1000 ? Number(l.latency_ms) + ' ms' : (Number(l.latency_ms) / 1000).toFixed(1) + ' s'}`);
-  if (l.kind === 'php' && l.connector) bits.push(`connector version ${Number(l.connector)}`);
+  if (l.kind === 'php' && l.connector) bits.push(`connector version ${Number(l.connector)}${l.self_updating ? ', updates itself' : ''}`);
   if (l.kind === 'wordpress') bits.push('through WordPress');
   if (l.checked_at) bits.push('last tested ' + when(l.checked_at));
   return esc(sentence(bits.join(' · ')));
 }
 
+/* ======================= PROGRESS ======================= */
+/* How the website is doing, day by day (pipelines/site_progress): Google's own
+   numbers from Search Console, and what the agency measures itself. One small
+   chart per measure — never two scales on one chart. */
+const fmtN = (n) => n == null ? '–' : Math.abs(n) >= 10000 ? (n / 1000).toFixed(0) + 'K' : Math.abs(n) >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(Math.round(n * 10) / 10);
+const fmtDay = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}); } catch { return d; } };
+function kpi(label, value, delta, href) {
+  const d = delta ? `<span class="d ${delta.dir}"><span aria-hidden="true">${delta.dir === 'up' ? '▲' : delta.dir === 'down' ? '▼' : '–'}</span>${esc(delta.text)}</span>` : '';
+  return `<${href ? `a href="${href}"` : 'div'} class="card kpi"${href ? ' style="text-decoration:none;color:var(--ink)"' : ''}><span class="label">${esc(label)}</span>
+    <span class="v">${value}</span>${d}</${href ? 'a' : 'div'}>`;
+}
+function change(pct, upIsGood = true) {
+  if (pct == null) return null;
+  const good = pct === 0 ? null : (pct > 0) === upIsGood;
+  return {dir: pct === 0 ? 'flat' : good ? 'up' : 'down', text: `${pct > 0 ? '+' : ''}${pct}% on the 28 days before`};
+}
+function progressTiles(pg, link) {
+  const t = (pg && pg.tiles) || {};
+  const out = [];
+  if (t.clicks) out.push(kpi('Clicks · 28 days', fmtN(t.clicks.value), change(t.clicks.change), link));
+  if (t.impressions) out.push(kpi('Shown · 28 days', fmtN(t.impressions.value), change(t.impressions.change), link));
+  if (t.position && t.position.value != null) {
+    const p = t.position;
+    const dl = p.then == null ? null : {dir: p.better ? 'up' : p.value === p.then ? 'flat' : 'down',
+      text: `${p.better ? 'up from' : p.value === p.then ? 'same as' : 'down from'} ${p.then} before`};
+    out.push(kpi('Average position', fmtN(p.value), dl, link));
+  }
+  if (t.on_google) out.push(kpi('Pages on Google', `${t.on_google.value}<span style="font-size:16px;font-weight:500;color:var(--muted)"> of ${t.on_google.of}</span>`,
+    t.on_google.first != null && t.on_google.first !== t.on_google.value ? {dir: t.on_google.value > t.on_google.first ? 'up' : 'down',
+      text: `${t.on_google.first} when Botix started`} : null, link));
+  if (t.complete) out.push(kpi('Website complete', t.complete.value + '%',
+    t.complete.first != null && t.complete.first !== t.complete.value ? {dir: t.complete.value > t.complete.first ? 'up' : 'down',
+      text: `${t.complete.first}% when first checked`} : null, link || '#website'));
+  return out.length ? `<div class="kpis">${out.join('')}</div>` : '';
+}
+let CHART_N = 0;
+const CHART_DATA = new Map();   // id -> the points behind a drawn chart, for its hover layer
+function lineChart(title, sub, rows, key, opts = {}) {
+  const pts = rows.filter((r) => r[key] != null && !(opts.skipZero && !r[key]));
+  if (pts.length < 2) return '';
+  const id = 'ch' + (++CHART_N);
+  const vals = pts.map((r) => Number(r[key]));
+  // Clean round numbers on the axis: 0, 150, 300 — not 0, 131.5, 263.
+  const nice = (v) => { if (v <= 0) return 1; const m = Math.pow(10, Math.floor(Math.log10(v)));
+    return [1, 2, 2.5, 5, 10].map((k) => k * m).find((s) => s >= v) || 10 * m; };
+  let lo = 0, hi = opts.max || nice(Math.max(...vals));
+  if (opts.invert) { lo = Math.max(1, Math.floor(Math.min(...vals))); hi = Math.ceil(Math.max(...vals));
+    if ((hi - lo) % 2) hi += 1; }
+  if (hi === lo) hi = lo + 2;
+  const n = pts.length;
+  const x = (i) => (i / (n - 1)) * 100;
+  const y = (v) => opts.invert ? ((v - lo) / (hi - lo)) * 100 : 100 - ((v - lo) / (hi - lo)) * 100;
+  const line = pts.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(2)},${y(Number(r[key])).toFixed(2)}`).join(' ');
+  const base = opts.invert ? 0 : 100;
+  const area = `${line} L100,${base} L0,${base} Z`;
+  const ticks = [hi, (hi + lo) / 2, lo].map((v) => ({v, top: y(v)}));
+  const last = pts[n - 1];
+  const fmt = opts.fmt || fmtN;
+  CHART_DATA.set(id, {pts: pts.map((r) => [r.day, Number(r[key])]), fmt});
+  return `<section class="card chart"><h3>${esc(title)}</h3><span class="sub">${esc(sub)}</span>
+    <div class="plot" id="${id}" tabindex="0" role="img" aria-label="${esc(title)}: ${esc(fmt(Number(last[key])))} on ${esc(fmtDay(last.day))}">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        ${ticks.map((tk) => `<line x1="0" x2="100" y1="${tk.top}" y2="${tk.top}" stroke="var(--line-soft)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join('')}
+        ${opts.invert ? '' : `<path d="${area}" fill="var(--chart)" fill-opacity=".1"/>`}
+        <path d="${line}" fill="none" stroke="var(--chart)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      </svg>
+      ${ticks.map((tk) => `<span class="yt" style="top:${tk.top}%">${esc(fmt(tk.v))}</span>`).join('')}
+      <span class="end" style="left:100%;top:${y(Number(last[key]))}%"></span>
+      <span class="xh"></span><span class="tip"></span>
+    </div>
+    <div class="xl"><span>${esc(fmtDay(pts[0].day))}</span><span>${esc(fmtDay(last.day))} · <b style="color:var(--ink);font-weight:600">${esc(fmt(Number(last[key])))}</b></span></div>
+    <details class="more"><summary style="font-size:13px;padding-top:4px">See the numbers</summary>
+      <div class="scroll" style="max-height:200px;overflow:auto;margin-top:8px"><table><thead><tr><th>Day</th><th>${esc(opts.col || title)}</th></tr></thead>
+      <tbody>${pts.slice().reverse().map((r) => `<tr><td>${esc(fmtDay(r.day))}</td><td class="mono">${esc(fmt(Number(r[key])))}</td></tr>`).join('')}</tbody></table></div></details>
+  </section>`;
+}
+/* The hover layer: a crosshair that snaps to the nearest day, and the same
+   readout on keyboard focus with the arrow keys. Values come from data, so
+   they are written with textContent. */
+function wireCharts(root) {
+  root.querySelectorAll('.plot[id]').forEach((el) => {
+    const d = CHART_DATA.get(el.id); if (!d) return;
+    const xh = el.querySelector('.xh'), tip = el.querySelector('.tip'), n = d.pts.length;
+    let at = n - 1;
+    const show = (i) => {
+      at = Math.max(0, Math.min(n - 1, i));
+      const [day, v] = d.pts[at], left = (at / (n - 1)) * 100;
+      xh.style.left = left + '%'; xh.style.display = 'block';
+      tip.style.left = Math.min(88, Math.max(12, left)) + '%'; tip.style.display = 'block';
+      tip.textContent = '';
+      const b = document.createElement('b'); b.textContent = d.fmt(v); tip.appendChild(b);
+      tip.appendChild(document.createTextNode(fmtDay(day)));
+    };
+    const hide = () => { xh.style.display = 'none'; tip.style.display = 'none'; };
+    el.addEventListener('pointermove', (e) => { const r = el.getBoundingClientRect(); show(Math.round(((e.clientX - r.left) / r.width) * (n - 1))); });
+    el.addEventListener('pointerleave', hide);
+    el.addEventListener('focus', () => show(at));
+    el.addEventListener('blur', hide);
+    el.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') { show(at - 1); e.preventDefault(); } if (e.key === 'ArrowRight') { show(at + 1); e.preventDefault(); } });
+  });
+}
+function progressSection(pg) {
+  if (!pg || !pg.ok) return '';
+  const g = pg.google || [], s = pg.site || [];
+  const s2 = s.map((r) => Object.assign({}, r, {complete: r.total ? Math.round(r.have / r.total * 100) : null}));
+  const charts = [
+    lineChart('Clicks from Google', 'People who clicked through to your website, each day', g, 'clicks', {col: 'Clicks'}),
+    lineChart('Shown in Google', 'How many times your website appeared in Google’s results, each day', g, 'impressions', {col: 'Times shown'}),
+    lineChart('Average position', 'Higher on the chart is higher on Google (1 is the top)', g, 'position', {invert: true, zero: false, skipZero: true, col: 'Position'}),
+    lineChart('Pages on Google', 'Of your pages, how many Google lists', s, 'on_google', {col: 'Pages'}),
+    lineChart('Website complete', 'Out of everything a complete website for your business has', s2, 'complete', {col: '% complete', max: 100, fmt: (v) => Math.round(v) + '%'}),
+  ].filter(Boolean).join('');
+  const tiles = progressTiles(pg);
+  const none = !tiles && !charts;
+  return `<section style="display:flex;flex-direction:column;gap:12px"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;align-items:baseline">
+      <h2 style="margin:0;font-size:19px;font-weight:600">How your website is doing</h2>
+      <span class="muted" style="font-size:13.5px">${pg.since ? 'Recorded every day since ' + esc(fmtDay(pg.since)) + '. ' : ''}${esc(pg.note || '')}</span></div>
+    ${none ? `<div class="card">${empty('Nothing recorded yet', 'The first numbers are written down when the day runs. From then on this fills in every day.')}</div>` : tiles}
+    ${!pg.google_connected ? `<div class="note">Connect Google Search Console to see clicks, how often you are shown in Google, and your average position every day. It is free.
+      <div style="margin-top:8px"><a class="btn small" href="/setup">Connect Search Console</a></div></div>` : ''}
+    ${charts ? `<div class="charts">${charts}</div>` : ''}
+  </section>`;
+}
+
 /* ======================= ON GOOGLE ======================= */
 async function google(main) {
-  const d = await api('/api/index-status');
+  const [d, pg] = await Promise.all([api('/api/index-status'), api('/api/site/progress')]);
   const pages = (d && d.pages) || [];
   const on = pages.filter((p) => p.on_google), seen = pages.filter((p) => !p.on_google && /crawled|discovered/i.test(p.coverage || '')),
     rest = pages.filter((p) => !p.on_google && !/crawled|discovered/i.test(p.coverage || ''));
@@ -1572,6 +1744,7 @@ async function google(main) {
     'Which of your pages Google lists, read from your Search Console every morning.',
     '<button class="btn ghost" type="button" id="askAgain">Ask Google again</button>')}
     ${d && d.mismatch ? `<div class="note">${esc(d.mismatch)}</div>` : ''}
+    ${progressSection(pg)}
     <div class="two">
       <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:14px">
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="mono" style="font-size:40px;font-weight:500;line-height:1">${on.length}</span>
@@ -1594,6 +1767,7 @@ async function google(main) {
         <td>${p.on_google ? pill('done', 'On Google') : /crawled|discovered/i.test(p.coverage || '') ? pill('work', 'Seen, not listed yet') : pill('plain', 'Not seen yet')}</td>
         <td class="muted">${esc(p.why || p.coverage || '')}</td></tr>`).join('')}</tbody></table>`
         : empty('Not asked yet', 'This fills in once Search Console is connected and the day has run.')}</section></div>`;
+  wireCharts(main);
   $('#askAgain').onclick = async () => { $('#askAgain').disabled = true; toast('Asking Google about every page — this can take a few minutes…');
     const j = await api('/api/index-check', {}); $('#askAgain').disabled = false; toast(j.head || j.error || 'Done.'); google(main); };
 }

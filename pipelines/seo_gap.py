@@ -119,7 +119,22 @@ if not _profile.is_starter():
         w for s in _svc.SERVICES.values() for n in [s["label"]] + list(s["names"])
         for w in n.lower().split() if len(w) > 3))
 
-_NON_UAE_RE = re.compile(r"\b(" + "|".join(re.escape(g) for g in NON_UAE) + r")\b")
+# HIS MARKETS ARE NOT "SOMEWHERE ELSE". A business that sells in Saudi Arabia
+# wants "glass partition riyadh"; one selling worldwide drops no country at all.
+# And a pass for another market asks Google as that country does.
+if not _profile.home_market():
+    _GL = _profile.country().lower()
+if _profile.worldwide():
+    NON_UAE = ()
+else:
+    _ours = set()
+    for _m in _profile.markets():
+        _ours.update(w.lower() for w in (_countries.name(_m),) + tuple(_countries.aliases(_m))
+                     + tuple(_countries.cities(_m)) if w)
+    NON_UAE = tuple(n for n in NON_UAE if n not in _ours and not any(n in o.split() for o in _ours))
+
+_NON_UAE_RE = (re.compile(r"\b(" + "|".join(re.escape(g) for g in NON_UAE) + r")\b") if NON_UAE
+               else re.compile(r"(?!x)x"))             # nothing is somewhere else
 
 
 def _suggest(q):

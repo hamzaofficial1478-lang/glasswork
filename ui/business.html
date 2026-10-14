@@ -43,6 +43,9 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
   border:1px solid var(--line2);background:var(--panel2);font-size:13px;cursor:pointer;user-select:none}
 .chip input{accent-color:var(--glass);margin:0}
 .chip.on{border-color:var(--glass);background:var(--glass-dim)}
+.chip .x{background:none;border:0;color:var(--muted);font-size:17px;line-height:1;cursor:pointer;padding:0 0 0 2px}
+.chip .x:hover{color:var(--ink)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .svc{border:1px solid var(--line2);border-radius:12px;padding:14px;margin-top:12px;background:var(--panel2)}
 .svc .row{display:flex;gap:10px;align-items:center}
 .svc .row input{flex:1}
@@ -107,6 +110,18 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
       <div><label for="pCur">Currency (for the rule that no price is ever quoted)</label>
         <input type="text" id="pCur" maxlength="8" placeholder="e.g. GBP"></div>
     </div>
+    <label>Where you want customers</label>
+    <div class="chips" id="mktMode" role="radiogroup" aria-label="Where you want customers">
+      <label class="chip"><input type="radio" name="mkt" value="home"> Only in my country</label>
+      <label class="chip"><input type="radio" name="mkt" value="list"> In these countries</label>
+      <label class="chip"><input type="radio" name="mkt" value="world"> Worldwide</label>
+    </div>
+    <div id="mktBox" style="display:none">
+      <div class="chips" id="mktChips"></div>
+      <div style="margin-top:10px;max-width:320px"><label for="mktAdd" class="sr-only">Add a country</label>
+        <select id="mktAdd"><option value="">Add a country…</option></select></div>
+    </div>
+    <p class="hint" id="mktHint"></p>
     <label for="pAreas">Areas you serve — one per line, nearest first</label>
     <textarea id="pAreas" placeholder="Manchester&#10;Salford&#10;Stockport"></textarea>
     <p class="hint" id="pAreasHint"></p>
@@ -133,6 +148,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
       <input type="checkbox" id="ruleConfirm">
       <span id="ruleConfirmText">I have checked my country's rules on marketing email to businesses, and they allow it.</span>
     </label>
+    <div id="mktRules"></div>
   </section>
 </main>
 
@@ -156,6 +172,27 @@ async function post(url, body) {
 function slug(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'service'; }
 function catLabel(k) { const c = (OPT.catalogue || []).find((x) => x.key === k); return c ? c.label : k.replace(/_/g, ' '); }
 
+// WHERE HE WANTS CUSTOMERS. Home stays where the business is based; these are
+// the countries the agency finds leads in, researches searches for and writes
+// to (coordination/profile.markets). They take turns, one per pass.
+let MKT = {mode: 'home', list: [], confirmed: []};
+function cname(cc) { return ((OPT.countries || []).find((c) => c.code === cc) || {}).name || cc; }
+function renderMkt() {
+  document.querySelectorAll('input[name=mkt]').forEach((r) => { r.checked = r.value === MKT.mode; r.parentElement.classList.toggle('on', r.checked); });
+  const home = $('#pCountry').value;
+  $('#mktBox').style.display = MKT.mode === 'home' ? 'none' : 'block';
+  $('#mktChips').innerHTML = MKT.list.map((cc) => `<span class="chip on">${esc(cname(cc))}${cc === home ? ' (home)' : ''}`
+    + `<button class="x" type="button" title="Remove ${esc(cname(cc))}" aria-label="Remove ${esc(cname(cc))}" onclick="dropMkt('${esc(cc)}')">×</button></span>`).join('')
+    || `<span class="hint">${MKT.mode === 'world' ? 'Optional: the countries to look for leads in first.' : 'Add the countries you want customers in.'}</span>`;
+  $('#mktHint').textContent = MKT.mode === 'home'
+    ? 'Leads, searches and posts are all for your own country.'
+    : MKT.mode === 'list'
+      ? 'Leads are found in each country in turn, SEO looks at what people there search for, and posts speak to all of them.'
+      : 'Posts and SEO speak to customers anywhere. Leads are still found country by country — the ones listed here, or your own country if none.';
+  renderRule();
+}
+function dropMkt(cc) { MKT.list = MKT.list.filter((x) => x !== cc); renderMkt(); }
+
 function fill(p) {
   const b = p.business || {}, pl = p.place || {};
   $('#bName').value = b.name || ''; $('#bYears').value = b.years || '';
@@ -167,10 +204,13 @@ function fill(p) {
   $('#pAreas').value = (pl.served && pl.served.length ? pl.served : (pl.cities || [])).join('\n');
   $('#pAreasHint').textContent = (pl.districts || []).length
     ? `The lead finders also search ${pl.districts.length} districts inside these areas.` : '';
+  const ms = (p.markets || []).filter((cc) => cc);
+  MKT = {mode: p.worldwide ? 'world' : (ms.length > 1 || (ms.length === 1 && ms[0] !== p.country)) ? 'list' : 'home',
+         list: ms.length > 1 || p.worldwide || (ms[0] && ms[0] !== p.country) ? ms : [], confirmed: p.outreach_confirmed_for || []};
   CUST = new Set(Object.keys(p.customers || {}));
   const order = (p.service_order && p.service_order.length) ? p.service_order : Object.keys(p.services || {});
   SVCS = order.filter((k) => (p.services || {})[k]).map((k) => ({key: k, ...p.services[k]}));
-  renderCust(); renderSvcs(); renderRule();
+  renderCust(); renderSvcs(); renderMkt();
   const miss = p.missing || [];
   $('#missing').style.display = miss.length ? 'block' : 'none';
   $('#missing').textContent = miss.length ? 'Still needed before every desk can work for you: ' + miss.join(', ') + '.' : '';
@@ -218,6 +258,20 @@ function renderRule() {
   $('#ruleConfirmBox').style.display = r.rule === 'confirm' ? 'flex' : 'none';
   $('#ruleConfirmText').textContent = `I have checked ${name}'s rules on marketing email to businesses, and they allow it.`;
   $('#ruleConfirm').checked = !!(P && P.outreach_confirmed);
+  // Each other market under its own country's rule, confirmed on its own.
+  const others = MKT.mode === 'home' ? [] : MKT.list.filter((x) => x && x !== cc);
+  $('#mktRules').innerHTML = others.map((m) => {
+    const rr = (OPT.outreach || {})[m] || {rule: 'confirm', law: ''};
+    const nm = cname(m);
+    const words = rr.rule === 'allowed' ? `${nm}: the agency may write to businesses, with an opt-out in every message. ${rr.law}`
+      : rr.rule === 'consent' ? `${nm}: businesses must agree before they are emailed, so for leads there the agency writes drafts and sends nothing. ${rr.law}`
+      : `${nm}: check what is allowed when writing to businesses there, then tick the box. Until you do, leads there get drafts only.`;
+    return `<div class="note${rr.rule === 'allowed' ? ' ok' : rr.rule === 'consent' ? ' bad' : ''}" style="margin-top:10px">${esc(words)}</div>`
+      + (rr.rule === 'confirm' ? `<label class="check"><input type="checkbox" data-mconfirm="${esc(m)}" ${MKT.confirmed.includes(m) ? 'checked' : ''}>
+        <span>I have checked ${esc(nm)}'s rules on marketing email to businesses, and they allow it.</span></label>` : '');
+  }).join('');
+  document.querySelectorAll('[data-mconfirm]').forEach((b) => b.onchange = () => {
+    const m = b.dataset.mconfirm; MKT.confirmed = MKT.confirmed.filter((x) => x !== m); if (b.checked) MKT.confirmed.push(m); });
 }
 
 async function drafting() {
@@ -263,6 +317,9 @@ async function save() {
     services, service_order: order, customers,
     local_customers: [...CUST].filter((k) => ((OPT.catalogue || []).find((x) => x.key === k) || {}).local),
     outreach_confirmed: $('#ruleConfirm').checked,
+    worldwide: MKT.mode === 'world',
+    markets: MKT.mode === 'home' ? [] : MKT.list,
+    outreach_confirmed_for: MKT.confirmed.filter((m) => MKT.list.includes(m)),
   };
   $('#saveBtn').disabled = true; $('#saveMsg').textContent = 'Saving…';
   const j = await post('/api/business', body);
@@ -278,7 +335,16 @@ async function save() {
   $('#pCountry').innerHTML = '<option value="">Choose…</option>'
     + (OPT.countries || []).map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
   $('#pLang').innerHTML = (OPT.languages || []).map((l) => `<option value="${esc(l.code)}">${esc(l.name)}</option>`).join('');
-  $('#pCountry').addEventListener('change', renderRule);
+  $('#pCountry').addEventListener('change', renderMkt);
+  $('#mktAdd').innerHTML = '<option value="">Add a country…</option>'
+    + (OPT.countries || []).map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
+  $('#mktAdd').addEventListener('change', (e) => { const cc = e.target.value; e.target.value = '';
+    if (!cc) return; if (!MKT.list.length && $('#pCountry').value && cc !== $('#pCountry').value) MKT.list.push($('#pCountry').value);
+    if (!MKT.list.includes(cc)) MKT.list.push(cc); renderMkt(); });
+  document.querySelectorAll('input[name=mkt]').forEach((r) => r.addEventListener('change', () => {
+    MKT.mode = r.value;
+    if (MKT.mode !== 'home' && !MKT.list.length && $('#pCountry').value) MKT.list = [$('#pCountry').value];
+    renderMkt(); }));
   fill(P || {});
   // The address they gave when they added the website, so drafting is one press.
   if (!$('#draftUrl').value.trim()) {

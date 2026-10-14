@@ -31,7 +31,10 @@ account's key like every other setting.
 """
 import argparse
 import json
+import os
+import sqlite3
 import sys
+import time
 
 from . import countries, workspace
 
@@ -41,7 +44,18 @@ STARTER = "glass_uae"
 # What a stored profile may hold. Anything else is dropped on save.
 FIELDS = ("starter", "business", "country", "place", "services", "service_order",
           "fallback_service", "customers", "local_customers", "language", "spelling",
-          "currency", "outreach_confirmed")
+          "currency", "outreach_confirmed", "markets", "worldwide", "outreach_confirmed_for")
+
+# THE MARKET A PASS WORKS FOR. "user can also mention 2 or 3 or more countries
+# or worldwide and according to that program will find leads do write posts do
+# seo". The country a business is BASED in stays its home (its email rules, its
+# phone numbers, its own areas). The countries it wants customers in are its
+# markets, and a lead or keyword pass works one market at a time: the day sets
+# AGENCY_MARKET for that step's process (pipelines/day_run), and inside it the
+# whole program reads the market as "the country" — the maps fence, the areas,
+# phone formats, the web addresses businesses there use. Markets take turns, so
+# no one country takes every pass.
+MARKET_ENV = "AGENCY_MARKET"
 
 _CACHE = {}
 
@@ -131,8 +145,60 @@ def local_customers(starter=None) -> set:
     return set(_pick("local_customers", starter, []))
 
 
-def country(starter="AE") -> str:
+def home_country(starter="AE") -> str:
+    """Where the business is based."""
     return (_pick("country", starter, "") or "").upper()
+
+
+def _market_env() -> str:
+    """The market this process was given, when it is not the home country."""
+    m = (os.environ.get(MARKET_ENV) or "").strip().upper()
+    if not m or not countries.name(m):
+        return ""
+    return "" if m == home_country() else m
+
+
+def home_market() -> bool:
+    """Is this process working for the home country (no other market given)?"""
+    return not _market_env()
+
+
+def starter_here() -> bool:
+    """The owner's UAE catalogue of places applies: his starter, working at home."""
+    return is_starter() and home_market()
+
+
+def country(starter="AE") -> str:
+    """The country this process works in: the market it was given, else home."""
+    return _market_env() or home_country(starter)
+
+
+def markets() -> list:
+    """Where the business wants customers: country codes, home first if it is one of them."""
+    raw = stored().get("markets")
+    out = []
+    for cc in raw if isinstance(raw, list) else []:
+        cc = str(cc or "").upper()
+        if cc and countries.name(cc) and cc not in out:
+            out.append(cc)
+    home = home_country()
+    if not out:
+        return [home] if home else []
+    return ([home] if home in out else []) + [c for c in out if c != home]
+
+
+def worldwide() -> bool:
+    return bool(stored().get("worldwide"))
+
+
+def market_phrase() -> str:
+    """'the UAE', 'the UAE, Saudi Arabia and Qatar', or 'customers worldwide'."""
+    if worldwide():
+        return "customers worldwide"
+    names = [countries.in_a_sentence(c) for c in markets()]
+    if not names:
+        return where()
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def place(starter=None) -> dict:
@@ -140,7 +206,14 @@ def place(starter=None) -> dict:
     {regions, region_word, cities, districts, parent, served, home} — where it
     works. Regions are the big divisions (emirates, states, counties); districts
     are where a map search finds the street; parent says which region each sits in.
+
+    In a pass for another market, that market's biggest business cities.
     """
+    m = _market_env()
+    if m:
+        big = list(countries.cities(m)) or [countries.name(m)]
+        return {"regions": [], "region_word": "city", "cities": big, "districts": [], "parent": {},
+                "served": big, "home": ""}
     p = _pick("place", starter, {}) or {}
     return {"regions": list(p.get("regions") or []), "region_word": p.get("region_word") or "area",
             "cities": list(p.get("cities") or []), "districts": list(p.get("districts") or []),
@@ -169,11 +242,45 @@ def spelling() -> str:
 
 def outreach() -> dict:
     """{rule, law, confirmed, may_send} — whether this country lets the agency write first."""
-    cc = country()
+    return outreach_for(country())
+
+
+def outreach_for(cc) -> dict:
+    """The same, for a lead in country cc — each market's own rule, each confirmed on its own."""
+    cc = (cc or home_country() or "").upper()
     r = countries.outreach_rule(cc)
-    confirmed = bool(stored().get("outreach_confirmed"))
+    s = stored()
+    confirmed = (bool(s.get("outreach_confirmed")) if cc == home_country()
+                 else cc in [str(x).upper() for x in (s.get("outreach_confirmed_for") or [])])
     may = r["rule"] == countries.ALLOWED or (r["rule"] == countries.CONFIRM and confirmed)
     return {**r, "country": cc, "confirmed": confirmed, "may_send": may}
+
+
+def market_for_run(kind, run_key, db=None) -> str:
+    """
+    The market a pass of `kind` (leads, seo) works for in this run or round —
+    the one that waited longest, so the countries take turns and the load is
+    shared. The same run_key always gets the same answer. '' with one market.
+    """
+    ms = markets()
+    if len(ms) < 2:
+        return ""
+    try:
+        from . import board
+        with sqlite3.connect(db or board.DB, timeout=30) as c:
+            c.execute("CREATE TABLE IF NOT EXISTS market_turns (kind TEXT, run_key TEXT, market TEXT, at INTEGER,"
+                      " PRIMARY KEY(kind, run_key))")
+            r = c.execute("SELECT market FROM market_turns WHERE kind=? AND run_key=?", (kind, run_key)).fetchone()
+            if r and r[0] in ms:
+                return r[0]
+            last = {m: at for m, at in c.execute("SELECT market, max(at) FROM market_turns WHERE kind=?"
+                                                  " GROUP BY market", (kind,))}
+            pick = min(ms, key=lambda m: (last.get(m, 0), ms.index(m)))
+            c.execute("INSERT OR REPLACE INTO market_turns(kind,run_key,market,at) VALUES(?,?,?,?)",
+                      (kind, run_key, pick, int(time.time() * 1000)))
+            return pick
+    except Exception:
+        return ms[0]
 
 
 def describe() -> str:
@@ -264,6 +371,10 @@ def current() -> dict:
     out["outreach"] = outreach()
     out["missing"] = missing()
     out["describe"] = describe()
+    out["markets"] = markets()
+    out["worldwide"] = worldwide()
+    out["market_phrase"] = market_phrase()
+    out["outreach_by_market"] = {cc: outreach_for(cc) for cc in markets()}
     return json.loads(json.dumps(out, default=list))
 
 
@@ -277,6 +388,18 @@ def save(data: dict) -> dict:
         if cc and not countries.name(cc):
             return {"ok": False, "error": f"'{cc}' is not a country code the program knows"}
         clean["country"] = cc
+    for key in ("markets", "outreach_confirmed_for"):
+        if key in clean:
+            got = []
+            for cc in clean[key] if isinstance(clean[key], list) else []:
+                cc = str(cc or "").upper()
+                if not countries.name(cc):
+                    return {"ok": False, "error": f"'{cc}' is not a country code the program knows"}
+                if cc not in got:
+                    got.append(cc)
+            clean[key] = got
+    if "worldwide" in clean:
+        clean["worldwide"] = bool(clean["worldwide"])
     merged = {**stored(), **clean}
     workspace.write_secret(_path(), json.dumps(merged, indent=2, ensure_ascii=False, default=list))
     _CACHE.clear()

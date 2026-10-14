@@ -662,9 +662,46 @@ def gsc_queries(days=90, limit=500):
     Returns [] and a reason rather than raising, because every other source here
     works without it and a missing optional login must not stop the pass.
     """
+    end = time.strftime("%Y-%m-%d", time.localtime())
+    start = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
+    rows, why = _gsc_search({"startDate": start, "endDate": end,
+                             "dimensions": ["query"], "rowLimit": limit})
+    if rows is None:
+        return [], why
+    return [{"phrase": (row.get("keys") or [""])[0].strip().lower(),
+             "impressions": int(row.get("impressions") or 0),
+             "clicks": int(row.get("clicks") or 0),
+             "position": round(float(row.get("position") or 0), 1)}
+            for row in rows if (row.get("keys") or [""])[0].strip()], ""
+
+
+def gsc_daily(days=90):
+    """
+    Clicks, impressions and average position for each day — the line on his
+    progress chart. Google's numbers arrive about two days late, so the last
+    day or two are missing rather than zero. Returns ([], why) when it cannot.
+    """
+    end = time.strftime("%Y-%m-%d", time.localtime())
+    start = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
+    rows, why = _gsc_search({"startDate": start, "endDate": end,
+                             "dimensions": ["date"], "rowLimit": days + 5})
+    if rows is None:
+        return [], why
+    return [{"day": (row.get("keys") or [""])[0],
+             "clicks": int(row.get("clicks") or 0),
+             "impressions": int(row.get("impressions") or 0),
+             "position": round(float(row.get("position") or 0), 1)}
+            for row in rows if (row.get("keys") or [""])[0]], ""
+
+
+def _gsc_search(body):
+    """
+    One Search Console searchAnalytics question. (rows, "") or (None, why) —
+    never raises: every caller has other sources and must carry on without it.
+    """
     ok, why = gsc_ready()
     if not ok:
-        return [], why
+        return None, why
     import google.auth.transport.requests
     from google.oauth2 import service_account
     import requests
@@ -685,7 +722,7 @@ def gsc_queries(days=90, limit=500):
     try:
         creds = _sa_credentials(service_account, [GSC_SCOPE])
     except Exception as e:
-        return [], (f"the Search Console key file could not be read ({e}). Upload "
+        return None, (f"the Search Console key file could not be read ({e}). Upload "
                     "the service-account JSON again on /setup → Integrations.")
     err = None
     for wait in (0, 2, 5):
@@ -700,10 +737,8 @@ def gsc_queries(days=90, limit=500):
             if not _dropped(e):
                 break
     if err is not None:
-        return [], _login_failed(err)
+        return None, _login_failed(err)
 
-    end = time.strftime("%Y-%m-%d", time.localtime())
-    start = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
     # The documented host is www.googleapis.com. An earlier version of this used
     # searchconsole.googleapis.com — that host serves the newer URL-inspection
     # API, not webmasters/v3, so the very first real call would have come back
@@ -712,8 +747,6 @@ def gsc_queries(days=90, limit=500):
     hosts = ("https://www.googleapis.com", "https://searchconsole.googleapis.com")
     path = ("/webmasters/v3/sites/" + urllib.parse.quote(prop, safe="")
             + "/searchAnalytics/query")
-    body = {"startDate": start, "endDate": end,
-            "dimensions": ["query"], "rowLimit": limit}
     last = ""
     rows = None
     for host in hosts:
@@ -730,7 +763,7 @@ def gsc_queries(days=90, limit=500):
         # 403 and 404 mean different things and the fix is different for each,
         # so neither is reported as a bare status code.
         if r.status_code == 403 and _api_switched_off(r.text or ""):
-            return [], _api_switched_off(r.text or "")
+            return None, _api_switched_off(r.text or "")
         if r.status_code == 403:
             # THE SAME SITE, WRITTEN THE WAY GOOGLE KNOWS IT. If the account can
             # see this site under another spelling, use that — and keep it, so
@@ -771,22 +804,19 @@ def gsc_queries(days=90, limit=500):
             # The old message named both causes and left him to work out
             # which. On his own site the answer is almost certainly the www:
             # he verified one form in Search Console and set the other here.
-            return [], (f"Search Console refused (403) for {prop}." + slash + " "
+            return None, (f"Search Console refused (403) for {prop}." + slash + " "
                         + _which_403(creds, host, prop))
         if r.status_code == 404 and host is hosts[-1]:
-            return [], (f"Search Console has no property called {prop!r} (404). It "
+            return None, (f"Search Console has no property called {prop!r} (404). It "
                         f"must match exactly: 'sc-domain:yoursite.ae' for a domain "
                         f"property, or 'https://yoursite.ae/' with the trailing "
                         f"slash for a URL-prefix one.")
         last = f"Search Console said {r.status_code}: {r.text[:160]}"
     if rows is None:
-        return [], last or "Search Console did not answer"
+        return None, last or "Search Console did not answer"
+    return rows, ""
 
-    return [{"phrase": (row.get("keys") or [""])[0].strip().lower(),
-             "impressions": int(row.get("impressions") or 0),
-             "clicks": int(row.get("clicks") or 0),
-             "position": round(float(row.get("position") or 0), 1)}
-            for row in rows if (row.get("keys") or [""])[0].strip()], ""
+
 
 
 # ---------------------------------------------------------------------------

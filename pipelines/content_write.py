@@ -250,13 +250,15 @@ def system_prompt() -> str:
     return (GENERIC_HEAD
             .replace("__BUSINESS__", profile.describe())
             .replace("__WHAT__", b.get("description") or b.get("trade") or "its services")
-            .replace("__WHERE__", countries.in_a_sentence(profile.country()))
+            .replace("__WHERE__", profile.market_phrase())
             .replace("__SPELLING__", profile.spelling())
             + rest).replace("__YEARS__", years)
 
 
 def _local_conditions() -> str:
     from coordination import countries, profile
+    if profile.worldwide() or len(profile.markets()) > 1:
+        return "the conditions where each customer is (" + profile.market_phrase() + ")"
     return ("UAE conditions" if profile.is_starter()
             else countries.in_a_sentence(profile.country()) + "'s conditions")
 
@@ -390,7 +392,9 @@ def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
         lines.append(f"THE AREA: {area}")
     else:
         from coordination import countries, profile
-        whole = ("the whole UAE" if profile.is_starter()
+        # Every market he sells in, or the world — not only the home country.
+        whole = (profile.market_phrase() if profile.worldwide() or len(profile.markets()) > 1
+                 else "the whole UAE" if profile.is_starter()
                  else "all of " + countries.in_a_sentence(profile.country()))
         lines.append(f"THE AREA: {whole} — " + ", ".join(facts.get("areas") or []))
     lines.append("HOW LONG: " + (f"about {pack['target_words']} words" if pack and

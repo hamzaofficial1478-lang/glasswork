@@ -376,6 +376,12 @@ def _check(agent, url, timeout, run_row):
                              "run this again. Nothing was checked and nothing was filed."}
 
         status, html, ms, err = _fetch(site, timeout)
+        if status and not err:
+            try:                       # the speed line on his progress chart
+                from . import site_progress
+                site_progress.note(speed_ms=int(ms))
+            except Exception:
+                pass
         fetched = bool(html) or status > 0
 
         # the enquiry path first, exactly as the MD ordered it — and on the

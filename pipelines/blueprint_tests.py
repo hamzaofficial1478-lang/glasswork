@@ -67,9 +67,11 @@ class _Cabinet:
             c.close()
 
 
-def _page(title, body="", head="", links=()):
+def _page(title, body="", head="", links=(), full=False, path="/"):
     nav = "".join(f'<a href="{u}">{t}</a>' for u, t in links)
-    return (f"<!doctype html><html{head and ' ' + head}><head><title>{title}</title></head>"
+    extra = (f'<meta name="description" content="{title} — what we do and how to reach us.">'
+             f'<link rel="canonical" href="{HOME}{path}">') if full else ""
+    return (f"<!doctype html><html{head and ' ' + head}><head><title>{title}</title>{extra}</head>"
             f"<body><nav>{nav}</nav><h1>{title}</h1>{body}</body></html>")
 
 
@@ -111,11 +113,11 @@ def _complete():
     head = ('<link rel="icon" href="/favicon.png"><meta property="og:title" content="X">'
             '<meta property="og:image" content="/x.jpg">'
             '<script type="application/ld+json">{"@type": "LocalBusiness", "name": "X"}</script>')
-    pages = {"/": _page("Home", head, head='lang="en"', links=links).replace("<title>Home</title>",
-                                                                             "<title>Home</title>" + head)}
+    pages = {"/": _page("Home", '<img src="/a.jpg" alt="A finished shower screen">', head='lang="en"', links=links,
+                        full=True).replace("<title>Home</title>", "<title>Home</title>" + head)}
     for path, title in links:
         body = "<p>Office 12, Al Quoz Industrial Area, Dubai</p>" if path == "/contact.php" else "<p>Text.</p>"
-        pages[path] = _page(title, body, links=[("/", "Home")])
+        pages[path] = _page(title, body, links=[("/", "Home")], full=True, path=path)
     locs = "".join(f"<url><loc>{HOME}{p}</loc></url>" for p in pages)
     files = {"/robots.txt": (200, f"User-agent: *\nAllow: /\nSitemap: {HOME}/sitemap.php\n", "text/plain"),
              "/sitemap.php": (200, f'<?xml version="1.0"?><urlset>{locs}</urlset>', "application/xml"),
@@ -151,6 +153,28 @@ def test_bare_and_complete():
     done = bp.assess(full)
     check("a complete site has nothing missing", [g["code"] for g in done["gaps"]], [])
     check("  and every check was counted as there", len(done["have"]), len(done["checked"]))
+
+
+def test_basics_on_every_page():
+    print("\nThe basics are checked on every page, worst first:")
+    pages = {"/": _page("Home", '<img src="/a.jpg">', links=[("/a.php", "A"), ("/b.php", "B"), ("/c.php", "C"),
+                                                           ("/thanks.php", "Thanks")], full=True),
+             "/a.php": _page("Same title", "<h1>Second heading</h1>", full=True, path="/a.php"),
+             "/b.php": _page("Same title", full=True, path="/b.php"),
+             "/c.php": "<html><head></head><body><p>No title, no heading, nothing.</p></body></html>",
+             "/thanks.php": '<html><head><meta name="robots" content="noindex"><title>Thanks</title></head><body></body></html>'}
+    got = bp.assess(bp.read_site(HOME, get=_site({}, pages)))
+    g = {x["code"]: x for x in got["gaps"]}
+    check("a page with no title", ("titles" in g, g.get("titles", {}).get("severity")), (True, "high"))
+    check("  named in the evidence", "/c.php" in g.get("titles", {}).get("evidence", ""), True)
+    check("two pages with one title", "titles_repeat" in g, True)
+    check("no description, or no single main heading",
+          ("descriptions" in g, "/a.php" in g.get("headings", {}).get("evidence", "")), (True, True))
+    check("a picture with no description", "image_alt" in g, True)
+    check("a page hidden from Google", ("noindex" in g, "/thanks.php" in g.get("noindex", {}).get("evidence", "")),
+          (True, True))
+    check("the worst come first", [x["severity"] for x in got["gaps"][:3]], ["high", "high", "high"])
+    check("  and titles go to SEO, who writes the words", g["titles"]["sector"], "SEO")
 
 
 def test_robots():
@@ -284,6 +308,7 @@ def test_partial_and_recent():
 
 def main():
     test_bare_and_complete()
+    test_basics_on_every_page()
     test_robots()
     test_llms()
     test_handing_on()

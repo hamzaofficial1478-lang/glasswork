@@ -1306,6 +1306,9 @@ _ADDED_COLUMNS = (
     # He deleted this lead's sent mail from the Mail room's list. The lead is
     # still marked as mailed (above), so it is never listed or mailed again.
     ("leads",        "sent_cleared_at", "INTEGER"),
+    # Which of his markets the lead was found in, so each is written to under
+    # its own country's email rules (coordination/profile.outreach_for).
+    ("leads",        "country",      "TEXT"),
 )
 
 # WHY THIS LIST NO LONGER DECIDES ANYTHING
@@ -2245,13 +2248,14 @@ def add_lead_if_new(lead: dict):
         cur = c.execute(
             "INSERT INTO leads(name,company,email,phone,socials,source,area,segment,"
             "found_at,website,whatsapp,address,contact_kind,evidence,"
-            "phone_key,domain_key,company_key)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "phone_key,domain_key,company_key,country)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (lead.get("name"), lead.get("company"), _norm(lead.get("email")),
              lead.get("phone"), lead.get("socials"), lead.get("source"),
              lead.get("area"), lead.get("segment"), _now(),
              lead.get("website"), lead.get("whatsapp"), lead.get("address"),
-             lead.get("contact_kind"), ev, pk, dk, ck),
+             lead.get("contact_kind"), ev, pk, dk, ck,
+             (str(lead.get("country") or "").upper()[:2] or None)),
         )
         return cur.lastrowid
 

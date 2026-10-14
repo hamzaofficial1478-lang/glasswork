@@ -61,7 +61,7 @@ from . import fetcher
 from coordination import countries as _countries, profile as _profile, uae as _uae  # noqa: E402
 
 # Anywhere else, the open website's country's own endings first (.co.uk, .de).
-TLDS = (("ae", "com", "net", "co.ae", "org") if _profile.is_starter() else
+TLDS = (("ae", "com", "net", "co.ae", "org") if _profile.starter_here() else
         tuple(dict.fromkeys(_countries.tlds(_profile.country()) + ("com", "net", "org"))))
 
 # Stripped before the domain is guessed. Nobody registers
@@ -83,7 +83,7 @@ PLACE_NOISE = {
     "jlt", "jvc", "deira", "bur", "quoz", "karama", "barsha",
 }
 # ...and the open website's own places, when it is not the owner's.
-if not _profile.is_starter():
+if not _profile.starter_here():
     for _p in (list(_uae.EMIRATES) + list(_uae.CITIES) + list(_uae.DISTRICTS)
                + list(_countries.aliases(_profile.country()))):
         PLACE_NOISE.update(w for w in _p.lower().replace(".", " ").split() if len(w) > 1)

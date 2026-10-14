@@ -10,7 +10,7 @@
   --line:#E4E7EC; --line-soft:#EEF0F3; --line-strong:#CDD2DA;
   --ink:#111318; --ink-2:#343A46; --muted:#5E6573; --faint:#747B89;
   --accent:#16181D; --accent-hover:#2D323C; --accent-ink:#FFFFFF; --accent-soft:#ECEEF2; --nav-on:#111318;
-  --brand:#E8834F; --brand-hover:#DD7440; --brand-ink:#1A0E06; --brand-soft:#FBEFE7; --link:#B4501E; --tile:#15171D;
+  --brand:#E8834F; --brand-hover:#DD7440; --brand-ink:#1A0E06; --brand-soft:#FBEFE7; --link:#B4501E; --tile:#15171D; --chart:#B4501E;
   --done-bg:#EAF4EE; --done:#22684A; --wait-bg:#FBF3E4; --wait:#86590F;
   --work-bg:#EDF1F8; --work:#38558F; --stuck-bg:#FBECEA; --stuck:#A23A31;
   --plain-bg:#F1F3F6; --plain:#5E6573; --ok-dot:#2F8A5A;
@@ -29,7 +29,7 @@
     --line:#272B33; --line-soft:#1F232A; --line-strong:#383E49;
     --ink:#E9EBEF; --ink-2:#C9CDD5; --muted:#9AA1AD; --faint:#868D99;
     --accent:#E9EBEF; --accent-hover:#FFFFFF; --accent-ink:#0E1013; --accent-soft:#23272F; --nav-on:#FFFFFF;
-    --brand:#E8834F; --brand-hover:#F09867; --brand-ink:#170C05; --brand-soft:#2A1E17; --link:#F0A57C; --tile:#0A0B0E;
+    --brand:#E8834F; --brand-hover:#F09867; --brand-ink:#170C05; --brand-soft:#2A1E17; --link:#F0A57C; --tile:#0A0B0E; --chart:#D46E3B;
     --done-bg:#14271D; --done:#82C9A1; --wait-bg:#2A2314; --wait:#DCB46D;
     --work-bg:#18202F; --work:#9DB3E3; --stuck-bg:#2C1918; --stuck:#EA9F96;
     --plain-bg:#1F232A; --plain:#A9AFBA; --ok-dot:#4CA778;
@@ -47,7 +47,7 @@
   --line:#272B33; --line-soft:#1F232A; --line-strong:#383E49;
   --ink:#E9EBEF; --ink-2:#C9CDD5; --muted:#9AA1AD; --faint:#868D99;
   --accent:#E9EBEF; --accent-hover:#FFFFFF; --accent-ink:#0E1013; --accent-soft:#23272F; --nav-on:#FFFFFF;
-  --brand:#E8834F; --brand-hover:#F09867; --brand-ink:#170C05; --brand-soft:#2A1E17; --link:#F0A57C; --tile:#0A0B0E;
+  --brand:#E8834F; --brand-hover:#F09867; --brand-ink:#170C05; --brand-soft:#2A1E17; --link:#F0A57C; --tile:#0A0B0E; --chart:#D46E3B;
   --done-bg:#14271D; --done:#82C9A1; --wait-bg:#2A2314; --wait:#DCB46D;
   --work-bg:#18202F; --work:#9DB3E3; --stuck-bg:#2C1918; --stuck:#EA9F96;
   --plain-bg:#1F232A; --plain:#A9AFBA; --ok-dot:#4CA778;

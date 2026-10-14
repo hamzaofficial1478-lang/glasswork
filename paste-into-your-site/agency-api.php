@@ -1,6 +1,6 @@
 <?php
 /**
- * agency-api.php — FULL ACCESS for YOUR-WEBSITE  (version 9)
+ * agency-api.php — FULL ACCESS for YOUR-WEBSITE  (version 10)
  *
  * This is the door. Put this ONE file on your server and the agency can read
  * and edit your pages itself, instead of handing you homework.
@@ -42,7 +42,10 @@
  *   - run a command, or read any other file
  *   - read or change your database, except your blog's posts table: it may add
  *     a post to it, and take away only a post it added itself
- *   - overwrite itself or your token
+ *   - change your token, or replace itself with anything but a NEWER copy of
+ *     this same file — sent by the agency with your token, checked before it
+ *     goes in (it must be whole, readable PHP that your server's PHP can run),
+ *     the old copy kept, and put straight back if the new one does not answer
  *
  * And every edit copies the old file to a backup first. Nothing an agent does
  * is one-way: /rollback puts a page back exactly as it was, in one call, and
@@ -85,7 +88,21 @@ header('X-Robots-Tag: noindex, nofollow');   // never let Google index the door
 //                         a few seconds and hands back the rest for next time;
 //                         the list of pages is remembered for a minute instead of
 //                         walking your folders on every call
-const CONNECTOR = 9;
+//
+// WHAT 10 ADDED — "the api auto update ... not on every update to upload the
+// api file ... the program will do that":
+//   it updates itself     the agency sends the newer version of this file and
+//                         it replaces itself — only with a newer copy of the
+//                         same connector, only after the copy has been checked
+//                         to be whole and runnable here, keeping the old copy,
+//                         and putting it back by itself if the new one does not
+//                         answer. Your token and your settings are untouched,
+//                         and so is the SITE_ROOT line below if you changed it.
+//                         This is the last time anybody uploads this by hand.
+const CONNECTOR = 10;
+// The oldest PHP this file runs on. A newer copy that needs more than your
+// server has is refused before it is put in, rather than breaking the door.
+const NEEDS_PHP = '8.0';
 
 // CLEAN ANSWERS, EVEN ON A NOISY HOST. Shared hosting often prints PHP notices
 // and warnings straight into the page, and one line of that above the JSON
@@ -572,13 +589,168 @@ if ($route === '/health' && $method === 'GET') {
            'mode' => 'full-access', 'warnings' => $warn,
            'connector' => CONNECTOR,
            'can' => ['pages', 'head', 'rollback', 'blog', 'remove', 'pictures', 'batch', 'safe-write', 'fingerprint',
-                     'gzip', 'batch-write', 'text-files', 'short-holds'],
+                     'gzip', 'batch-write', 'text-files', 'short-holds', 'self-update'],
+           'self_update' => self_update_problem(),
            'packing' => function_exists('gzencode') && function_exists('gzdecode'),
            'limits' => ['batch_max' => BATCH_MAX, 'read_budget_seconds' => READ_BUDGET,
                         'post_max_size' => (string)ini_get('post_max_size'),
                         'upload_max_filesize' => (string)ini_get('upload_max_filesize'),
                         'memory_limit' => (string)ini_get('memory_limit'),
                         'max_execution_time' => (int)ini_get('max_execution_time')]]);
+}
+
+// --- a newer copy of this file (version 10) --------------------------------
+//
+// "the api auto update not on every update to uplaod the api file ... as we
+//  are building the program for non IT USERS"
+//
+// The agency sends {version, code (base64), sha256}. In order, and nothing is
+// changed until every check has passed:
+//
+//   whole          the code's sha256 matches what was sent with it
+//   newer          its CONNECTOR number is higher than this one's
+//   the same file  it is this connector (its own first lines), not any PHP
+//   runs here      PHP can read it (no syntax error) and your PHP is at least
+//                  the version it says it needs
+//   yours kept     your SITE_ROOT line, if you changed it, goes into the new
+//                  copy; your token is in token.php and is never touched
+//
+// Then the old copy is kept in backups/, the new one goes in whole (written
+// beside this file and swapped in one step), and this file asks the website
+// for /health as a visitor would. If the new copy answers with an error, the
+// old one is put back at once. If the website cannot call itself (some hosts
+// block that), the new copy stays — it has already been checked — and the
+// agency asks for /health itself straight afterwards.
+const UPDATE_MAX = 1024 * 1024;
+
+function self_update_problem(): string {
+    if (!function_exists('token_get_all')) {
+        return 'your host has PHP\'s tokenizer switched off, so a new copy cannot be checked before it goes in';
+    }
+    if (!is_writable(__FILE__) || !is_writable(__DIR__)) {
+        return 'the agency-api folder is not writable, so the connector cannot replace itself';
+    }
+    return '';
+}
+
+function own_address(): string {
+    $https = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off')
+          || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+          || (string)($_SERVER['SERVER_PORT'] ?? '') === '443';
+    $host = (string)($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? ''));
+    $path = parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
+    return ($https ? 'https' : 'http') . '://' . $host . $path;
+}
+
+/**
+ * Ask this website for /health, as a visitor would. 'new' = the new copy
+ * answered; 'old' = the host is still running the old copy from its cache;
+ * 'broken' = it answered with an error; 'unknown' = it could not ask itself.
+ */
+function ask_self(string $token, int $want): string {
+    $url = own_address() . '?do=health&n=' . mt_rand();
+    $heads = ["X-Agency-Token: $token", "Authorization: Bearer $token", 'Accept: application/json'];
+    $body = null;
+    $code = 0;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10,
+                                CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_HTTPHEADER => $heads]);
+        $got = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($got === false || $code === 0) { return 'unknown'; }
+        $body = (string)$got;
+    } elseif (filter_var(ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN)) {
+        $ctx = stream_context_create(['http' => ['method' => 'GET', 'timeout' => 10,
+                                                 'ignore_errors' => true,
+                                                 'header' => implode("\r\n", $heads) . "\r\n"]]);
+        $got = @file_get_contents($url, false, $ctx);
+        if ($got === false) { return 'unknown'; }
+        $body = (string)$got;
+        foreach ((array)($http_response_header ?? []) as $h) {
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', (string)$h, $m)) { $code = (int)$m[1]; }
+        }
+    } else {
+        return 'unknown';
+    }
+    $j = json_decode($body, true);
+    if (!is_array($j)) {
+        // A firewall's own page is not the connector failing; a server error is.
+        return $code >= 500 ? 'broken' : 'unknown';
+    }
+    if (empty($j['ok'])) { return 'broken'; }
+    $v = (int)($j['connector'] ?? 0);
+    return $v === $want ? 'new' : ($v === CONNECTOR ? 'old' : 'broken');
+}
+
+function put_in_place(string $code): bool {
+    $tmp = __DIR__ . '/.index-' . bin2hex(random_bytes(4)) . '.tmp';
+    if (@file_put_contents($tmp, $code, LOCK_EX) !== strlen($code)) { @unlink($tmp); return false; }
+    if (!@rename($tmp, __FILE__)) { @unlink($tmp); return false; }
+    if (function_exists('opcache_invalidate')) { @opcache_invalidate(__FILE__, true); }
+    clearstatcache(true, __FILE__);
+    return true;
+}
+
+if ($route === '/self-update' && $method === 'POST') {
+    $why = self_update_problem();
+    if ($why !== '') { fail(409, $why . ' — upload the new agency-api folder by hand this once'); }
+    $ver = (int)($body['version'] ?? 0);
+    $code = base64_decode((string)($body['code'] ?? ''), true);
+    if (!is_string($code) || $code === '' || strlen($code) > UPDATE_MAX) {
+        fail(400, 'the new copy did not arrive whole — nothing was changed');
+    }
+    if (!hash_equals(hash('sha256', $code), strtolower((string)($body['sha256'] ?? '')))) {
+        fail(400, 'the new copy was damaged on the way (its fingerprint does not match) — nothing was changed');
+    }
+    if ($ver <= CONNECTOR) {
+        reply(['ok' => true, 'unchanged' => true, 'connector' => CONNECTOR,
+               'head' => 'the connector is already version ' . CONNECTOR]);
+    }
+    if (strncmp($code, '<?php', 5) !== 0 || strpos(substr($code, 0, 400), 'agency-api.php — FULL ACCESS') === false
+            || !preg_match('/^const CONNECTOR = (\d+);/m', $code, $m) || (int)$m[1] !== $ver) {
+        fail(400, 'that is not a newer copy of this connector — nothing was changed');
+    }
+    if (preg_match("/^const NEEDS_PHP = '([0-9.]+)';/m", $code, $need) && version_compare(PHP_VERSION, $need[1], '<')) {
+        fail(409, 'the new connector needs PHP ' . $need[1] . ' and your website runs PHP ' . PHP_VERSION
+                . '. Ask your host to raise the PHP version (most control panels have a PHP version setting) — nothing was changed');
+    }
+    try {
+        token_get_all($code, TOKEN_PARSE);
+    } catch (\Throwable $e) {
+        fail(400, 'the new copy would not run on your website (' . substr($e->getMessage(), 0, 160) . ') — nothing was changed');
+    }
+    $mine = (string)file_get_contents(__FILE__);
+    if (preg_match("/^define\('SITE_ROOT',.*$/m", $mine, $root)) {
+        $code = preg_replace_callback("/^define\('SITE_ROOT',.*$/m", fn() => $root[0], $code, 1);
+    }
+    if (!is_dir(BACKUP_DIR) && !@mkdir(BACKUP_DIR, 0755, true)) {
+        fail(500, 'the backups folder could not be made, so the old copy could not be kept — nothing was changed');
+    }
+    $lock = @fopen(BACKUP_DIR . '/.self-update.lock', 'c');
+    if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
+        fail(423, 'another update of the connector is already going in — try again in a minute');
+    }
+    $kept = BACKUP_DIR . '/connector-v' . CONNECTOR . '-' . date('Ymd-His') . '.php.bak';
+    if (@file_put_contents($kept, $mine, LOCK_EX) !== strlen($mine)) {
+        fail(500, 'the old copy could not be kept, so nothing was changed');
+    }
+    if (!put_in_place($code)) {
+        fail(500, 'the new copy could not be written into the agency-api folder — the old one is still in place');
+    }
+    $seen = ask_self($expected, $ver);
+    if ($seen === 'broken') {
+        $back = put_in_place($mine);
+        fail(502, 'the new connector answered with an error, so the old one was '
+                . ($back ? 'put straight back — nothing else changed' : 'meant to be put back but could not be: copy '
+                . basename($kept) . ' from agency-api/backups over index.php'));
+    }
+    flock($lock, LOCK_UN);
+    reply(['ok' => true, 'from' => CONNECTOR, 'to' => $ver, 'checked' => $seen, 'kept' => basename($kept),
+           'head' => 'the connector updated itself from version ' . CONNECTOR . ' to ' . $ver
+                   . ($seen === 'new' ? '' : ($seen === 'old' ? ' (your host is still serving the old copy from its cache for a few minutes)'
+                                                              : ' (your website could not call itself to check, so the agency checks next)'))]);
 }
 
 // --- what pages are there --------------------------------------------------
