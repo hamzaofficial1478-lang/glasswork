@@ -5,9 +5,13 @@ licence_tests.py — run: python -m coordination.licence_tests   (python3 on mac
      or cannot write posts more then 1 a day ... even user will use his own llm
      or will use our llm the user will be limitated with the plan he selected"
 
-Botix Home's licences.php on a real PHP server; the publisher's program
-switching plans on, making keys and changing plans; and a customer's copy
-keeping to them. What has to hold:
+Botix Home's licences.php on a real PHP server — the backend — driven through
+its owner routes the way his dashboard will drive them, and a customer's copy
+keeping to the plans it sets. What has to hold:
+
+  admin lives in the backend: the program has no Customers room, no route
+    that makes keys or changes plans, and the plan key is made on the backend
+    and never leaves it; a release only picks up its public half
 
   a plan is a plan: leads, emails and posts a day for each website, the words
     in a post, the websites, Website Check reports a month — counted by the
@@ -57,15 +61,47 @@ ENV_KEYS = ("GLASSWORK_PUBLISHER_FILE", "AGENCY_DATA", "AGENCY_ACCOUNT", "AGENCY
             "GLASSWORK_LICENCE_HOME", "GLASSWORK_LICENCE_KEY", "AGENCY_KEY", "SMTP_HOST", "SMTP_USER")
 
 
+class Dashboard:
+    """What his dashboard on the backend will do: the Home's owner routes, with his Home key."""
+
+    @staticmethod
+    def call(do, body=None):
+        return publisher._ask(do, "POST" if body is not None else "GET", body)
+
+    def setup(self, rotate=False):
+        return self.call("licence-setup", {"rotate": True} if rotate else {})
+
+    def settings(self, changes=None):
+        return self.call("licence-settings", changes) if changes else self.call("licence-settings")
+
+    def list(self):
+        return self.call("licence-list")
+
+    def new(self, plan, email="", name="", days=30, note="", trial=False):
+        return self.call("licence-new", {"plan": plan, "email": email, "name": name, "days": days, "note": note,
+                                         "status": "trial" if trial else "active"})
+
+    def change(self, lid, **change):
+        return self.call("licence-change", {"id": lid, **change})
+
+    def unbind(self, lid, websites=False):
+        return self.call("licence-unbind", {"id": lid, "websites": websites})
+
+
+dash = Dashboard()
+
+
 class World:
-    """His Home and his program (the owner), and a customer's copy on another computer."""
+    """His backend and his program (the owner), and a customer's copy on another computer."""
 
     def __init__(self, h):
         self.h = h
         self.owner = {k: os.environ.get(k) for k in ENV_KEYS}
-        made = publisher.licence_setup()
-        assert made.get("ok"), made
-        self.setup = made
+        made = dash.setup()
+        assert made.get("ok") and made.get("ready"), made
+        picked = publisher.licence_key_from_home()
+        assert picked.get("ok"), picked
+        self.setup = {**made, "settings": dash.settings()}
         self.public = dict(product.publisher()["public"])
         self.root = Path(h.dir)
         self.copies = {}
@@ -146,10 +182,35 @@ def _sub(sid, cus, price, status="active", start=None, end=None, cancel_end=Fals
 
 # ---------------------------------------------------------------------------
 
+def test_admin_is_in_the_backend(w):
+    print("\nAdmin lives in the backend, not the program:")
+    root = Path(__file__).parents[1]
+    js = (root / "ui" / "publisher.js").read_text(encoding="utf-8")
+    app = (root / "ui" / "app.html").read_text(encoding="utf-8")
+    server = (root / "server.js").read_text(encoding="utf-8")
+    pub = (root / "coordination" / "publisher.py").read_text(encoding="utf-8")
+    check("no Customers room in his copy of the program", ("customers" in js.lower(), "#customers" in app), (False, False))
+    check("no office route that makes keys or changes plans",
+          [r for r in ("/api/publisher/licences", "licence-new", "licence-change", "licence-settings", "licence-key", "licence-unbind")
+           if r in server], [])
+    check("his program has no call that makes keys, changes plans or reads customers",
+          [r for r in ("licence-new", "licence-change", "licence-settings", "licence-list", "licence-unbind", "licence-setup")
+           if r in pub], [])
+    check("the plan key's private half is made on the backend; none is on his computer",
+          (list(Path(os.environ["GLASSWORK_SIGNING_KEY"]).parent.glob("licence*")), "seed" in json.dumps(w.setup)), ([], False))
+    pub_only = urllib.request.urlopen(w.h.url + "/glasswork-home/index.php?do=licence-public", timeout=10).read().decode()
+    check("anyone may read the public half — and only that", (json.loads(pub_only).get("public_key"), "seed" in pub_only),
+          (w.setup["public_key"], False))
+    code, _ = w.h.raw("/glasswork-home/index.php?do=licence-list")
+    code2, _ = w.h.raw("/glasswork-home/index.php?do=licence-new", {"plan": "pro", "email": "me@example.com"})
+    code3, _ = w.h.raw("/glasswork-home/index.php?do=licence-setup", {"rotate": True})
+    check("the owner's routes refuse anyone without his key", (code, code2, code3), (401, 401, 401))
+
+
 def test_switching_plans_on(w):
-    print("\nThe publisher switches plans on:")
-    check("his licence key is made and his Home holds it", w.setup.get("ok"), True)
-    check("  the public half goes in what a release carries",
+    print("\nPlans are switched on in the backend:")
+    check("the plan key is made there", (w.setup.get("ok"), w.setup.get("ready")), (True, True))
+    check("  the version he puts out picks up its public half by itself",
           json.loads(publisher.release_product_json()).get("licence_key"), w.setup["public_key"])
     plans = w.setup["settings"]["plans"]
     check("the plans on his website are there: Starter, Growth, Pro", list(plans), ["starter", "growth", "pro"])
@@ -160,9 +221,25 @@ def test_switching_plans_on(w):
           (plans["pro"]["websites"], plans["pro"]["limits"]["leads"]["n"], plans["pro"]["limits"]["mails"]["n"],
            plans["pro"]["limits"]["posts"]["n"], plans["pro"]["post_words"], plans["pro"]["features"]),
           (2, 50, 30, 2, 1200, ["own_logo"]))
-    again = publisher.licence_setup()
-    check("pressing it again keeps the same key (customers' copies keep working)",
-          again.get("public_key"), w.setup["public_key"])
+    again = dash.setup()
+    check("switching on again keeps the same key (customers' copies keep working)",
+          (again.get("public_key"), publisher.licence_key_from_home().get("ok")), (w.setup["public_key"], True))
+    p = product.publisher()
+    p["public"]["licence_key"] = "A" * 43 + "="
+    publisher._save_pub(p)
+    changed = publisher.licence_key_from_home()
+    check("  a backend key that is not the one his last version carried stops a release, and says why",
+          (changed.get("ok"), changed.get("changed")), (False, True))
+    p["public"]["licence_key"] = w.setup["public_key"]
+    publisher._save_pub(p)
+    edited = dash.settings({"plans": {"starter": {"name": "<b>Starter</b>", "websites": 999, "post_words": -5,
+                                                  "features": ["own_logo", "anything"],
+                                                  "limits": {"leads": {"n": 7, "per": "week", "scope": "planet"}}}}})
+    st = edited.get("plans", {}).get("starter", {})
+    check("plans the dashboard sends are made safe by the backend",
+          (st.get("name"), st.get("websites"), st.get("post_words"), st.get("features"), st.get("limits", {}).get("leads")),
+          ("Starter", 50, 0, ["own_logo"], {"n": 7, "per": "day", "scope": "site"}))
+    dash.settings({"plans": w.setup["settings"]["plans"]})
     check("his own copy never asks for a key", (licence.owner_copy(), licence.enabled(), licence.take("leads").get("ok")),
           (True, False, True))
     fake = Path(w.h.dir) / "fake-owner.json"
@@ -177,7 +254,7 @@ def test_switching_plans_on(w):
 
 def test_a_key_on_a_computer(w):
     print("\nA customer enters the key they bought:")
-    made = publisher.licence_new("starter", "aisha@example.com", "Aisha Trading", days=30, note="bank transfer")
+    made = dash.new("starter", "aisha@example.com", "Aisha Trading", days=30, note="bank transfer")
     check("he makes a Starter plan sold by hand, and sees its key once", bool(re.fullmatch(r"BTX(-[0-9A-Z]{5}){4}", made.get("key", ""))), True)
     w.key = made["key"]
     w.lic_id = made["licence"]["id"]
@@ -214,7 +291,7 @@ def test_a_plan_is_a_plan(w):
     two = licence.take("leads", site="another-website")
     check("a second website is beyond a 1-website plan", (two.get("ok"), "covers 1 website" in two.get("error", "")), (False, True))
     w.as_owner()
-    ch = publisher.licence_change(w.lic_id, plan="growth", note="upgraded on the phone")
+    ch = dash.change(w.lic_id, plan="growth", note="upgraded on the phone")
     check("he upgrades them to Growth mid-month", (ch.get("ok"), ch["licence"]["plan"]), (True, "growth"))
     w.copy("one")
     licence.check(force=True)
@@ -229,7 +306,7 @@ def test_a_plan_is_a_plan(w):
     check("one Website Check report a month on Growth", (first.get("ok"), month.get("ok")), (True, False))
     check("  the second says when the plan renews", "This month's Website Check reports are used up" in month.get("error", ""), True)
     w.as_owner()
-    publisher.licence_change(w.lic_id, restart=True)
+    dash.change(w.lic_id, restart=True)
     w.copy("one")
     check("  a new month (a renewal) brings it back", licence.take("checks").get("ok"), True)
     meters = {m["kind"]: m for m in licence.view()["meters"]}
@@ -239,7 +316,7 @@ def test_a_plan_is_a_plan(w):
 def test_stopping(w):
     print("\nCancelled or ended means stopped — at once, with the work kept:")
     w.as_owner()
-    publisher.licence_change(w.lic_id, status="cancelled", note="asked to stop")
+    dash.change(w.lic_id, status="cancelled", note="asked to stop")
     w.copy("one")
     c = licence.check(force=True)
     check("cancelled: the copy stops at its next check", (c.get("ok"), "cancelled" in c.get("error", "")), (False, True))
@@ -250,7 +327,7 @@ def test_stopping(w):
     from pipelines import seo_fixer
     check("  nor does the Fix button", seo_fixer.start("title_missing").get("plan"), True)
     w.as_owner()
-    publisher.licence_change(w.lic_id, status="active")
+    dash.change(w.lic_id, status="active")
     w.copy("one")
     check("started again: it works again", licence.check(force=True).get("ok"), True)
     w.edit(w.key, lambda d: d.update(period_end=int(time.time()) - 86400))
@@ -259,11 +336,11 @@ def test_stopping(w):
     e = licence.check(force=True)
     check("past the grace days: ended", (e.get("ok"), "ended" in e.get("error", "")), (False, True))
     w.as_owner()
-    publisher.licence_change(w.lic_id, extend_days=30, note="renewed by transfer")
+    dash.change(w.lic_id, extend_days=30, note="renewed by transfer")
     w.copy("one")
     check("he adds 30 days: working again", licence.check(force=True).get("ok"), True)
     w.as_owner()
-    hist = [x["what"] for x in publisher.licences()["licences"][0]["history"]]
+    hist = [x["what"] for x in dash.list()["licences"][0]["history"]]
     check("his records say what happened, in order",
           [x for x in hist if x in ("bought", "upgraded", "new_period", "cancelled", "reactivated", "renewed")],
           ["bought", "upgraded", "new_period", "cancelled", "reactivated", "renewed"])
@@ -288,7 +365,7 @@ def test_one_computer(w):
     last = licence.activate(w.key, move=True)
     check("a key moves 3 times a month and no more", (last.get("ok"), "3 times in the last month" in last.get("error", "")), (False, True))
     w.as_owner()
-    publisher.licence_unbind(w.lic_id)
+    dash.unbind(w.lic_id)
     w.copy("one")
     check("he can clear its computers (a new laptop, a reinstall)", licence.activate(w.key).get("working"), True)
     # Two copies at once with the same key: a copied data folder.
@@ -314,7 +391,7 @@ def test_one_computer(w):
 def test_offline(w):
     print("\nWithout the internet for a while:")
     w.as_owner()
-    publisher.licence_unbind(w.lic_id)
+    dash.unbind(w.lic_id)
     w.copy("one", run="eeee5555")
     licence.activate(w.key)
     licence.check(force=True)
@@ -336,7 +413,7 @@ def test_offline(w):
           {m["kind"]: m["used"] for m in licence.view()["meters"]}["mails"], 15)
     check("  (leads untouched)", {m["kind"]: m["used"] for m in licence.view()["meters"]}["leads"], leads_now)
     w.as_owner()
-    publisher.licence_settings({"offline_days": 0})
+    dash.settings({"offline_days": 0})
     w.copy("one", run="eeee5555")
     licence.check(force=True)
     os.environ["GLASSWORK_LICENCE_HOME"] = "http://127.0.0.1:9"
@@ -346,7 +423,7 @@ def test_offline(w):
           (off.get("ok"), "reach its plan server" in off.get("error", "")), (False, True))
     os.environ.pop("GLASSWORK_LICENCE_HOME", None)
     w.as_owner()
-    publisher.licence_settings({"offline_days": 3})
+    dash.settings({"offline_days": 3})
 
 
 def test_cannot_be_edited_here(w):
@@ -387,7 +464,7 @@ def test_gates(w):
     board.DB = d / "agency.db"
     try:
         w.as_owner()
-        fresh = publisher.licence_new("starter", "omar@example.com", days=30)
+        fresh = dash.new("starter", "omar@example.com", days=30)
         w.copy("gates", run="abab1212", sites=(("Omar Glass", "https://omar-glass.example"),))
         licence.activate(fresh["key"])
         biz = [{"company": f"Marina Fitout {i} LLC", "segment": "fitout_contractor", "area": "Dubai Marina",
@@ -422,7 +499,7 @@ def test_gates(w):
         website_check.save_brand(name="Omar Glass", logo=png)
         check("his logo is kept, but not on the reports on Starter", (website_check.brand().get("name"), website_check.brand().get("logo")), ("Omar Glass", ""))
         w.as_owner()
-        publisher.licence_change(fresh["licence"]["id"], plan="pro")
+        dash.change(fresh["licence"]["id"], plan="pro")
         w.copy("gates", run="abab1212")
         licence.check(force=True)
         check("on Pro his logo is on them", website_check.brand().get("logo"), png)
@@ -436,23 +513,23 @@ def test_gates(w):
 def test_stripe(w):
     print("\nStripe tells the Home who bought, upgraded, renewed and cancelled:")
     w.as_owner()
-    s = publisher.licence_settings({"stripe_secret": "whsec_test_secret", "cancel_effect": "now",
+    s = dash.settings({"stripe_secret": "whsec_test_secret", "cancel_effect": "now",
                                     "prices": {"price_starter": {"plan": "starter"}, "price_growth": {"plan": "growth"},
                                                "price_pro_ai": {"plan": "pro", "variant": "ai"}}})
     check("his Stripe settings are saved; the secret is never read back", (s.get("ok"), s.get("has_stripe_secret"), "stripe_secret" in s), (True, True, False))
     check("  he is given the two addresses to put in Stripe", ("do=stripe" in s.get("webhook_url", ""), "{CHECKOUT_SESSION_ID}" in s.get("welcome_url", "")), (True, True))
-    before = len(publisher.licences()["licences"])
+    before = len(dash.list()["licences"])
     trial_end = int(time.time()) + 14 * 86400
     check("a message not signed by Stripe changes nothing",
           (w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_x", "cus_x", "price_pro_ai")}}, sign=False),
-           len(publisher.licences()["licences"])), (400, before))
+           len(dash.list()["licences"])), (400, before))
     check("  nor one signed with the wrong secret, or an old one",
           (w.stripe({"type": "checkout.session.completed", "data": {"object": {}}}, secret="whsec_wrong"),
            w.stripe({"type": "checkout.session.completed", "data": {"object": {}}}, t=time.time() - 3600)), (400, 400))
     w.stripe({"type": "checkout.session.completed", "data": {"object": {"id": "cs_test_1", "customer": "cus_1", "subscription": "sub_1",
                                                                         "customer_details": {"email": "Buyer@Example.com"}}}})
     w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_1", "cus_1", "price_starter", "trialing", trial_end=trial_end)}})
-    lic = next(x for x in publisher.licences()["licences"] if x["email"] == "buyer@example.com")
+    lic = next(x for x in dash.list()["licences"] if x["email"] == "buyer@example.com")
     check("a new customer on a 14-day trial of Starter", (lic["plan"], lic["status"], lic["source"], lic["period_end"]), ("starter", "trial", "stripe", trial_end))
     page = w.page("/glasswork-home/index.php?do=welcome&session=cs_test_1")
     key = (re.search(r"BTX(-[0-9A-Z]{5}){4}", page) or [""])[0]
@@ -463,7 +540,7 @@ def test_stripe(w):
     now = int(time.time())
     w.stripe({"type": "customer.subscription.updated", "data": {"object": _sub("sub_1", "cus_1", "price_growth", "active", now, now + 30 * 86400)}})
     w.as_owner()
-    lic = next(x for x in publisher.licences()["licences"] if x["email"] == "buyer@example.com")
+    lic = next(x for x in dash.list()["licences"] if x["email"] == "buyer@example.com")
     check("they pay and upgrade to Growth: the Home knows, and since when",
           (lic["plan"], lic["status"], lic["plan_since"] >= now - 5, "upgraded" in [h["what"] for h in lic["history"]]), ("growth", "active", True, True))
     w.copy("buyer", run="b0b0b0b0")
@@ -474,7 +551,7 @@ def test_stripe(w):
     w.stripe({"type": "customer.subscription.updated", "data": {"object": _sub("sub_1", "cus_1", "price_growth", "active", now, now + 30 * 86400)}})
     check("  they change their mind: working again", licence.check(force=True).get("ok"), True)
     w.as_owner()
-    publisher.licence_settings({"cancel_effect": "period_end"})
+    dash.settings({"cancel_effect": "period_end"})
     w.stripe({"type": "customer.subscription.updated", "data": {"object": _sub("sub_1", "cus_1", "price_growth", "active", now, now + 30 * 86400, cancel_end=True)}})
     w.copy("buyer", run="b0b0b0b0")
     licence.check(force=True)
@@ -487,12 +564,12 @@ def test_stripe(w):
     w.stripe({"type": "customer.subscription.deleted", "data": {"object": _sub("sub_1", "cus_1", "price_growth", "canceled", now, now + 30 * 86400)}})
     check("Stripe ends the subscription: stopped", licence.check(force=True).get("ok"), False)
     w.as_owner()
-    publisher.licence_settings({"cancel_effect": "now"})
+    dash.settings({"cancel_effect": "now"})
     # The same person again, for a second trial — the messages in the other order this time.
     w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_2", "cus_2", "price_starter", "trialing", trial_end=trial_end)}})
     w.stripe({"type": "checkout.session.completed", "data": {"object": {"id": "cs_test_2", "customer": "cus_2", "subscription": "sub_2",
                                                                         "customer_details": {"email": "buyer@example.com"}}}})
-    second = [x for x in publisher.licences()["licences"] if x["email"] == "buyer@example.com" and x["id"] != lic["id"]]
+    second = [x for x in dash.list()["licences"] if x["email"] == "buyer@example.com" and x["id"] != lic["id"]]
     check("one trial per customer: a second trial for the same address is refused",
           [x["status"] for x in second], ["trial_used"])
     k2 = (re.search(r"BTX(-[0-9A-Z]{5}){4}", w.page("/glasswork-home/index.php?do=welcome&session=cs_test_2")) or [""])[0]
@@ -523,7 +600,7 @@ def main() -> int:
     with Home() as h:
         w = World(h)
         try:
-            for t in (test_switching_plans_on, test_a_key_on_a_computer, test_a_plan_is_a_plan, test_stopping,
+            for t in (test_admin_is_in_the_backend, test_switching_plans_on, test_a_key_on_a_computer, test_a_plan_is_a_plan, test_stopping,
                       test_one_computer, test_offline, test_cannot_be_edited_here, test_gates, test_stripe,
                       test_nothing_of_the_work_reaches_the_home):
                 try:
@@ -537,7 +614,8 @@ def main() -> int:
         finally:
             w.as_owner()
     publish_tests._fail.clear()
-    check("\nthe program's own config folder was never written", stray.exists(), was_there)
+    print("\nAnd afterwards:")
+    check("the program's own config folder was never written", stray.exists(), was_there)
     print("\nAll green." if not _fail else f"\n{len(_fail)} FAILED: " + "; ".join(_fail))
     return 1 if _fail else 0
 

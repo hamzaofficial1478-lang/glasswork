@@ -472,8 +472,6 @@ const SETUP_API = [
   "/api/connect",
   // The developer's Home: making it and its download carry his key.
   "/api/publisher/setup", "/api/publisher/home.zip", "/api/publisher/publish",
-  // His customers: their addresses, and making keys.
-  "/api/publisher/licences",
 ];
 // Reading the count needs no second password; setting the address, and seeing the owner key, does.
 const SETUP_POSTS = ["/api/publisher/online"];
@@ -1004,11 +1002,6 @@ app.get("/api/publisher/online", async (_q, res) => {
 app.post("/api/publisher/online", async (req, res) => {
   const b = req.body || {};
   res.json(await pyStdin("coordination.publisher", ["--online"], { url: textField(b.url, 300), key: textField(b.key, 200) }, 30000));
-});
-// His customers: plans, keys, payments (coordination/publisher.py licence_*). Behind the Setup password.
-app.post("/api/publisher/licences", async (req, res) => {
-  const b = req.body || {};
-  res.json(await pyStdin("coordination.publisher", ["--licences"], b, 120000));
 });
 app.get("/api/publisher/job", async (_q, res) => {
   try { res.json({ ok: true, ...JSON.parse(fs.readFileSync(publishJob(), "utf8")) }); }

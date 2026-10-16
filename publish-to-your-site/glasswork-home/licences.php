@@ -10,7 +10,13 @@
  *   ?do=licence-release   (a copy)  this computer gives its place back
  *   ?do=stripe            (Stripe)  a payment, an upgrade, a cancellation — signed by Stripe
  *   ?do=welcome           (a buyer) after paying: the key, shown on the thank-you page
+ *   ?do=licence-public    (anyone)  the public half of the plan key, for a release to carry
  *   ?do=licence-list / -new / -change / -key / -unbind / -settings / -setup   (the owner)
+ *
+ * THIS IS THE BACKEND. Customers, plans, keys and payments are managed here —
+ * by the owner's dashboard, through the owner routes above (his Home key) —
+ * never from inside the program. The program only enters a key, shows the
+ * plan and keeps to it. docs/BACKEND.md lists every route.
  *
  * WHAT A PLAN IS
  *
@@ -51,9 +57,58 @@ const LIC_TRIES_HOUR = 30;              // keys entered from one address in an h
 
 function lic_dir(): string { return private_dir('licences'); }
 
+/** The plans on the website (website/botix.html), until the owner saves his own. */
+function lic_default_plans(): array {
+    $day = fn(int $n) => ['n' => $n, 'per' => 'day', 'scope' => 'site'];
+    $month = fn(int $n) => ['n' => $n, 'per' => 'period', 'scope' => 'account'];
+    return [
+        'starter' => ['name' => 'Starter', 'websites' => 1, 'post_words' => 400, 'devices' => 1, 'features' => [],
+                      'limits' => ['leads' => $day(7), 'mails' => $day(5), 'posts' => $day(1), 'checks' => $month(0)]],
+        'growth' => ['name' => 'Growth', 'websites' => 2, 'post_words' => 800, 'devices' => 1, 'features' => [],
+                     'limits' => ['leads' => $day(20), 'mails' => $day(15), 'posts' => $day(1), 'checks' => $month(1)]],
+        'pro' => ['name' => 'Pro', 'websites' => 2, 'post_words' => 1200, 'devices' => 1, 'features' => ['own_logo'],
+                  'limits' => ['leads' => $day(50), 'mails' => $day(30), 'posts' => $day(2), 'checks' => $month(1)]],
+    ];
+}
+
+/** Plans as the owner's dashboard sent them, made safe to count against. */
+function lic_clean_plans($plans): array {
+    $out = [];
+    foreach ((array)$plans as $pid => $pl) {
+        $pid = substr(preg_replace('/[^a-z0-9_-]/', '', strtolower((string)$pid)), 0, 30);
+        if ($pid === '' || !is_array($pl)) { continue; }
+        $limits = [];
+        foreach (['leads', 'mails', 'posts', 'checks'] as $kind) {
+            $lim = $pl['limits'][$kind] ?? null;
+            if (!is_array($lim)) { continue; }
+            $limits[$kind] = ['n' => max(0, min(100000, (int)($lim['n'] ?? 0))),
+                              'per' => ($lim['per'] ?? 'day') === 'period' ? 'period' : 'day',
+                              'scope' => ($lim['scope'] ?? 'site') === 'account' ? 'account' : 'site'];
+        }
+        $out[$pid] = ['name' => substr(trim(strip_tags((string)($pl['name'] ?? ''))), 0, 40) ?: ucfirst($pid),
+                      'websites' => max(1, min(50, (int)($pl['websites'] ?? 1))),
+                      'post_words' => max(0, min(10000, (int)($pl['post_words'] ?? 0))),
+                      'devices' => max(1, min(20, (int)($pl['devices'] ?? 1))),
+                      'features' => array_values(array_intersect((array)($pl['features'] ?? []), ['own_logo'])),
+                      'limits' => $limits];
+    }
+    return $out;
+}
+
+function lic_clean_prices($prices): array {
+    $out = [];
+    foreach ((array)$prices as $id => $v) {
+        $id = substr(preg_replace('/[^A-Za-z0-9_]/', '', (string)$id), 0, 80);
+        $plan = substr(preg_replace('/[^a-z0-9_-]/', '', strtolower((string)($v['plan'] ?? ''))), 0, 30);
+        if ($id !== '' && $plan !== '') { $out[$id] = ['plan' => $plan, 'variant' => ($v['variant'] ?? '') === 'ai' ? 'ai' : 'own']; }
+    }
+    return $out;
+}
+
 function lic_settings(): array {
     $s = kept(private_dir() . '/licence-settings.php') ?? [];
-    return $s + ['plans' => [], 'cancel_effect' => 'now', 'grace_days' => 3, 'moves_per_month' => 3,
+    if (empty($s['plans'])) { unset($s['plans']); }
+    return $s + ['plans' => lic_default_plans(), 'cancel_effect' => 'now', 'grace_days' => 3, 'moves_per_month' => 3,
                  'offline_days' => 3, 'trial_days' => 14, 'prices' => [], 'pricing_url' => '', 'portal_url' => '',
                  'mail_from' => '', 'stripe_secret' => ''];
 }
@@ -162,7 +217,7 @@ function lic_token(array $lic, string $device): string {
     $key = kept(private_dir() . '/licence-key.php') ?? [];
     $seed = base64_decode((string)($key['seed'] ?? ''), true);
     if (!is_string($seed) || strlen($seed) !== 32 || !function_exists('sodium_crypto_sign_seed_keypair')) {
-        refuse(503, 'the licence server is not set up yet — the owner sets it up from his program');
+        refuse(503, 'plans are not switched on here yet');
     }
     $st = lic_settings();
     $plan = lic_plan($lic);
@@ -636,7 +691,7 @@ if ($do === 'welcome' && $method === 'GET') {
 }
 
 // ---------------------------------------------------------------------------
-// the owner
+// the owner — his dashboard, with his Home key (never the program)
 // ---------------------------------------------------------------------------
 
 function lic_public(array $lic): array {
@@ -666,31 +721,45 @@ function lic_by_id(string $id): array {
     return [$h, $lic, $ix];
 }
 
+/** The public half of the plan key ('' while plans are off). It can check a plan, never sign one. */
+function lic_public_key(): string {
+    $k = kept(private_dir() . '/licence-key.php') ?? [];
+    $seed = base64_decode((string)($k['seed'] ?? ''), true);
+    return (is_string($seed) && strlen($seed) === 32 && function_exists('sodium_crypto_sign_seed_keypair'))
+         ? base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_seed_keypair($seed))) : '';
+}
+
+// What a release carries, so copies can check the plans signed here. Public on purpose.
+if ($do === 'licence-public' && $method === 'GET') {
+    $pub = lic_public_key();
+    answer(['ok' => true, 'ready' => $pub !== '', 'public_key' => $pub]);
+}
+
 if (in_array($do, ['licence-list', 'licence-new', 'licence-change', 'licence-key', 'licence-unbind',
                    'licence-settings', 'licence-setup'], true)) {
     owner_only();
 }
 
+// Switching plans on: the plan key is made HERE, and its private half never leaves this server.
 if ($do === 'licence-setup') {
     $path = private_dir() . '/licence-key.php';
+    $sodium = function_exists('sodium_crypto_sign_seed_keypair');
     if ($method === 'POST') {
-        $seed = base64_decode((string)($body['seed'] ?? ''), true);
-        if (!is_string($seed) || strlen($seed) !== 32) { refuse(400, 'that is not a licence key'); }
-        if (is_file($path) && empty($body['rotate'])) { refuse(409, 'the licence key is already set; send rotate to replace it'); }
-        keep($path, ['seed' => base64_encode($seed), 'at' => time()]);
+        if (!$sodium) { refuse(503, "this hosting's PHP has no sodium, which signing plans needs (PHP 7.2 or newer has it)"); }
+        if (!is_file($path) || !empty($body['rotate'])) {
+            keep($path, ['seed' => base64_encode(random_bytes(32)), 'at' => time()]);
+        }
     }
-    $k = kept($path) ?? [];
-    $seed = base64_decode((string)($k['seed'] ?? ''), true);
-    $pub = (is_string($seed) && strlen($seed) === 32 && function_exists('sodium_crypto_sign_seed_keypair'))
-         ? base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_seed_keypair($seed))) : '';
-    answer(['ok' => true, 'ready' => $pub !== '', 'public_key' => $pub, 'sodium' => function_exists('sodium_crypto_sign_seed_keypair')]);
+    $pub = lic_public_key();
+    answer(['ok' => true, 'ready' => $pub !== '', 'public_key' => $pub, 'sodium' => $sodium]);
 }
 
 if ($do === 'licence-settings') {
     $path = private_dir() . '/licence-settings.php';
     if ($method === 'POST') {
         $cur = kept($path) ?? [];
-        foreach (['plans', 'prices'] as $k) { if (isset($body[$k]) && is_array($body[$k])) { $cur[$k] = $body[$k]; } }
+        if (isset($body['plans']) && is_array($body['plans'])) { $cur['plans'] = lic_clean_plans($body['plans']); }
+        if (isset($body['prices']) && is_array($body['prices'])) { $cur['prices'] = lic_clean_prices($body['prices']); }
         foreach (['grace_days', 'moves_per_month', 'offline_days', 'trial_days'] as $k) {
             if (isset($body[$k])) { $cur[$k] = max(0, min(60, (int)$body[$k])); }
         }
