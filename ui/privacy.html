@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F3F5F5;--surface:#FFFFFF;--line:#D9E0E0;--ink:#142022;--ink-2:#33464A;--muted:#4A5A5D;--accent:#1F5F66;--note-bg:#FFF9EE;--note-line:#EFD9AE}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0E1415;--surface:#151D1F;--line:#283436;--ink:#E3EAEA;--ink-2:#C2CFD0;--muted:#A7B5B7;--accent:#7FC4C7;--note-bg:#2B2414;--note-line:#5A4A26}}
+:root[data-theme="dark"]{--bg:#0E1415;--surface:#151D1F;--line:#283436;--ink:#E3EAEA;--ink-2:#C2CFD0;--muted:#A7B5B7;--accent:#7FC4C7;--note-bg:#2B2414;--note-line:#5A4A26}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.65}
+.wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px}
+a{color:var(--accent)}
+h1{font-size:32px;line-height:1.2;margin:0 0 6px;letter-spacing:-.015em;text-wrap:balance}
+h2{font-size:19px;margin:34px 0 8px;text-wrap:balance}
+p,li{color:var(--ink-2)} ul{padding-left:22px}
+.muted{color:var(--muted);font-size:14.5px}
+.note{padding:14px 16px;border-radius:10px;background:var(--note-bg);border:1px solid var(--note-line);margin:22px 0;font-size:15px}
+nav{display:flex;gap:18px;flex-wrap:wrap;font-size:15px;margin-bottom:28px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:15px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+th{font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+</style>
+</head>
+<body><div class="wrap">
+<nav><a href="/">Back to the program</a><a href="/terms">Terms of use</a></nav>
+<h1>Privacy</h1>
+<p class="muted"><span class="pname">Botix</span> by <span class="pcompany">TECH DUO</span> · version <span class="pver"></span></p>
+<div class="note"><b>Draft for review.</b> This policy has not yet been checked by a lawyer. <span class="pcompany">TECH DUO</span>’s contact details are filled in before public launch.</div>
+
+<h2>The short version</h2>
+<p>The program keeps what it knows encrypted with your password — on your own computer or, when you use it online, on <span class="pcompany">TECH DUO</span>’s server, stored so that nobody without your password can read it, <span class="pcompany">TECH DUO</span> included. <b><span class="pcompany">TECH DUO</span> does not track what you do.</b> Online, the server counts how many people sign in each day — a number, never who. To keep to the plan you bought, the program checks it with <span class="pcompany">TECH DUO</span>’s website: it sends your key and counts of the work done (“one lead”, “one email”), never the work itself. <span class="pcompany">TECH DUO</span> receives a problem report only when you choose to send one, sealed first so that only their own computer can open it. Otherwise information leaves only when you use a feature that needs another service, and only to that service.</p>
+<p>Each person on the computer has their own account. Another account — even on the same computer, in the same copy of the program — cannot open yours: it is locked with your password. The sign-in screen names nobody — each person types their own name — and no file on the computer shows who has an account or which websites they look after.</p>
+
+<h2>What is kept, and where</h2>
+<ul>
+<li>Your account: your name and the keys that lock your data (your password itself is never stored).</li>
+<li>Your business profile and your websites’ details.</li>
+<li>The keys you give it for other services.</li>
+<li>What the agency works with: leads it finds (business names and their published contact details), drafts, approvals, website changes, reports and the record of every action.</li>
+</ul>
+<p>All of it is encrypted with your password. On your own computer the program answers that computer alone; online, it answers only over an encrypted connection (HTTPS). While you are signed in online, the key that opens your data is held in the server’s memory so the agency can work; it is never written down, and it is gone when you sign out. You can turn on two-step sign-in, so that a code from your phone is needed as well as your password.</p>
+
+<h2>What leaves your computer, and where it goes</h2>
+<div class="scroll"><table>
+<thead><tr><th>When you…</th><th>It goes to</th><th>What is sent</th></tr></thead>
+<tbody>
+<tr><td>let the agency think</td><td>the AI company you chose</td><td>the instructions and the information the task needs — for example a lead’s business name when a message is drafted</td></tr>
+<tr><td>connect Search Console</td><td>Google</td><td>requests about your own website</td></tr>
+<tr><td>look for leads</td><td>maps and directory services you connected</td><td>the searches, such as a trade and an area</td></tr>
+<tr><td>approve an email</td><td>your email provider</td><td>that email</td></tr>
+<tr><td>connect your website</td><td>your website</td><td>the changes you approve</td></tr>
+<tr><td>run Website Check</td><td>the website being checked</td><td>ordinary page requests, like any visitor’s</td></tr>
+<tr><td>enter your key, and use the program (before each job, and every few minutes while it is open)</td><td><span class="pcompany">TECH DUO</span>’s plan server, on their website</td><td>your key; a random number made when the program was installed, which says nothing about you or your computer; the name you gave this computer; today’s date; and for each job only its kind and a count — “one lead”, “one post” — with a one-way fingerprint of which of your websites it was for. Never the lead, the email, the post or your website’s address. What comes back is your plan, signed, so the program can carry on for a few days without the internet.</td></tr>
+<tr><td>open the program (and every few hours while it is open)</td><td>the publisher’s website</td><td>a plain request for the newest version — nothing about you or your copy. A new version is installed only when you press Update, and only if it is signed by the publisher.</td></tr>
+<tr><td>send a problem report from Help and reports</td><td>the publisher, sealed, through their website</td><td>what you wrote, the email you give for a reply (if any), the program’s version and the kind of computer — and, only if you tick it, the support report, which you can read first and which has no keys, passwords, email addresses, web addresses, phone numbers or lead details in it. Nothing in it says which copy sent it, and two reports from you cannot be linked. It waits, unreadable, on the publisher’s website until their program collects it, and is deleted there as soon as it is collected. Their answer comes back sealed to that one report.</td></tr>
+</tbody></table></div>
+
+<h2>Your plan</h2>
+<p>When you buy a plan, the payment is handled by Stripe; your card details go to Stripe, never to <span class="pcompany">TECH DUO</span>. <span class="pcompany">TECH DUO</span>’s website then keeps, for your plan: the email address you paid with, which plan it is, when you bought it, changed it, renewed it or cancelled it, and until when it is paid; the computers your key is on (their random numbers, the names you gave them, and when each was last used); a one-way fingerprint of each website the program worked on lately; and counts of the work done each day and each month. Your key itself is kept only as a fingerprint, apart from a copy for the page you see straight after paying, deleted after two days. This is kept while you are a customer, and afterwards only as long as accounting law requires. Ask, and you will be told what is kept about you.</p>
+
+<h2>The people in your leads</h2>
+<p>When the agency finds businesses to contact, you decide what is done with their details, so the law treats you as responsible for them. The program helps: it prefers a business’s published role address (such as info@), never writes to the same contact twice, follows each country’s rules as it knows them, and lets you delete what you no longer need. Stop contacting anyone who asks you to, and delete their details if they ask.</p>
+
+<h2>How long things are kept</h2>
+<p>What the program keeps: as long as you keep it. Old records can be cleared from the program, and deleting your account removes its folder from your computer. Your plan’s details: as above.</p>
+
+<h2>Children</h2>
+<p>The program is for businesses and is not meant for anyone under 18.</p>
+
+<h2>Changes and contact</h2>
+<p>If this policy changes, the new version says so in its notes. Questions: send a report from Help and reports, or write to <span class="pmail">the publisher’s address, added before launch</span>.</p>
+</div>
+<script>
+fetch('/api/product').then((r) => r.json()).then((p) => {
+  if (!p || !p.ok) return;
+  document.querySelectorAll('.pname').forEach((e) => { e.textContent = p.name; });
+  document.querySelectorAll('.pver').forEach((e) => { e.textContent = p.version; });
+  if (p.company) document.querySelectorAll('.pcompany').forEach((e) => { e.textContent = p.company; });
+  if (p.support_email) document.querySelectorAll('.pmail').forEach((e) => { e.textContent = p.support_email; });
+  document.title = 'Privacy — ' + p.name;
+}).catch(() => {});
+</script>
+</body>
+</html>

@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in · Botix</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/botix.css">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:'Geist',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+body{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:44px 16px 56px}
+.head{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+.head img{width:40px;height:40px;border-radius:9px}
+.head b{display:block;font-size:20px;font-weight:700;letter-spacing:-.01em;line-height:1.1}
+.head small{display:block;font-size:10.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+main{width:100%;max-width:440px}
+section{display:none;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:28px 26px;box-shadow:var(--shadow)}
+section.on{display:block}
+h1{font-size:23px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:15.5px;font-weight:600;margin:0 0 4px}
+p.lead{color:var(--muted);font-size:14.5px;line-height:1.6;margin:0 0 18px}
+label{display:block;font-size:13px;font-weight:500;color:var(--ink-2);margin:14px 0 6px}
+label .opt{font-weight:400;color:var(--faint)}
+input[type=text],input[type=password],input[type=url],select{width:100%;min-height:46px;padding:11px 13px;border-radius:9px;
+  border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font:inherit;font-size:15px}
+input::placeholder{color:var(--faint)}
+main a{color:var(--link)}
+input:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:46px;margin-top:20px;padding:0 16px;border-radius:9px;
+  border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;font-size:15px;
+  cursor:pointer;text-align:center;text-decoration:none}
+.btn:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn[disabled]{opacity:.55;cursor:progress}
+.btn.quiet{background:var(--surface);color:var(--accent);border-color:var(--line-strong)}
+.btn.quiet:hover{border-color:var(--accent);background:var(--sunken)}
+.btn.small{display:inline-flex;width:auto;min-height:36px;margin:0;padding:0 12px;font-size:13.5px}
+.links{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px 14px;margin-top:18px;font-size:14px}
+.links a,.link{color:var(--link);text-decoration:none;cursor:pointer;background:none;border:0;font:inherit;padding:0}
+.links a:hover,.link:hover{text-decoration:underline}
+.err{display:none;margin-top:14px;padding:10px 12px;border-radius:8px;background:var(--stuck-bg);
+  border:1px solid var(--bad-line);color:var(--stuck);font-size:14px;line-height:1.5}
+.err.on{display:block}
+.note{padding:12px 14px;border-radius:9px;font-size:14px;line-height:1.55;margin:0 0 16px;
+  background:var(--note-bg);border:1px solid var(--note-line);color:var(--note-ink)}
+.note.ok{background:var(--done-bg);border-color:var(--ok-line);color:var(--done)}
+.promise{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:9px;background:var(--sunken);
+  border:1px solid var(--line);font-size:14px;line-height:1.55;color:var(--ink-2);margin:0 0 6px}
+.promise svg{flex:none;margin-top:2px;color:var(--accent)}
+.key{font-family:'Geist Mono',monospace;font-size:clamp(14px,4.2vw,18px);letter-spacing:.03em;text-align:center;
+  padding:16px 10px;border-radius:10px;border:1px dashed var(--line-strong);background:var(--sunken);color:var(--ink);
+  white-space:nowrap;overflow-x:auto;user-select:all;margin:6px 0 12px;font-variant-numeric:tabular-nums}
+.row{display:flex;gap:10px}
+.row .btn{margin-top:0}
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-size:14px;line-height:1.5;color:var(--ink)}
+.check input{margin-top:3px;accent-color:var(--accent);width:16px;height:16px;flex:none}
+.qr{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 4px}
+.qr img{width:168px;height:168px;border-radius:8px;border:1px solid var(--line);background:#fff;padding:4px}
+.qr .side{flex:1 1 160px;min-width:0;font-size:14px;color:var(--muted);line-height:1.55}
+.steps{margin:0 0 10px;padding-left:20px;color:var(--ink-2);font-size:14px;line-height:1.6}
+.sites{display:grid;gap:10px;margin:14px 0 6px}
+.site{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--sunken)}
+.site .fav{width:30px;height:30px;border-radius:7px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-family:'Geist Mono',monospace;font-size:11px;font-weight:500;background:var(--accent-soft);color:var(--nav-on)}
+.site .nm{flex:1;min-width:0}
+.site .nm b{display:block;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.site .nm small{display:block;color:var(--muted);font-family:'Geist Mono',monospace;font-size:11.5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--done-bg);color:var(--done)}
+.block{border-top:1px solid var(--line-soft);margin-top:22px;padding-top:18px}
+.block p{color:var(--muted);font-size:14px;line-height:1.6;margin:4px 0 0}
+.who{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px}
+.choice{display:block;width:100%;text-align:left;margin-top:12px;padding:14px 16px;border-radius:10px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}
+.choice:hover{border-color:var(--accent);background:var(--sunken)}
+.choice b{display:block;font-size:15px;margin-bottom:3px}
+.choice span{color:var(--muted);font-size:13.5px;line-height:1.5}
+footer{margin-top:22px;color:var(--faint);font-size:13px;text-align:center;max-width:440px;line-height:1.6}
+footer a{color:var(--faint)}
+@media (prefers-reduced-motion:no-preference){section.on{animation:rise .25s ease-out}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}}
+</style>
+</head>
+<body>
+<script src="/opening.js"></script>
+<div class="head"><img src="/logo.svg" alt="" width="40" height="40"><span><b id="product">Botix</b><small id="company">by TECH DUO</small></span></div>
+<main>
+
+  <section id="loading" class="on"><p class="lead" style="margin:0">One moment…</p></section>
+
+  <!-- SIGN IN -->
+  <section id="signin">
+    <h1>Sign in</h1>
+    <p class="lead">Welcome back.</p>
+    <form onsubmit="signIn(event)">
+      <label for="siWho">Your name</label>
+      <input id="siWho" type="text" autocomplete="username" required maxlength="60">
+      <label for="siPw">Password</label>
+      <input id="siPw" type="password" autocomplete="current-password" required>
+      <div id="siCodeBox" style="display:none"><label for="siCode">Six-digit code from your authenticator app</label>
+        <input id="siCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="[0-9 ]*"></div>
+      <button class="btn" id="siBtn">Sign in</button>
+      <div class="err" id="siErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('recover')">Forgot your password?</button>
+      <button class="link" onclick="show('lostphone')">Lost your phone?</button>
+      <button class="link" onclick="show('signup')">Make a new account</button></div>
+  </section>
+
+  <!-- MAKE AN ACCOUNT -->
+  <section id="signup">
+    <h1>Make your account</h1>
+    <p class="promise"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span>Keep your password and recovery key safe and private. Your account is encrypted with your password. We don't keep your password, and we can't open your account without it.</span></p>
+    <div class="note" id="cipherNote" style="display:none"></div>
+    <form onsubmit="signUp(event)">
+      <label for="suName">Your name</label>
+      <input id="suName" type="text" autocomplete="name" required maxlength="60">
+      <div id="suInviteBox" style="display:none"><label for="suInvite">Invitation code</label>
+        <input id="suInvite" type="text" autocomplete="off" maxlength="80"></div>
+      <label for="suPw">Password <span class="opt">· 8 characters or more, not your name</span></label>
+      <input id="suPw" type="password" autocomplete="new-password" required minlength="8">
+      <label for="suPw2">Password again</label>
+      <input id="suPw2" type="password" autocomplete="new-password" required minlength="8">
+      <p style="font-size:13.5px;color:var(--muted);margin:14px 0 0">By making an account you agree to the
+        <a href="/terms" target="_blank" rel="noopener">terms of use</a> and the
+        <a href="/privacy" target="_blank" rel="noopener">privacy policy</a>.</p>
+      <button class="btn" id="suBtn">Make my account</button>
+      <div class="err" id="suErr"></div>
+    </form>
+    <div class="links" id="suBack"><button class="link" onclick="show('signin')">I already have an account</button><span></span></div>
+  </section>
+
+  <!-- THE RECOVERY KEY, SHOWN ONCE -->
+  <section id="recovery">
+    <h1>Save your recovery key</h1>
+    <p class="lead">If you forget your password, this key gets you back in. We show it once and don't keep a copy.</p>
+    <div class="key" id="rkKey">—</div>
+    <div class="row">
+      <button class="btn quiet" onclick="copyKey()" id="rkCopy">Copy</button>
+      <button class="btn quiet" onclick="saveKey()">Save as a file</button>
+    </div>
+    <label class="check"><input type="checkbox" id="rkDone" onchange="$('#rkNext').disabled=!this.checked">
+      <span>I've saved it somewhere safe, away from this device.</span></label>
+    <button class="btn" id="rkNext" disabled onclick="afterKey()">Continue</button>
+  </section>
+
+  <!-- THE AUTHENTICATOR, ASKED FOR STRAIGHT AFTER SIGN-UP -->
+  <section id="twostep">
+    <h1>Add your authenticator</h1>
+    <p class="lead">You'll type a code from it each time you sign in, so your password alone is never enough.</p>
+    <ol class="steps"><li>Open Google Authenticator, Microsoft Authenticator or any authenticator app.</li>
+      <li>Scan this code, or type the key below it.</li><li>Type the six-digit code the app shows.</li></ol>
+    <div class="qr"><img id="tsQr" alt="Code to scan with your authenticator app" hidden>
+      <div class="side">On this phone? <a id="tsLink" href="#">Open it in your authenticator app</a>.</div></div>
+    <div class="key" id="tsKey" style="white-space:normal;word-spacing:.2em;font-size:15px">—</div>
+    <label for="tsCode">Six-digit code</label>
+    <input id="tsCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+    <button class="btn" id="tsBtn" onclick="twoStepOn()">Turn it on</button>
+    <div class="err" id="tsErr"></div>
+    <div class="links"><button class="link" onclick="twoStepLater()">Do this later</button><span></span></div>
+  </section>
+
+  <!-- LOST PHONE: THE PASSWORD AND THE RECOVERY KEY TOGETHER -->
+  <section id="lostphone">
+    <h1>Lost your phone?</h1>
+    <p class="lead">Your password and your recovery key together turn off the authenticator and let you in. You can add it again on your new phone.</p>
+    <form onsubmit="lostPhone(event)">
+      <label for="lpWho">Your name</label>
+      <input id="lpWho" type="text" autocomplete="username" required maxlength="60">
+      <label for="lpPw">Password</label>
+      <input id="lpPw" type="password" autocomplete="current-password" required>
+      <label for="lpKey">Recovery key</label>
+      <input id="lpKey" type="text" autocomplete="off" spellcheck="false" required
+             style="font-family:'Geist Mono',monospace;letter-spacing:.05em" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX">
+      <button class="btn" id="lpBtn">Let me in</button>
+      <div class="err" id="lpErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('signin')">Back to sign in</button><span></span></div>
+  </section>
+
+  <!-- RECOVER WITH THE KEY -->
+  <section id="recover">
+    <h1>Forgot your password?</h1>
+    <p class="lead">Use the recovery key you saved when you made your account, then choose a new password.</p>
+    <form onsubmit="recover(event)">
+      <label for="reWho">Your name</label>
+      <input id="reWho" type="text" autocomplete="username" required maxlength="60">
+      <label for="reKey">Recovery key</label>
+      <input id="reKey" type="text" autocomplete="off" spellcheck="false" required
+             style="font-family:'Geist Mono',monospace;letter-spacing:.05em" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX">
+      <div id="reCodeBox" style="display:none"><label for="reCode">Code from your authenticator app</label>
+        <input id="reCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></div>
+      <label for="rePw">New password</label>
+      <input id="rePw" type="password" autocomplete="new-password" required minlength="8">
+      <label for="rePw2">New password again</label>
+      <input id="rePw2" type="password" autocomplete="new-password" required minlength="8">
+      <button class="btn" id="reBtn">Open my account</button>
+      <div class="err" id="reErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('signin')">Back to sign in</button><span></span></div>
+  </section>
+
+  <!-- FIRST WEBSITE -->
+  <section id="start">
+    <h1>Which website first?</h1>
+    <p class="lead">You can add a second one later.</p>
+    <button class="choice" id="startBring" onclick="bringIn()" style="display:none">
+      <b id="startBringName">Bring in your current website</b>
+      <span>Its leads, orders, approvals and settings are copied into your account and encrypted.</span>
+    </button>
+    <button class="choice" onclick="show('addfirst')"><b>Start with a new website</b>
+      <span>Its name and address. You connect it afterwards.</span></button>
+    <div class="err" id="stErr"></div>
+  </section>
+
+  <section id="addfirst">
+    <h1>Add a website</h1>
+    <form onsubmit="addSite(event,'af')">
+      <label for="afName">Name</label>
+      <input id="afName" type="text" required maxlength="60" placeholder="e.g. Riverside Bakery">
+      <label for="afUrl">Address</label>
+      <input id="afUrl" type="url" required placeholder="https://www.example.com">
+      <button class="btn" id="afBtn">Add it</button>
+      <div class="err" id="afErr"></div>
+    </form>
+    <div class="links"><button class="link" onclick="show('start')">Back</button><span></span></div>
+  </section>
+
+  <!-- SIGNED IN: WEBSITES AND ACCOUNT -->
+  <section id="manage">
+    <div class="who"><h1 id="mgName">Your account</h1>
+      <button class="link" onclick="signOut()">Sign out</button></div>
+    <p class="lead" style="margin-bottom:6px">Your websites <span id="mgCount" style="color:var(--faint)"></span></p>
+    <div class="sites" id="mgSites"></div>
+    <div class="err" id="mgErr"></div>
+    <a class="btn" href="/">Go to the office</a>
+    <a class="btn quiet" href="/business">Your business — what you sell, where</a>
+
+    <div class="block" id="mgBring" style="display:none">
+      <h2 id="mgBringTitle">Bring in your current website</h2>
+      <p>Its leads, orders, approvals and settings are copied into this account and encrypted.</p>
+      <button class="btn quiet" id="mgBringBtn" onclick="bringIn()">Bring it in</button>
+    </div>
+
+    <div class="block" id="mgRetire" style="display:none">
+      <h2>Remove the original, unencrypted copy</h2>
+      <p>Your website is in your account now, encrypted, but the old unencrypted files are still in the program's folder. Once the office looks right, remove them. This can't be undone.</p>
+      <label class="check"><input type="checkbox" id="rtYes"><span>I have checked my website in the office, and I want the original copy removed.</span></label>
+      <button class="btn quiet" id="rtBtn" onclick="retireOld()">Remove the original copy</button>
+    </div>
+
+    <div class="block" id="mgAdd" style="display:none">
+      <h2>Add your second website</h2>
+      <form onsubmit="addSite(event,'ad')">
+        <label for="adName">Name</label>
+        <input id="adName" type="text" required maxlength="60">
+        <label for="adUrl">Address</label>
+        <input id="adUrl" type="url" required placeholder="https://www.example.com">
+        <button class="btn quiet" id="adBtn">Add it</button>
+        <div class="err" id="adErr"></div>
+      </form>
+    </div>
+
+    <div class="block" id="mgMfa">
+      <h2>Two-step sign-in</h2>
+      <p id="mfaSay">A code from your authenticator app as well as your password.</p>
+      <div id="mfaSetup" style="display:none">
+        <p>Scan this with your authenticator app, or type the key:</p>
+        <div class="qr"><img id="mfaQr" alt="Code to scan with your authenticator app" hidden></div>
+        <div class="key" id="mfaKey" style="white-space:normal;word-spacing:.2em">—</div>
+        <p style="margin:0"><a id="mfaLink" href="#">Open it in my authenticator app</a></p>
+        <label for="mfaCode">The six-digit code the app now shows</label>
+        <input id="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
+      </div>
+      <div id="mfaOffBox" style="display:none"><label for="mfaOffCode">A code from your app, to turn it off</label>
+        <input id="mfaOffCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7"></div>
+      <button class="btn quiet" id="mfaBtn" onclick="mfaStep()">Turn on</button>
+      <div class="err" id="mfaErr"></div>
+    </div>
+
+    <div class="block">
+      <h2>Change your password</h2>
+      <form onsubmit="changePw(event)">
+        <label for="cpCur">Current password</label>
+        <input id="cpCur" type="password" autocomplete="current-password" required>
+        <label for="cpNew">New password</label>
+        <input id="cpNew" type="password" autocomplete="new-password" required minlength="8">
+        <label for="cpNew2">New password again</label>
+        <input id="cpNew2" type="password" autocomplete="new-password" required minlength="8">
+        <button class="btn quiet" id="cpBtn">Change password</button>
+        <div class="err" id="cpErr"></div>
+      </form>
+    </div>
+  </section>
+</main>
+<footer><span id="footName">Botix</span> by <span id="footCompany">TECH DUO</span> · <a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></footer>
+
+<script>
+const $ = (q) => document.querySelector(q);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let LIST = null, ME = null, RECOVERY = '', ACCOUNT_NAME = '', AFTER_KEY = '', THEN_TWOSTEP = false;
+
+function show(id) {
+  document.querySelectorAll('section').forEach((s) => s.classList.toggle('on', s.id === id));
+  const f = document.querySelector('#' + id + ' input');
+  if (f && id !== 'manage') setTimeout(() => f.focus(), 30);
+}
+function fail(id, msg) { const e = $('#' + id); e.textContent = msg || ''; e.classList.toggle('on', !!msg); }
+async function call(url, body) {
+  let r, j = {};
+  try {
+    r = await fetch(url, body === undefined ? {} : {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    j = await r.json();
+  } catch (e) { return {ok: false, error: 'The office did not answer. Is the program still running?'}; }
+  return j || {ok: false};
+}
+function busy(btn, on, label) {
+  const b = $('#' + btn); if (!b) return;
+  if (on) { b.dataset.label = b.textContent; b.textContent = label || 'One moment…'; b.disabled = true; }
+  else { b.textContent = b.dataset.label || b.textContent; b.disabled = false; }
+}
+function initials(s) {
+  const t = String(s || '').replace(/^https?:\/\//, '').replace(/^www\./, '');
+  return (t.slice(0, 2) || '··').toUpperCase();
+}
+
+async function names() {
+  const p = await call('/api/product');
+  if (!p || !p.ok) return;
+  for (const [id, v] of [['product', p.name], ['footName', p.name], ['company', p.company && 'by ' + p.company], ['footCompany', p.company]])
+    if (v && $('#' + id)) $('#' + id).textContent = v;
+}
+
+async function boot() {
+  names();
+  LIST = await call('/api/account/list');
+  if (LIST.cipher_problem) {
+    $('#cipherNote').textContent = 'Encryption is not ready on this computer yet: ' + LIST.cipher_problem;
+    $('#cipherNote').style.display = 'block';
+  }
+  if (LIST.signedIn) return manage();
+  // Nobody's name is listed: each person types their own.
+  $('#suInviteBox').style.display = LIST.invite ? 'block' : 'none';
+  if (!LIST.accounts) { $('#suBack').style.display = 'none'; return show('signup'); }
+  show('signin');
+}
+
+async function signIn(e) {
+  e.preventDefault(); fail('siErr', '');
+  busy('siBtn', true, 'Opening your account…');
+  const j = await call('/api/account/sign-in', {account: $('#siWho').value, password: $('#siPw').value,
+                                               code: $('#siCode').value.trim() || undefined});
+  busy('siBtn', false);
+  if (j.mfa) { $('#siCodeBox').style.display = 'block'; $('#siCode').value = ''; $('#siCode').focus(); }
+  if (!j.ok) return fail('siErr', j.error || 'That did not work.');
+  $('#siPw').value = $('#siCode').value = '';
+  if (!j.site) { LIST = await call('/api/account/list'); return firstSite(); }
+  location.href = '/';
+}
+
+async function signUp(e) {
+  e.preventDefault(); fail('suErr', '');
+  if ($('#suPw').value !== $('#suPw2').value) return fail('suErr', 'The two passwords do not match.');
+  busy('suBtn', true, 'Making your account…');
+  const j = await call('/api/account/sign-up', {name: $('#suName').value, password: $('#suPw').value,
+                                               confirm: $('#suPw2').value, invite: $('#suInvite').value.trim()});
+  busy('suBtn', false);
+  if (!j.ok) return fail('suErr', j.error || 'That did not work.');
+  $('#suPw').value = $('#suPw2').value = '';
+  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; THEN_TWOSTEP = true;
+  $('#rkKey').textContent = RECOVERY;
+  show('recovery');
+}
+function copyKey() {
+  navigator.clipboard && navigator.clipboard.writeText(RECOVERY).then(() => {
+    $('#rkCopy').textContent = 'Copied'; setTimeout(() => $('#rkCopy').textContent = 'Copy', 1600);
+  });
+}
+function saveKey() {
+  const text = 'Recovery key for the account "' + ACCOUNT_NAME + '"\n\n' + RECOVERY + '\n\n'
+    + 'Keep this somewhere safe, away from the computer. It is the only way back into the account\n'
+    + 'if the password is forgotten. Anyone who has it and your account name can open the account.\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: 'text/plain'}));
+  a.download = 'recovery-key.txt'; a.click();
+}
+async function afterKey() {
+  RECOVERY = ''; $('#rkKey').textContent = '—';
+  if (THEN_TWOSTEP) { THEN_TWOSTEP = false; return twoStep(); }
+  if (AFTER_KEY) return (location.href = AFTER_KEY);
+  LIST = await call('/api/account/list'); firstSite();
+}
+
+/* Straight after the recovery key: the authenticator. "Do this later" is
+   allowed, and it can be added from the account page at any time. */
+async function twoStep() {
+  fail('tsErr', '');
+  const j = await call('/api/account/mfa/start', {});
+  if (!j.ok) return twoStepLater();
+  $('#tsKey').textContent = j.secret.replace(/(.{4})/g, '$1 ').trim();
+  $('#tsLink').href = j.uri;
+  if (j.qr) { $('#tsQr').src = j.qr; $('#tsQr').hidden = false; } else $('#tsQr').hidden = true;
+  $('#tsCode').value = '';
+  show('twostep');
+}
+async function twoStepOn() {
+  fail('tsErr', '');
+  busy('tsBtn', true, 'Checking…');
+  const j = await call('/api/account/mfa/on', {code: $('#tsCode').value.trim()});
+  busy('tsBtn', false);
+  if (!j.ok) return fail('tsErr', j.error || 'That code is not right. Type the newest one.');
+  twoStepLater();
+}
+async function twoStepLater() {
+  if (AFTER_KEY) return (location.href = AFTER_KEY);
+  LIST = await call('/api/account/list');
+  ME = await call('/api/account/me');
+  if (ME && ME.open) return (location.href = '/');
+  firstSite();
+}
+
+function firstSite() {
+  const lp = LIST && LIST.legacy_present, ls = (LIST && LIST.legacy_site) || {};
+  $('#startBring').style.display = lp ? 'block' : 'none';
+  if (lp) $('#startBringName').textContent = 'Bring in ' + (ls.name || ls.url || 'your current website');
+  show('start');
+}
+
+async function bringIn() {
+  fail('stErr', ''); fail('mgErr', '');
+  const btn = $('#manage').classList.contains('on') ? 'mgBringBtn' : null;
+  if (btn) busy(btn, true, 'Copying and encrypting…');
+  else { $('#startBring').disabled = true; $('#startBringName').textContent = 'Copying and encrypting…'; }
+  const j = await call('/api/account/bring-in', {});
+  if (btn) busy(btn, false); else $('#startBring').disabled = false;
+  if (!j.ok) return fail(btn ? 'mgErr' : 'stErr', j.error || 'That did not work.');
+  manage('Your website is in your account now, encrypted: ' + (j.copied || []).length + ' things were copied across.');
+}
+
+async function addSite(e, p) {
+  e.preventDefault(); fail(p + 'Err', '');
+  busy(p + 'Btn', true, 'Adding…');
+  const j = await call('/api/account/add-site', {name: $('#' + p + 'Name').value, url: $('#' + p + 'Url').value});
+  busy(p + 'Btn', false);
+  if (!j.ok) return fail(p + 'Err', j.error || 'That did not work.');
+  if (p === 'af') return (location.href = '/business');      // a new website starts blank
+  $('#adName').value = $('#adUrl').value = '';
+  manage();
+}
+
+async function recover(e) {
+  e.preventDefault(); fail('reErr', '');
+  if ($('#rePw').value !== $('#rePw2').value) return fail('reErr', 'The two passwords do not match.');
+  busy('reBtn', true, 'Opening your account…');
+  const j = await call('/api/account/recover', {account: $('#reWho').value,
+    recovery_key: $('#reKey').value, password: $('#rePw').value, code: $('#reCode').value.trim() || undefined});
+  busy('reBtn', false);
+  if (j.mfa) { $('#reCodeBox').style.display = 'block'; $('#reCode').value = ''; $('#reCode').focus(); }
+  if (!j.ok) return fail('reErr', j.error || 'That did not work.');
+  $('#reKey').value = $('#rePw').value = $('#rePw2').value = $('#reCode').value = '';
+  // The key just used is finished with: here is its replacement, shown once.
+  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; AFTER_KEY = j.site ? '/' : '';
+  $('#rkKey').textContent = RECOVERY; $('#rkDone').checked = false; $('#rkNext').disabled = true;
+  show('recovery');
+}
+
+/* Phone lost: the password and the recovery key turn the authenticator off.
+   A new recovery key is shown, then the chance to add the new phone. */
+async function lostPhone(e) {
+  e.preventDefault(); fail('lpErr', '');
+  busy('lpBtn', true, 'Opening your account…');
+  const j = await call('/api/account/lost-phone', {account: $('#lpWho').value, password: $('#lpPw').value,
+                                                  recovery_key: $('#lpKey').value});
+  busy('lpBtn', false);
+  if (!j.ok) return fail('lpErr', j.error || 'That did not work.');
+  $('#lpPw').value = $('#lpKey').value = '';
+  RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; AFTER_KEY = j.site ? '/' : ''; THEN_TWOSTEP = true;
+  $('#rkKey').textContent = RECOVERY; $('#rkDone').checked = false; $('#rkNext').disabled = true;
+  show('recovery');
+}
+
+async function manage(happy) {
+  ME = await call('/api/account/me');
+  if (!ME.signedIn) return boot();
+  $('#mgName').textContent = ME.signedIn.name;
+  const sites = ME.sites || [];
+  $('#mgCount').textContent = '— ' + sites.length + ' of ' + (ME.maxSites || 2);
+  $('#mgSites').innerHTML = (happy ? `<div class="note ok" style="margin:0">${esc(happy)}</div>` : '')
+    + (sites.length ? sites.map((s) => `<div class="site"><span class="fav">${esc(initials(s.url || s.name))}</span>`
+      + `<div class="nm"><b>${esc(s.name)}</b><small>${esc(s.url || 'no address yet')}</small></div>`
+      + (s.id === ME.open ? `<span class="chip">Open</span>`
+         : `<button class="btn quiet small" onclick="openSite('${esc(s.id)}')">Open</button>`) + `</div>`).join('')
+      : `<p style="color:var(--muted);font-size:14px;margin:4px 0">No website yet.</p>`);
+  const canBring = ME.legacyPresent && !ME.broughtIn && sites.length < (ME.maxSites || 2);
+  $('#mgBring').style.display = canBring ? 'block' : 'none';
+  if (canBring) $('#mgBringTitle').textContent = 'Bring in ' + (ME.legacySite.name || ME.legacySite.url || 'your current website');
+  $('#mgRetire').style.display = ME.broughtIn && ME.legacyPresent ? 'block' : 'none';
+  $('#mgAdd').style.display = sites.length < (ME.maxSites || 2) ? 'block' : 'none';
+  $('#mgAdd h2').textContent = sites.length ? 'Add your second website' : 'Add a website';
+  $('#mfaSetup').style.display = 'none'; $('#mfaOffBox').style.display = ME.mfa ? 'block' : 'none';
+  $('#mfaBtn').textContent = ME.mfa ? 'Turn off' : 'Turn on';
+  $('#mfaSay').textContent = ME.mfa ? 'On. Signing in asks for a code from your authenticator app as well as your password.'
+    : 'Off. Turn it on so your password alone is never enough to sign in.';
+  show('manage');
+}
+
+/* Two-step sign-in: Turn on shows a key for the app; the app's first code confirms it. */
+async function mfaStep() {
+  fail('mfaErr', '');
+  if (ME.mfa) {
+    const j = await call('/api/account/mfa/off', {code: $('#mfaOffCode').value.trim()});
+    if (!j.ok) return fail('mfaErr', j.error || 'That did not work.');
+    return manage('Two-step sign-in is off.');
+  }
+  if ($('#mfaSetup').style.display === 'none') {
+    const j = await call('/api/account/mfa/start', {});
+    if (!j.ok) return fail('mfaErr', j.error || 'That did not work.');
+    $('#mfaKey').textContent = j.secret.replace(/(.{4})/g, '$1 ').trim(); $('#mfaLink').href = j.uri;
+    if (j.qr) { $('#mfaQr').src = j.qr; $('#mfaQr').hidden = false; }
+    $('#mfaSetup').style.display = 'block'; $('#mfaBtn').textContent = 'Confirm and turn on'; $('#mfaCode').focus();
+    return;
+  }
+  const j = await call('/api/account/mfa/on', {code: $('#mfaCode').value.trim()});
+  if (!j.ok) return fail('mfaErr', j.error || 'That did not work.');
+  manage('Two-step sign-in is on. Next time you sign in, have your phone ready.');
+}
+
+async function openSite(id) {
+  fail('mgErr', '');
+  const j = await call('/api/account/open-site', {site: id});
+  if (!j.ok) return fail('mgErr', j.error || 'That did not work.');
+  manage();
+}
+
+async function retireOld() {
+  fail('mgErr', '');
+  if (!$('#rtYes').checked) return fail('mgErr', 'Tick the box first: this removes the original copy for good.');
+  busy('rtBtn', true, 'Removing…');
+  const j = await call('/api/account/retire-old', {confirm: true});
+  busy('rtBtn', false);
+  if (!j.ok) return fail('mgErr', j.error || 'That did not work.');
+  manage('The original copy is gone: ' + (j.removed || []).length + ' files removed. Only the encrypted copy is left.');
+}
+
+async function changePw(e) {
+  e.preventDefault(); fail('cpErr', '');
+  if ($('#cpNew').value !== $('#cpNew2').value) return fail('cpErr', 'The two passwords do not match.');
+  busy('cpBtn', true, 'Changing…');
+  const j = await call('/api/account/password', {current: $('#cpCur').value,
+    password: $('#cpNew').value, confirm: $('#cpNew2').value});
+  busy('cpBtn', false);
+  if (!j.ok) return fail('cpErr', j.error || 'That did not work.');
+  $('#cpCur').value = $('#cpNew').value = $('#cpNew2').value = '';
+  manage('Password changed, and signed out everywhere else. Your recovery key still works.');
+}
+
+async function signOut() {
+  const j = await call('/api/account/sign-out', {});
+  if (!j.ok) return fail('mgErr', j.error || 'That did not work.');
+  location.href = '/account';
+}
+
+boot();
+</script>
+</body>
+</html>

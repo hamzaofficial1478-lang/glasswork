@@ -32,17 +32,19 @@ import os
 import re
 import sqlite3
 
-from coordination import board
+from coordination import board, dispatch, inbox, uae
 from . import services
 
 # Where to look. The keyword work named the first six; the rest are simply where
 # the money is in the UAE, and leaving them out was costing us reach for no
 # reason. Abu Dhabi and Sharjah are in because the business serves all three
 # emirates, and a target list that only knows Dubai is half a target list.
-DISTRICTS = ["Business Bay", "Al Quoz", "Al Barsha", "Jumeirah Village Circle",
-             "Dubai Marina", "Downtown Dubai", "Deira", "Jumeirah Lake Towers",
-             "Dubai Investment Park", "Dubai Silicon Oasis", "Al Qusais", "Mirdif",
-             "Abu Dhabi", "Al Ain", "Sharjah", "Ajman", "Ras Al Khaimah"]
+# THE WHOLE COUNTRY. This list stopped at Ras Al Khaimah and never had Umm Al
+# Quwain or Fujairah in it at all, so two emirates he works in were never
+# searched. It is one list now — coordination/uae.py — and it is districts
+# first, because a map search for "Al Quoz" returns the workshops and a search
+# for "Dubai" returns the same well-known forty every time.
+DISTRICTS = uae.search_areas()
 
 # WHO WE SELL TO
 #
@@ -55,7 +57,7 @@ DISTRICTS = ["Business Bay", "Al Quoz", "Al Barsha", "Jumeirah Village Circle",
 #
 # Each segment carries the search terms that find it on a map, because the
 # Hunter needs a real query, not a category label.
-SEGMENTS = {
+GLASS_SEGMENTS = {
     # --- the trade, who buy in volume ---------------------------------------
     "fitout_contractor": {
         "why": "Fit-out contractors — partitions, shopfronts and doors on every single job.",
@@ -155,6 +157,97 @@ SEGMENTS = {
         "why": "Studios, agencies and startups — first fit-out of a new office.",
         "queries": ("marketing agency", "photography studio", "software company"),
     },
+
+    # --- LOCAL AND STREET-LEVEL ---------------------------------------------
+    #
+    # The owner's correction, and it was a fair one: "on maps most of the data
+    # is related to agencies, businesses and majors, while what I want is to
+    # target the locals". The segments above are mostly buildings and firms
+    # with a procurement process. These are the ones where the person who
+    # decides is the person standing behind the counter, and they buy the
+    # smaller, faster, better-margin jobs — a shopfront, a shower screen, a
+    # sign board, a pergola over the terrace.
+    "supermarket": {
+        "why": "Grocers and supermarkets — shopfronts, cold-room glass, sign boards, "
+               "and they refit a unit at a time rather than tendering it.",
+        "queries": ("supermarket", "grocery store", "hypermarket", "mini mart",
+                    "baqala"),
+    },
+    "local_market": {
+        "why": "Souks, community markets and small malls — dozens of small units "
+               "behind one landlord, each with its own frontage.",
+        "queries": ("souk", "local market", "community mall", "market place",
+                    "fish market", "vegetable market"),
+    },
+    "signage": {
+        "why": "Sign and advertising companies — they SUBCONTRACT the aluminium "
+               "framing, acrylic and display glass they cannot make themselves. "
+               "One relationship here is repeat work every month.",
+        "queries": ("signage company", "sign board maker", "advertising company",
+                    "billboard company", "printing press", "branding company"),
+    },
+    "holiday_let": {
+        "why": "Holiday-home and short-let operators — they turn units over "
+               "constantly and fix what the last guest broke, out of their own "
+               "pocket, this week.",
+        "queries": ("holiday homes", "short term rental", "vacation homes",
+                    "serviced apartments", "guest house"),
+    },
+    "landlord": {
+        "why": "Small landlords and building owners — the ones who own two or "
+               "three buildings and manage them themselves, so there is nobody "
+               "to get past.",
+        "queries": ("building owner", "landlord", "rental apartments",
+                    "flats for rent", "labour accommodation"),
+    },
+    "builder": {
+        "why": "Small builders and villa contractors — the ones who build one "
+               "villa at a time and buy the glazing themselves rather than "
+               "putting it out to tender.",
+        "queries": ("villa contractor", "building renovation", "home renovation",
+                    "villa construction", "swimming pool contractor",
+                    "landscaping company"),
+    },
+    "laundry": {
+        "why": "Laundries, tailors, key-cutters and the rest of the parade — "
+               "small shopfronts, cheap to win, and they talk to each other.",
+        "queries": ("laundry", "dry cleaners", "tailor shop", "mobile repair shop",
+                    "key cutting"),
+    },
+    # ITS OWN SEGMENT, because it was inside 'laundry' and should not have been.
+    # A Sharjah search for laundries came back Wheelocity Garage, Alrehan
+    # Garage, Al Jouda Auto Repairing and eleven more workshops — fourteen of
+    # twenty-six results. They are perfectly good local leads, and lumping them
+    # in with laundries meant the mail would have offered a garage a mirror
+    # wall. What a garage actually buys is the roller-shutter frontage, the
+    # office partition and the toughened glass in the door.
+    "garage": {
+        "why": "Car workshops, spare-part shops and car washes — big aluminium "
+               "frontages, roller doors, and a partitioned office at the front. "
+               "The owner is on site and decides on the spot.",
+        "queries": ("car repair garage", "auto repair", "car workshop",
+                    "spare parts shop", "car wash", "tyre shop",
+                    "auto electrical repair"),
+    },
+    "clinic_small": {
+        "why": "Single-branch clinics — physio, optical, veterinary, dental — "
+               "who need partitions and hygiene glass without a procurement "
+               "department in the way.",
+        "queries": ("physiotherapy clinic", "optical shop", "veterinary clinic",
+                    "dermatology clinic", "homeopathy clinic"),
+    },
+    "nursery_local": {
+        "why": "Home nurseries and small learning centres — safety glass, "
+               "railings and shades, and a very short decision chain.",
+        "queries": ("home nursery", "day care", "tuition centre", "learning centre"),
+    },
+    "food_stall": {
+        "why": "Cafeterias, juice shops, bakeries and shawarma counters — the "
+               "densest shopfront segment in the UAE and the one nobody else "
+               "bothers to call.",
+        "queries": ("cafeteria", "juice shop", "bakery", "shawarma", "sweets shop",
+                    "butchery", "catering kitchen"),
+    },
 }
 
 # WHERE WE FIND THEM
@@ -170,7 +263,13 @@ SEGMENTS = {
 # business's OWN website, off the contact page where they printed it so people
 # would write to them. That second hop is where real, working addresses come
 # from, and it is why the two entries below run as a pair.
-SOURCES = [
+# THE OPEN WEBSITE'S customer types: the owner's list above for his website
+# (the starter in coordination/profile.py), the business's own for anyone else.
+from coordination import profile as _profile  # noqa: E402
+
+SEGMENTS = _profile.customers(GLASS_SEGMENTS)
+
+GLASS_SOURCES = [
     {"name": "Google Maps (Places API) by category + area", "kind": "maps",
      "segments": list(SEGMENTS), "business_data": True, "access": "api key",
      "why": "Every UAE business, with category, area, phone and website. The Hunter's "
@@ -211,12 +310,136 @@ SOURCES = [
     {"name": "Hotel and hospital group corporate sites", "kind": "website",
      "segments": ["hotel", "hospital", "mall", "school"], "business_data": True,
      "access": "public", "why": "Groups buy centrally — one procurement contact covers twenty buildings."},
+    # ---- WHERE THE LOCALS ARE, WHICH IS NOT WHERE THE FIRMS ARE ------------
+    #
+    # The owner's point: "on maps most of the data is related to agencies,
+    # businesses and majors, while what I want is the locals." Maps has the
+    # small shops too — a cafeteria in Al Quoz is on Maps — but you only reach
+    # them by searching for what they ARE, area by area, which is what the
+    # local segments above now do. These are the places that hold what Maps
+    # does not.
+    {"name": "Instagram business profiles by UAE location tag", "kind": "social",
+     "segments": ["salon", "spa", "gym", "restaurant", "food_stall", "retail",
+                  "supermarket", "laundry", "clinic_small", "nursery_local",
+                  "holiday_let", "signage"],
+     "business_data": True, "access": "public business profiles",
+     "why": "Where a UAE salon, café or gym actually lives. Business profiles "
+            "publish a phone or a WhatsApp button in the bio, and a location "
+            "tag puts them in an area. Business profiles only — never a "
+            "personal account."},
+    {"name": "Food-delivery platform listings (Talabat, Deliveroo, Zomato)",
+     "kind": "portal",
+     "segments": ["restaurant", "food_stall", "supermarket", "laundry"],
+     "business_data": True, "access": "public listing pages",
+     "why": "Every cafeteria, juice shop and grocer in the country, with its "
+            "area and trading name. The densest shopfront list there is."},
+    {"name": "UAE local directories (Yellow Pages, Connect.ae, Dubai listings)",
+     "kind": "directory",
+     "segments": ["supermarket", "local_market", "laundry", "food_stall",
+                  "signage", "builder", "clinic_small", "nursery_local", "retail"],
+     "business_data": True, "access": "public",
+     "why": "The small businesses that never bothered with a website but did "
+            "get themselves listed. Often a landline and nothing else — which "
+            "is still a way to reach them."},
+    {"name": "Holiday-let operator pages (Airbnb/Booking host listings)",
+     "kind": "portal", "segments": ["holiday_let", "landlord"],
+     "business_data": True, "access": "public",
+     "why": "Operators managing several units, who fix what the last guest "
+            "broke out of their own pocket and this week. The OPERATOR's own "
+            "site or company page — not a guest, and not a private host."},
+    {"name": "Signage and print companies' client and portfolio pages",
+     "kind": "website", "segments": ["signage"], "business_data": True,
+     "access": "public",
+     "why": "They subcontract the aluminium framing and acrylic they cannot "
+            "make. One relationship here is repeat work every month, and their "
+            "portfolio page names the shops they fitted out — who are leads too."},
+    {"name": "Owners' association and building manager listings (Mollak/DLD)",
+     "kind": "registry", "segments": ["landlord", "property_management",
+                                      "villa_compound"],
+     "business_data": True, "access": "public search",
+     "why": "The registered manager of a building is the person who signs off "
+            "railings, windows and lobby glass across every unit in it."},
+
     # Kept in the list on purpose so the screen has something real to refuse and
     # you can see the rule biting rather than take it on trust.
     {"name": "Classifieds villa-owner listings", "kind": "classifieds",
      "segments": ["private_individual"], "business_data": False,
      "access": "public", "why": "Private individuals at home — see the note on ALLOW_INDIVIDUALS."},
 ]
+
+# The sources that work in any country, for any website that is not the
+# owner's. The list above is his: Dubai's chamber, DED licences, Mollak.
+GENERIC_SOURCES = [
+    {"name": "Maps (Google Places or TomTom) by customer type + area", "kind": "maps",
+     "segments": list(SEGMENTS), "business_data": True, "access": "api key",
+     "why": "Every listed business, with category, area, phone and website."},
+    {"name": "OpenStreetMap by customer type + area", "kind": "maps",
+     "segments": list(SEGMENTS), "business_data": True, "access": "public",
+     "why": "Businesses on the open map, with no key at all."},
+    {"name": "The business's own website contact page", "kind": "website",
+     "segments": list(SEGMENTS), "business_data": True, "access": "public",
+     "why": "Where the company itself publishes its address for people to write to."},
+    {"name": "Local business directories", "kind": "directory",
+     "segments": list(SEGMENTS), "business_data": True, "access": "public",
+     "why": "Street-level businesses that are not on the big maps yet."},
+]
+
+SOURCES = GLASS_SOURCES if _profile.starter_here() else GENERIC_SOURCES
+
+# WHICH SEGMENTS ARE "THE LOCALS"
+#
+# Not a category of business, a category of DECISION. On this list the person
+# who decides is the person behind the counter or the one who owns the villa:
+# no procurement, no tender, no three quotes, and the job is wanted this month.
+# The rest have a process to get through. The owner asked to be pointed at the
+# first group, and this is what lets the source map answer him rather than
+# leaving him to count the list himself.
+GLASS_LOCAL = {
+    "supermarket", "local_market", "signage", "holiday_let", "landlord",
+    "builder", "laundry", "garage", "clinic_small", "nursery_local",
+    "food_stall",
+    "salon", "gym", "spa", "restaurant", "retail", "startup", "coworking",
+    "villa_compound",
+}
+
+
+LOCAL_SEGMENTS = _profile.local_customers(GLASS_LOCAL)
+
+# Every kind of business the program knows how to find, for the "Your
+# business" page: its name and the map searches that find it. Taken from the
+# owner's list — those are buyer types, not glass types — plus a few his trade
+# never needed.
+CATALOGUE = {k: {"label": v["why"].split(" — ")[0], "queries": list(v["queries"]),
+                 "local": k in GLASS_LOCAL}
+             for k, v in GLASS_SEGMENTS.items()}
+# Names that read as one country's, said so any business anywhere recognises them.
+for _k, _label in (("local_market", "Markets and small shopping centres"),
+                   ("food_stall", "Cafés, bakeries and takeaways"),
+                   ("villa_compound", "Residential compounds and staff accommodation"),
+                   ("facility_management", "Facility management firms"),
+                   ("laundry", "Laundries, tailors, key-cutters and other small shops"),
+                   ("builder", "Small builders and renovation contractors")):
+    if _k in CATALOGUE:
+        CATALOGUE[_k]["label"] = _label
+CATALOGUE.update({
+    "care_home": {"label": "Care homes and nursing homes",
+                  "queries": ["care home", "nursing home", "assisted living"], "local": False},
+    "event_venue": {"label": "Event venues and conference centres",
+                    "queries": ["event venue", "wedding venue", "conference centre"], "local": False},
+    "pub_bar": {"label": "Pubs and bars", "queries": ["pub", "bar", "wine bar"], "local": True},
+    "dentist": {"label": "Dental practices", "queries": ["dentist", "dental practice"], "local": True},
+    "accountant": {"label": "Accountants and solicitors",
+                   "queries": ["accountant", "solicitor", "law firm"], "local": True},
+    "car_dealer": {"label": "Car dealers", "queries": ["car dealer", "used car dealer"], "local": True},
+    "manufacturer": {"label": "Manufacturers and workshops",
+                     "queries": ["manufacturer", "factory", "workshop"], "local": False},
+})
+
+
+def reaches_locals(source) -> bool:
+    """Does this source find street-level buyers, or only firms with a process?"""
+    segs = set(source.get("segments") or [])
+    return bool(segs & LOCAL_SEGMENTS)
 
 # PRIVATE INDIVIDUALS — the one limit left, and it is the owner's to lift
 #
@@ -284,7 +507,70 @@ RELEVANT = (
 # detail. It is also simply better outreach: info@ survives the person leaving.
 ROLE_INBOXES = ("info", "sales", "enquiry", "enquiries", "contact", "admin",
                 "office", "projects", "procurement", "purchasing", "tenders",
-                "hello", "team", "support", "estimation", "estimating")
+                "hello", "team", "support", "estimation", "estimating",
+                # decision-maker roles: still company addresses, not people
+                "owner", "manager", "director", "md", "gm", "ceo", "founder",
+                "partner", "principal", "operations", "facilities", "fm",
+                "maintenance", "purchase", "tender", "estimates")
+
+# WHICH ROLE INBOX, NOT WHETHER A ROLE INBOX.
+#
+# The leads repo the owner pointed at (kashif-developer9053/our-company)
+# measured it: 288 emails, 82 opens, 3 clicks — and 350 of its 511 addresses
+# were info@. "A role inbox gets opened and then nobody feels responsible for
+# replying." It fixed that by preferring named people.
+#
+# That half does not come across: the paragraph above is a UAE PDPL decision,
+# and preferring a named employee's address would undo it. The other half
+# does, because it was never really about people — it was about who DECIDES.
+# owner@, manager@ and, for a glazier's customers above all, projects@,
+# procurement@ and estimation@ are company addresses that reach someone who
+# buys. info@ reaches a switchboard. sales@ reaches the people selling their
+# own services, and careers@ reaches applicants. So role inboxes are ranked,
+# and a named individual still comes after every role, flagged as before.
+BUYER_ROLES = ("projects", "procurement", "purchasing", "purchase", "tenders",
+               "tender", "estimation", "estimating", "estimates", "owner",
+               "manager", "director", "md", "gm", "ceo", "founder", "partner",
+               "principal", "operations", "facilities", "fm", "maintenance")
+SWITCHBOARD = ("info", "contact", "enquiry", "enquiries", "hello", "office",
+               "admin", "team", "support", "mail", "reception", "general")
+NOT_A_BUYER = ("sales", "marketing", "careers", "jobs", "hr", "recruitment",
+               "reservations", "reservation", "bookings", "booking",
+               "accounts", "billing", "finance", "invoices",
+               "noreply", "no-reply", "donotreply", "newsletter")
+
+
+# What UAE firms tack onto a role word: info.dxb@, sales2@, infouae@. Anything
+# else glued on is treated as a different word — "mdahmed" is a person called
+# Ahmed, not the managing director's inbox.
+_ROLE_TAILS = ("uae", "dxb", "dubai", "auh", "abudhabi", "shj", "sharjah", "ae")
+
+
+def _starts(local, words):
+    for w in words:
+        if local == w:
+            return True
+        if not local.startswith(w):
+            continue
+        rest = local[len(w):]
+        if rest[0] in ".-_" or rest.isdigit() or rest in _ROLE_TAILS:
+            return True
+    return False
+
+
+def address_tier(email: str) -> int:
+    """
+    0 a buying or deciding role, 1 a switchboard, 2 a role that does not buy,
+    3 a named individual or anything unrecognised — last, per the PDPL rule.
+    """
+    local = (email or "").split("@")[0].strip().lower()
+    if _starts(local, BUYER_ROLES):
+        return 0
+    if _starts(local, SWITCHBOARD):
+        return 1
+    if _starts(local, NOT_A_BUYER):
+        return 2
+    return 3
 
 
 def contact_kind(lead: dict) -> str:
@@ -320,6 +606,11 @@ def screen_source(src) -> tuple:
     return (not reasons, reasons)
 
 
+def _where() -> str:
+    from coordination import countries
+    return countries.in_a_sentence(_profile.country("AE"))
+
+
 def screen_lead(c: dict) -> tuple:
     """
     The gate every candidate passes before it can be stored. Order matters:
@@ -338,19 +629,46 @@ def screen_lead(c: dict) -> tuple:
     # source name into this check would wave it straight through.
     geo = (str(c.get("area") or "").strip()
            or f'{c.get("company") or ""} {c.get("name") or ""}').lower()
-    if not any(h in geo for h in UAE_HINTS):
-        return (False, "outside the UAE — not a market this business serves")
-    if not any(r in blob.lower() for r in RELEVANT):
+    # uae.is_uae as well: UAE_HINTS has no Al Ain, Mussafah or Khor Fakkan, and
+    # the OSM hunt now widens into Al Ain — every lead from there was being
+    # refused as "outside the UAE".
+    # A collector that searched INSIDE the country says so (c["country"]); a
+    # map search fenced to that country cannot return a firm from another one,
+    # and most map addresses never name the country at all.
+    # ANY OF HIS MARKETS IS HERE. A lead found in Saudi Arabia for a business
+    # that sells there is not "outside the UAE" (coordination/profile.markets).
+    here = _profile.worldwide() or (c.get("country") or "").upper() in (
+        set(_profile.markets()) | {_profile.country("AE")})
+    hints = UAE_HINTS if _profile.starter_here() else ()
+    if not here and not any(h in geo for h in hints) and not uae.is_uae(geo):
+        return (False, f"outside {_where()} — not a market this business serves")
+    if _profile.is_starter() and not any(r in blob.lower() for r in RELEVANT):
         return (False, "no connection to glass, aluminium or the trades that buy it")
-    if not ((c.get("email") or "").strip() or (c.get("phone") or "").strip()):
-        return (False, "no business contact route recorded")
+    # A STREET ADDRESS IS A CONTACT ROUTE FOR THIS BUSINESS.
+    #
+    # This used to demand an email or a phone, which is right for an agency
+    # that only ever writes. It is wrong for a glass and aluminium workshop in
+    # Dubai: a shopfront job is won by walking into the cafeteria and talking
+    # to the man behind the counter, and "Al Hunoof Public Kitchen, Al Quoz 3"
+    # is everything the owner needs to do that.
+    #
+    # It mattered the moment the OSM collector arrived. Most small UAE
+    # businesses on the map carry a name and an address and no phone at all, so
+    # this line would have thrown away the majority of exactly the local leads
+    # he asked for. Nothing downstream is loosened: outreach still refuses a
+    # lead with no address to write to, and a visit-only lead simply is not
+    # mailed.
+    if not ((c.get("email") or "").strip() or (c.get("phone") or "").strip()
+            or (c.get("address") or "").strip()):
+        return (False, "no way to reach them at all — no email, no phone, "
+                       "not even a street address")
     kind = contact_kind(c)
     if kind == "personal":
         # Allowed, but it is personal data and must not be filed as if it were
         # just a company detail. Prefer the switchboard where one exists.
         return (True, "business, but a NAMED PERSON's address — personal data under "
                       "PDPL; prefer the company's role inbox and keep a lawful basis")
-    return (True, f"business, in the UAE, relevant, contactable ({kind} inbox)")
+    return (True, f"business, in {_where()}, relevant, contactable ({kind} inbox)")
 
 
 def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
@@ -363,28 +681,52 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
     needs Security clearance and an owner-approved route, neither of which lives
     in this function.
     """
-    stored, dupes, refused, personal = [], [], [], []
+    stored, dupes, refused, personal, filled = [], [], [], [], []
+    plan_stop, left = "", 0
     for c in candidates:
+        if plan_stop:
+            left += 1
+            continue
         ok, why = screen_lead(c)
         if not ok:
             refused.append({"company": c.get("company") or c.get("name"), "why": why})
             continue
-        if contact_kind(c) == "personal":
+        kind = contact_kind(c)
+        if kind == "personal":
             # counted separately so you can always see how much personal data the
             # cabinet is holding, rather than discovering it during an audit
             personal.append(c.get("company"))
         # dedup BEFORE the store — re-approaching a firm burns the relationship
         if board.lead_seen(c.get("email"), c.get("phone"), c.get("company")):
+            # Still one lead — but if the one on file has no address and this
+            # find brings one, the lead can be mailed now.
+            if board.fill_missing_email(c):
+                filled.append(c.get("company"))
             dupes.append(c.get("company"))
             continue
-        lid = board.add_lead_if_new({**c, "source": c.get("source", "leads-hunter")})
+        # THE PLAN, BEFORE IT IS STORED. "user buy a plan in which the program
+        # cannot fetch the leads more then 10" — a new lead is counted by the
+        # Home (coordination/licence); a duplicate above never is.
+        from coordination import licence
+        allowed = licence.take("leads")
+        if not allowed.get("ok"):
+            plan_stop, left = allowed.get("error") or "Your plan's leads for today are used up.", 1
+            continue
+        # Stored WITH how we can reach them, so nobody has to re-derive it later
+        # and get a different answer. See pipelines/harvest.py.
+        lid = board.add_lead_if_new({**c, "source": c.get("source", "leads-hunter"),
+                                     "contact_kind": kind})
         if lid is None:
             dupes.append(c.get("company"))
         else:
-            stored.append({"id": lid, "company": c.get("company")})
-    return {"stored": stored, "duplicates": dupes, "refused": refused,
-            "personal_data_held": personal, "contacted": 0,
-            "agent": agent, "sector": sector}
+            stored.append({"id": lid, "company": c.get("company"),
+                           "email": (c.get("email") or "").strip()})
+    out = {"stored": stored, "duplicates": dupes, "refused": refused,
+           "personal_data_held": personal, "contacted": 0, "address_added": filled,
+           "agent": agent, "sector": sector}
+    if plan_stop:
+        out.update(plan_stop=plan_stop, not_stored=left)
+    return out
 
 
 # ---- today's task: the source map -------------------------------------------
@@ -410,8 +752,13 @@ def build_source_map():
         by_segment[seg] = {"why_they_buy": meta["why"],
                            "search_terms": list(meta["queries"]),
                            "services_they_need": [services.label(k) for k in svc],
-                           "sources": hits, "source_count": len(hits)}
+                           "sources": hits, "source_count": len(hits),
+                           # street-level buyer, or a firm with a process
+                           "local": seg in LOCAL_SEGMENTS}
+    local_srcs = [s["name"] for s in usable if reaches_locals(s)]
     return {"segments": by_segment, "usable_sources": usable, "districts": DISTRICTS,
+            "local_segments": sorted(s for s in by_segment if by_segment[s]["local"]),
+            "local_sources": local_srcs,
             "refused_sources": [{"name": r["name"], "because": r["refused_because"]}
                                 for r in refused]}
 
@@ -445,12 +792,24 @@ def critic_check(smap, env_ready):
     return (not reasons, reasons)
 
 
-def run(agent="leads-hunter"):
+def run(agent="leads-mapper"):
+    # ITS OWN NAME, NOT THE HUNTER'S. Running as "leads-hunter" at the head of
+    # the Leads lane, this step was handed the Hunter's collection task every
+    # run and closed it with a source map — zero leads, task marked done, the
+    # collectors starved. See the leads-mapper desk in coordination/desks.py.
     with board.agent_run(agent) as run_row:
+        # Leads reads its post first — this is the sector's one reader, and it
+        # runs at the head of the Leads lane so anything filed as work can be
+        # claimed by the Hunter, the Scanner or Outreach later the same day.
+        post = inbox.read_post("Leads", agent)
         out = _hunt(agent, run_row)
-        run_row.note(f"mapped {out.get('usable_sources', 0)} usable source(s) across "
-                     f"{out.get('segments_covered', 0)} segment(s)"
-                     if out.get("ok") else out.get("error", "nothing to hunt"))
+        out["post"] = post
+        note = (f"mapped {out.get('usable_sources', 0)} usable source(s) across "
+                f"{out.get('segments_covered', 0)} segment(s)"
+                if out.get("ok") else out.get("error", "nothing to hunt"))
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
 
 
@@ -464,9 +823,7 @@ def _hunt(agent, run_row):
         # 1. claim the MD's task (atomic — two Hunters cannot both take it)
         task = board.next_open_task("Leads", agent)
         if not task:
-            return {"ok": False, "error":
-                    "No open Leads task on the board to claim. The Hunter works from the "
-                    "board, never on its own initiative."}
+            return dispatch.nothing_here("Leads", agent)
         run_row.task(task["id"])
 
         # 2. the MD scoped this as prep because there is no outreach route yet.

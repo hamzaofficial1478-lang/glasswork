@@ -1,18 +1,45 @@
-# Push to main -> SSH into the box -> pull and restart. Hands-off deploys.
-# Add repo secrets: SSH_HOST, SSH_USER, SSH_KEY
+# THE HOSTED OFFICE: push to main -> the safety tests -> SSH into the server ->
+# pull, install, restart. Setting the server up is docs/HOSTING.md.
+#
+# Repository secrets: SSH_HOST, SSH_USER, SSH_KEY, and SSH_FINGERPRINT (the
+# server's own host-key fingerprint, so a deploy refuses to talk to an
+# impostor). Actions are pinned to exact commits: a tag can be moved, a commit
+# cannot.
 name: deploy
 on: { push: { branches: [main] } }
+permissions:
+  contents: read
+concurrency: { group: deploy, cancel-in-progress: false }
 jobs:
-  ship:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: appleboy/ssh-action@v1.0.3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt && npm ci --omit=dev
+      - name: Safety tests
+        env: { AGENCY_IGNORE_DOTENV: "1", CLAUDE_TEAM_OFF: "1" }
+        run: |
+          python -m coordination.security_tests
+          python -m coordination.isolation_tests
+          python -m coordination.account_tests
+  ship:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          fingerprint: ${{ secrets.SSH_FINGERPRINT }}
           script: |
-            cd ~/agency
-            git pull origin main
-            npm install --omit=dev
-            pm2 restart agency || pm2 start server.js --name agency
+            set -e
+            cd ~/glasswork
+            git pull --ff-only origin main
+            .venv/bin/pip install -q -r requirements.txt
+            npm ci --omit=dev --no-audit --no-fund
+            sudo systemctl restart glasswork

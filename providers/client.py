@@ -1,31 +1,28 @@
 """
-client.py — actually talk to a provider. Probe/test and production both go through
-_execute() with a request built by request.py, so there is one code path.
+client.py — test a shelf tool's key against its own endpoint.
 
-Every failure returns a full, key-redacted diagnostic (url, headers, payload,
-status, body) and a plain-language likely cause — that one feature makes almost
+Every failure returns a key-redacted diagnostic (url, headers, method, status,
+body) and a plain-language likely cause — the one feature that makes almost
 every misconfiguration obvious at a glance.
+
+This used to be the client for every AI provider too: chat, model lists,
+retries with backoff. Every sector thinks with Claude now
+(providers/claude_team.py), so only the tool half is left.
 """
 import json
 
 import requests
 
-from . import auth, signatures
-from .request import build_chat_request, build_request, redact_headers
-from .urls import chat_endpoint, models_endpoint
-
-# a 1x1 transparent PNG, for the multimodal probe
-_TINY_PNG = ("data:image/png;base64,"
-             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+from . import auth
 
 
 def _likely_cause(status, err_text):
     if status == 401 or status == 403:
         return "401/403 — auth problem: check the API key and auth style."
     if status == 404:
-        return "404 — wrong URL: check the base URL and that this model id exists here."
+        return "404 — wrong URL: check the address you saved for this tool."
     if status == 402:
-        return "402 — the provider needs payment/credit for this model. A billing issue on their side, not your setup; sort it out with the provider."
+        return "402 — the provider needs payment or credit. A billing issue on their side, not your setup."
     if status == 429:
         return "429 — rate limited or out of credit."
     if status == 0 and "timed out" in (err_text or "").lower():
@@ -37,130 +34,86 @@ def _likely_cause(status, err_text):
     return f"HTTP {status}."
 
 
-def _execute(cred, url, headers, body, timeout):
-    """Single HTTP execution. Returns a dict with ok/status/text/raw (redacted)."""
-    raw = {
-        "url": url,
-        "headers": redact_headers(cred, headers),
-        "payload": json.loads(body) if body else None,
-        "status": None,
-        "response_body": None,
-    }
+def redact_headers(cred: dict, headers: dict) -> dict:
+    """Copy of headers with the auth value replaced by a redaction — safe to show."""
+    out = dict(headers)
+    key = cred.get("api_key", "")
+    for name, val in list(out.items()):
+        if key and key in val:
+            out[name] = val.replace(key, auth.redact(key))
+        elif name.lower() in ("authorization", "x-api-key") or name == cred.get("auth_header_name"):
+            out[name] = auth.redact(key)
+    return out
+
+
+def _is_extract_api(tool) -> bool:
+    """
+    A crawler/fetch API — Zyte today, the same shape for the others. Recognised
+    by the shelf it sits on or by its own address, so it works whether the owner
+    added it through the crawler dropdown or typed the URL by hand.
+    """
+    blob = ((tool.get("base_url") or "") + " " + (tool.get("name") or "")).lower()
+    return ((tool.get("shelf") or "").strip().lower() == "crawler"
+            or "zyte" in blob or "/v1/extract" in blob)
+
+
+def _probe_extract_api(tool, timeout):
+    """
+    Test a Zyte-style extract API for real: Basic auth, a POST, a body naming a
+    stable public URL. httpResponseBody (not browserHtml) because a plain fetch
+    is the cheaper of the two and proving the KEY does not need a browser render.
+
+    The verdicts are Zyte's, not a search API's:
+      200  the key works.
+      401  the key is wrong — and the hint says Basic, never 'raw'.
+      429  the key WORKS; it is only rate-limited or out of quota.
+    """
+    url = (tool.get("base_url") or "https://api.zyte.com/v1/extract").strip()
+    key = (tool.get("api_key") or "").strip()
+    if not key:
+        return {"ok": False, "status": 0, "cause": "No API key saved for this tool."}
+    # The key is the Basic USERNAME with an empty password. Owner pastes it bare;
+    # the colon is ours. Same rule as pipelines/fetcher.py — kept in step by both
+    # going through auth.auth_header('basic', ...).
+    probe_key = key if key.endswith(":") else key + ":"
+    headers = {"Content-Type": "application/json", "Accept": "application/json",
+               **auth.auth_header("basic", probe_key)}
+    # Zyte's own starter snippet points at this sandbox, so it is guaranteed an
+    # allowed target — a target-side problem cannot masquerade as a bad key.
+    body = json.dumps({"url": "https://books.toscrape.com/", "httpResponseBody": True})
+    raw = {"url": url, "headers": redact_headers(tool, headers), "method": "POST",
+           "status": None, "response_body": None}
     try:
         r = requests.post(url, headers=headers, data=body, timeout=timeout)
-        raw["status"] = r.status_code
-        text = r.text
-        raw["response_body"] = text[:4000]
-        ok = 200 <= r.status_code < 300
-        return {"ok": ok, "status": r.status_code, "text": text,
-                "cause": None if ok else _likely_cause(r.status_code, text), "raw": raw}
     except requests.exceptions.Timeout:
         raw["status"] = 0
-        return {"ok": False, "status": 0, "text": "timed out",
-                "cause": _likely_cause(0, "timed out"), "raw": raw}
+        return {"ok": False, "status": 0, "cause": f"Timed out after {timeout}s.", "raw": raw}
     except Exception as e:
         raw["status"] = 0
-        raw["response_body"] = str(e)
-        return {"ok": False, "status": 0, "text": str(e),
-                "cause": _likely_cause(0, str(e)), "raw": raw}
+        raw["response_body"] = str(e)[:300]
+        return {"ok": False, "status": 0,
+                "cause": "Could not connect — check the base URL is reachable.", "raw": raw}
 
-
-def _content_text(body_text):
-    """Pull the assistant text out of an OpenAI/Anthropic-ish chat response."""
-    try:
-        d = json.loads(body_text)
-    except Exception:
-        return ""
-    try:
-        return d["choices"][0]["message"]["content"]
-    except Exception:
-        pass
-    try:  # anthropic-style
-        return d["content"][0]["text"]
-    except Exception:
-        return ""
-
-
-def chat(cred, model, messages, max_tokens=512, timeout=180, extra=None):
-    """Production LLM call. Shares build_chat_request with the probe path."""
-    url, headers, body = build_chat_request(cred, model["api_model_id"], messages, max_tokens, extra)
-    res = _execute(cred, url, headers, body, timeout)
-    res["output"] = _content_text(res["text"]) if res["ok"] else ""
-    return res
-
-
-def fetch_models(cred, timeout=90):
-    """GET <base>/models. Convenience only — failure must never block manual entry."""
-    url, headers, _ = build_request(cred, "models")
-    try:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        ids = []
-        if 200 <= r.status_code < 300:
-            try:
-                d = r.json()
-                rows = d.get("data", d if isinstance(d, list) else [])
-                ids = [m.get("id") for m in rows if isinstance(m, dict) and m.get("id")]
-            except Exception:
-                ids = []
-        return {"ok": 200 <= r.status_code < 300, "status": r.status_code,
-                "models": ids, "raw": {"url": url, "response_body": r.text[:2000]}}
-    except Exception as e:
-        return {"ok": False, "status": 0, "models": [], "error": str(e),
-                "raw": {"url": url, "response_body": str(e)}}
-
-
-def probe_model(cred, model, timeout=120):
-    """
-    Test & detect for a model, using a request VALID FOR ITS CATEGORY:
-      LLM       -> a tiny chat completion (+ a multimodal image probe)
-      Image     -> a tiny image-generation request
-      Embedding -> a tiny embeddings request
-    Signature table gives instant flags for known vendors; the live probe confirms.
-    Anything undetectable is reported as None (unknown) and degrades off — never blocks.
-    """
-    category = (model.get("category") or "LLM").upper()
-    sig = signatures.match(cred.get("base_url", ""), model.get("api_model_id", ""))
-    diag = {"category": category, "vendor": sig["vendor"] if sig else "unknown",
-            "endpoint": chat_endpoint(cred.get("base_url", ""))}
-
-    if category == "LLM":
-        caps = {"chat": None, "multimodal": None}
-        if sig:
-            caps.update({k: v for k, v in sig["caps"].items() if k in caps})
-        res = chat(cred, model, [{"role": "user", "content": "Reply with the single word: ok"}],
-                   max_tokens=5, timeout=timeout)
-        caps["chat"] = bool(res["ok"])
-        result = {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
-                  "output": res.get("output", ""), "raw": res["raw"]}
-        if res["ok"] and caps.get("multimodal") is None:  # Vision = an LLM capability, detected here
-            mm = [{"role": "user", "content": [
-                {"type": "text", "text": "what colour is this? one word"},
-                {"type": "image_url", "image_url": {"url": _TINY_PNG}}]}]
-            caps["multimodal"] = bool(chat(cred, model, mm, max_tokens=5, timeout=timeout)["ok"])
-        return {"capabilities": caps, "detect": diag, "test": result}
-
-    if category == "IMAGE":
-        url, headers, body = build_request(cred, "images/generations", {
-            "model": model["api_model_id"], "prompt": "a small blue circle on a white background",
-            "n": 1, "size": "256x256"})
-        res = _execute(cred, url, headers, body, timeout)
-        diag["endpoint"] = url
-        return {"capabilities": {"images": bool(res["ok"])}, "detect": diag,
-                "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
-                         "output": "image generated" if res["ok"] else "", "raw": res["raw"]}}
-
-    if category == "EMBEDDING":
-        url, headers, body = build_request(cred, "embeddings", {
-            "model": model["api_model_id"], "input": "ping"})
-        res = _execute(cred, url, headers, body, timeout)
-        diag["endpoint"] = url
-        return {"capabilities": {"embeddings": bool(res["ok"])}, "detect": diag,
-                "test": {"ok": res["ok"], "status": res["status"], "cause": res.get("cause"),
-                         "output": "embedding returned" if res["ok"] else "", "raw": res["raw"]}}
-
-    return {"capabilities": {"supported": None}, "detect": diag,
-            "test": {"ok": None, "status": None, "output": "",
-                     "cause": f"No live probe for {category}; leaving it as unknown.", "raw": diag}}
+    raw["status"] = r.status_code
+    raw["response_body"] = r.text[:600]
+    if 200 <= r.status_code < 300:
+        return {"ok": True, "status": r.status_code,
+                "cause": "Reachable, the key was accepted, and a test page came back. "
+                         "This crawler is working.", "raw": raw}
+    if r.status_code in (401, 403):
+        return {"ok": False, "status": r.status_code,
+                "cause": (f"{r.status_code} — Zyte rejected the key. Check it is the "
+                          "Zyte API key (not the Zyte Proxy password), copied whole. "
+                          "The auth style does not matter here — the code always uses "
+                          "HTTP Basic for Zyte, so there is no prefix to switch."),
+                "raw": raw}
+    if r.status_code == 429:
+        return {"ok": True, "status": 429,
+                "cause": "The key WORKS — this is a rate-limit or an empty quota, not a "
+                         "bad key. It will fetch once the limit resets or the plan has "
+                         "credit.", "raw": raw}
+    return {"ok": False, "status": r.status_code,
+            "cause": _likely_cause(r.status_code, r.text), "raw": raw}
 
 
 def probe_tool(tool, timeout=90):
@@ -178,10 +131,18 @@ def probe_tool(tool, timeout=90):
       400/422  the host READ the key and objected to the REQUEST. Auth passed; we
                retry with a sample query so a working API shows live data.
     """
-    from . import auth
     url = (tool.get("base_url") or "").strip()
     if not url:
         return {"ok": False, "status": 0, "cause": "No base URL saved for this tool."}
+
+    # A fetch/extract API cannot be tested like a search API. It answers a POST
+    # whose JSON body names a URL, with HTTP Basic auth (the key as username).
+    # A GET, or a Bearer header, comes back 401 that looks exactly like a bad
+    # key — which is what had the generic probe telling Zyte owners to "switch
+    # to raw", the one style that is also wrong. So these get their own probe.
+    if _is_extract_api(tool):
+        return _probe_extract_api(tool, timeout)
+
     headers = {"Accept": "application/json"}
     headers.update(auth.auth_header(tool.get("auth_style"), tool.get("api_key", ""),
                                     tool.get("auth_header_name", "")))

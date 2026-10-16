@@ -5,97 +5,99 @@ preflight.py — test everything, once, and say plainly whether the agency can r
   python3 -m providers.preflight --quick    # skip the model calls (no tokens spent)
   python3 -m providers.preflight --notify   # also post a real Telegram test message
 
-WHY THIS EXISTS, AND WHAT IT DOES DIFFERENTLY
+THE BRAINS ARE ONE QUESTION NOW
+
+Every sector thinks with a Claude model (providers/claude_team.py), so the
+brain check is: is Claude Code ready, is each account signed in, and does each
+model on the team answer today? A model that does not answer is a warning, not
+a stop — the sector steps down to the next model on its own. Only "Claude
+cannot answer at all" stops the day.
+
+THE SHELF STILL TESTS EVERY LINK IN EVERY CHAIN
 
 Testing a primary tells you today works. It tells you nothing about the night the
-primary rate-limits at 2am and the whole sector stops. So this sweep tests EVERY
-LINK IN EVERY CHAIN — each model behind a sector's routing, each API behind a
-shelf — and then reports the thing that actually matters:
+primary rate-limits at 2am. So each API behind a shelf is tested, and the
+verdict is the thing that actually matters:
 
   COVERED   two or more links work; losing the primary costs you nothing
   SINGLE    exactly one link works; it is a single point of failure
   DOWN      nothing works; this sector or shelf cannot run at all
 
 A chain of four dead fallbacks and one live primary reads as SINGLE, not as a
-pass, because that is the truth. Each model is tested once and reused across
-every sector that routes to it, so a shared brain costs one call, not five.
+pass, because that is the truth.
 """
 import sys
 import time
 
-from . import client, integrations, routing, store
+from . import claude_team, client, engines, integrations, store
 
 COVERED, SINGLE, DOWN, EMPTY = "COVERED", "SINGLE", "DOWN", "EMPTY"
+# Five, not four. Under --quick nothing is called, so every link comes back
+# ok=None — and the old four-way verdict read that as DOWN and announced that
+# every sector in the agency had no working brain. "I did not look" and "I
+# looked and it is dead" are not the same answer, and reporting the first as
+# the second makes the cheap check useless: it can never say ready.
+UNKNOWN = "UNKNOWN"
 
 
-def _cover(n_working: int, n_total: int) -> str:
+def _cover(n_working: int, n_total: int, n_unknown: int = 0) -> str:
     if n_total == 0:
         return EMPTY
-    if n_working == 0:
-        return DOWN
-    return COVERED if n_working >= 2 else SINGLE
+    if n_working >= 2:
+        return COVERED
+    if n_working == 1:
+        return SINGLE
+    return UNKNOWN if n_unknown else DOWN
 
 
-class _ModelCache:
-    """A model shared by five sectors should cost one test, not five."""
-
-    def __init__(self, quick=False):
-        self.quick, self.seen = quick, {}
-
-    def test(self, cred, model):
-        mid = model["id"]
-        if mid in self.seen:
-            return self.seen[mid]
-        if self.quick:
-            r = {"ok": None, "status": None, "ms": 0,
-                 "cause": "skipped (--quick): no call was made, so this is unverified"}
-        else:
-            t0 = time.time()
-            probe = client.probe_model(cred, model)
-            t = probe["test"]
-            r = {"ok": t.get("ok"), "status": t.get("status"),
-                 "ms": int((time.time() - t0) * 1000), "cause": t.get("cause")}
-        self.seen[mid] = r
-        return r
+def _verdict(chain) -> str:
+    return _cover(sum(1 for l in chain if l["ok"] is True), len(chain),
+                  sum(1 for l in chain if l["ok"] is None))
 
 
-# ---- the four sweeps ---------------------------------------------------------
-
-def sweep_brains(cache) -> list:
-    out = []
-    for c in store._load()["credentials"]:
-        for m in c.get("models", []):
-            if not m.get("enabled", True):
-                out.append({"credential": c["name"], "model": m.get("api_model_id", ""),
-                            "category": m.get("category", "LLM"), "ok": None,
-                            "cause": "disabled — not tested", "ms": 0})
-                continue
-            r = cache.test(c, m)
-            out.append({"credential": c["name"], "model": m.get("api_model_id", ""),
-                        "category": m.get("category", "LLM"), "cost_tier": m.get("cost_tier"),
-                        **r})
-    return out
-
-
-def sweep_routing(cache) -> list:
-    """Every sector's brain chain, each link tested, with the cover verdict."""
-    out = []
-    for task in sorted(store.get_routing()):
-        r = routing.resolve_task(task)
-        if not r["ok"]:
-            out.append({"task": task, "cover": DOWN, "error": r["error"], "chain": []})
-            continue
+def sweep_team(quick=False) -> dict:
+    """
+    The Claude team: the command, the accounts, and — unless --quick — one tiny
+    real call per model on each signed-in account. Each model is tested once,
+    however many sectors use it.
+    """
+    st = claude_team.status()
+    api = st.get("engine") in engines.API_ENGINES
+    tested = {}
+    if st["ready"] and not quick:
+        for acc in st["accounts"]:
+            if acc.get("ok"):
+                for row in claude_team.test(account=acc["id"]):
+                    tested[(acc["id"], row["model"])] = row
+    brains = []
+    for (aid, m), r in sorted(tested.items(), key=lambda kv: (kv[0][0], claude_team.rank(kv[0][1]))):
+        brains.append({"credential": (f"{engines.NAME[aid]} API key" if api
+                                      else f"{aid} Claude account"),
+                       "model": engines.label(m) if api else claude_team.LABEL.get(m, m),
+                       "ok": r["ok"], "ms": int((r.get("seconds") or 0) * 1000),
+                       "cause": r.get("why") or ""})
+    routing = []
+    for row in st["team"]:
         chain = []
-        for i, cand in enumerate(r["candidates"]):
-            cred, model = store.find_model(cand["model_id"])
-            res = cache.test(cred, model)
-            chain.append({"role": "primary" if i == 0 else f"fallback {i}",
-                          "name": f'{cand["credential_name"]} · {cand["api_model_id"]}',
-                          **res})
-        working = sum(1 for l in chain if l["ok"] is True)
-        out.append({"task": task, "chain": chain, "working": working,
-                    "cover": _cover(working, len(chain))})
-    return out
+        for acc in st["accounts"]:
+            model = row["model"]
+            if acc["id"] == "backup" and not row["main"] and \
+                    claude_team.rank(model) < claude_team.rank(claude_team.BACKUP_CAP_FOR_OTHERS):
+                model = claude_team.BACKUP_CAP_FOR_OTHERS
+            r = tested.get((acc["id"], model))
+            ok = None if quick or not st["ready"] else (
+                False if not acc.get("ok") else (r["ok"] if r else None))
+            cause = ("" if ok else
+                     "skipped (--quick): unverified" if quick else
+                     acc.get("why") if not acc.get("ok") else (r or {}).get("why", ""))
+            chain.append({"role": acc["id"],
+                          "name": engines.label(model) if api else claude_team.LABEL.get(model, model),
+                          "ok": ok, "ms": int(((r or {}).get("seconds") or 0) * 1000),
+                          "cause": cause})
+        routing.append({"task": row["sector"], "label": row["label"],
+                        "model": row["model"], "cover": _verdict(chain),
+                        "chain": chain})
+    return {"status": st, "brains": brains, "routing": routing}
 
 
 def sweep_shelf(quick=False) -> list:
@@ -105,9 +107,6 @@ def sweep_shelf(quick=False) -> list:
     for shelf in sorted(set(store.known_shelves()) | set(cat)):
         tools = store.tools_on_shelf(shelf)
         if not tools:
-            models = [i for i in cat.get(shelf, []) if i.get("kind") == "model"]
-            if models:  # a model shelf — already covered by sweep_routing
-                continue
             out.append({"shelf": shelf, "purpose": store.shelf_kind(shelf),
                         "chain": [], "working": 0, "cover": EMPTY})
             continue
@@ -125,39 +124,88 @@ def sweep_shelf(quick=False) -> list:
                     "ok": res["ok"], "status": res["status"], "at": int(time.time())}})
             chain.append({"role": "primary" if i == 0 else f"fallback {i}",
                           "name": t["name"], **res})
-        working = sum(1 for l in chain if l["ok"] is True)
         out.append({"shelf": shelf, "purpose": store.shelf_kind(shelf), "chain": chain,
-                    "working": working, "cover": _cover(working, len(chain))})
+                    "working": sum(1 for l in chain if l["ok"] is True),
+                    "cover": _verdict(chain)})
     return out
 
 
 def sweep(quick=False, notify=False) -> dict:
-    cache = _ModelCache(quick=quick)
-    brains = sweep_brains(cache)
-    route = sweep_routing(cache)
+    team = sweep_team(quick=quick)
+    st = team["status"]
     shelf = sweep_shelf(quick=quick)
     chan = integrations.test_all(notify=notify)
 
-    blocking = []
-    for r in route:
-        if r["cover"] == DOWN:
-            blocking.append(f"sector '{r['task']}' has no working brain")
-    tg = next((c for c in chan if c["integration"] == "telegram"), None)
-    if tg and tg["ok"] is False:
-        blocking.append("Telegram is broken — you cannot be asked to approve anything")
-    if tg and tg["ok"] is None:
-        blocking.append("Telegram is not set up — approvals have nowhere to go")
+    blocking, warn = [], []
+    signed = [a for a in st["accounts"] if a.get("ok")]
+    if st.get("engine", engines.CLAUDE_CODE) in engines.API_ENGINES:
+        # Claude, OpenAI or Gemini by API key: one key, no backup account, and a
+        # model that fails steps down to the next tier by itself.
+        if not st["ready"]:
+            blocking.append("the AI engine is not ready, so no sector can think: "
+                            + (st["why"] or "").splitlines()[0])
+        else:
+            for r in team["routing"]:
+                main = r["chain"][0] if r["chain"] else {}
+                if main.get("ok") is False:
+                    warn.append(f"{r['label']}: {engines.label(r['model'])} did not answer "
+                                f"({main.get('cause') or 'no reason given'}) — it will step "
+                                "down to a lighter model")
+            if quick:
+                warn.append("nothing was actually called, so no model is proven — "
+                            "only that a key is saved")
+            cap_why = engines.cap_block()
+            if cap_why:
+                blocking.append(cap_why)
+    elif not st["ready"]:
+        blocking.append("Claude Code is not ready on this machine, so no sector can "
+                        "think: " + st["why"].splitlines()[0])
+    elif not signed:
+        blocking.append("no Claude account is signed in on this machine — run "
+                        "`claude` once and sign in")
+    else:
+        for a in st["accounts"]:
+            if not a.get("ok"):
+                warn.append(f"the {a['label']} is not signed in — "
+                            "`python -m providers.claude_team --login-backup`")
+        if len(st["accounts"]) < 2:
+            warn.append("no backup Claude account — if the main account's allowance "
+                        "runs out, sectors step down to lighter models and then stop. "
+                        "`python -m providers.claude_team --login-backup` adds one")
+        for r in team["routing"]:
+            main = r["chain"][0] if r["chain"] else {}
+            if main.get("ok") is False:
+                lower = claude_team.below(r["model"])
+                warn.append(f"{r['label']}: {claude_team.LABEL.get(r['model'], r['model'])} "
+                            f"did not answer ({main.get('cause') or 'no reason given'})"
+                            + (f" — it will step down to {claude_team.LABEL[lower[0]]}"
+                               if lower else ""))
+        if quick:
+            warn.append("nothing was actually called, so no model is proven — "
+                        "only that the accounts are signed in")
 
-    warn = [f"sector '{r['task']}' runs on one brain with no fallback"
-            for r in route if r["cover"] == SINGLE]
+    # Alerts and approvals live in the app, on his computer and his phone, so
+    # the owner can always be reached. Telegram is an optional extra copy: a
+    # broken one is worth a line, never a stop — "Not resumed. ... failed" once
+    # refused the whole day over an alert route while every approval was
+    # waiting for him in the app anyway.
+    broken = sorted(c["integration"] for c in chan
+                    if c["integration"] == "telegram" and c["ok"] is False)
+    if broken:
+        warn.append(f"{' and '.join(broken)} failed — alerts still wait for you in the app "
+                    "under Waiting on you")
+
     warn += [f"shelf '{s['shelf']}' has one API and no fallback"
              for s in shelf if s["cover"] == SINGLE]
     warn += [f"shelf '{s['shelf']}' is configured but every API on it failed"
              for s in shelf if s["cover"] == DOWN]
 
     return {"ok": True, "quick": quick, "at": int(time.time()),
-            "brains": brains, "routing": route, "shelf": shelf, "integrations": chan,
-            "ready": not blocking, "blocking": blocking, "warnings": warn}
+            "team": {"accounts": st["accounts"], "ready": st["ready"],
+                     "why": st["why"]},
+            "brains": team["brains"], "routing": team["routing"], "shelf": shelf,
+            "integrations": chan, "ready": not blocking, "blocking": blocking,
+            "warnings": warn}
 
 
 # ---- human-readable report ---------------------------------------------------
@@ -174,21 +222,25 @@ def report(res: dict) -> None:
     print("  AGENCY PREFLIGHT" + ("   (--quick: nothing was actually called)" if res["quick"] else ""))
     print("=" * 74)
 
-    print("\nBRAINS")
+    print("\nCLAUDE ACCOUNTS")
+    for a in res["team"]["accounts"]:
+        who = f" as {a['email']}" if a.get("email") else ""
+        print(_line(a["label"] + who, bool(a.get("ok")),
+                    "" if a.get("ok") else (a.get("why") or "")[:40]))
+
+    print("\nMODELS — one tiny call each")
     if not res["brains"]:
-        print("    (none configured)")
+        print("    (nothing called)")
     for b in res["brains"]:
         right = f'{b.get("ms", 0)}ms' if b["ok"] is True else (b.get("cause") or "")[:44]
         print(_line(f'{b["credential"]} · {b["model"]}', b["ok"], right))
 
-    print("\nSECTOR BRAINS — does each survive losing its primary?")
-    if not res["routing"]:
-        print("    (no routing configured)")
+    print("\nTHE TEAM — each sector on the main account, and on the backup")
     for r in res["routing"]:
-        print(f'  {r["task"]:10} {r["cover"]}' + (f'   {r.get("error","")}' if r.get("error") else ""))
+        print(f'  {r["label"]:18} {r["cover"]}')
         for l in r.get("chain", []):
             right = f'{l.get("ms",0)}ms' if l["ok"] is True else (l.get("cause") or "")[:40]
-            print(_line(f'{l["role"]:12} {l["name"]}', l["ok"], right))
+            print(_line(f'{l["role"]:8} {l["name"]}', l["ok"], right))
 
     print("\nSHELF — does each shelf survive losing its primary?")
     for s in res["shelf"]:
@@ -213,7 +265,7 @@ def report(res: dict) -> None:
         for b in res["blocking"]:
             print(f"    ✕ {b}")
     else:
-        print("  READY — every sector has a working brain and you can be reached.")
+        print("  READY — Claude can think for every sector and you can be reached.")
     for w in res["warnings"]:
         print(f"    ! {w}")
     print("-" * 74 + "\n")

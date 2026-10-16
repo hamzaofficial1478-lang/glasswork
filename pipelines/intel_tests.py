@@ -1,0 +1,857 @@
+"""
+intel_tests.py — run: python -m pipelines.intel_tests
+
+Three new pieces, each with one way of going badly wrong.
+
+  seo_intel   the whole point is that it works with NO paid API. A version that
+              quietly needs DataForSEO to produce anything is the bug. And it
+              must never print a number that reads as monthly search volume,
+              because that is the one thing free sources genuinely cannot give
+              and the one thing an owner would act on hardest.
+
+  notify      the failure mode is not silence, it is noise. An alert that
+              repeats until answered gets muted, and then the one that mattered
+              is muted too. Sent once, and progress never reaches the phone.
+
+  site        the owner set his website, pulled an update, and was told to set
+              his website. config/site.json was tracked, so the repo's empty
+              copy overwrote his. Pinned in site_tests.py; the .env precedence
+              is re-checked here because notify and intel both depend on it.
+
+No network call is made: the suggest endpoints are monkeypatched.
+"""
+import sqlite3
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+from coordination import board, faults, notify
+from . import seo_intel
+
+_fail = []
+
+
+def check(name, got, want):
+    if got == want:
+        print(f"  ok  {name}")
+    else:
+        print(f"FAIL  {name}\n        got:  {got!r}\n        want: {want!r}")
+        _fail.append(name)
+
+
+def _fresh_db():
+    d = Path(tempfile.mkdtemp())
+    db = d / "agency.db"
+    con = sqlite3.connect(db)
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8"))
+    con.commit()
+    con.close()
+    return db
+
+
+# ---------------------------------------------------------------------------
+# seo_intel — free, and honest about what it is
+# ---------------------------------------------------------------------------
+
+FAKE = {
+    "glass partition": ["glass partition dubai price", "glass partition company in dubai",
+                        "glass partition sri lanka", "glass partition"],
+    "pergola": ["pergola dubai price", "aluminium pergola abu dhabi"],
+}
+
+
+def _fake_suggest(q):
+    out = []
+    for seed, res in FAKE.items():
+        if seed in q:
+            out += res
+    return out
+
+
+def test_it_works_with_no_paid_api():
+    print("\nThe whole point: real output with no keyword subscription:")
+    real_db = board.DB
+    real_s, real_b, real_g = seo_intel.seo_gap._suggest, seo_intel._bing_suggest, seo_intel.gsc_queries
+    board.DB = _fresh_db()
+    seo_intel.seo_gap._suggest = _fake_suggest
+    seo_intel._bing_suggest = lambda q: []
+    seo_intel.gsc_queries = lambda **k: ([], "no GSC_PROPERTY set")
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        built = seo_intel.build(con, seeds=["glass partition"], our_paths=[])
+        check("phrases came back with no key of any kind", built["phrases"] > 0, True)
+        check("and it says Search Console was not available",
+              "GSC_PROPERTY" in built["gsc_why"], True)
+
+        rows = [dict(r) for r in con.execute(
+            "SELECT * FROM keyword_intel ORDER BY score DESC")]
+        phrases = [r["phrase"] for r in rows]
+        check("a UAE buying phrase is in", "glass partition dubai price" in phrases, True)
+        check("another country is filtered out",
+              "glass partition sri lanka" in phrases, False)
+        check("every row carries its evidence",
+              all(r["evidence"] for r in rows), True)
+        top = rows[0]
+        check("the top phrase names an emirate", bool(top["area"]), True)
+        con.close()
+    finally:
+        board.DB = real_db
+        seo_intel.seo_gap._suggest, seo_intel._bing_suggest = real_s, real_b
+        seo_intel.gsc_queries = real_g
+
+
+def test_it_never_claims_to_know_volume():
+    print("\nIt must not print anything a person would read as searches per month:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        seo_intel._table(con)
+        con.execute("INSERT INTO keyword_intel(phrase,score,evidence,sources,"
+                    "suggest_breadth) VALUES('glass partition dubai',50,"
+                    "'6 autocomplete completions (demand breadth, NOT a volume figure)',"
+                    "'autocomplete',6)")
+        con.commit()
+        con.close()
+        txt = seo_intel.as_text().lower()
+        check("the report says outright it is not volume",
+              "not search volume" in txt, True)
+        check("the word volume never appears as a claim",
+              "searches per month" in txt.replace("estimates searches per month", ""), False)
+        check("and it names the free sources it used", "autocomplete" in txt, True)
+        check("and says no subscription is needed", "no dataforseo" in txt, True)
+        row = {"suggest_breadth": 6}
+        check("breadth is labelled breadth, not volume",
+              "NOT a volume figure" in seo_intel.evidence_line(row), True)
+    finally:
+        board.DB = real_db
+
+
+def test_striking_distance_is_the_free_win():
+    print("\nStriking distance is the cheapest traffic there is, so pin the band:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        seo_intel._table(con)
+        for phrase, pos, imp in [("a", 2.0, 900), ("b", 8.0, 300), ("c", 19.0, 120),
+                                 ("d", 40.0, 500), ("e", 9.0, 3)]:
+            striking = int(seo_intel.STRIKING_LOW <= pos <= seo_intel.STRIKING_HIGH
+                           and imp >= 10)
+            con.execute("INSERT INTO keyword_intel(phrase,position,impressions,striking)"
+                        " VALUES(?,?,?,?)", (phrase, pos, imp, striking))
+        con.commit()
+        got = [w["phrase"] for w in seo_intel.striking_distance(con)]
+        check("already on page one is not a 'win' to chase", "a" in got, False)
+        check("position 8 with real impressions is", "b" in got, True)
+        check("so is position 19", "c" in got, True)
+        check("position 40 is a new page, not a nudge", "d" in got, False)
+        check("three impressions is noise, not a signal", "e" in got, False)
+        wins = seo_intel.striking_distance(con)
+        check("worth the most clicks first (300 shown at 8th beats 120 at 19th)", [w["phrase"] for w in wins], ["b", "c"])
+        check("  roughly: 100 a month x (10.5% - 3.5%) = 7 more clicks", wins[0]["gain"], 7)
+        check("  and the reason says it is an estimate", "an estimate" in seo_intel.evidence_line(
+            {**wins[0], "striking": 1}), True)
+        check("already in the top three gains nothing", seo_intel.clicks_to_gain(900, 2.0), 0)
+        con.close()
+    finally:
+        board.DB = real_db
+
+
+def test_it_stops_before_the_runner_kills_it():
+    """
+    The daily runner kills a step at 420 seconds. Twelve seeds of autocomplete
+    on a slow line can reach that, and a step killed at 419 seconds throws away
+    every phrase it gathered. It works to a clock instead.
+    """
+    print("\nOut of time means a partial pass, never a lost one:")
+    real_db = board.DB
+    real_s, real_b, real_g = (seo_intel.seo_gap._suggest, seo_intel._bing_suggest,
+                              seo_intel.gsc_queries)
+    board.DB = _fresh_db()
+    seo_intel.seo_gap._suggest = _fake_suggest
+    seo_intel._bing_suggest = lambda q: []
+    seo_intel.gsc_queries = lambda **k: ([], "off")
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        out = seo_intel.build(con, seeds=["glass partition"] * 6, budget=-1)
+        check("it stopped early", out["ran_out_of_time"], True)
+        check("without finishing every seed", out["seeds_done"] < out["seeds_total"], True)
+        check("and it did not raise", out["phrases"] >= 0, True)
+
+        out2 = seo_intel.build(con, seeds=["glass partition"], budget=60)
+        check("a normal budget completes", out2["ran_out_of_time"], False)
+        check("and gets real phrases", out2["phrases"] > 0, True)
+        con.close()
+    finally:
+        board.DB = real_db
+        seo_intel.seo_gap._suggest, seo_intel._bing_suggest = real_s, real_b
+        seo_intel.gsc_queries = real_g
+
+
+def test_a_customers_words_never_reach_a_public_topic():
+    """
+    An alert can be copied to a chat app outside the program (Telegram).
+    Pasting a customer's reply into it puts their message somewhere the program
+    does not control, to save the owner one tap. He gets told WHO wrote; the
+    words stay in the app.
+    """
+    print("\nA customer's own words must not be published to a public topic:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO leads(id,company,email,found_at) VALUES(7,'Barsha Build','a@b.ae',1)")
+    con.execute("INSERT INTO outreach_log(lead_id,channel,direction,body,reply_class,"
+                "needs_owner,at) VALUES(7,'email','reply',"
+                "'Our budget is 180000 AED and the landlord is Sheikh...','interested',1,1)")
+    con.commit()
+    con.close()
+    try:
+        alert = [a for a in notify.collect() if a["key"].startswith("reply:")][0]
+        check("he is told who wrote", "Barsha Build" in alert["title"], True)
+        check("and roughly what kind of message", "interested" in alert["body"].lower(), True)
+        check("but the budget figure is NOT published", "180000" in alert["body"], False)
+        check("nor any of the message body", "landlord" in alert["body"].lower(), False)
+        check("and he is told where to read it",
+              "open the office" in alert["body"].lower(), True)
+    finally:
+        board.DB = real_db
+
+
+def test_the_critic_rejects_evidence_free_output():
+    print("\nA shortlist with no evidence behind it must not ship:")
+    ok, why = seo_intel.critic_check({"phrases": 3, "gsc_rows": 0}, [
+        {"phrase": "x", "impressions": 0, "suggest_breadth": 0,
+         "rival_pages": 0, "in_enquiries": 0}])
+    check("it is rejected", ok, False)
+    check("and it says why", "no evidence" in " ".join(why), True)
+    ok2, _ = seo_intel.critic_check({"phrases": 1, "gsc_rows": 0}, [
+        {"phrase": "glass partition dubai price", "impressions": 0,
+         "suggest_breadth": 4, "rival_pages": 0, "in_enquiries": 0}])
+    check("real autocomplete evidence passes", ok2, True)
+    ok3, why3 = seo_intel.critic_check({"phrases": 0, "gsc_rows": 0}, [])
+    check("nothing gathered is rejected too", ok3, False)
+
+
+# ---------------------------------------------------------------------------
+# notify — the failure mode is noise, not silence
+# ---------------------------------------------------------------------------
+
+def _seed_alerts(db):
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
+                " VALUES('form_dead','critical','contact form posts to a 404','/contact',"
+                "'open','it-watcher',1)")
+    con.execute("INSERT INTO tasks(id,sector,title,detail,risk,status,created_by,created_at)"
+                " VALUES('t1','Leads','Mail 9 cleared firms','d','amber','open','MD',1)")
+    con.commit()
+    con.close()
+
+
+def test_only_things_that_need_him():
+    print("\nProgress is not news — it must not reach the phone:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    _seed_alerts(board.DB)
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO tasks(id,sector,title,detail,risk,status,created_by,created_at)"
+                " VALUES('t2','SEO','Wrote 4 briefs','d','green','open','MD',1)")
+    con.commit()
+    con.close()
+    try:
+        keys = [a["key"] for a in notify.collect()]
+        check("a dead contact form gets through", any(k.startswith("site:") for k in keys), True)
+        check("an amber approval gets through", "task:t1" in keys, True)
+        check("routine green work does not", "task:t2" in keys, False)
+        urg = {a["key"]: a["urgency"] for a in notify.collect()}
+        check("the enquiry path is the most urgent thing there is",
+              urg[[k for k in keys if k.startswith("site:")][0]], notify.NOW)
+    finally:
+        board.DB = real_db
+
+
+def test_it_does_not_repeat_itself():
+    print("\nAn alert that repeats until answered gets muted, and so does the next one:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    _seed_alerts(board.DB)
+    sent = []
+    try:
+        import providers.integrations as ig
+        real_send = ig.send_message
+        ig.send_message = lambda text, **k: (sent.append(text) or
+                                             {"ok": True, "integration": "app",
+                                              "detail": "delivered"})
+        first = notify.send()
+        check("the first pass sends what is waiting", first["sent"] > 0, True)
+        n = first["sent"]
+        second = notify.send()
+        check("the second pass sends nothing new", second["sent"], 0)
+        check("and says so plainly", second["note"], "nothing needs him")
+        check("no duplicate went out", len(sent), n)
+
+        # ...until enough time has passed for one more nudge
+        # ...but tomorrow the same unanswered thing earns one more nudge
+        check("tomorrow it is worth one more nudge",
+              len(notify.unsent(repeat_after=0)) > 0, True)
+    finally:
+        ig.send_message = real_send
+        board.DB = real_db
+
+
+def test_digest_items_stay_off_the_phone():
+    print("\nA stalled agent is worth knowing, not worth a buzz at 11pm:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    con = sqlite3.connect(board.DB)
+    # Long enough to be a stall, recent enough not to be blocking — a stall
+    # nobody has fixed for hours IS worth waking him for, and that is tested
+    # separately below.
+    con.execute("INSERT INTO agent_runs(agent,started_at,status,note)"
+                " VALUES('seo-strategist',?, 'running','stuck')",
+                (int(time.time()) - 1500,))
+    con.commit()
+    con.close()
+    try:
+        # The owner is told about faults the agency has FILED, not about raw
+        # rows notify went looking for itself. That is the point of the change:
+        # what reaches his phone and what reaches the sectors are one list, so
+        # he is never told about something no sector has been given.
+        check("nothing is on his phone before the Overseer has looked",
+              [a for a in notify.collect() if a["key"].startswith("fault:")], [])
+        faults.scan()
+        alerts = notify.collect()
+        check("once filed, the stall is collected",
+              any(a["key"].startswith("fault:") for a in alerts), True)
+        check("and marked digest, not now",
+              [a["urgency"] for a in alerts if a["key"].startswith("fault:")],
+              [notify.DIGEST])
+        check("and it says who was given it",
+              any("IT" in a["body"] for a in alerts if a["key"].startswith("fault:")), True)
+        out = notify.send(dry_run=True)
+        check("so nothing goes to the phone", out["alerts"], [])
+    finally:
+        board.DB = real_db
+
+
+def test_a_blocking_fault_does_reach_the_phone():
+    print("\nBut the agency actually stopped is a today, not a digest:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    con = sqlite3.connect(board.DB)
+    con.execute("INSERT INTO agent_runs(agent,started_at,status,note)"
+                " VALUES('seo-strategist',?, 'running','stuck')",
+                (int(time.time()) - 5 * faults.STALL_SECS,))
+    con.commit()
+    con.close()
+    try:
+        faults.scan()
+        alerts = [a for a in notify.collect() if a["key"].startswith("fault:")]
+        check("it is collected", len(alerts) >= 1, True)
+        check("as a today", alerts[0]["urgency"], notify.TODAY)
+        out = notify.send(dry_run=True)
+        check("and it would go out", len(out["alerts"]) >= 1, True)
+    finally:
+        board.DB = real_db
+
+
+def test_preview_sends_nothing():
+    print("\n'What will I get?' must answer without sending anything:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    _seed_alerts(board.DB)
+    sent = []
+    try:
+        import providers.integrations as ig
+        real_send = ig.send_message
+        ig.send_message = lambda text, **k: (sent.append(text) or {"ok": True})
+        txt = notify.preview_text()
+        check("it lists what is waiting", "contact form" in txt, True)
+        check("it says what he does NOT get", "You do not get" in txt, True)
+        check("and it sent nothing at all", sent, [])
+        dry = notify.send(dry_run=True)
+        check("the dry run sends nothing either", (dry["sent"], sent), (0, []))
+    finally:
+        ig.send_message = real_send
+        board.DB = real_db
+
+
+def test_with_nothing_set_up_alerts_stay_in_the_app():
+    print("\nWith nothing else set up, every alert is kept in the app:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    _seed_alerts(board.DB)
+    try:
+        import providers.integrations as ig
+        real_read = ig.read_env
+        ig.read_env = lambda: {}
+        out = notify.send()
+        check("every alert is kept", out["sent"], len(out["alerts"]))
+        check("and each says where", all(a["detail"] == "Kept in the app." for a in out["alerts"]), True)
+        con = sqlite3.connect(board.DB)
+        routes = {r[0] for r in con.execute("SELECT route FROM notifications WHERE key NOT LIKE 'activity:%'")}
+        con.close()
+        check("the cabinet records them for the app", routes, {"app"})
+    finally:
+        ig.read_env = real_read
+        board.DB = real_db
+
+
+
+# ---------------------------------------------------------------------------
+# SEARCH CONSOLE — the path that cannot be tested against a real property
+# ---------------------------------------------------------------------------
+#
+# google-auth is stood in for, so the real request-building code runs. This
+# caught a genuine bug: the endpoint host was searchconsole.googleapis.com,
+# which serves the URL-inspection API and not webmasters/v3, so the owner's
+# very first call would have 404'd and read like a permissions problem.
+
+import types
+
+
+def _stub_google():
+    class _Creds:
+        token = "fake-token"
+        def refresh(self, req):
+            pass
+    sa = types.ModuleType("google.oauth2.service_account")
+    sa.Credentials = type("C", (), {
+        "from_service_account_file": staticmethod(lambda p, scopes=None: _Creds())})
+    oauth2 = types.ModuleType("google.oauth2"); oauth2.service_account = sa
+    tr = types.ModuleType("google.auth.transport")
+    tr.requests = types.ModuleType("google.auth.transport.requests")
+    tr.requests.Request = lambda: None
+    gauth = types.ModuleType("google.auth"); gauth.transport = tr
+    g = types.ModuleType("google"); g.oauth2 = oauth2; g.auth = gauth
+    for n, m in [("google", g), ("google.oauth2", oauth2),
+                 ("google.oauth2.service_account", sa), ("google.auth", gauth),
+                 ("google.auth.transport", tr),
+                 ("google.auth.transport.requests", tr.requests)]:
+        sys.modules.setdefault(n, m)
+
+
+class _Resp:
+    def __init__(self, code, payload=None, text=""):
+        self.status_code, self._p, self.text = code, payload or {}, text
+
+    def json(self):
+        return self._p
+
+
+def test_search_console_talks_to_the_right_endpoint():
+    print("\nSearch Console: the documented host, and failures that name the fix:")
+    _stub_google()
+    import requests
+    from providers import integrations
+    root = Path(__file__).parents[1]
+    sa_path = root / seo_intel.GSC_SA
+    made = not sa_path.exists()
+    if made:
+        sa_path.parent.mkdir(parents=True, exist_ok=True)
+        sa_path.write_text("{}", encoding="utf-8")
+    real_env, real_post = integrations.read_env, requests.post
+    real_get = requests.get
+    integrations.read_env = lambda: {"GSC_PROPERTY": "sc-domain:example.ae"}
+    try:
+        seen = []
+
+        def responder(fn):
+            def post(url, **kw):
+                seen.append(url)
+                return fn(url, len(seen))
+            requests.post = post
+            # GET too, and NOT counted in `seen`.
+            #
+            # A 403 now asks Google which properties the service account can
+            # actually see, so there is a second call on this path. Patching
+            # only post left that one live: the suite made a real request to
+            # googleapis.com, which is slow, needs a network, and answers
+            # differently depending on where it runs. It is what made this
+            # test flaky. `seen` stays post-only so the host assertions above
+            # still mean what they say.
+            requests.get = lambda url, **kw: _Resp(403, text="forbidden")
+
+        responder(lambda u, n: _Resp(200, {"rows": [
+            {"keys": ["glass partition dubai"], "impressions": 240,
+             "clicks": 3, "position": 8.4}]}))
+        rows, err = seo_intel.gsc_queries(days=30, limit=10)
+        check("it calls the DOCUMENTED host", seen[0].startswith(
+            "https://www.googleapis.com/webmasters/v3/"), True)
+        check("the property is url-encoded into the path",
+              "sc-domain%3Aexample.ae" in seen[0], True)
+        check("a real query comes back", len(rows), 1)
+        check("with its position", rows[0]["position"], 8.4)
+        check("and no error", err, "")
+
+        seen.clear()
+        responder(lambda u, n: _Resp(403, text="forbidden"))
+        rows, err = seo_intel.gsc_queries()
+        check("403 is not retried on the other host", len(seen), 1)
+        check("and it names the actual fix", "not a user on" in err, True)
+
+        seen.clear()
+        responder(lambda u, n: _Resp(404, text="nf"))
+        rows, err = seo_intel.gsc_queries()
+        check("404 tries the alternative host once", len(seen), 2)
+        check("then explains the property format", "sc-domain:" in err, True)
+
+        seen.clear()
+        responder(lambda u, n: _Resp(404) if n == 1 else _Resp(200, {"rows": []}))
+        rows, err = seo_intel.gsc_queries()
+        check("a 404 on the first host falls through to the second", err, "")
+    finally:
+        integrations.read_env, requests.post = real_env, real_post
+        requests.get = real_get
+        if made:
+            sa_path.unlink()
+
+
+def test_no_wins_says_which_link_is_missing():
+    """
+    "Either the pass has not run, or Search Console is not connected" was true
+    and useless — it handed the diagnosis back as homework. Every step is
+    checkable from here, so every step gets checked.
+    """
+    print("\nAn empty answer must still say what to do:")
+    real_db, real_ready = board.DB, seo_intel.gsc_ready
+    real_q = seo_intel.gsc_queries
+    board.DB = _fresh_db()
+    # The diagnosis now PROBES Search Console rather than inferring from config,
+    # so the probe has to be stubbed too — that is the point of the change and
+    # the reason these four assertions had to be rewritten.
+    seo_intel.gsc_queries = lambda **k: ([], "")
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        seo_intel._table(con)
+
+        seo_intel.gsc_ready = lambda: (False, "no GSC_PROPERTY set")
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("not connected -> says so, and does not blame the pass",
+              "not usable yet" in t and "never run" not in t, True)
+
+        seo_intel.gsc_ready = lambda: (True, "")
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("connected but nothing on file -> run the pass",
+              "never run" in t and "python -m pipelines.seo_intel" in t, True)
+
+        con.execute("INSERT INTO keyword_intel(phrase,position,impressions)"
+                    " VALUES('glass dubai',0,0)")
+        con.commit()
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("pass ran but GSC gave nothing -> property or permissions",
+              "does not match" in t and "Users and" in t, True)
+
+        con.execute("INSERT INTO keyword_intel(phrase,position,impressions)"
+                    " VALUES('glass fix dubai',1.4,900)")
+        con.commit()
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("everything works, just nothing in the band -> a real answer",
+              "real answer, not a fault" in t, True)
+        check("and it shows where he actually ranks", "glass fix dubai" in t, True)
+        con.close()
+        print("  and when Google itself refuses, that is what it says:")
+        seo_intel.gsc_queries = lambda **k: (
+            [], "Search Console refused (403) for https://x.ae. Two causes...")
+        t = seo_intel._why_no_wins(seo_intel._nearly(con))
+        check("the real 403 is quoted, not guessed at",
+              "Google refused the call" in t and "403" in t, True)
+        check("and both causes of a 403 are given",
+              "not a user on the property" in t and "TRAILING" in t, True)
+        check("it does not fall through to 'the pass never ran'",
+              "never run" in t, False)
+    finally:
+        board.DB, seo_intel.gsc_ready = real_db, real_ready
+        seo_intel.gsc_queries = real_q
+
+
+def test_nothing_is_hardcoded():
+    """
+    The owner's instruction: this is the main part of his SEO, so its work, its
+    limits, its conditions and its reasoning must not be literals in a file only
+    I can edit. Every one of them was.
+    """
+    print("\nWhat it researches comes from the business, not from this file:")
+    import os
+    keys = ["SEO_AREAS", "SEO_SEEDS", "SEO_BUY_WORDS", "SEO_ASK_WORDS",
+            "SEO_STRIKING_FROM", "SEO_STRIKING_TO", "SEO_W_ENQUIRIES",
+            "SEO_TIME_BUDGET"]
+    for k in keys:
+        os.environ.pop(k, None)
+    import providers.integrations as integ
+    real_read = integ.read_env
+    integ.read_env = lambda: {}
+    try:
+        seeds = seo_intel.seeds_from_catalogue()
+        check("seeds come from the live service catalogue, not a fixed list",
+              len(seeds) >= 8, True)
+        from . import services
+        check("and they are the catalogue's own names",
+              seeds[0] in [n for s in services.SERVICES.values()
+                           for n in (s.get("names") or ())], True)
+
+        os.environ["SEO_SEEDS"] = "frameless shower screen, curtain wall"
+        check("he can force the list without touching Python",
+              seo_intel.seeds_from_catalogue(),
+              ["frameless shower screen", "curtain wall"])
+        os.environ.pop("SEO_SEEDS")
+
+        check("areas default to the emirates", seo_intel.areas_list()[0], "Dubai")
+        os.environ["SEO_AREAS"] = "Al Ain, Fujairah"
+        check("and move when the business moves",
+              seo_intel.areas_list(), ["Al Ain", "Fujairah"])
+        os.environ.pop("SEO_AREAS")
+
+        check("the striking band is a judgement he can change",
+              seo_intel.striking_band(), (4.5, 20.5))
+        os.environ["SEO_STRIKING_TO"] = "30"
+        check("chase to 30 if he wants", seo_intel.striking_band()[1], 30.0)
+        os.environ.pop("SEO_STRIKING_TO")
+
+        base = seo_intel.score({"in_enquiries": 1})
+        os.environ["SEO_W_ENQUIRIES"] = "80"
+        raised = seo_intel.score({"in_enquiries": 1})
+        check("and the scoring weights are his too", raised > base, True)
+        os.environ.pop("SEO_W_ENQUIRIES")
+
+        check("a junk override falls back rather than breaking the ranking",
+              (os.environ.__setitem__("SEO_W_AREA", "banana"),
+               seo_intel.weights()["area"])[1], 12.0)
+        os.environ.pop("SEO_W_AREA")
+    finally:
+        integ.read_env = real_read
+        for k in keys + ["SEO_W_AREA"]:
+            os.environ.pop(k, None)
+
+
+def test_it_asks_instead_of_shrugging():
+    """
+    The handbook: a sector that needs something outside its expertise asks the
+    sector that owns it. SEO kept hitting exactly those walls and swallowing
+    them — Search Console refused and the pass just reported zero.
+    """
+    print("\nWhen it cannot do the job alone, it asks the sector that can:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        con.execute("INSERT INTO keywords(phrase,intent) VALUES('Folding Door','site')")
+        con.commit()
+        seo_intel.ask_for_help(
+            con, {"gsc_why": "Search Console refused (403) for x", "gsc_rows": 0,
+                  "from_enquiries": 0}, [{"phrase": "x"}])
+        rows = {r["to_sector"]: r["subject"] for r in
+                con.execute("SELECT to_sector, subject FROM requests")}
+        check("Search Console is IT's door, so IT is asked", "IT" in rows, True)
+        check("uncatalogued services go to Content, who own the list",
+              "Content" in rows, True)
+        check("a missing rival signal is raised", "SEO" in rows, True)
+        check("and Leads is told its replies would sharpen the ranking",
+              "Leads" in rows, True)
+        # The body lives in request_msgs — a request is append-only, so the
+        # subject is on the request and every message hangs off it.
+        body = con.execute(
+            "SELECT m.body FROM request_msgs m JOIN requests r ON r.id=m.request_id"
+            " WHERE r.to_sector='IT'").fetchone()[0]
+        check("the request carries Google's actual words, not a paraphrase",
+              "403" in body, True)
+        con.close()
+
+        print("It does not invent problems it does not have:")
+        board.DB = _fresh_db()
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        con.execute("INSERT INTO competitors(name,domain) VALUES('R','r.ae')")
+        con.commit()
+        seo_intel.ask_for_help(con, {"gsc_why": "", "gsc_rows": 40,
+                                     "from_enquiries": 5}, [{"phrase": "x"}])
+        n = con.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+        check("everything working -> nobody is bothered", n, 0)
+        con.close()
+    finally:
+        board.DB = real_db
+
+
+def test_a_403_from_search_console_says_which_of_the_two_causes_it_is():
+    """
+    His report said: "Search Console refused (403). Two causes, and Google
+    uses the same code for both." Both true, and it left him to work out
+    which — with the wrong guess costing a trip through a permissions screen
+    for a property string that was simply written differently.
+
+    Google answers it itself. /sites lists every property the service account
+    can actually see.
+    """
+    from . import seo_intel as I
+    print("\nNo properties at all is a permissions problem, not a typo:")
+
+    class _R:
+        def __init__(self, code, payload): self.status_code, self._p = code, payload
+        def json(self): return self._p
+
+    real_email = I._service_account_email
+    I._service_account_email = lambda: "agency@proj.iam.gserviceaccount.com"
+    C = type("C", (), {"token": "t"})()
+    try:
+        msg = I._which_403(C, "https://h", "https://www.mysite.com/",
+                           get=lambda *a, **k: _R(200, {"siteEntry": []}))
+        check("named as permissions", "can see NO properties" in msg, True)
+        check("and it gives him the address to add",
+              "agency@proj.iam.gserviceaccount.com" in msg, True)
+        check("and where to put it", "Users and permissions" in msg, True)
+
+        print("\n...a property list WITHOUT his string is a typo, and the "
+              "right one is in the list:")
+        msg = I._which_403(C, "https://h", "https://www.mysite.com/",
+                           get=lambda *a, **k: _R(200, {"siteEntry": [
+            {"siteUrl": "https://mysite.com/"}]}))
+        check("it says the string is wrong", "is not one of the" in msg, True)
+        check("it lists what IS there", "https://mysite.com/" in msg, True)
+        check("and spots it is the same site written differently",
+              "same site as yours written differently" in msg, True)
+
+        print("\n...a completely different site is listed without that claim:")
+        msg = I._which_403(C, "https://h", "https://www.mysite.com/",
+                           get=lambda *a, **k: _R(200, {"siteEntry": [
+            {"siteUrl": "sc-domain:someoneelse.ae"}]}))
+        check("no false reassurance",
+              "same site as yours" in msg, False)
+        check("but still actionable", "exactly one of those" in msg, True)
+
+        print("\n...and if the listing itself fails, both causes stay open:")
+        def boom(*a, **k): raise OSError("no network")
+        msg = I._which_403(C, "https://h", "p", get=boom)
+        check("it does not pick one", "both causes are still open" in msg, True)
+        check("and still offers the address", "agency@proj" in msg, True)
+    finally:
+        I._service_account_email = real_email
+
+
+def test_a_dropped_google_connection_does_not_crash_the_desk():
+    """
+    "seo-strategist crashed: FAILED: TransportError: ('Connection aborted.',
+     RemoteDisconnected)" — the Search Console login was the one step not
+    guarded, and one dropped connection took the whole SEO desk down.
+    """
+    print("\nGoogle dropping the login connection is a reason, not a crash:")
+    _stub_google()
+    sa = sys.modules["google.oauth2.service_account"]
+    tries = []
+
+    class TransportError(Exception):
+        pass
+
+    class _Dropped:
+        token = ""
+        def refresh(self, req):
+            tries.append(1)
+            raise TransportError("('Connection aborted.', RemoteDisconnected("
+                                 "'Remote end closed connection without response'))")
+
+    from providers import integrations
+    root = Path(__file__).parents[1]
+    sa_path = root / seo_intel.GSC_SA
+    made = not sa_path.exists()
+    if made:
+        sa_path.parent.mkdir(parents=True, exist_ok=True)
+        sa_path.write_text("{}", encoding="utf-8")
+    real = (sa.Credentials, integrations.read_env, seo_intel.time.sleep)
+    sa.Credentials = type("C", (), {
+        "from_service_account_file": staticmethod(lambda p, scopes=None: _Dropped())})
+    integrations.read_env = lambda: {"GSC_PROPERTY": "sc-domain:example.ae"}
+    waits = []
+    seo_intel.time.sleep = waits.append
+    try:
+        rows, why = seo_intel.gsc_queries()
+    except Exception as e:
+        rows, why = None, f"RAISED {type(e).__name__}: {e}"
+    finally:
+        sa.Credentials, integrations.read_env, seo_intel.time.sleep = real
+        if made:
+            sa_path.unlink()
+    check("it did not raise", rows, [])
+    check("it tried three times, waiting longer each time", (len(tries), waits), (3, [2, 5]))
+    check("and says plainly it was a dropped connection, not his setup",
+          "connection was closed" in why and "not a problem with your setup" in why, True)
+
+
+def test_the_same_site_spelt_differently_is_used_not_refused():
+    """
+    "asked IT: Search Console 403 blocking keyword data — service account fix
+     needed" — when the account could already see the site, registered as a
+    domain property while Setup held the www address.
+    """
+    print("\nSearch Console: the same site under another spelling is used and kept:")
+    _stub_google()
+    import requests
+    from providers import integrations
+    root = Path(__file__).parents[1]
+    sa_path = root / seo_intel.GSC_SA
+    made = not sa_path.exists()
+    if made:
+        sa_path.parent.mkdir(parents=True, exist_ok=True)
+        sa_path.write_text("{}", encoding="utf-8")
+    real = (integrations.read_env, integrations.write_env, requests.post, requests.get)
+    integrations.read_env = lambda: {"GSC_PROPERTY": "https://www.example.ae/"}
+    saved, posted = [], []
+    integrations.write_env = lambda values, path=None: saved.append(values) or {"ok": True}
+
+    def post(url, **kw):
+        posted.append(url)
+        if "sc-domain" in url:
+            return _Resp(200, {"rows": [{"keys": ["shower glass dubai"], "impressions": 90,
+                                         "clicks": 2, "position": 11.2}]})
+        return _Resp(403, text="forbidden")
+    requests.post = post
+    requests.get = lambda url, **kw: _Resp(200, {"siteEntry": [
+        {"siteUrl": "sc-domain:example.ae"}, {"siteUrl": "https://other.ae/"}]})
+    try:
+        rows, why = seo_intel.gsc_queries()
+    finally:
+        (integrations.read_env, integrations.write_env, requests.post, requests.get) = real
+        if made:
+            sa_path.unlink()
+    check("the keyword data comes back", [r["phrase"] for r in rows], ["shower glass dubai"])
+    check("with no error", why, "")
+    check("asked under the spelling Google knows", "sc-domain%3Aexample.ae" in posted[-1], True)
+    check("and kept for next time", saved, [{"GSC_PROPERTY": "sc-domain:example.ae"}])
+    check("a different site is never taken for his",
+          seo_intel._bare_site("https://other.ae/") == seo_intel._bare_site("https://www.example.ae/"),
+          False)
+
+
+def main():
+    test_it_works_with_no_paid_api()
+    test_the_same_site_spelt_differently_is_used_not_refused()
+    test_nothing_is_hardcoded()
+    test_it_asks_instead_of_shrugging()
+    test_search_console_talks_to_the_right_endpoint()
+    test_a_dropped_google_connection_does_not_crash_the_desk()
+    test_a_403_from_search_console_says_which_of_the_two_causes_it_is()
+    test_no_wins_says_which_link_is_missing()
+    test_it_never_claims_to_know_volume()
+    test_striking_distance_is_the_free_win()
+    test_the_critic_rejects_evidence_free_output()
+    test_it_stops_before_the_runner_kills_it()
+    test_a_customers_words_never_reach_a_public_topic()
+    test_only_things_that_need_him()
+    test_it_does_not_repeat_itself()
+    test_digest_items_stay_off_the_phone()
+    test_a_blocking_fault_does_reach_the_phone()
+    test_preview_sends_nothing()
+    test_with_nothing_set_up_alerts_stay_in_the_app()
+    print()
+    if _fail:
+        print(f"{len(_fail)} FAILED: " + ", ".join(_fail))
+        sys.exit(1)
+    print("All intel/notify tests passed.")
+
+
+if __name__ == "__main__":
+    main()

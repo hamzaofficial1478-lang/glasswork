@@ -32,20 +32,25 @@ import json
 import sqlite3
 import sys
 import time
-from pathlib import Path
 
-DB = Path(__file__).parent / "agency.db"
+# the open website's cabinet; the test run's own when AGENCY_DB is set
+DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()
 
 # Each job: what it is, how progress is counted, and the point past which the
 # number stops being ambition and starts being a liability.
 JOBS = {
     "leads": {
-        "label": "New leads collected",
+        # WITH AN EMAIL. "i ask for 20 leads it just give 8 leads" — the Leads
+        # room lists only leads with an email (nobody else can be written to),
+        # so a count that included phone-only finds said 20 while he could see
+        # 8, and the day stopped as if the job were done.
+        "label": "New leads with an email",
         "unit": "leads",
         "ceiling": 200,
         "why_ceiling": "Collecting is cheap; the limit is how many you can actually "
                        "follow up. A pile nobody contacts is not an asset.",
-        "sql": "SELECT count(*) FROM leads WHERE found_at>=?",
+        "sql": ("SELECT count(*) FROM leads WHERE found_at>=?"
+                " AND COALESCE(email,'')!=''"),
         "does_it": "python -m pipelines.leads_hunt",
     },
     "mails": {
@@ -138,6 +143,65 @@ def set_target(name, per_day, note=""):
             "within_safe_ceiling": ok, "warning": warning}
 
 
+# WORDS THAT NAME A NUMBER ARE A TARGET, NOT JUST A SENTENCE.
+#
+# "i asked for 20 leads and 1 content post but in images you can see it's
+#  saying leads sector had nothing to run why?"
+#
+# Because he typed it and the MD reads figures. Orders and targets were two
+# separate things that nobody had joined up: an order became a task titled
+# "Owner's order: collect 20 leads", which is a real task and does get claimed
+# — but the MD posts the actual COLLECT TODAY'S LEADS task only when
+# targets.status() reports a leads target with something still to do. No
+# target, no collection task, and the Hunter came back to an empty board.
+#
+# He should not have to know that his own program keeps numbers in one place
+# and sentences in another. Writing "20 leads" sets the target.
+#
+# Only patterns where the number is unambiguous — a bare figure next to the
+# thing being counted. Anything vaguer is left alone rather than guessed at,
+# because a target invented from a misread sentence is worse than none: it
+# makes the MD plan work he never asked for.
+_NUMBER_WORDS = [
+    ("leads", r"(\d{1,3})\s*(?:new\s+)?(?:leads?|prospects?|businesses|firms|companies)"),
+    ("mails", r"(\d{1,3})\s*(?:outreach\s+)?(?:e-?mails?|mails?)\b"),
+    ("posts", r"(\d{1,2})\s*(?:content\s+|blog\s+|service\s+)?(?:posts?|pages?|articles?)"),
+    ("site_checks", r"(\d{1,2})\s*(?:site\s+|website\s+)?(?:checks?|diagnostics?|audits?)"),
+]
+
+
+def from_words(text, apply=True) -> list:
+    """
+    The daily targets an order in plain English is asking for.
+
+    Returns [{name, per_day, phrase, ...}] — what it found and, when `apply`,
+    what it set. `apply=False` is the dry run the office uses to show him what
+    it understood before it acts on it.
+    """
+    import re
+    said = (text or "").lower()
+    found = []
+    for name, pattern in _NUMBER_WORDS:
+        m = re.search(pattern, said)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if n <= 0:
+            continue
+        row = {"name": name, "per_day": n, "phrase": m.group(0).strip(),
+               "label": JOBS[name]["label"]}
+        if apply:
+            try:
+                row.update(set_target(name, n, note="from the owner's own words"))
+            except Exception as e:                           # pragma: no cover
+                row["error"] = str(e)
+        else:
+            ok, warning = check_ceiling(name, n)
+            row.update({"within_safe_ceiling": ok, "warning": warning})
+        found.append(row)
+    return found
+
+
 def set_orders(text, day=None):
     """
     The owner's orders for a day, in his own words: "focus on Sharjah hotels",
@@ -152,7 +216,11 @@ def set_orders(text, day=None):
                   " updated_at=excluded.updated_at",
                   (d, (text or "").strip()[:4000], int(time.time())))
         c.commit()
-    return {"ok": True, "day": d}
+    # A number in the order is a target. See from_words: the MD plans from
+    # figures, the owner writes sentences, and nobody had joined the two up —
+    # which is why "20 leads" produced a task saying "collect 20 leads" and no
+    # actual collection.
+    return {"ok": True, "day": d, "targets_set": from_words(text)}
 
 
 def get_orders(day=None):
@@ -174,6 +242,23 @@ def _done_today(c, job, day0):
         return 0
 
 
+def _running_position(c, job, day0):
+    """
+    (yesterday, all time). The two numbers a sector needs to know where it is.
+
+    "merge them into 1 task just on the base when the user will ask to find the
+     next leads and also the previous day's leads"
+
+    A job's own SQL counts everything since a moment, so yesterday is the
+    difference between two of those counts and the all-time figure is the same
+    count from zero. No new queries to write and no chance of the two
+    disagreeing with what the target screen already shows.
+    """
+    since_yesterday = _done_today(c, job, day0 - 86400)
+    today = _done_today(c, job, day0)
+    return max(0, since_yesterday - today), _done_today(c, job, 0)
+
+
 def status(day0=None):
     """
     Where the day stands: every job, its target, what has actually happened, and
@@ -191,10 +276,12 @@ def status(day0=None):
                 if row:
                     set_any = True
                 done = _done_today(c, job, day0)
+                yesterday, on_file = _running_position(c, job, day0)
                 ok, warning = check_ceiling(name, per_day)
                 entry = {
                     "name": name, "label": job["label"], "unit": job["unit"],
                     "per_day": per_day, "done_today": done,
+                    "done_yesterday": yesterday, "on_file": on_file,
                     "remaining": max(0, per_day - done),
                     "pct": (min(100, round(done / per_day * 100)) if per_day else None),
                     "hit": bool(per_day) and done >= per_day,

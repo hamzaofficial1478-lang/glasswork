@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Glassworks Agency — Live Office</title>
+<title>Botix — Live Office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -22,11 +22,28 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:'Space Grotesk'
 .etch{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
 button{font-family:inherit}
 
-header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:rgba(12,18,22,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
-.brand{display:flex;flex-direction:column;gap:2px}.brand b{font-size:14px}.brand span{font-size:9px}
+/* NOTHING IN THE HEADER WRAPS.
+   It used to: flex items shrink below their content by default, so on his
+   screen the agency name broke across three lines, the Run button grew into a
+   three-line box, and the whole bar was twice its own height. Every item is
+   now flex:none and nowrap, the tabs are allowed to scroll rather than wrap,
+   and the two things that can be long — the agency name and the website — are
+   capped with an ellipsis and carry the full text in their tooltip. */
+header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;
+  align-items:center;gap:14px;padding:0 18px;background:rgba(12,18,22,.9);
+  backdrop-filter:blur(12px);border-bottom:1px solid var(--line);
+  flex-wrap:nowrap;white-space:nowrap}
+header>*{flex:none}
+.brand{display:flex;flex-direction:column;gap:1px;min-width:0;max-width:180px}
+.brand b{font-size:13px;line-height:1.15;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;display:block}
+.brand span{font-size:9px;white-space:nowrap}
 .site-switch{position:relative}
-.site-btn{display:flex;align-items:center;gap:9px;padding:8px 13px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2);color:var(--text);cursor:pointer;font-size:13px}
-.site-btn .fav{width:20px;height:20px;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
+.site-btn{display:flex;align-items:center;gap:7px;padding:6px 10px;
+  border:1px solid var(--line2);border-radius:9px;background:var(--panel2);
+  color:var(--text);cursor:pointer;font-size:12.5px;max-width:170px}
+.site-btn #curSite{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.site-btn .fav{width:18px;height:18px;flex:none;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
 .site-menu{position:absolute;top:46px;left:0;width:250px;background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:6px;display:none;box-shadow:0 16px 40px rgba(0,0,0,.5)}
 .site-menu.open{display:block}
 .site-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13px}
@@ -35,9 +52,14 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .site-item small{display:block;color:var(--muted);font-size:10.5px;font-family:'IBM Plex Mono',monospace}
 .site-add{margin-top:4px;padding:9px 10px;border-radius:8px;border:1px dashed var(--line2);color:var(--glass);cursor:pointer;font-size:12.5px;text-align:center}
 .site-add:hover{background:var(--glass-dim)}
-.htab{padding:7px 14px;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
+.htab{padding:7px 11px;white-space:nowrap;border-radius:9px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
 .htab.on{background:var(--glass-dim);border-color:var(--glass);color:var(--glass)}.htab:hover{color:var(--text)}
-.spacer{flex:1}
+/* The tabs, and only the tabs, take the leftover room. On a narrow window
+   they scroll sideways instead of pushing the bar onto a second line. */
+.htabs{display:flex;gap:2px;align-items:center;flex:1 1 auto;min-width:0;
+  overflow-x:auto;scrollbar-width:none}
+.htabs::-webkit-scrollbar{display:none}
+.spacer{flex:0 0 6px}
 .live{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ok)}
 .live .d{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(92,192,136,.14);animation:pulse 2.4s infinite}
 .clock{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--muted);min-width:52px;text-align:right}
@@ -59,6 +81,16 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .room.sec{border-color:rgba(229,86,91,.5)}.room.dir{border-color:var(--glass)}
 .plaque{position:absolute;top:-11px;left:14px;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:3px 10px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--etch);white-space:nowrap;z-index:3}
 .room.dir .plaque{border-color:var(--glass);color:var(--glass)}
+/* THE DOOR OUT OF A ROOM, on its bottom edge the way the plaque sits on the
+   top: the Leads room opens onto the Mail room, Content onto the Posts room.
+   "i did not see any section or room where the mails will be sent there is
+   just leads room" — so the door is on the room itself. */
+.door{position:absolute;bottom:-12px;right:14px;z-index:6;display:flex;gap:6px;align-items:center;
+  background:var(--panel2);border:1px solid var(--glass);border-radius:7px;padding:3px 10px;
+  font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--glass);text-decoration:none;white-space:nowrap}
+.door:hover{background:var(--glass-dim)}
+.door b{background:var(--amber);color:#1a1206;border-radius:999px;padding:0 6px;font-size:10px;letter-spacing:0}
 .room.sec .plaque{border-color:rgba(229,86,91,.5);color:var(--danger)}
 /* port lights where wires enter a room */
 .port{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--glass);box-shadow:0 0 8px var(--glass);opacity:.5;z-index:4}
@@ -67,44 +99,129 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .desks{flex:1;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:6px 4px;padding:18px 8px 8px;overflow:hidden}
 .emp{width:72px;display:flex;flex-direction:column;align-items:center;cursor:pointer;position:relative}
 .emp .figure{position:relative;animation:bob 3.4s ease-in-out infinite}
-.emp .status{position:absolute;top:-9px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;z-index:4}
-/* The small dot above the head is the status lamp, and it is the loud one: it
-   is the ONLY thing that turns red, so a broken desk is findable in a glance
-   even though its bulb has gone out. */
-.emp.working .status{background:var(--glass);box-shadow:0 0 8px var(--glass);animation:pulse 1.4s infinite}
-.emp.done .status{background:var(--ok);box-shadow:0 0 7px var(--ok)}
-.emp.waiting .status{background:var(--amber);box-shadow:0 0 8px var(--amber)}
-.emp.idle .status{background:var(--faint)}
-.emp.blocked .status{background:var(--danger);box-shadow:0 0 10px var(--danger);animation:pulse 1s infinite}
+/* THERE IS ONE LAMP, AND IT IS THE BULB ON THE ANTENNA.
+   ---------------------------------------------------------------------------
+   There used to be two. A separate 9px `.status` dot sat at z-index:4 directly
+   on top of the bulb — and when an agent was idle, which is most of the day, it
+   was painted a flat dull grey.
+
+   That is the whole reason the owner reported "the heads are not glowing" ten
+   times and was right ten times. Every fix I made was to the bulb UNDERNEATH a
+   grey disc that covered it. I kept confirming the fix by reading the bulb's
+   computed colour, which changed correctly every time and was never the thing
+   on screen. Reading the value instead of looking at the picture is what let
+   that run for ten rounds.
+
+   Two lamps for one fact could only ever disagree. The dot is gone. */
 /* a broken desk is dimmed and outlined, so you see it before you read it */
 .emp.blocked .figure{opacity:.55}
 .emp.blocked .head{border-color:var(--danger)}
+/* An unpowered desk is greyed the way an unplugged machine is: it is not
+   broken, there is simply nothing behind it to reach. Distinct from the red
+   dimming above, which means something went wrong. */
+.emp:not(.pw):not(.blocked) .figure{opacity:.62}
 .head{width:26px;height:24px;border-radius:9px 9px 8px 8px;margin:0 auto;position:relative;background:linear-gradient(180deg,#c9d6dc,#9fb2ba);border:1px solid #7d929b}
 .emp.dir .head{background:linear-gradient(180deg,#8fe6ef,#54cbd9)}.emp.sec .head{background:linear-gradient(180deg,#f0a9ac,#e5565b)}
 .head::before,.head::after{content:"";position:absolute;top:9px;width:4px;height:4px;border-radius:50%;background:#1a2429;animation:blink 4.2s infinite}
 .head::before{left:6px}.head::after{right:6px}
 .antenna{position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:2px;height:6px;background:#7d929b}
-/* THE BULB ON THE HEAD — the one thing you should be able to read across the room.
+/* THE BULB ON THE HEAD — the one thing you should read across the room.
 
-   Lit means alive. Blinking means working. DARK MEANS BROKEN.
+   It answers "can this agent work, and is it working" in that order:
 
-   This was the wrong way round: idle desks went dark and broken ones lit up red,
-   so a healthy agency with nothing queued looked like a morgue and you could not
-   tell "nothing to do" from "this one has fallen over". Now:
+     dark       its sector has no working API. The agent has nothing to reach,
+                so it could not act even if you asked it to.
+     steady     it HAS its sector's API. Powered, not busy. This is the resting
+                state of a healthy agency and most desks sit here most of the day.
+     blinking   working right now.
+     RED        something is wrong with this agent — its last run raised, or it
+                started and never came back. The desk says which.
 
-     blinking   working right now
-     steady     alive and fine — recently finished (green), work queued (amber),
-                or simply nothing to do (pale)
-     dark       something is wrong; the desk says what
+   The previous rule tied the bulb to activity alone, so a sector with every key
+   in place looked identical to one with nothing configured: both dark, because
+   neither happened to be mid-run. Capability and activity are different
+   questions and the owner asked to see both, so the bulb now carries capability
+   and the blink carries activity. Nothing was lost — red is still the loud one. */
+/* OFF: a small dark bead. Nothing to reach, so nothing is lit. */
+.antenna::after{content:"";position:absolute;top:-4px;left:-2.5px;width:7px;height:7px;border-radius:50%;
+  background:#26333a;border:1px solid #313f47;box-shadow:none;transition:all .3s ease}
 
-   A bulb only goes out for a reason, and the reason is always on the desk. */
-.antenna::after{content:"";position:absolute;top:-3px;left:-1.5px;width:5px;height:5px;border-radius:50%;
-  background:#8fa4ad;box-shadow:0 0 5px rgba(143,164,173,.7)}
-.emp.working .antenna::after{background:var(--glass);box-shadow:0 0 8px var(--glass);animation:pulse 1.1s infinite}
-.emp.done .antenna::after{background:var(--ok);box-shadow:0 0 7px var(--ok)}
-.emp.waiting .antenna::after{background:var(--amber);box-shadow:0 0 7px var(--amber)}
-/* the only dark bulb in the building */
-.emp.blocked .antenna::after{background:#3a2326;box-shadow:none}
+/* ON: powered by its sector's API.
+   This was #8fa4ad with a 6px grey halo, which is a technically-different
+   colour and a visually identical dot — the owner said ten times that the
+   heads were not glowing and he was right every time. I kept checking the
+   computed value instead of looking at the picture. A lamp is only lit if it
+   looks lit: real colour, three stacked shadows so the halo carries across the
+   room, and a matching wash on the head underneath. */
+.emp.pw .antenna::after{background:#eafff4;border-color:var(--ok);
+  box-shadow:0 0 0 2px rgba(92,192,136,.35), 0 0 10px 2px var(--ok), 0 0 20px rgba(92,192,136,.6)}
+.emp.pw .antenna{background:#5f7d86}
+.emp.pw .head{border-color:var(--ok);box-shadow:0 0 12px rgba(92,192,136,.45)}
+
+/* AMBER MEANS ONE THING: THIS DESK NEEDS YOUR YES OR NO.
+   It used to mean "there is an unclaimed task in this room", which is a
+   completely different statement and is true almost all the time. The owner
+   cleared every approval he had, watched the SEO Auditor stay orange, and
+   fairly concluded the agency had not heard him — it had, and the bulb was
+   never about approvals. Ordinary unclaimed work is .queued, below. */
+.emp.pw.waiting .antenna::after{background:#fff6e6;border-color:var(--amber);
+  box-shadow:0 0 0 2px rgba(234,165,67,.35), 0 0 10px 2px var(--amber), 0 0 20px rgba(234,165,67,.6)}
+.emp.pw.waiting .head{border-color:var(--amber);box-shadow:0 0 12px rgba(234,165,67,.45)}
+
+/* QUEUED: work is on the board for this desk and it has not started yet.
+   Deliberately the ordinary powered lamp with a soft glass ring rather than a
+   colour of its own — nothing is wrong, nobody is being asked for anything,
+   and a fourth alarm colour on the floor would only teach the owner to ignore
+   all of them. */
+.emp.pw.queued .antenna::after{background:#eafff4;border-color:var(--ok);
+  box-shadow:0 0 0 2px rgba(84,203,217,.30), 0 0 9px 1px var(--ok), 0 0 18px rgba(92,192,136,.45)}
+.emp.pw.queued .head{border-color:rgba(84,203,217,.55);
+  box-shadow:0 0 10px rgba(84,203,217,.28)}
+.emp.queued .monitor{border-color:rgba(84,203,217,.45)}
+
+/* WORKING: the same lamp, blinking. An agent can be mid-run before its sector
+   has ever been proven, so this does not require .pw. */
+.emp.working .antenna::after,
+.emp.pw.working .antenna::after{background:#eaffff;border-color:var(--glass);
+  box-shadow:0 0 0 2px rgba(84,203,217,.4), 0 0 12px 3px var(--glass), 0 0 24px rgba(84,203,217,.7);
+  animation:pulse 1.1s infinite}
+.emp.working .head,.emp.pw.working .head{border-color:var(--glass);
+  box-shadow:0 0 14px rgba(84,203,217,.55)}
+
+/* BROKEN: red beats everything, and it is the only thing that throbs urgently. */
+.emp.blocked .antenna::after,
+.emp.pw.blocked .antenna::after{background:#ffecec;border-color:var(--danger);
+  box-shadow:0 0 0 2px rgba(229,86,91,.4), 0 0 12px 3px var(--danger), 0 0 24px rgba(229,86,91,.7);
+  animation:pulse 1s infinite}
+.emp.blocked .head,.emp.pw.blocked .head{border-color:var(--danger);
+  box-shadow:0 0 14px rgba(229,86,91,.5)}
+/* SWITCHED OFF: the lights are actually out.
+   Last in the file and heavier than every rule above it on purpose — an agent
+   in a stopped sector must not keep a green lamp because .pw is still on the
+   element, and must not keep blinking because it was mid-run when the owner
+   flipped the switch. Off beats powered, working and blocked. The desks stay on
+   the floor, dimmed: a sector he switched off should look stopped, not deleted. */
+.emp.off .figure{opacity:.3;filter:grayscale(1)}
+.emp.off .antenna{background:#3a474d}
+.emp.off .antenna::after,
+.emp.off.pw .antenna::after,
+.emp.off.working .antenna::after,
+.emp.off.pw.working .antenna::after,
+.emp.off.blocked .antenna::after,
+.emp.off.pw.blocked .antenna::after{background:#2b363b;border-color:#3c4a51;
+  box-shadow:none;animation:none}
+.emp.off .head,.emp.off.pw .head,.emp.off.working .head,
+.emp.off.pw.working .head,.emp.off.blocked .head,.emp.off.pw.blocked .head{
+  border-color:#3c4a51;box-shadow:none}
+.emp.off .monitor .scan{background:#2b363b;animation:none}
+.emp.off .name,.emp.off .role{opacity:.42}
+/* And the room around them, so it reads as stopped at a glance rather than
+   needing you to notice six dark lamps. */
+.room.off{opacity:.66;border-style:dashed}
+.room.off .plaque{color:var(--faint)}
+.room.off .plaque::after{content:' · OFF';color:var(--amber);letter-spacing:.12em;
+  font-size:9px;font-weight:600}
+
 .body{width:34px;height:20px;border-radius:10px 10px 5px 5px;margin:-2px auto 0;background:linear-gradient(180deg,#41565f,#2e3f47);border:1px solid #223038}
 .desk{width:54px;height:14px;border-radius:5px;margin:3px auto 0;position:relative;background:linear-gradient(180deg,#3a4c54,#293840);border:1px solid #1e2a30;box-shadow:0 4px 8px rgba(0,0,0,.3)}
 .monitor{position:absolute;top:-11px;left:50%;transform:translateX(-50%);width:22px;height:14px;border-radius:3px;background:#0e161a;border:1px solid #33484f;overflow:hidden}
@@ -112,7 +229,14 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .emp.working .monitor{border-color:var(--glass)}.emp.working .monitor .scan{background:var(--glass);animation:type 1.3s steps(4) infinite}
 .emp.done .monitor{border-color:var(--ok)}.emp.done .monitor .scan{background:var(--ok);opacity:.6}
 .name{margin-top:5px;font-size:9.5px;font-weight:500;text-align:center;line-height:1.05}
-.role{font-size:8px;color:var(--muted);text-align:center}
+/* One line, cut with an ellipsis, full text on hover. It used to render
+   role.split(' ')[0] — the FIRST WORD ONLY — which turned 'Only agent on
+   production' into 'Only', 'Scam & fraud filter' into 'Scam', and 'AEO &
+   GEO' into 'AEO', so the owner reasonably asked why GEO was missing from
+   his SEO sector. It never was. Kept to ONE line on purpose: two lines add
+   ~10px per desk row and the SEO room, at five desks, has 8px of slack. */
+.role{font-size:8px;color:var(--muted);text-align:center;max-width:72px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ---- THE SHELF: a real cabinet standing against the right wall ---- */
 .room.shelf{border-color:#5b7a86}
@@ -158,10 +282,57 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .panel{position:fixed;top:0;right:-460px;width:460px;max-width:94vw;height:100vh;background:var(--panel);border-left:1px solid var(--line2);z-index:85;transition:right .26s ease;overflow-y:auto}.panel.open{right:0}
 .panel h2{margin:0;padding:18px 20px;font-size:15px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
 .panel h2 .x{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer}
+.pstat.clicky{cursor:pointer;border-radius:8px;transition:background .14s ease}
+.pstat.clicky:hover{background:rgba(255,255,255,.05)}
+.pstat.clicky:hover .l{color:var(--glass)}
+.appr{border:1px solid var(--line2);border-radius:11px;padding:14px 16px;margin-bottom:12px}
+.appr .lvl{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--amber)}
+.appr h4{margin:6px 0 4px;font-size:14px;font-weight:600}
+.appr .why{font-size:12px;color:var(--muted);line-height:1.6;white-space:pre-wrap;
+  overflow-wrap:anywhere;max-height:180px;overflow:auto}
+.appr .row{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.appr button{padding:8px 16px;border-radius:8px;border:1px solid var(--line2);
+  background:transparent;color:var(--ink);font:inherit;font-size:12.5px;cursor:pointer}
+.appr button.yes{border-color:rgba(91,191,134,.5);color:var(--ok)}
+.appr button.yes:hover{background:rgba(91,191,134,.12)}
+.appr button.no:hover{background:rgba(229,86,91,.12);border-color:var(--danger);color:var(--danger)}
+.appr button:disabled{opacity:.45;cursor:default}
+.appr a.yes{padding:8px 16px;border-radius:8px;border:1px solid rgba(91,191,134,.5);color:var(--ok);font-size:12.5px;font-weight:600}
+.appr a.yes:hover{background:rgba(91,191,134,.12)}
+.ldtable{width:100%;border-collapse:collapse;font-size:12.5px}
+.ldtable th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+  border-bottom:1px solid var(--line);padding:6px 10px 6px 0;font-weight:500}
+.ldtable td{padding:9px 10px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.ldtable .wait{color:var(--amber)}
+.actbtn{background:none;border:1px solid var(--line2);color:var(--muted);font:inherit;
+  font-size:11.5px;padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.actbtn:hover:not(:disabled){border-color:var(--glass);color:var(--glass)}
+.actbtn:disabled{opacity:.4;cursor:default}
+/* Which filter is showing. Without it the three buttons on the website-changes
+   panel look identical whichever list is on screen, and 'Everything' vs 'Not
+   the agency' becomes guesswork. */
+.actbtn.on{border-color:var(--glass);color:var(--glass)}
+
+/* The rows a sector produced. Same table the control room uses — a sector's
+   output should not look like two different things on two screens. */
+.made{width:100%;border-collapse:collapse;font-size:12.5px}
+.made th{text-align:left;padding:7px 10px;color:var(--etch);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line);
+  white-space:nowrap}
+.made td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.made td.mono{font-family:'IBM Plex Mono',monospace;color:var(--faint);
+  white-space:nowrap}
+.made tr:hover td{background:var(--panel2)}
 .pgroup{padding:16px 20px;border-bottom:1px solid var(--line)}.pgroup .gh{margin-bottom:12px}
 .conn{display:flex;align-items:center;gap:12px;padding:10px 0}
 .conn .ic{width:32px;height:32px;border-radius:8px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none}
-.conn .nm{flex:1}.conn .nm b{display:block;font-size:13px;font-weight:500}.conn .nm span{font-size:10.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace}
+.conn .nm{flex:1;min-width:0}.conn .nm b{display:block;font-size:13px;font-weight:500}
+/* A metric can now carry a sentence explaining itself (why agency health has no
+   number yet), so this wraps instead of running off the edge of the panel. */
+.conn .nm span{display:block;font-size:10.5px;color:var(--muted);line-height:1.5;
+  font-family:'IBM Plex Mono',monospace;white-space:normal;overflow-wrap:anywhere}
 .field{margin:0 0 12px}.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}
 .field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:'IBM Plex Mono',monospace}
 .field input:focus,.field select:focus{outline:none;border-color:var(--glass)}
@@ -169,6 +340,136 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 .toggle::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--faint);transition:.2s}
 .toggle.on{background:var(--glass-dim);border-color:var(--glass)}.toggle.on::after{left:20px;background:var(--glass)}
 .pbtn{width:100%;padding:12px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:14px;cursor:pointer;margin-top:4px}
+
+/* ---- CAN THIS SECTOR WORK? ------------------------------------------------
+   The bulbs say what a sector HAS DONE. This says what it COULD do, which is a
+   different question and was missing: a sector with no brain and no key looked
+   exactly like one that had a quiet morning — both dark, both silent.
+
+   Four states, not two, because green/red would lie in both directions:
+     ready      proven — an API was actually called and answered
+     unchecked  configured but never called. A saved key is not a working key,
+                so this is deliberately NOT green
+     thin       runs, but one thing dying stops it
+     blocked    cannot run at all
+   ------------------------------------------------------------------------- */
+.rdy{position:absolute;top:-11px;right:12px;z-index:4;display:flex;align-items:center;gap:5px;
+     padding:3px 8px;border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:9px;
+     letter-spacing:.1em;text-transform:uppercase;cursor:help;white-space:nowrap;
+     background:var(--panel2);border:1px solid var(--line2);color:var(--muted)}
+.rdy .b{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.rdy.ready{border-color:var(--ok);color:var(--ok)}
+.rdy.ready .b{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+.rdy.unchecked{border-color:var(--line2);color:var(--etch)}
+.rdy.unchecked .b{background:transparent;border:1px solid var(--etch)}
+.rdy.thin{border-color:var(--amber);color:var(--amber)}
+.rdy.thin .b{background:var(--amber);box-shadow:0 0 7px var(--amber)}
+.rdy.blocked{border-color:var(--danger);color:var(--danger)}
+.rdy.blocked .b{background:var(--danger);box-shadow:0 0 8px var(--danger);animation:pulse 1.6s infinite}
+/* a sector that cannot run gets a wash across the whole room, not just a chip —
+   the chip is easy to miss when you are looking at the desks */
+.room.rd-blocked{background:linear-gradient(180deg,rgba(229,86,91,.09),rgba(10,16,20,.8))}
+.room.rd-thin{background:linear-gradient(180deg,rgba(234,165,67,.06),rgba(10,16,20,.8))}
+
+/* ---- THE RUN BUTTON ---- */
+.runbtn{display:flex;align-items:center;gap:8px;padding:8px 15px;border-radius:10px;
+        border:1px solid var(--ok);background:rgba(92,192,136,.14);color:var(--ok);
+        font-size:13px;font-weight:600;cursor:pointer;
+        /* It grew into a three-line box on his screen. It is one line. */
+        white-space:nowrap;flex:none;line-height:1.2}
+.runbtn:hover{background:rgba(92,192,136,.24)}
+.runbtn.busy{border-color:var(--glass);background:var(--glass-dim);color:var(--glass)}
+.runbtn .b{width:8px;height:8px;border-radius:50%;background:currentColor}
+.runbtn.busy .b{animation:pulse 1.1s infinite}
+/* Resume: amber, because it is about something left unfinished. It only
+   appears when there is something to pick up or clear. */
+.runbtn.resume{border-color:var(--amber);background:var(--amber-dim);color:var(--amber)}
+.runbtn.resume:hover{background:rgba(234,165,67,.24)}
+.left .chk small{max-width:60ch}
+/* A wider panel must also park further off-screen. Widening it alone left
+   100px of an invisible panel sitting over the right of the header, swallowing
+   clicks on the Run button and on whichever panel was actually open. */
+.panel.wide{width:560px;right:-560px}
+/* FULL WINDOW. The activity list was a 560px drawer showing six lines of a
+   sixty-line day, with the rest behind a scroll nobody found. */
+.panel.full{width:100vw;max-width:100vw;right:-100vw;border-left:none}
+.panel.full.open{right:0}
+.panel.full .pgroup{max-width:1100px;margin:0 auto}
+/* .panel.open is declared earlier and has the same specificity, so without this
+   the wide panels would never slide in — they'd open off-screen. */
+.panel.wide.open{right:0}
+.step{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.step .n{width:18px;height:18px;border-radius:50%;border:1px solid var(--line2);color:var(--faint);
+         font-family:'IBM Plex Mono',monospace;font-size:9px;display:flex;align-items:center;
+         justify-content:center;flex:none}
+.step.ok .n{border-color:var(--ok);color:var(--ok)}
+/* 'idle' is its own outcome: the sector ran and had nothing to do. A green tick
+   beside the words "no task on the board" is the dashboard contradicting itself. */
+.step.idle .n{border-color:var(--line2);color:var(--faint)}
+.step.idle .t{color:var(--muted)}
+.step.failed .n{border-color:var(--danger);color:var(--danger)}
+.step.running .n{border-color:var(--glass);color:var(--glass);animation:pulse 1.1s infinite}
+/* Skipped: he switched that sector off. Stopped: he pressed Stop. Neither is a
+   failure and neither should wear the red ring — but both are steps that did
+   no work, so they must not wear the green one either. */
+.step.skipped .n{border-color:var(--line2);color:var(--faint)}
+.step.skipped .t{color:var(--muted)}
+.step.stopped .n{border-color:var(--amber);color:var(--amber)}
+.step.stopped .t{color:var(--muted)}
+.step .t{flex:1}.step .t small{display:block;color:var(--muted);font-size:10.5px;
+         font-family:'IBM Plex Mono',monospace;margin-top:2px}
+.chk{display:flex;gap:9px;padding:7px 0;font-size:12.5px;align-items:flex-start}
+.chk .m{font-family:'IBM Plex Mono',monospace;flex:none;width:14px}
+.chk.ok .m{color:var(--ok)}.chk.bad .m{color:var(--danger)}.chk.warn .m{color:var(--amber)}
+.chk.dim .m{color:var(--faint)}
+.chk small{display:block;color:var(--muted);font-size:10.5px;margin-top:1px}
+.bar{height:5px;border-radius:3px;background:var(--panel2);overflow:hidden;margin:10px 0 4px}
+.bar i{display:block;height:100%;background:var(--glass);transition:width .4s ease}
+/* Indeterminate: the check is one long call and there is no honest
+   percentage to show, so this says 'working' without claiming to know
+   how far through it is. A bar parked at 35%% claimed exactly that. */
+.bar.indet i{width:35%;animation:slide 1.4s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+.field textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;
+                color:var(--text);padding:10px 12px;font-size:12.5px;font-family:inherit;
+                resize:vertical;min-height:46px}
+.field textarea:focus{outline:none;border-color:var(--glass)}
+.warnbox{border:1px solid var(--danger);background:var(--danger-dim);border-radius:10px;padding:12px;
+         font-size:12.5px;margin-bottom:12px}
+.warnbox b{color:var(--danger)}
+.tick{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);margin:10px 0;cursor:pointer}
+.tick .bx{width:16px;height:16px;border-radius:4px;border:1px solid var(--line2);flex:none}
+.tick.on .bx{background:var(--danger);border-color:var(--danger)}
+/* a sector picked for this run: an ordinary choice, not a warning */
+.tick.pick{margin:6px 0;color:var(--text)}
+.tick.pick.on .bx{background:var(--glass);border-color:var(--glass);box-shadow:inset 0 0 0 3px var(--panel)}
+
+/* ---- WHAT EACH AGENT GOT, GRABBED, PUSHED, DELIVERED, BROKE ON ---- */
+.act{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.act .tm{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--faint);width:38px;flex:none;padding-top:2px}
+.act .vb{font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;
+         padding:2px 6px;border-radius:4px;height:16px;flex:none;border:1px solid var(--line2);color:var(--muted)}
+.act.got .vb{border-color:var(--amber);color:var(--amber)}
+.act.grabbed .vb{border-color:var(--glass);color:var(--glass)}
+.act.pushed .vb{border-color:var(--line2);color:var(--etch)}
+.act.delivered .vb{border-color:var(--ok);color:var(--ok)}
+.act.errored .vb{border-color:var(--danger);color:var(--danger)}
+.act .bd{flex:1;min-width:0}
+.act .bd b{font-weight:500;display:block;word-break:break-word}
+.act .bd small{color:var(--muted);font-size:10.5px;font-family:'IBM Plex Mono',monospace}
+.act .bd em{font-style:normal;color:var(--faint);font-size:10px}
+.act.go{cursor:pointer}
+.act.go:hover .bd b{color:var(--glass)}
+.act .actdoor{display:inline-block;margin-top:3px;font-size:10.5px;color:var(--glass);text-decoration:none}
+.act .actdoor:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
+.act.live .bd b{color:var(--glass)}
+.ticker{position:fixed;left:0;right:0;bottom:0;height:34px;z-index:45;display:none;align-items:center;
+        gap:14px;padding:0 22px;background:rgba(19,29,35,.94);backdrop-filter:blur(8px);
+        border-top:1px solid var(--line);font-size:12px}
+.ticker.on{display:flex}
+.ticker .lb{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--glass);flex:none}
+.ticker .ln{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticker .more{margin-left:auto;color:var(--glass);cursor:pointer;font-size:11.5px;flex:none}
 
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @keyframes blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.15)}}
@@ -181,15 +482,31 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 <body>
 
 <header>
-  <div class="brand"><b>Glassworks Agency</b><span class="etch">Live office</span></div>
+  <div class="brand"><b id="brandName">Botix</b><span class="etch">Live office</span></div>
   <div class="site-switch">
-    <button class="site-btn" onclick="toggleSites(event)"><span class="fav" id="curFav">GD</span><span id="curSite">Glassworks Dubai</span><span style="color:var(--muted)">▾</span></button>
+    <!-- Filled from /api/settings. The markup shows a neutral placeholder, not
+         a name: whatever is written here is what the owner sees for the first
+         second, and it used to be another company's. -->
+    <button class="site-btn" onclick="toggleSites(event)"><span class="fav" id="curFav">··</span><span id="curSite">Loading…</span><span style="color:var(--muted)">▾</span></button>
     <div class="site-menu" id="siteMenu"></div>
   </div>
-  <button class="htab on">Office</button>
-  <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
-  <button class="htab" onclick="openPanel('connPanel')">Connections</button>
+  <div class="htabs">
+    <button class="htab on">Office</button>
+    <button class="htab" onclick="openActivity()">Activity <span id="actBadge"></span></button>
+    <button class="htab" onclick="openComms()">Sector traffic <span id="commBadge"></span></button>
+    <button class="htab" onclick="openResults()">Results</button>
+    <a class="htab" href="/mail" style="text-decoration:none">Mail &amp; posts <span id="revBadge"></span></a>
+    <button class="htab" onclick="openOrders()">Your orders</button>
+    <button class="htab" onclick="openChanges()">Website changes</button>
+    <button class="htab" onclick="openIndex()">On Google</button>
+    <button class="htab" onclick="openPanel('perfPanel')">Performance</button>
+    <!-- Connections lived here and also in the full control room. Two doors to
+         one screen is one door too many in a bar that was already wrapping. -->
+  </div>
   <div class="spacer"></div>
+  <button class="runbtn resume" id="resumeBtn" onclick="openLeftovers()" style="display:none"
+          title="Pick up what the last run left: finish or clear the waiting work first"><span class="b"></span><span id="resumeLabel">Resume</span></button>
+  <button class="runbtn" id="runBtn" onclick="openRun()"><span class="b"></span><span id="runLabel">Run the day</span></button>
   <span class="live"><span class="d"></span>Open</span>
   <span class="clock" id="clock">--:--</span>
 </header>
@@ -206,19 +523,169 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
 <div class="scrim" id="scrim" onclick="closeAll()"></div>
 <div class="panel" id="connPanel"><h2>Connections <button class="x" onclick="closeAll()">×</button></h2><div id="connBody"></div></div>
 <div class="panel" id="perfPanel"><h2>Performance <button class="x" onclick="closeAll()">×</button></h2><div id="perfBody"></div></div>
+<!-- This was a four-field form that promised "a fresh office with all six
+     sectors staffed, kept completely separate from your other websites". None
+     of that existed: the button added a row to a JavaScript object which was
+     gone on the next refresh, and the agency has one SITE_URL, one cabinet and
+     one set of agents. The panel now says what is true and points at the one
+     screen that does change the website. -->
 <div class="panel" id="sitePanel">
-  <h2>Add a website <button class="x" onclick="closeAll()">×</button></h2>
+  <h2>This agency works on one website <button class="x" onclick="closeAll()">×</button></h2>
   <div class="pgroup">
-    <div class="field"><label>Business name</label><input id="nsName" placeholder="e.g. Sharjah Glass Co"></div>
-    <div class="field"><label>Website URL</label><input id="nsUrl" placeholder="https://…"></div>
-    <div class="field"><label>Platform</label><select id="nsStack"><option>WordPress</option><option>Custom backend</option><option>Shopify</option><option>Other</option></select></div>
-    <div class="field"><label>Main areas (comma separated)</label><input id="nsAreas" placeholder="Dubai, Abu Dhabi, Sharjah"></div>
-    <button class="pbtn" onclick="addSite()">Create office for this website</button>
-    <p style="font-size:11.5px;color:var(--muted);margin-top:12px">A fresh office opens with all six sectors staffed, kept completely separate from your other websites.</p>
+    <p style="font-size:12.5px;line-height:1.7;color:var(--muted);margin:0 0 14px">
+      One filing cabinet, one set of agents, one address. Running a second
+      business through the same office would mix its leads, rankings and
+      spending in with this one, so it is not offered &mdash; a second business
+      wants its own copy of the agency.</p>
+    <p style="font-size:12.5px;line-height:1.7;color:var(--muted);margin:0 0 16px">
+      To point this office at a different address, change it on the setup
+      screen. Everything the agents do reads from there.</p>
+    <a class="pbtn" href="/setup" style="display:inline-block;text-decoration:none">
+      Open the setup screen &rarr;</a>
   </div>
 </div>
 
+<!-- WHAT EVERY AGENT GOT, GRABBED, PUSHED, DELIVERED OR BROKE ON.
+     Derived from the rows the work itself wrote — a claimed task, a granted
+     borrow, a finished run — never from a log an agent had to remember to
+     write. See coordination/activity.py for why. -->
+<div class="panel wide full" id="actPanel">
+  <h2><span>Activity <small id="actHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <!-- Opening the panel already marks it read. These are here because the
+             owner asked for a button he can press and watch work, rather than
+             trusting that opening it did something invisible. -->
+        <button class="actbtn" id="actReadAll" onclick="markAllRead()">Mark all read</button>
+        <button class="actbtn" id="actClear" onclick="clearActivity()">Clear</button>
+        <button class="x" onclick="closeAll()">×</button>
+      </span></h2>
+  <div class="pgroup" id="actBody"></div>
+</div>
+
+<!-- WAITING ON YOU. The tile used to be a number and nothing else: the owner
+     could see that two things needed him and had no way to find out what, or to
+     answer either of them without opening the full control room. Each item now
+     carries its own Approve and Not now. -->
+<div class="panel wide full" id="apprPanel">
+  <h2><span>Waiting on you <small id="apprHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <button class="x" onclick="closeAll()">&times;</button></h2>
+  <div class="pgroup" id="apprBody"></div>
+</div>
+
+<!-- THE LEADS BEHIND THE NUMBER. Same problem: a count he could not open. -->
+<div class="panel wide full" id="leadPanel">
+  <h2><span>Leads <small id="leadHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" id="leadToday" onclick="openLeads('today')">Today</button>
+        <button class="actbtn" id="leadAll" onclick="openLeads('all')">All on file</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="leadBody"></div>
+</div>
+
+<!-- SECTOR TRAFFIC. One sector asking another for something, and what came
+     back. These are the same rows the beams on the floor are drawn from, and
+     the same rows the handbook makes the sectors use — there is no second
+     channel, because a second channel is how two agents end up answering the
+     same question. Read-only: replying happens in the work, not here. -->
+<div class="panel wide full" id="commPanel">
+  <h2><span>Sector traffic <small id="commHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <button class="x" onclick="closeAll()">×</button></h2>
+  <div class="pgroup" id="commBody"></div>
+</div>
+
+<!-- WHAT EACH SECTOR ACTUALLY PRODUCED.
+     "there is no any section that shows the results of the sectors."
+
+     The floor shows which desks are lit — that is who is working, not what came
+     out. The run panel shows which steps ran — 'SEO finds the gaps, finished'
+     says the program did not crash, not that it found anything. Neither answers
+     the question he asks after pressing Run.
+
+     Every sector gets its numbers for the period, the actual rows it produced,
+     and — the half that matters on the day he goes looking — why it produced
+     nothing, when it produced nothing. -->
+<div class="panel wide full" id="resPanel">
+  <h2><span>Results <small id="resHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" id="resD0" onclick="openResults(0)">Today</button>
+        <button class="actbtn" id="resD7" onclick="openResults(7)">7 days</button>
+        <button class="actbtn" id="resD30" onclick="openResults(30)">30 days</button>
+        <!-- "make a button to clear the communication older then 30 days...
+             the data deleted must not get stored in the Db or any other place
+             it must be deleted permanently". It asks first and says exactly
+             what will go, because permanent means there is no undo. -->
+        <button class="actbtn" id="resPurge" onclick="askPurge()">Clear old data</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="resBody"></div>
+</div>
+
+<!-- WHAT CHANGED ON THE WEBSITE.
+     "there should be a section in program where i can see whats changed in
+      website... that's totally blind."
+
+     He was, and it was worse than he thought: nothing anywhere recorded a
+     change to his site. Two kinds of line show here. What the agency did —
+     written down at the moment of the write, with the command that reverses
+     it. And what somebody else did — found by fingerprinting every page, so
+     it catches him editing in the file manager, a designer, a plugin, and a
+     hosting company restoring last week by mistake. The second kind is the
+     half he actually asked for. -->
+<!-- YOUR ORDERS. "there is no any room where i can see that the commands i gave
+     how much work get done what remains and why" — every order, the jobs it became,
+     the changes they made, and what is left with its reason (coordination/orders_view). -->
+<div class="panel wide full" id="ordPanel">
+  <h2><span>Your orders <small id="ordHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" onclick="openOrders()">Refresh</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="ordBody"></div>
+</div>
+
+<!-- WHICH PAGES GOOGLE HAS LISTED. "the program did not figure that more then 8
+     pages are still not indexed" — read from Google's own URL Inspection, each
+     day, by pipelines/seo_index.py. -->
+<div class="panel wide full" id="idxPanel">
+  <h2><span>On Google <small id="idxHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" id="idxAsk" onclick="askGoogle()">Ask Google again</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="idxBody"></div>
+</div>
+
+<div class="panel wide full" id="chgPanel">
+  <h2><span>Website changes <small id="chgHead" style="color:var(--muted);font-weight:400;font-size:11.5px"></small></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button class="actbtn" id="chgAllBtn" onclick="openChanges('all')">Everything</button>
+        <button class="actbtn" id="chgOutBtn" onclick="openChanges('outside')">Not the agency</button>
+        <!-- A GET per page, so it is a button and never a poll. -->
+        <button class="actbtn" id="chgLook" onclick="lookNow()">Check the site now</button>
+        <button class="x" onclick="closeAll()">&times;</button>
+      </span></h2>
+  <div class="pgroup" id="chgBody"></div>
+</div>
+
+<!-- THE RUN BUTTON. Three beats: check everything, take the owner's orders,
+     then work. Each beat is its own screen so nothing starts by accident. -->
+<div class="panel wide" id="runPanel">
+  <h2><span>Run the agency</span><button class="x" onclick="closeAll()">×</button></h2>
+  <div id="runBody"></div>
+</div>
+
+<div class="ticker" id="ticker">
+  <span class="lb" id="tickLabel">Live</span>
+  <span class="ln" id="tickLine">—</span>
+  <span class="more" onclick="openActivity()">see everything →</span>
+</div>
+
+<script src="/stale.js"></script>
 <script>
+/* Say so, on screen, when the running server is older than this page. */
+try{ Stale.check(['activity-seen','sectors','site-name','brand']); }catch(e){}
+
 /* The staff list: who sits where. NOT what they are doing — every desk starts
    dark and stays dark until the server says otherwise.
 
@@ -227,20 +694,62 @@ header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;a
    dark: the first paint was a mock-up, and the truth arrived a beat later. A
    dashboard that shows work nobody did is worse than one that shows nothing,
    so the placeholder is gone. If a bulb is lit, an agent really ran. */
+/* Every desk carries an `id` as well as a label. The chat drawer used to send
+   the LABEL — 'Watcher', 'Hunter' — which has no sector in it, so the server
+   could not tell which sector's brain should answer and fell back to the
+   Director's. Sixteen desks out of seventeen were answering on the MD's model.
+   The label is for reading; the id is for addressing, and it never changes. */
 function sectors(){return [
-  {key:"Director",name:"Director's Office",cls:"dir",agents:[{n:"Director",role:"Plans the day",s:"idle",t:"—",av:"🔮"}]},
-  {key:"IT",name:"IT & Site Health",cls:"",agents:[{n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"}]},
-  {key:"Content",name:"Content & Social",cls:"",agents:[{n:"Writer",role:"Drafts in your voice",s:"idle",t:"—",av:"✍"},{n:"Illustrator",role:"AI images",s:"idle",t:"—",av:"🎨"},{n:"Publisher",role:"Publishes after Auditor",s:"idle",t:"—",av:"📤"}]},
-  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"}]},
-  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{n:"Hunter",role:"Finds UAE leads",s:"idle",t:"—",av:"🎯"},{n:"Scanner",role:"Blocks duplicates",s:"idle",t:"—",av:"♻"},{n:"Outreach",role:"Mail + DMs, under cap",s:"idle",t:"—",av:"✉"},{n:"Responder",role:"Handles replies",s:"idle",t:"—",av:"💬"}]},
-  {key:"Report",name:"Reports",cls:"",agents:[{n:"Reporter",role:"Scores the agency",s:"idle",t:"—",av:"📋"}]},
-  {key:"Security",name:"Security",cls:"sec",agents:[{n:"Screener",role:"Scam & fraud filter",s:"idle",t:"—",av:"🛡"},{n:"Guard",role:"Untrusts scraped text",s:"idle",t:"—",av:"⚠"}]}
+  {key:"Director",name:"Director's Office",cls:"dir",agents:[{id:"managing-director",n:"Director",role:"Plans the day",s:"idle",t:"—",av:"🔮"}]},
+  {key:"IT",name:"IT & Site Health",cls:"",agents:[{id:"it-watcher",n:"Watcher",role:"Finds issues",s:"idle",t:"—",av:"🛠"},{id:"it-fixer",n:"Fixer",role:"Patches in a branch",s:"idle",t:"—",av:"🧰"},{id:"it-releaser",n:"Releaser",role:"Only agent on production",s:"idle",t:"—",av:"🚀"},{id:"it-search",n:"Search",role:"Indexes your site",s:"idle",t:"—",av:"🔎"}]},
+  {key:"Content",name:"Content & Social",cls:"",agents:[{id:"content-writer",n:"Writer",role:"Drafts in your voice",s:"idle",t:"—",av:"✍"},{id:"content-illustrator",n:"Illustrator",role:"Real photos + stock",s:"idle",t:"—",av:"🎨"},{id:"content-publisher",n:"Publisher",role:"Publishes after Auditor",s:"idle",t:"—",av:"📤"}]},
+  /* Rival has a desk of its own because pipelines/competitors.py runs as
+     'seo-rival' every day. Without one it fell through to the first free desk
+     and lit the Auditor's lamp instead — work credited to the wrong chair. */
+  {key:"SEO",name:"SEO & Rankings",cls:"",agents:[{id:"seo-auditor",n:"Auditor",role:"On-page & schema",s:"idle",t:"—",av:"🔍"},{id:"seo-strategist",n:"Strategist",role:"Keyword gaps",s:"idle",t:"—",av:"🧭"},{id:"seo-rival",n:"Rival",role:"Watches competitors",s:"idle",t:"—",av:"👁"},{id:"seo-backlinks",n:"Backlinks",role:"Links & guest posts",s:"idle",t:"—",av:"🔗"},{id:"seo-answers",n:"Answers",role:"AEO & GEO",s:"idle",t:"—",av:"💬"}]},
+  {key:"Leads",name:"Leads & Outreach",cls:"",agents:[{id:"leads-hunter",n:"Hunter",role:"Finds UAE leads",s:"idle",t:"—",av:"🎯"},{id:"leads-scanner",n:"Scanner",role:"Blocks duplicates",s:"idle",t:"—",av:"♻"},{id:"leads-outreach",n:"Outreach",role:"Mail + DMs, under cap",s:"idle",t:"—",av:"✉"},{id:"leads-responder",n:"Responder",role:"Handles replies",s:"idle",t:"—",av:"💬"}]},
+  {key:"Report",name:"Reports",cls:"",agents:[{id:"reporter",n:"Reporter",role:"Scores the agency",s:"idle",t:"—",av:"📋"}]},
+  {key:"Security",name:"Security",cls:"sec",agents:[{id:"security-screener",n:"Screener",role:"Scam & fraud filter",s:"idle",t:"—",av:"🛡"},{id:"security-guard",n:"Guard",role:"Untrusts scraped text",s:"idle",t:"—",av:"⚠"}]}
 ];}
-const SITES={gd:{name:"Glassworks Dubai",fav:"GD",url:"glassworks.ae",metrics:[["82","Agency health","glass"],["6","Leads today",""],["3","Awaiting you","amber"],["—","Shelf","ok"],["$4.12","Spend today","mono"]],rooms:sectors()}};
-let CURRENT="gd";
-const LAYOUT={Director:{x:24,y:22,w:320,h:150},Report:{x:372,y:22,w:230,h:150},Security:{x:630,y:22,w:266,h:150},Leads:{x:24,y:210,w:400,h:210},SEO:{x:454,y:210,w:210,h:210},Content:{x:694,y:210,w:202,h:210},IT:{x:24,y:452,w:872,h:242}};
+/* Dashes, not numbers, until the server answers. The desks were fixed for this
+   already — they used to ship lit and go dark a beat later — but the header
+   still opened on 82 health, 6 leads and $4.12 spent, on a machine that had
+   never run anything. A number you have not been given is not a number. */
+const BLANK_METRICS=[["—","Agency health","glass"],["—","Leads today",""],
+                     ["—","Awaiting you","amber"],["—","Shelf","ok"],
+                     ["—","Spend today","mono"]];
+/* THE WEBSITE THIS OFFICE IS WORKING ON.
+   This was `{name:"Glassworks Dubai", url:"glassworks.ae"}` — a constant, so the
+   switcher showed a business that was not the owner's and no amount of saving
+   on the setup screen could change it. It is filled from /api/settings now,
+   which asks coordination/site.py, which reads what he actually saved. Until
+   that answers, the entry says it does not know yet rather than inventing a
+   name — an honest blank beats a confident wrong one. */
+const SITES={site:{name:"Loading…",fav:"··",url:"",configured:false,
+                   metrics:BLANK_METRICS.map(m=>m.slice()),rooms:sectors()}};
+let CURRENT="site";
+/* Room sizes are load-bearing, not decoration. A desk is 72px wide with a 4px
+   gap inside 8px padding, so a room fits floor((w-16)/76) desks per row and
+   .desks clips whatever will not fit. SEO grew to five agents when Answers
+   (AEO/GEO) joined, which pushed a third row past the room wall and hid that
+   desk's name entirely. The middle row is sized from the agent COUNT: Leads
+   four across, SEO three across (5 = 3+2), Content three across. */
+const LAYOUT={Director:{x:24,y:22,w:320,h:150},Report:{x:372,y:22,w:230,h:150},Security:{x:630,y:22,w:266,h:150},Leads:{x:24,y:210,w:320,h:210},SEO:{x:374,y:210,w:246,h:210},Content:{x:650,y:210,w:246,h:210},IT:{x:24,y:452,w:872,h:242}};
 const $=s=>document.querySelector(s);
 const SVGNS="http://www.w3.org/2000/svg";
+
+// The rooms that open onto a room of their own, and how many things are
+// waiting in there for him (from the same approvals list the header counts).
+const DOORS = {Leads:['/mail','Mail room',['review_mails','review_campaign']],
+               Content:['/posts','Posts room',['review_pages']]};
+function doorOf(key){
+  const d = DOORS[key]; if(!d) return '';
+  const n = ((LIVE&&LIVE.approvals)||[]).filter(x=>d[2].includes(x.kind))
+              .reduce((t,x)=>t+(x.count||0),0);
+  return `<a class="door" href="${d[0]}" title="${key==='Leads'
+      ? 'Your campaign mail: read it, approve it, and send it to the leads you tick'
+      : 'Read the pages Content wrote, and approve or turn them down'}">${d[1]}${n?` <b>${n}</b>`:''} &rarr;</a>`;
+}
 
 function renderFloor(){
   const st=SITES[CURRENT], floor=$('#floor');
@@ -248,9 +757,21 @@ function renderFloor(){
   st.rooms.forEach(rm=>{
     const L=LAYOUT[rm.key]; if(!L)return;
     const room=document.createElement('div');
-    room.className='room '+rm.cls; room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
-    room.innerHTML=`<div class="plaque">${rm.name}</div><div class="desks">`+
-      rm.agents.map((a,i)=>`<div class="emp ${a.s} ${rm.cls}" data-k="${rm.key}" data-i="${i}"><div class="status"></div><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role">${a.role.split(' ')[0]}</div></div>`).join('')
+    const rd=readyOf(rm.key);
+    // "Powered" = this sector has at least one API that answers, so its agents
+    // can actually reach something. Not the same as busy, and not the same as
+    // healthy — a thin or unproven sector still has a working key behind it.
+    const powered = !!rd && rd.state !== 'blocked';
+    // A sector the owner switched off is drawn stopped: dimmed room, OFF on the
+    // plaque, and every lamp out. It used to look exactly like a quiet sector,
+    // so the only place his own switch was visible was the control room.
+    const off = rm.enabled === false;
+    room.className='room '+rm.cls+(rd?' rd-'+rd.state:'')+(off?' off':'');
+    if(off) room.title = 'Switched off'+(rm.off_note?' — '+rm.off_note:'')
+      +'. Turn it back on in the full control room.';
+    room.style.cssText=`left:${L.x}px;top:${L.y}px;width:${L.w}px;height:${L.h}px`;
+    room.innerHTML=`<div class="plaque">${rm.name}</div>`+readyChip(rd,rm.name,L.w)+doorOf(rm.key)+`<div class="desks">`+
+      rm.agents.map((a,i)=>`<div class="emp ${oneOf(a.s,['idle','queued','waiting','working','done','blocked','off'])} ${rm.cls} ${powered&&!off?'pw':''} ${off?'off':''}" data-k="${rm.key}" data-i="${i}"><div class="figure"><div class="antenna"></div><div class="head"></div><div class="body"></div><div class="desk"><div class="monitor"><div class="scan"></div></div></div></div><div class="name">${a.n}</div><div class="role" title="${escA(a.role)}">${esc(a.role)}</div></div>`).join('')
       +`</div>`;
     floor.appendChild(room);
   });
@@ -260,6 +781,43 @@ function renderFloor(){
   renderShelfRoom(floor);
   [['🪴',430,662],['🌿',600,192]].forEach(([e,x,y])=>{const p=document.createElement('div');p.className='plant';p.style.cssText=`position:absolute;z-index:2;font-size:19px;opacity:.75;left:${x}px;top:${y}px`;p.textContent=e;floor.appendChild(p);});
   drawLinks();
+}
+
+/* ---- CAN THIS SECTOR WORK? -----------------------------------------------
+   Read straight from coordination/readiness.py, which comes down inside the
+   same /api/state poll. The wording is the server's, not the browser's: if the
+   reason a sector cannot run ever changes, it changes in one place. --------- */
+const RDY_WORD={ready:'apis working',unchecked:'not proven',thin:'no fallback',blocked:'cannot run'};
+const RDY_STATES=['unchecked','ready','thin','blocked'];
+function readyOf(key){
+  const rs=(LIVE&&LIVE.readiness&&LIVE.readiness.sectors)||[];
+  return rs.find(s=>s.room===key)||null;
+}
+/* The chip sits on the same border line as the room's plaque, so on a narrow
+   room the two collide and the plaque loses its last few letters. When there
+   isn't room for both, the word drops and the lamp stays — the colour is the
+   part you read from across the screen; the words are in the tooltip. */
+function readyChip(rd, roomName, width){
+  if(!rd) return '';
+  /* "double check each sector had modules integrated" — the light said whether
+     a model answers, never what that model is FOR. Only Content and Leads put
+     one to work producing anything; the rest use theirs to word the requests
+     they send each other. That is a design choice and he should be able to see
+     it rather than assume every sector is thinking. */
+  const tip=[rd.says,...(rd.brain_does?['its model '+rd.brain_does]:[]),
+             ...(rd.blocking||[]),...(rd.thin||[]),...(rd.notes||[])]
+    .filter((v,i,a)=>v&&a.indexOf(v)===i).join('\n');
+  const st = oneOf(rd.state, RDY_STATES);
+  const word = RDY_WORD[st];
+  // Does the word fit beside the plaque without sitting on top of it? The
+  // constants are measured, not guessed: the old 74 was about 38px short, so
+  // "not proven" overlapped "CONTENT & SOCIAL" by fifteen pixels the moment a
+  // room was resized. When it does not fit the chip keeps its coloured dot and
+  // the word moves into the tooltip — a dot you can read beats a word you
+  // cannot.
+  const fits = width >= String(roomName||'').length*6.4 + word.length*5.6 + 112;
+  return `<div class="rdy ${st}" title="${escA((fits?'':word+' — ')+tip)}">`
+       + `<span class="b"></span>${fits?word:''}</div>`;
 }
 
 /* THE SHELF — a cabinet standing against the right wall of the office. Each slot
@@ -352,19 +910,43 @@ function drawLinks(){
     });
   });
 }
-const COMMS=[
-  {a:"Leads",b:"Security",label:"verify lead?",type:"amber"},
-  {a:"Security",b:"Leads",label:"✓ cleared",type:"glass"},
-  {a:"Content",b:"SEO",label:"keyword worth it?",type:"glass"},
-  {a:"SEO",b:"IT",label:"change page",type:"glass"},
-  {a:"IT",b:"Report",label:"fix logged",type:"glass"},
-  {a:"Content",b:"Security",label:"scraped — check",type:"amber"},
-  {a:"Report",b:"Director",label:"scores in",type:"glass"},
-  {a:"Leads",b:"Director",label:"hot reply",type:"amber"}
-];
+/* ---- WHAT THE SECTORS ARE ACTUALLY SAYING ---------------------------------
+   These beams used to be eight hardcoded strings — "verify lead?", "✓ cleared"
+   — fired at random every couple of seconds. They looked exactly like the
+   agency working, and they fired identically on a morning when nothing had run
+   at all. That is worse than an empty floor: it told the owner his agency was
+   busy when it was asleep.
+
+   Every beam now is one row on the real request board (coordination/comms.py →
+   the requests table). The label is the actual subject, the colour is the
+   actual state, and if no sector has spoken to another the floor is quiet. The
+   quiet is information. ------------------------------------------------- */
+let COMMS=[], COMM_I=0, COMM_SEEN='';
+
+async function pullComms(){
+  try{
+    const j=await (await fetch('/api/comms')).json();
+    if(!j||!j.ok) return;
+    COMMS=(j.beams||[]).map(b=>({
+      a:b.from_room, b:b.to_room,
+      label:b.label, type:(b.tone==='amber'?'amber':'glass'), id:b.id,
+      subject:b.subject, from:b.from, to:b.to}));
+    // Restart the rotation when the traffic itself changes, so a new exchange
+    // is shown promptly rather than queued behind a cycle of older ones.
+    const sig=COMMS.map(c=>c.id).join(',');
+    if(sig!==COMM_SEEN){ COMM_SEEN=sig; COMM_I=0; }
+    COMM_HEAD=j.head||''; COMM_THREADS=j.threads||[];
+    const t=$('#commHead'); if(t) t.textContent=j.head||'';
+    if($('#commPanel') && $('#commPanel').classList.contains('open')) renderComms();
+  }catch(e){}
+}
+let COMM_HEAD='', COMM_THREADS=[];
+
 function fireComm(){
-  const c=COMMS[Math.floor(Math.random()*COMMS.length)];
+  if(!COMMS.length) return;      // nothing has been said: draw nothing
+  const c=COMMS[COMM_I % COMMS.length]; COMM_I++;
   const A=LAYOUT[c.a],B=LAYOUT[c.b];
+  if(!A||!B) return;
   const pa=edgePoint(A,B.x+B.w/2,B.y+B.h/2), pb=edgePoint(B,A.x+A.w/2,A.y+A.h/2);
   const col=c.type==='amber'?'var(--amber)':'var(--glass)';
   const svg=$('#links');
@@ -394,8 +976,16 @@ function fireComm(){
 
 function renderPerf(){
   const m=SITES[CURRENT].metrics;
-  $('#perfStrip').innerHTML=m.map(([v,l,c])=>`<div class="pstat"><span class="v ${c}">${v}</span><span class="l etch">${l}</span></div>`).join('')+`<a href="agency.html">Open full control room →</a>`;
-  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>live</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working'||a.s==='done').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
+  // Two of these open something. A number the owner cannot click is a number he
+  // has to go and look up somewhere else, which is what he was doing.
+  const OPENS = {"Awaiting you": "openApprovals()", "Leads today": "openLeads()"};
+  $('#perfStrip').innerHTML=m.map(([v,l,c,why])=>{
+    const act = OPENS[l];
+    return `<div class="pstat${act?' clicky':''}"${act?` onclick="${act}" role="button" tabindex="0"`:''}${
+      why?` title="${escA(why)}" style="cursor:help"`:act?' title="Click to open"':''
+    }><span class="v ${c}">${v}</span><span class="l etch">${l}${act?' &rsaquo;':''}</span></div>`;
+  }).join('')+`<a href="/control">Open full control room &rarr;</a>`;
+  $('#perfBody').innerHTML=`<div class="pgroup"><div class="gh etch">This website · today</div>`+m.map(([v,l,c,why])=>`<div class="conn"><div class="ic">◔</div><div class="nm"><b>${l}</b><span>${why?esc(why):'live'}</span></div><b class="${c}" style="font-family:'IBM Plex Mono',monospace">${v}</b></div>`).join('')+`</div><div class="pgroup"><div class="gh etch">Per-sector health</div>`+SITES[CURRENT].rooms.filter(r=>r.key!=='Director').map(r=>{const w=r.agents.filter(a=>a.s==='working'||a.s==='done').length,tot=r.agents.length;const pct = r.score!=null ? r.score : Math.round(w/tot*100);
     const sub = r.foot ? r.foot.join(' · ') : (w+'/'+tot+' working');
     return `<div class="conn"><div class="ic">▦</div><div class="nm"><b>${r.name}</b><span>${sub}</span></div><div style="width:80px;height:6px;border-radius:3px;background:var(--line)"><div style="width:${pct}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`;}).join('')+`</div>`
     + shelfPanel();
@@ -433,22 +1023,134 @@ function shelfPanel(){
     + `<div style="width:${health}%;height:6px;border-radius:3px;background:var(--glass)"></div></div></div>`
     + rows + `</div>`;
 }
-const CONNS=[
-  {g:"Website & backend",items:[{ic:"◧",n:"Website",s:"custom · connected",on:true},{ic:"🗄",n:"Filing cabinet (DB)",s:"agency.db",on:true}]},
-  {g:"SEO & data",items:[{ic:"⌕",n:"DataForSEO",s:"rank tracking",on:true},{ic:"📈",n:"Search Console",s:"not connected",on:false}]},
-  {g:"Messaging",items:[{ic:"✈",n:"Telegram bridge",s:"@owner",on:true}]},
-  {g:"Social",items:[{ic:"⌾",n:"Instagram",s:"not connected",on:false},{ic:"♪",n:"TikTok",s:"not connected",on:false},{ic:"f",n:"Facebook",s:"not connected",on:false}]},
-  {g:"Outreach",items:[{ic:"✉",n:"Outreach domain",s:"mail.glassworks.ae",on:true}]}
-];
+/* CONNECTIONS — read from .env through the server, not made up here.
+
+   This panel used to be a hardcoded list. It showed a "Telegram bridge ·
+   @owner" toggled ON, a DataForSEO account and an outreach domain that reads
+   mail.glassworks.ae — all of it on a machine where none of those were set,
+   and none of it changing when they were. /api/state has carried the real
+   list the whole time (server.js readConnections), so the panel was inventing
+   an answer next to the truth.
+
+   The toggles are gone with it: a switch you can flick that changes nothing on
+   the server is worse than no switch, because it looks like you turned
+   something off. Connections are set on /setup, which is where the keys live. */
 function renderConns(){
-  $('#connBody').innerHTML=CONNS.map(grp=>`<div class="pgroup"><div class="gh etch">${grp.g}</div>`+grp.items.map(it=>`<div class="conn"><div class="ic">${it.ic}</div><div class="nm"><b>${it.n}</b><span>${it.s}</span></div><div class="toggle ${it.on?'on':''}" onclick="this.classList.toggle('on')"></div></div>`).join('')+`</div>`).join('')+`<div class="pgroup"><div class="gh etch">Add a key or link</div><div class="field"><label>Name</label><input placeholder="e.g. Instagram token"></div><div class="field"><label>Value / URL</label><input placeholder="paste here"></div><button class="pbtn" onclick="alert('Stored on the server, never in the browser or git.')">Add connection</button></div>`;
+  const conns = (LIVE && LIVE.connections) || null;
+  if(!conns){
+    $('#connBody').innerHTML = `<div class="pgroup"><p style="color:var(--muted);font-size:12.5px">`
+      + `Waiting for the server…</p></div>`;
+    return;
+  }
+  const on = conns.filter(c=>c.on).length;
+  $('#connBody').innerHTML =
+    `<div class="pgroup"><div class="gh etch">${on} of ${conns.length} connected</div>`
+    + conns.map(c=>`<div class="conn"><div class="ic">${esc(c.ic||'·')}</div>`
+        // "Website · not set · not set" — the server already says 'not set' in
+        // the sub when there is nothing to show, and the column says it again
+        + `<div class="nm"><b>${esc(c.name)}</b><span>${esc(c.on?(c.sub||''):(c.sub==='not set'?'':c.sub||''))}</span></div>`
+        + `<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;`
+        + `color:${c.on?'var(--ok)':'var(--faint)'}">${c.on?'ON':'not set'}</div></div>`).join('')
+    + `</div><div class="pgroup"><p style="font-size:11.5px;color:var(--muted);line-height:1.6">`
+    + `Keys and addresses are set on the setup screen and stored on the server — `
+    + `never in this browser, never in git.</p>`
+    + `<a class="pbtn" href="/setup" style="display:block;text-align:center;text-decoration:none">`
+    + `Open setup</a></div>`;
+}
+/* The menu used to end with "+ Add another website", which built an entry in
+   this page's memory and nothing else: it vanished on refresh, no agent ever
+   heard of it, and the agency has exactly one SITE_URL. It offers the thing
+   that actually works instead — changing the website on the setup screen. */
+/* ONCE ACCOUNTS EXIST the menu is the account's websites (up to two), each
+   opened for real on the server — every room, order and lead on this page
+   then belongs to that website — plus managing them and signing out.
+   Before any account exists it is the one website, as it always was, with a
+   way in to making one. */
+let ACCOUNT = null, ENGINE = null;
+async function loadAccount(){
+  try{
+    const r = await fetch('/api/account/me'); if(!r.ok) return;
+    ACCOUNT = await r.json();
+    await loadEngine();
+    renderSiteMenu();
+    const open = ACCOUNT && ACCOUNT.signedIn && (ACCOUNT.sites||[]).find(x=>x.id===ACCOUNT.open);
+    if(open){ $('#curSite').textContent = shortSite(open.name||open.url); $('#curFav').textContent = siteFav(open.url||open.name); }
+  }catch(e){}
+}
+/* WHICH AI THINKS, AND TODAY'S SPEND (providers/engines.py). A new account has
+   not chosen one yet, and until it does no desk can think — so the first
+   visit to the office goes to the Engine page instead. */
+async function loadEngine(){
+  try{
+    const r = await fetch('/api/engine-state'); if(!r.ok) return;
+    ENGINE = await r.json();
+    if(ENGINE && ENGINE.ok && !ENGINE.chosen && ACCOUNT && ACCOUNT.signedIn && ACCOUNT.open){
+      location.href = '/engine?first=1';
+    }
+  }catch(e){}
+}
+function engineLine(){
+  if(!ENGINE || !ENGINE.ok) return '';
+  const what = ENGINE.chosen ? ENGINE.name : 'not chosen yet';
+  const spend = ENGINE.api ? ` · about $${Number(ENGINE.spent_all||0).toFixed(2)} of $${Number(ENGINE.cap||0).toFixed(2)} today` : '';
+  return `<a class="site-add" href="/engine" style="display:block;text-decoration:none;border-style:solid">`
+    + `AI engine — ${esc(what)}${esc(spend)}${ENGINE.ready ? '' : ' (not ready)'} →</a>`;
+}
+function siteFav(s){ const t=String(s||'').replace(/^https?:\/\//,'').replace(/^www\./,''); return (t.slice(0,2)||'··').toUpperCase(); }
+async function openAccountSite(id){
+  if(ACCOUNT && id===ACCOUNT.open){ $('#siteMenu').classList.remove('open'); return; }
+  const r = await fetch('/api/account/open-site',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({site:id})});
+  const j = await r.json().catch(()=>({}));
+  if(!j.ok){ alert(j.error||'Could not switch website.'); return; }
+  location.reload();
+}
+async function signOutHere(){
+  const r = await fetch('/api/account/sign-out',{method:'POST'});
+  const j = await r.json().catch(()=>({}));
+  if(!j.ok){ alert(j.error||'Could not sign out.'); return; }
+  location.href='/account';
 }
 function renderSiteMenu(){
-  $('#siteMenu').innerHTML=Object.entries(SITES).map(([id,s])=>`<div class="site-item" onclick="switchSite('${id}')"><span class="fav">${s.fav}</span><div><b>${s.name}</b><small>${s.url}</small></div></div>`).join('')+`<div class="site-add" onclick="openPanel('sitePanel');toggleSites()">+ Add another website</div>`;
+  if(ACCOUNT && ACCOUNT.signedIn){
+    const sites = ACCOUNT.sites||[];
+    $('#siteMenu').innerHTML = sites.map(s=>`<div class="site-item" onclick="openAccountSite('${escA(s.id)}')">`
+        + `<span class="fav">${esc(siteFav(s.url||s.name))}</span><div style="flex:1;min-width:0"><b>${esc(s.name)}</b>`
+        + `<small>${esc(s.id===ACCOUNT.open?'open now':(s.url||'switch to this website'))}</small></div></div>`).join('')
+      + `<a class="site-add" href="/business" style="display:block;text-decoration:none;border-style:solid">Your business — what you sell, where →</a>`
+      + engineLine()
+      + `<a class="site-add" href="/account" style="display:block;text-decoration:none">`
+      + (sites.length < (ACCOUNT.maxSites||2) ? 'Add a website · manage →' : 'Manage websites and account →') + `</a>`
+      + `<div class="site-add" style="border-style:solid;color:var(--muted)" onclick="signOutHere()">Sign out · ${esc(ACCOUNT.signedIn.name)}</div>`;
+    return;
+  }
+  const items=Object.entries(SITES).map(([id,s])=>{
+    // When he has not given the site a name, the label IS the domain — and
+    // printing the domain twice, once bold and once small, looks like a bug.
+    const sub = !s.configured ? s.url
+              : (s.name===s.url ? 'the website this agency works on' : s.url);
+    return `<div class="site-item" onclick="switchSite('${id}')"><span class="fav">${esc(s.fav)}</span>`
+      +`<div><b>${esc(s.name)}</b><small>${esc(sub)}</small></div></div>`;
+  }).join('');
+  const st=SITES[CURRENT]||{};
+  $('#siteMenu').innerHTML = items
+    + `<a class="site-add" href="/setup" style="display:block;text-decoration:none">`
+    + (st.configured ? 'Change this website →' : 'Save your website →') + `</a>`
+    + `<a class="site-add" href="/account" style="display:block;text-decoration:none;border-style:solid">`
+    + `Make your account — two websites, encrypted →</a>`;
+}
+/* The label for the bar. Drops www. and the .com, and cuts at 16 characters —
+   enough to know which site it is, short enough not to own the header. */
+function shortSite(name){
+  let s = String(name||'').replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/$/,'');
+  s = s.replace(/\.(com|net|org|ae|co\.ae|io)$/i,'');
+  return s.length > 16 ? s.slice(0,16)+'…' : (s || 'No website');
 }
 function toggleSites(e){if(e)e.stopPropagation();$('#siteMenu').classList.toggle('open');}
-function switchSite(id){CURRENT=id;$('#curSite').textContent=SITES[id].name;$('#curFav').textContent=SITES[id].fav;$('#siteMenu').classList.remove('open');boot();}
-function addSite(){const name=($('#nsName').value.trim()||'New Website'),url=($('#nsUrl').value.trim()||'example.com');const id='s'+Object.keys(SITES).length,fav=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();SITES[id]={name,fav,url,metrics:[["—","Agency health","glass"],["0","Leads today",""],["0","Awaiting you","amber"],["—","Shelf","ok"],["$0.00","Spend today","mono"]],rooms:sectors()};renderSiteMenu();switchSite(id);closeAll();}
+function switchSite(id){CURRENT=id;$('#curSite').textContent=shortSite(SITES[id].name);$('#curFav').textContent=SITES[id].fav;$('#siteMenu').classList.remove('open');boot();}
+/* addSite() lived here. It built a website entry in this page's memory that no
+   agent, pipeline or database row had ever heard of, and which disappeared on
+   the next refresh. Changing the website is /setup, which writes SITE_URL where
+   everything actually reads it. */
 let cur;
 /* ---- TALKING TO AN AGENT ------------------------------------------------
    The drawer used to reply "On it. I'll claim that as a task on the board…" to
@@ -460,6 +1162,28 @@ let cur;
    holds — and has the sector's brain explain it. The opening line is built from
    live state too, so a broken agent leads with what broke. ------------------ */
 const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* One brand, one place. The agency name lives in .env (AGENCY_NAME) and is
+   served with the settings, so renaming the firm is a field on this screen and
+   not a hunt through eleven files — which is how it came to say the wrong name
+   in eleven places at once. */
+function setBrand(name){
+  if(!name) return;
+  const el=document.getElementById('brandName');
+  if(el) el.textContent = (el.textContent||'').toUpperCase()===(el.textContent||'')
+    ? name.toUpperCase() : name;
+  document.title = name + document.title.replace(/^[^\u2014]*/, '');
+}
+/* Attribute context needs the quotes too. esc() alone inside title="…" lets a
+   sector name or an error message containing a double quote close the attribute
+   and start writing markup. */
+const escA=(s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+/* A value that becomes a CSS CLASS is not text — escaping does nothing useful
+   for it, so it is checked against the list instead. These come from the server
+   today, but the activity feed is the one screen that renders text written by
+   the outside world (a rival's page title, a lead's company name, the body of
+   a scraped enquiry), so nothing on it gets to reach an attribute unchecked. */
+const oneOf=(v,allowed)=>allowed.includes(String(v))?String(v):allowed[0];
 function bubble(kind, html){
   $('#dBody').insertAdjacentHTML('beforeend',`<div class="msg ${kind}">${html}</div>`);
   $('#dBody').scrollTop=$('#dBody').scrollHeight;
@@ -473,13 +1197,25 @@ function openDrawer(a){
   if(a.s==='blocked'){
     open = `<b style="color:var(--danger)">I've stopped.</b> ${esc(a.t)}`
          + (a.why?`<br><br>${esc(a.why)}`:'')
+         // A red desk the owner could only look at was the whole complaint. If
+         // the line carries the job it is stuck on, offer to put it back.
+         + (a.task_id
+             ? `<br><br><button class="yes" id="relBtn" onclick="releaseStuck('${escA(a.task_id)}')"`
+               + ` style="font-size:12px;padding:5px 10px">Put it back on the board</button>`
+               + ` <span class="dim" id="relMsg" style="font-size:11.5px"></span>`
+             : '')
          + `<br><br>Ask me about it and I'll tell you what I know.`;
   } else if(a.s==='working'){
     open = `Working now — ${esc(a.t)}.`;
   } else if(a.s==='done'){
     open = `Last thing I did: ${esc(a.t)}. Ask me anything about it.`;
   } else if(a.s==='waiting'){
-    open = `There's work on the board for me — ${esc(a.t)} — but nobody has claimed it yet.`;
+    open = `<b style="color:var(--amber)">I need your yes or no.</b> ${esc(a.t)}`
+         + `<br><br>Until you decide, I can't start it. Approve or decline it on `
+         + `<b>Awaiting you</b> and I'll move on to whatever's next.`;
+  } else if(a.s==='queued'){
+    open = `There's work on the board for me — ${esc(a.t)} — and I haven't `
+         + `started it yet. Nothing is blocking it and nobody is waiting on you.`;
   } else {
     open = `Nothing on the board for me right now. Ask what I'm for, or what the sector's carrying.`;
   }
@@ -488,6 +1224,37 @@ function openDrawer(a){
   $('#dInput').focus();
 }
 function closeDrawer(){ $('#drawer').classList.remove('open'); }
+
+/* Put a stuck job back on the board.
+
+   The server does the judging, not this — board.release_claim refuses a claim
+   that is merely slow, and says so. So a refusal is shown as the answer it is,
+   never swallowed: the one thing this screen must never do is report a change
+   the cabinet did not make (see the note on the approve button). */
+async function releaseStuck(taskId){
+  const btn = document.getElementById('relBtn');
+  const msg = document.getElementById('relMsg');
+  if(!btn || !msg) return;
+  btn.disabled = true; msg.textContent = 'releasing…'; msg.style.color = 'var(--muted)';
+  let j = null;
+  try{
+    const r = await fetch('/api/release',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id: taskId, by: 'owner'})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'could not reach the server'}; }
+  if(!j || !j.ok){
+    btn.disabled = false;
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '✕ ' + ((j && (j.error || j.why)) || 'not released');
+    return;
+  }
+  btn.remove();
+  msg.style.color = 'var(--ok)';
+  msg.textContent = '✓ back on the board — the next desk that can do it will take it';
+  const j2 = await pullLive();
+  if(j2){ LIVE=j2; applyLive(j2); renderFloor(); renderPerf(); }
+}
 
 let asking=false;
 async function askAgent(){
@@ -498,7 +1265,8 @@ async function askAgent(){
   bubble('a','<span class="dim" id="thinking">…</span>');
   const j=await (async()=>{ try{
     const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({agent:cur.n, message:v})});
+      // the id, never the label — see the note on sectors()
+      body:JSON.stringify({agent:cur.id||cur.n, message:v})});
     return await r.json();
   }catch(e){ return {ok:false, error:String(e)}; }})();
   const t=document.getElementById('thinking'); if(t) t.parentElement.remove();
@@ -511,7 +1279,7 @@ async function askAgent(){
   // or something is broken.
   const foot=(txt,col)=>`<br><br><span class="dim" style="font-size:11px${col?';color:'+col:''}">${txt}</span>`;
   if(j.brain_error)   html += foot(`my model failed: ${esc(j.brain_error)} — that was my record read straight`,'var(--danger)');
-  else if(j.unrouted) html += foot(`Read straight off my record — ${esc(j.unrouted)}. Set one on Setup → Who runs what and I can talk it through.`,'var(--amber)');
+  else if(j.unrouted) html += foot(`Read straight off my record — ${esc(j.unrouted)}. Sign Claude in on this machine (Setup → The Claude team) and I can talk it through.`,'var(--amber)');
   else if(j.brain)    html += foot(`via ${esc(j.brain.model||j.brain)}`);
   bubble('a', html);
 }
@@ -537,8 +1305,15 @@ function applyLive(j){
   if(!j) return;
   const st = SITES[CURRENT];
   const pend = (j.approvals||[]).length;
+  // `String(null)` is the four letters n-u-l-l, and that is exactly what the
+  // header showed. A score the agency cannot honestly give is an em dash, and
+  // the tile carries the reason so "when does this appear?" has an answer on
+  // the screen rather than needing to be asked.
+  const health = (j.metrics.health===null || j.metrics.health===undefined)
+    ? '—' : String(j.metrics.health);
+  st.healthWhy = j.metrics.health_why || '';
   st.metrics = [
-    [String(j.metrics.health), "Agency health", "glass"],
+    [health, "Agency health", "glass", st.healthWhy],
     [String(j.metrics.leads),  "Leads today",   ""],
     [String(pend),             "Awaiting you",  "amber"],
     [shelfSummary(j),          "Shelf",         "ok"],
@@ -551,8 +1326,21 @@ function applyLive(j){
     if(!live) return;
     rm.score = live.score;
     rm.foot  = live.foot;
+    // The owner's switch, carried onto the floor. Without this the office had
+    // no idea a sector was stopped and drew it exactly like a quiet one — the
+    // switch was only visible in the control room where he had set it.
+    rm.enabled   = live.enabled !== false;
+    rm.essential = !!live.essential;
+    rm.off_note  = live.off_note || '';
     seatLive(rm, live.agents||[]);
   });
+  renderRunButton(); renderTicker(); renderActBadge(); renderConns();
+  if($('#actPanel').classList.contains('open')) renderActivity();
+  // Only redraw the run panel from the poll while a day is actually going —
+  // otherwise a poll landing mid-typing would wipe the orders the owner is
+  // still writing into the form. (This is why RUN.touched exists too.)
+  if($('#runPanel').classList.contains('open') && RUN.view==='progress') renderRun();
+  else if($('#runPanel').classList.contains('open') && RUN.view==='idle') renderRun();
 }
 
 /* Put each live line at the desk it belongs to.
@@ -571,9 +1359,14 @@ function seatLive(rm, feed){
     desk.s = f.s; desk.t = f.t;
     // a dark bulb always carries its reason — see state.py's _run_feed
     desk.why = f.why || '';
+    // and, when the desk is stuck on a claim, the job it is stuck on, so the
+    // drawer can offer to put it back rather than only describe the problem
+    desk.task_id = f.task_id || '';
     // show WHO actually did it — a desk labelled 'Writer' while content-writer
     // holds the task tells you nothing you didn't already know.
-    desk.n = (f.n && f.n !== 'unassigned') ? f.n : desk.staff;
+    // (and the three words the state uses for a job nobody holds are not a name)
+    desk.n = (f.n && !['unassigned','waiting on you','next in line','no desk can take this'].includes(f.n))
+      ? f.n : desk.staff;
   };
 
   const spare = [];
@@ -596,16 +1389,1466 @@ function shelfSummary(j){
   return busy ? (busy+" in use") : (stocked+"/"+sh.length);
 }
 
+/* ---- THE ACTIVITY LOG -----------------------------------------------------
+   Every line here came out of a row the work itself wrote. Nothing is
+   summarised into existence by the browser: if it is on this list it happened,
+   and the verb is the server's word for it. -------------------------------- */
+async function openActivity(){
+  openPanel('actPanel');
+  renderActivity();                       // paint what we have, instantly
+  // Always re-read on open, not just when there is nothing cached. The old
+  // version reused a poll from up to a refresh ago and marked THAT moment as
+  // read, so everything since stayed unread and the badge came straight back —
+  // which is what "I opened it and it still says 23" was.
+  const j = await paintActBadge();
+  renderActivity();
+  // Opening IS reading, and it clears whether or not the network cooperates.
+  actMarkSeen((j && (j.newest_at || j.at)) || (ACT && (ACT.newest_at || ACT.at)) || 0);
+}
+
+function renderActivity(){
+  // ACT (the unread-aware read) wins over the copy bundled in /api/state — the
+  // bundle has no idea what he has already seen.
+  const a = ACT || (LIVE&&LIVE.activity) || {};
+  const ev = a.events||[];
+  const cut = a.seen_to||0;
+  $('#actHead').textContent = a.head ? '· '+a.head : '';
+  const back = a.hidden
+    ? `<p style="margin-top:14px;font-size:12px;color:var(--muted)">`
+      + `${a.hidden} line${a.hidden===1?'':'s'} cleared. Nothing was deleted — `
+      + `every one of them is a record of work that really happened. `
+      + `<a href="#" onclick="showAllActivity();return false" `
+      + `style="color:var(--glass)">Show them again</a>.</p>` : '';
+  if(!ev.length){
+    $('#actBody').innerHTML = (a.hidden
+      ? `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
+        + `Cleared. Anything the agency does from now on appears here.</p>`
+      : `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
+        + `Nothing has run in the last 24 hours, so there is nothing to show. This fills in `
+        + `on its own the moment a sector picks something up — press <b>Run the day</b> to start one.</p>`)
+      + back;
+    return;
+  }
+  const VERBS=['pushed','got','grabbed','delivered','errored'];
+  // A line about mail or a post opens the room it is waiting in. Plain links
+  // to pages the server hands out without asking Python anything, so they
+  // open at once even while the agency is mid-run.
+  const door = e => (e.door==='/mail'||e.door==='/posts') ? e.door : '';
+  const row = e =>
+    `<div class="act ${oneOf(e.verb,VERBS)} ${e.level==='live'?'live':''}${door(e)?' go':''}"`
+    + (door(e) ? ` onclick="if(!event.target.closest('a'))location.href='${door(e)}'"` : '')
+    + `>`
+    + `<span class="tm">${esc(e.hhmm)}</span>`
+    + `<span class="vb">${esc(e.verb)}</span>`
+    + `<span class="bd"><b>${esc(e.what)}</b>`
+    // 'SEO · SEO' tells you nothing twice — name the desk only when it is not
+    // just the room's own name repeated back
+    + `<small>${esc(e.room||'—')}${e.who && e.who.toLowerCase()!==String(e.room||'').toLowerCase() ? ' · '+esc(e.who) : ''}</small>`
+    + (e.detail?` <em>${esc(e.detail)}</em>`:'')
+    + (door(e) ? `<br><a class="actdoor" href="${door(e)}">open the ${esc(e.door_name||'room')} &rarr;</a>` : '')
+    + `</span></div>`;
+  const fresh = cut ? ev.filter(e=>e.at>cut) : ev;
+  const older = cut ? ev.filter(e=>e.at<=cut) : [];
+  $('#actBody').innerHTML =
+      (fresh.length && cut ? `<div class="gh">New since you last looked (${fresh.length})</div>` : '')
+    + fresh.map(row).join('')
+    + (older.length ? `<div class="gh" style="margin-top:18px">Earlier</div>`+older.map(row).join('') : '')
+    + back;
+}
+
+function renderActBadge(){
+  const a=(LIVE&&LIVE.activity)||{};
+  // The badge used to show a.live or a.errors — how many things are happening
+  // or broken. That is not an unread count and it does not go down when you
+  // read it, so it sat at 23 no matter how many times the panel was opened.
+  // It is a genuine unread count now: it climbs while you are away and clears
+  // the moment you look, like every other unread badge you have ever used.
+  paintActBadge();
+}
+
+/* WHERE THE READ MARK LIVES. It was localStorage, and localStorage is keyed by
+   ORIGIN — this office on localhost and the control room on 127.0.0.1 kept two
+   separate marks, so clearing one left the other showing the same stubborn
+   number. It is in the cabinet now: one owner, one agency, one mark, and the
+   server is the one deciding what is unread. */
+let ACT=null;   // the last full read, so the panel and the badge cannot disagree
+
+function drawActBadge(n){
+  const b=$('#actBadge'); if(!b) return;
+  b.innerHTML = n>0
+    ? `<span style="background:var(--danger);color:#fff;border-radius:999px;
+        padding:1px 6px;font-size:10.5px;font-weight:700">${n>99?'99+':n}</span>`
+    : '';
+}
+
+/* A LOCAL FLOOR UNDER THE SERVER'S COUNT.
+   The read mark belongs in the cabinet — that is what makes it agree across
+   both screens and both hostnames. But if the running server is older than
+   this page it has no /api/activity/seen route at all, the POST 404s, and the
+   badge comes straight back on the next poll no matter how many times he
+   presses the button. That is exactly what he kept reporting.
+
+   So the browser also remembers the newest thing it has shown him. It can only
+   ever SUPPRESS a count he has already acknowledged here; it can never invent
+   one, and the cabinet still wins the moment the server can answer. */
+const ACT_FLOOR='wdta_activity_floor';
+function actFloor(){ try{ return parseInt(localStorage.getItem(ACT_FLOOR)||'0',10)||0; }catch(e){ return 0; } }
+function setActFloor(ts){ try{ if(ts>actFloor()) localStorage.setItem(ACT_FLOOR,String(ts)); }catch(e){} }
+
+async function paintActBadge(){
+  if(!$('#actBadge')) return null;
+  try{
+    const j=await (await fetch('/api/activity')).json();
+    if(!j||!j.ok) return null;
+    ACT=j;
+    const unread = (j.newest_at && actFloor()>=j.newest_at) ? 0 : (j.unread||0);
+    j.unread = unread;
+    drawActBadge(unread);
+    return j;
+  }catch(e){ return null; }
+}
+
+// Clear it here and now, then tell the agency. A read that only counts if a
+// POST succeeds is a read that sometimes silently does not happen.
+function actMarkSeen(ts, extra){
+  drawActBadge(0);
+  if(ACT) ACT.unread=0;
+  if(ts) setActFloor(ts);
+  return fetch('/api/activity/seen',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({seen_to: ts||0}, extra||{}))})
+    .then(r=>r.json()).catch(()=>null);
+}
+
+/* The two buttons on the panel. Opening it already marks it read, but the owner
+   asked for something he can press and watch work — and after being told twice
+   that the count had been fixed, a button that visibly does it is worth more
+   than another invisible mechanism. */
+async function markAllRead(){
+  const b=$('#actReadAll'); if(b){ b.disabled=true; b.textContent='Marking…'; }
+  await actMarkSeen((ACT && (ACT.newest_at||ACT.at)) || Math.floor(Date.now()/1000));
+  await paintActBadge(); renderActivity();
+  if(b){ b.disabled=false; b.textContent='Mark all read'; }
+}
+
+async function clearActivity(){
+  // Hides, never deletes. Every line here is derived from a row the work wrote,
+  // so 'delete this event' would mean deleting the record of a real run.
+  const b=$('#actClear'); if(b){ b.disabled=true; b.textContent='Clearing…'; }
+  const ts=(ACT && (ACT.newest_at||ACT.at)) || Math.floor(Date.now()/1000);
+  const j=await actMarkSeen(ts,{clear:true});
+  if(j && j.ok) ACT=j; else await paintActBadge();
+  drawActBadge(0); renderActivity();
+  if(b){ b.disabled=false; b.textContent='Clear'; }
+}
+
+async function showAllActivity(){
+  const j=await fetch('/api/activity/seen',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({showAll:true})}).then(r=>r.json()).catch(()=>null);
+  if(j && j.ok) ACT=j; else await paintActBadge();
+  renderActivity();
+}
+
+/* ---- WAITING ON YOU -------------------------------------------------------
+   Each item gets its own Approve and Not now, because they are separate
+   decisions about separate things — one button pair for a list of four would
+   make him agree to three things to say yes to one.
+
+   The decision goes to /api/approve, the same endpoint the control room uses,
+   which writes it to the row. The button was decoration once: it faded the item
+   and printed "sent to the agent" while nothing was sent anywhere and the next
+   poll brought the item straight back. So nothing here reports success unless
+   the server said the row changed. ------------------------------------------ */
+function openApprovals(){
+  // A fresh sitting starts with a clean slate of receipts — yesterday's
+  // "approved" notes are history, not something to greet him with.
+  DECIDED.clear();
+  openPanel('apprPanel');
+  renderApprovals();
+}
+
+/* What has just been decided in this sitting, so the panel can say so after it
+   redraws. Keyed by kind+id, which is what the server actually acts on — the
+   list position is not an identity, and treating it as one is how deciding the
+   second item could act on the wrong row (see decide()). */
+const DECIDED = new Map();
+
+function renderApprovals(){
+  const items = (LIVE && LIVE.approvals) || [];
+  const done = [...DECIDED.values()];
+  const rb = $('#revBadge');
+  if(rb){
+    const n = items.filter(a=>a.link).reduce((t,a)=>t+(a.count||1),0);
+    rb.innerHTML = n ? `<span style="background:var(--amber);color:#1a1206;border-radius:999px;
+        padding:1px 6px;font-size:10.5px;font-weight:700">${n}</span>` : '';
+  }
+  $('#apprHead').textContent = items.length
+    ? `· ${items.length} decision${items.length===1?'':'s'} for you`
+    : (done.length ? `· all clear — ${done.length} decided just now`
+                   : '· nothing right now');
+  const receipts = done.map(d=>`
+    <div class="appr" style="opacity:.55">
+      <div class="lvl">${esc(d.lvl||'amber')}</div>
+      <h4>${esc(d.text||'(no description)')}</h4>
+      <div class="row"><span style="color:${d.yes?'var(--ok)':'var(--muted)'};font-size:12.5px">`
+      + `${d.yes?'✓ approved':'✕ turned down'} — ${esc((d.why||'').replace(/^(Approved|Turned down)\.\s*/,'')||'the desk has moved on')}</span></div>
+    </div>`).join('');
+
+  if(!items.length){
+    $('#apprBody').innerHTML = receipts
+      + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+      + `Nothing is waiting on you. Anything the agents cannot decide for themselves `
+      + `&mdash; a change to the live site, a task the MD marked amber &mdash; appears `
+      + `here and on your phone.</p>`;
+    return;
+  }
+  // data-key, not data-i. The list is re-read from the server after every
+  // decision, so a position captured when the panel was drawn can point at a
+  // different item by the time the next button is pressed.
+  $('#apprBody').innerHTML = items.map(a=>{
+    const k = `${a.kind}:${a.id}`;
+    // Written pages and drafted mail are read in full on the Review page, so
+    // their line here is a door to it rather than a yes/no on a summary.
+    if(a.link) return `
+    <div class="appr" data-key="${escA(k)}">
+      <div class="lvl">${esc(a.lvl||'amber')}</div>
+      <h4>${esc(a.text||'(no description)')}</h4>
+      ${a.why?`<div class="why">${esc(a.why)}</div>`:''}
+      <div class="row">
+        <a class="yes" href="${escA(a.link)}" style="text-decoration:none;display:inline-block">Read and decide &rarr;</a>
+      </div>
+    </div>`;
+    return `
+    <div class="appr" data-key="${escA(k)}">
+      <div class="lvl">${esc(a.lvl||'amber')}</div>
+      <h4>${esc(a.text||'(no description)')}</h4>
+      ${a.why?`<div class="why">${esc(a.why)}</div>`:''}
+      <div class="row">
+        <button class="yes" onclick="decide('${escA(k)}',true)">Approve</button>
+        <button class="no"  onclick="decide('${escA(k)}',false)">Not now</button>
+        <span class="msg" style="font-size:12px"></span>
+      </div>
+    </div>`;}).join('') + receipts;
+}
+
+async function decide(key, yes){
+  const items = (LIVE && LIVE.approvals) || [];
+  const a = items.find(x=>`${x.kind}:${x.id}` === key);
+  const el = document.querySelector(`.appr[data-key="${CSS.escape(key)}"]`);
+  if(!a || !el) return;
+  const btns = el.querySelectorAll('button');
+  const msg = el.querySelector('.msg');
+  btns.forEach(b=>b.disabled=true);
+  msg.textContent = 'saving…'; msg.style.color = 'var(--muted)';
+  let j = null;
+  try{
+    const r = await fetch('/api/approve',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind:a.kind, id:a.id, decision: yes?'approved':'rejected'})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'could not reach the server'}; }
+
+  // Only say it worked if the row actually changed.
+  if(!j || !j.ok){
+    btns.forEach(b=>b.disabled=false);
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '✕ not saved — ' + ((j&&(j.error||j.why)) || 'unknown error');
+    return;
+  }
+  // MOVE ON. The old version faded the decided item and stopped there: the
+  // panel kept the stale list, the next item never came forward, and the owner
+  // was left looking at a screen that had not visibly reacted to him. Re-read
+  // the cabinet, redraw the queue from it, and keep a receipt so a decision he
+  // just made does not simply vanish off the screen.
+  DECIDED.set(key, {yes, text:a.text, lvl:a.lvl, why:j.why||''});
+  const j2 = await pullLive();
+  if(j2){ LIVE=j2; applyLive(j2); renderFloor(); renderPerf(); }
+  renderApprovals();
+}
+
+/* ---- THE LEADS BEHIND THE NUMBER ------------------------------------------ */
+let LEAD_SCOPE='today';
+async function openLeads(scope){
+  LEAD_SCOPE = scope || LEAD_SCOPE;
+  openPanel('leadPanel');
+  $('#leadBody').innerHTML = '<p style="color:var(--muted);font-size:12.5px">Reading…</p>';
+  let j=null;
+  try{ j = await (await fetch('/api/leads?scope='+encodeURIComponent(LEAD_SCOPE))).json(); }
+  catch(e){}
+  if(!j || !j.ok){
+    $('#leadBody').innerHTML = '<p style="color:var(--danger);font-size:12.5px">'
+      + 'Could not read the leads' + (j&&j.error?': '+esc(j.error):'.') + '</p>';
+    return;
+  }
+  $('#leadHead').textContent = `· ${j.head} · ${j.total} waiting to be mailed`;
+  /* Only leads he can act on: an address, and nobody has written to them yet.
+     The rest are kept — that is what stops the Hunter collecting them again —
+     and he is told where they went rather than wondering. */
+  const kept = (j.mailed || j.no_address) ? `<p style="color:var(--faint);font-size:11.5px;margin:0 0 12px;line-height:1.6">`
+      + (j.mailed ? `${j.mailed} already mailed — they are in the Mail room under Sent, and are never mailed again. ` : '')
+      + (j.no_address ? `${j.no_address} with no email are kept only so they are never collected twice.` : '')
+      + `</p>` : '';
+  const mailDoor = kept + `<a class="pbtn" href="/mail" style="display:block;text-align:center;text-decoration:none;margin:0 0 14px">
+      Write and send mails to these leads &rarr;</a>`;
+  $('#leadToday').style.borderColor = LEAD_SCOPE==='today' ? 'var(--glass)' : '';
+  $('#leadAll').style.borderColor   = LEAD_SCOPE==='all'   ? 'var(--glass)' : '';
+  if(!j.leads.length){
+    $('#leadBody').innerHTML = kept + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+      + esc(j.head) + `. The Hunter finds these when the day runs; the Scanner drops `
+      + `anyone already on file so nobody is contacted twice.</p>`;
+    return;
+  }
+  $('#leadBody').innerHTML = mailDoor + `<table class="ldtable"><thead><tr>`
+    + `<th>Company</th><th>Where</th><th>Stage</th><th>Contact</th>`
+    + `<th>Reached</th><th>Found</th></tr></thead><tbody>`
+    + j.leads.map(l=>`<tr>
+        <td><b>${esc(l.company)}</b>${l.name?`<br><span style="color:var(--muted)">${esc(l.name)}</span>`:''}</td>
+        <td>${esc(l.area||'—')}${l.segment?`<br><span style="color:var(--faint);font-size:11px">${esc(l.segment)}</span>`:''}</td>
+        <td>${esc(l.stage)}${l.needs_owner?`<br><span style="color:var(--amber);font-size:11px">replied — needs you</span>`:''}</td>
+        <td style="overflow-wrap:anywhere">${esc(l.email||l.phone||'—')}${
+          l.email && !l.email_valid?`<br><span style="color:var(--amber);font-size:11px">not verified</span>`:''}${
+          /* The chat button they published on their own site. Shown because a
+             lead with no address and a WhatsApp button is reachable, and the
+             old column said only "—". */
+          l.whatsapp?`<br><span style="color:var(--ok);font-size:11px">whatsapp ${esc(l.whatsapp)}</span>`:''}${
+          l.email && l.phone?`<br><span style="color:var(--faint);font-size:11px">${esc(l.phone)}</span>`:''}</td>
+        <td>${l.waiting_on
+              ? `<span class="wait">${esc(l.waiting_on)}</span>`
+              : `${l.contacted} sent, ${l.replied} replied${l.last?`<br><span style="color:var(--faint);font-size:11px">${esc(l.last)}</span>`:''}`}</td>
+        <td style="color:var(--muted)">${esc(l.found)}</td>
+      </tr>`).join('')
+    + `</tbody></table>`;
+}
+
+/* ---- WHAT EACH SECTOR PRODUCED ---------------------------------------------
+   "there is no any section that shows the results of the sectors."
+
+   Two halves, and the second is the one worth building carefully. The numbers
+   and the rows are easy. The line under a quiet sector saying WHY it was quiet
+   is what stops him guessing — and it is drawn differently depending on which
+   of the six reasons it is, because "you switched this off" and "its work
+   failed" call for completely different things from him. ------------------- */
+let RES = {days:0, data:null};
+
+async function openResults(days){
+  RES.days = (days===undefined||days===null) ? RES.days : days;
+  openPanel('resPanel');
+  renderResults();
+  try{
+    const r = await fetch('/api/results'+(RES.days?('?days='+RES.days):''),{cache:'no-store'});
+    RES.data = await r.json();
+  }catch(e){ RES.data = {ok:false, error:String(e)}; }
+  renderResults();
+}
+
+/* A quiet sector is not all one thing. Red is broken and wants IT; amber is
+   waiting on him; grey is a perfectly ordinary nothing-to-do. Painting all
+   three the same colour is how a normal day starts looking like a fire. */
+function whyTone(why){
+  const w = (why||'').toLowerCase();
+  if(w.includes('work failed')) return 'var(--danger)';
+  if(w.includes('switched this sector off') || w.includes('has not been run')
+     || w.includes('you stopped')) return 'var(--amber)';
+  return 'var(--faint)';
+}
+
+/* CLEARING OUT WHAT IS OLDER THAN THIRTY DAYS.
+   Two steps, always. It reads what would go and shows him the list, and only
+   then does it offer to do it — because this one genuinely cannot be undone:
+   the database is rewritten and the write-ahead log emptied, so the words are
+   not in the file afterwards, which is what he asked for. */
+async function askPurge(){
+  const btn = $('#resPurge');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  let j = null;
+  try{ j = await (await fetch('/api/purge?days=30',{cache:'no-store'})).json(); }
+  catch(e){ j = {ok:false, error:String(e)}; }
+  btn.disabled = false; btn.textContent = 'Clear old data';
+  if(!j || !j.ok){ alert('Could not read what is on file.\n\n'+((j&&j.error)||'')); return; }
+  if(!j.rows){ alert(j.head + '.\n\nNothing to clear.'); return; }
+
+  const list = (j.tables||[]).map(x=>'  • '+x.rows+'  '+x.label).join('\n');
+  const kept = Object.keys(j.kept||{}).join(', ');
+  if(!confirm(
+      'Delete '+j.rows+' row(s) older than 30 days?\n\n'+list
+      + '\n\nKept whatever happens: '+kept
+      + '\n\nThis is permanent. The database is rewritten afterwards, so the '
+      + 'deleted text is not left in the file or in any backup taken from here '
+      + 'on. There is no undo.')) return;
+
+  btn.disabled = true; btn.textContent = 'Clearing…';
+  let r = null;
+  try{
+    r = await (await fetch('/api/purge',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({days:30})})).json();
+  }catch(e){ r = {ok:false, error:String(e)}; }
+  btn.disabled = false; btn.textContent = 'Clear old data';
+  alert(r && r.ok ? r.head : ('It did not run.\n\n'+((r&&r.error)||'no detail')));
+  openResults(RES.days);
+}
+
+function renderResults(){
+  const B=$('#resBody'), d=RES.data;
+  [['resD0',0],['resD7',7],['resD30',30]].forEach(([id,n])=>
+    $('#'+id).classList.toggle('on', RES.days===n));
+  if(!d){ B.innerHTML=`<p style="color:var(--muted);font-size:12.5px">Reading…</p>`; return; }
+  if(!d.ok){
+    $('#resHead').textContent='';
+    B.innerHTML=`<div class="warnbox"><b>Could not read the results.</b><br>${esc(d.error||'no detail')}</div>`;
+    return;
+  }
+  $('#resHead').textContent = '· '+(d.head||'');
+
+  B.innerHTML = (d.sectors||[]).map(s=>{
+    const counts = (s.counts||[]).map(c=>
+      `<span style="display:inline-block;margin-right:18px">
+         <b style="font-family:'IBM Plex Mono',monospace;font-size:15px;
+            color:${c.n?'var(--glass)':'var(--faint)'}">${c.n}</b>
+         <span style="font-size:11px;color:var(--muted);margin-left:5px">${esc(c.label)}</span>
+       </span>`).join('');
+
+    const why = s.nothing_because
+      ? `<div style="font-size:12px;color:${whyTone(s.nothing_because)};
+             line-height:1.6;margin-top:8px">${esc(s.nothing_because)}</div>` : '';
+
+    // The actual rows, not a count of them. Capped at eight on screen: he is
+    // scanning, and a hundred leads in a panel is a wall he scrolls past.
+    const rows = (s.items||[]).slice(0,8).map(it=>
+      `<tr><td class="mono">${esc(it.at||'')}</td>`
+      + it.cols.map(v=>`<td>${esc(String(v==null?'':v)).slice(0,140)}</td>`).join('')
+      + `</tr>`).join('');
+    const table = s.items && s.items.length
+      ? `<div style="overflow-x:auto;margin-top:10px"><table class="made">
+           <thead><tr><th>at</th>${(s.columns||[]).map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+           <tbody>${rows}</tbody></table></div>`
+        + (s.made>8?`<div style="font-size:11px;color:var(--faint);margin-top:6px">
+             …and ${s.made-8} more</div>`:'')
+      : '';
+
+    // What the last run asked of this sector, when something went wrong with
+    // it — but ONLY if the sector still produced something. If it produced
+    // nothing, the line above already quotes the failed step by name, and
+    // printing it twice made Leads say "every Overpass mirror refused the
+    // connection" twice in a row, which reads like two separate problems.
+    //
+    // The case this IS for is the one that would otherwise be invisible: a
+    // sector that found twelve businesses AND had a step fall over. The
+    // numbers look fine and something is still broken.
+    const bad = s.nothing_because ? []
+              : (s.steps||[]).filter(x=>['failed','stopped','skipped'].includes(x.status));
+    const steps = bad.length
+      ? `<div style="margin-top:8px">` + bad.map(x=>
+          `<div style="font-size:11.5px;color:var(--muted);line-height:1.6">
+             <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+                   text-transform:uppercase;letter-spacing:.08em;
+                   color:${x.status==='failed'?'var(--danger)':'var(--amber)'}">${esc(x.status)}</span>
+             &nbsp;${esc(x.label)}${x.summary?' — '+esc(x.summary):''}</div>`).join('')
+        + `</div>` : '';
+
+    return `<div style="border-left:2px solid ${s.made?'var(--ok)':'var(--line2)'};
+                 padding:2px 0 14px 12px;margin-bottom:18px">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <b style="font-size:13.5px;font-weight:600">${esc(s.name)}</b>
+          ${s.enabled===false?`<span style="font-size:10px;font-family:'IBM Plex Mono',monospace;
+             text-transform:uppercase;letter-spacing:.08em;color:var(--amber)">switched off</span>`:''}
+        </div>
+        <div style="margin-top:8px">${counts||''}</div>
+        ${why}${steps}${table}
+      </div>`;
+  }).join('');
+}
+
+/* ---- WHAT CHANGED ON THE WEBSITE -------------------------------------------
+   "there should be a section in program where i can see whats changed in
+    website... that's totally blind."
+
+   Two kinds of line, drawn differently on purpose. A change the agency made
+   carries the command that reverses it. A change somebody ELSE made is the one
+   worth his attention — that is his own edit, or a designer's, or a hosting
+   company overwriting the fix the agency put in on Tuesday — so it is drawn in
+   amber and it leads the eye.
+
+   Reading the log is a database read and happens on open. LOOKING at the site
+   is a GET per page, so it is a button and the daily run, never a poll. ----- */
+let CHG = {view:'recent', data:null, busy:false, said:''};
+
+async function openChanges(view){
+  CHG.view = view || 'recent';
+  openPanel('chgPanel');
+  renderChanges();
+  const qs = CHG.view==='all' ? '?all=1' : CHG.view==='outside' ? '?outside=1' : '';
+  try{
+    const r = await fetch('/api/site/changes'+qs,{cache:'no-store'});
+    CHG.data = await r.json();
+  }catch(e){ CHG.data = {ok:false, error:String(e)}; }
+  renderChanges();
+}
+
+async function lookNow(){
+  CHG.busy = true; CHG.said=''; renderChanges();
+  let j = null;
+  try{
+    const r = await fetch('/api/site/look',{method:'POST'});
+    j = await r.json();
+  }catch(e){ j = {ok:false, why:String(e)}; }
+  CHG.busy = false;
+  CHG.said = (j && (j.head || j.why || j.error)) || 'No answer from the server.';
+  await openChanges(CHG.view);
+}
+
+let ORD = null, ORD_SAID = '';
+async function openOrders(){
+  openPanel('ordPanel');
+  if(!ORD) $('#ordBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px">Reading your orders…</p>`;
+  try{ ORD = await (await fetch('/api/orders',{cache:'no-store'})).json(); }
+  catch(e){ ORD = {ok:false, error:String(e)}; }
+  renderOrders();
+}
+const ORD_LOOK = {
+  'done':            ['var(--ok)',     'Done'],
+  'waiting for you': ['var(--amber)',  'Waiting for you'],
+  'in progress':     ['var(--glass)',  'Being worked'],
+  'stuck':           ['var(--danger)', 'Stuck'],
+  'not started':     ['var(--muted)',  'Not started'],
+};
+function renderOrders(){
+  const d = ORD || {}, B = $('#ordBody');
+  $('#ordHead').textContent = d.head ? '· '+d.head : '';
+  let H = ORD_SAID ? `<div class="warnbox" style="margin-bottom:14px">${esc(ORD_SAID)}</div>` : '';
+  if(!d.ok){ B.innerHTML = H + `<div class="warnbox"><b>Could not read them.</b><br>${esc(d.error||'no detail')}</div>`; return; }
+  const os = d.orders || [];
+  if(!os.length){
+    B.innerHTML = H + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">No orders in the last week.
+      Give one in the box for each sector when you press <b>Run the day</b>, or ask any desk in the chat —
+      every one you give shows here with what became of it.</p>`;
+    return;
+  }
+  let day = '';
+  H += os.map(o=>{
+    const [col, word] = ORD_LOOK[o.state] || ['var(--muted)', o.state];
+    let h = '';
+    if(o.day !== day){ day = o.day; h += `<div class="gh etch" style="margin:18px 0 8px">${esc(o.day)}</div>`; }
+    h += `<div style="border-left:2px solid ${col};padding:2px 0 12px 12px;margin-bottom:12px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+        <b style="font-size:13px">${esc(o.sector)}</b>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:${col}">${esc(word)}</span>
+        <span style="font-size:10.5px;color:var(--faint)">${o.origin==='chat'?'from the chat':'from the order box'}</span>
+      </div>
+      <div style="font-size:13px;line-height:1.6;margin-top:4px">“${esc(o.text)}”</div>`;
+    if(o.leads) h += `<div style="font-size:12px;color:var(--muted);margin-top:4px">Leads with an email today: <b>${o.leads.done}</b> of ${o.leads.asked}</div>`;
+    if((o.jobs||[]).length) h += `<div style="margin-top:8px">` + o.jobs.map(j=>
+      `<div style="font-size:12px;line-height:1.6;color:var(--fg)">· <b>${esc(j.who)}</b>: ${esc(j.says)}`
+      + (j.said?`<div style="color:var(--muted);margin-left:12px">${esc(j.said)}</div>`:'') + `</div>`).join('') + `</div>`;
+    if((o.changes||[]).length) h += `<div style="margin-top:6px">` + o.changes.map(c=>{
+      const btns = c.status==='pending'
+        ? `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0 6px 0 0" onclick="ordDo('approve',${Number(c.id)})">Approve</button>`
+          + `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0;border-color:var(--line2);background:var(--panel2);color:var(--muted)" onclick="ordDo('reject',${Number(c.id)})">Turn down</button>`
+        : c.status==='failed'
+        ? `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0 6px 0 0" onclick="ordDo('retry_change',${Number(c.id)})">Try again</button>`
+          + `<button class="pbtn" style="width:auto;padding:5px 11px;margin:0;border-color:var(--line2);background:var(--panel2);color:var(--muted)" onclick="ordDo('drop_change',${Number(c.id)})">Drop it</button>`
+        : '';
+      return `<div style="font-size:12px;line-height:1.6;margin-top:4px">· change: ${esc(c.what)} — <b>${esc(c.says)}</b>`
+        + (c.note && c.status!=='pending'?`<div style="color:${c.status==='failed'?'var(--danger)':'var(--muted)'};margin-left:12px">${esc(c.note)}</div>`:'')
+        + (btns?`<div style="margin:6px 0 0 12px;display:flex;flex-wrap:wrap">${btns}</div>`:'') + `</div>`;
+    }).join('') + `</div>`;
+    if((o.left||[]).length) h += `<div style="margin-top:8px;font-size:12px;color:var(--amber);line-height:1.6">`
+      + `<b>What is left, and why</b>` + o.left.map(l=>`<div>→ ${esc(l)}</div>`).join('') + `</div>`;
+    return h + `</div>`;
+  }).join('');
+  B.innerHTML = H;
+}
+async function ordDo(act, id){
+  ORD_SAID = 'Working…'; renderOrders();
+  let j = null;
+  try{
+    if(act==='approve' || act==='reject'){
+      j = await (await fetch('/api/approve',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({kind:'site_change', id, decision: act==='approve'?'approved':'rejected'})})).json();
+    } else {
+      j = await (await fetch('/api/review/act',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({do:act, ids:[id]})})).json();
+    }
+  }catch(e){ j = {ok:false, error:String(e)}; }
+  ORD_SAID = (j && (j.why || j.head || j.error)) || (j && j.ok ? 'Done.' : 'No answer from the server.');
+  await openOrders();
+}
+
+let IDX = null, IDX_SAID = '';
+async function askGoogle(){
+  const b = $('#idxAsk'); if(b){ b.disabled = true; b.textContent = 'Asking Google… (a minute or two)'; }
+  let j = null;
+  try{ j = await (await fetch('/api/index-check',{method:'POST'})).json(); }
+  catch(e){ j = {ok:false, error:String(e)}; }
+  IDX_SAID = (j && (j.head || j.error)) || 'No answer from the server.';
+  if(b){ b.disabled = false; b.textContent = 'Ask Google again'; }
+  await openIndex();
+}
+async function openIndex(){
+  openPanel('idxPanel');
+  $('#idxBody').innerHTML = `<p style="color:var(--muted);font-size:12.5px">Reading what Google said…</p>`;
+  try{ IDX = await (await fetch('/api/index-status',{cache:'no-store'})).json(); }
+  catch(e){ IDX = {ok:false, error:String(e)}; }
+  renderIndex();
+}
+function renderIndex(){
+  const d = IDX || {}, B = $('#idxBody');
+  $('#idxHead').textContent = d.head ? '· '+d.head : '';
+  if(!d.ok){ B.innerHTML = `<div class="warnbox"><b>Could not read it.</b><br>${esc(d.error||'no detail')}</div>`; return; }
+  const ps = d.pages || [];
+  const warn = d.mismatch ? `<div class="warnbox" style="margin-bottom:14px"><b>Two addresses for one site.</b><br>${esc(d.mismatch)}</div>` : '';
+  if(!ps.length){
+    B.innerHTML = warn + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">Google has not been asked yet.
+      Once Search Console is working (Setup → Test), the day asks Google about every page and lists here which are
+      on Google, which are not, why, and what is being done.</p>`;
+    return;
+  }
+  const off = ps.filter(p=>!p.on_google), on = ps.filter(p=>p.on_google);
+  const when = d.checked_at ? new Date(d.checked_at*1000).toLocaleString() : '';
+  let H = warn + (IDX_SAID?`<div class="warnbox" style="margin-bottom:12px">${esc(IDX_SAID)}</div>`:'')
+    + `<p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.6">Asked Google ${esc(when)}. This is Google's own answer —
+      the same as the URL Inspection box in Search Console — about each page <b>as it was when Google last read it</b>.
+      Each one is checked against what your page says today, so an old reading is shown as old, not as a fault.</p>`;
+  if(off.length){
+    H += `<div class="gh etch" style="margin-bottom:8px">Not on Google yet · ${off.length}</div>`
+      + off.map(p=>`<div style="border-left:2px solid var(--amber);padding:2px 0 10px 12px;margin-bottom:10px">
+          <div style="font-size:12.5px;font-family:'IBM Plex Mono',monospace;overflow-x:auto;white-space:nowrap">${esc(p.url)}</div>
+          <div style="font-size:12.5px;line-height:1.6;margin-top:3px">${esc(p.why||p.coverage||'')}</div>`
+          + (p.doing?`<div style="font-size:12px;color:var(--glass);margin-top:3px">→ ${esc(p.doing)}</div>`:'')
+          + (p.coverage?`<div style="font-size:10.5px;color:var(--faint);margin-top:3px">Google: ${esc(p.coverage)}`
+             + (p.last_crawl?` · last read ${esc(String(p.last_crawl).slice(0,10))}`:'')
+             + (p.live_canonical?` · your page names ${esc(p.live_canonical)} today`:'') + `</div>`:'')
+          + `</div>`).join('');
+  }
+  if(on.length){
+    H += `<div class="gh etch" style="margin:16px 0 8px">On Google · ${on.length}</div>`
+      + on.map(p=>`<div style="font-size:12.5px;padding:3px 0;font-family:'IBM Plex Mono',monospace;overflow-x:auto;white-space:nowrap">✓ ${esc(p.url)}</div>`).join('');
+  }
+  H += `<p style="font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:16px">Not meant to be on Google: your gallery filters
+    (gallery.php?cat=…) and index.php show the same thing as gallery.php and your home page, and say so — Google is right to list
+    only the main page.</p>`;
+  B.innerHTML = H;
+}
+
+/* ---- FIND AND REPLACE ON YOUR WEBSITE ------------------------------------
+   "the program ... cannot even check into the code that the mail can get
+   changed ... cannot you see footer.php page and scan it?" — this is the
+   agency reading every file of the site in front of him: each file that holds
+   the text, how many times, and the line. Replace goes through IT like every
+   change (tests first, a copy of each file kept), approved on his word because
+   he typed both. ------------------------------------------------------------- */
+let FR = {find:'', to:'', result:null, busy:false, said:''};
+function findReplaceBox(){
+  const r = FR.result;
+  let h = `<div style="border:1px solid var(--line2);border-radius:10px;padding:12px 14px;margin-bottom:18px">
+    <div class="gh etch" style="margin-bottom:8px">Find and replace on your website</div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6">Type any text — an old email, a phone number, a wrong word.
+      The agency reads every file of your website and shows each one it is in. Then replace it everywhere in one press.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="frFind" value="${escA(FR.find)}" placeholder="text to find, e.g. info@oldaddress.com"
+        style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12.5px">
+      <button class="actbtn" onclick="frFind()">${FR.busy?'Reading your files…':'Find'}</button>
+    </div>`;
+  if(FR.said) h += `<div style="font-size:12px;margin-top:8px;color:var(--amber)">${esc(FR.said)}</div>`;
+  if(r){
+    if(!r.ok) h += `<div class="warnbox" style="margin-top:10px">${esc(r.error||'could not read your files')}</div>`;
+    else{
+      h += `<div style="font-size:12.5px;margin-top:10px">${esc(r.head||'')}</div>`;
+      h += (r.pages||[]).map(p=>`<div style="font-size:12px;margin-top:6px"><b style="font-family:'IBM Plex Mono',monospace">${esc(p.page)}</b> — ${p.times} time${p.times===1?'':'s'}
+        <div style="color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px;overflow-x:auto;white-space:nowrap">${esc(p.sample||'')}</div></div>`).join('');
+      if((r.pages||[]).length) h += `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+          <input id="frTo" value="${escA(FR.to)}" placeholder="replace with, e.g. hello@yourbusiness.com"
+            style="flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12.5px">
+          <button class="pbtn" style="width:auto;padding:7px 14px;margin:0" onclick="frReplace()">Replace everywhere</button></div>`;
+    }
+  }
+  return h + `</div>`;
+}
+async function frFind(){
+  FR.find = ($('#frFind')||{}).value || ''; FR.said=''; FR.result=null;
+  if(FR.find.trim().length < 6){ FR.said='Give at least 6 characters to look for.'; renderChanges(); return; }
+  FR.busy = true; renderChanges();
+  try{ FR.result = await (await fetch('/api/site/find?text='+encodeURIComponent(FR.find.trim()),{cache:'no-store'})).json(); }
+  catch(e){ FR.result = {ok:false, error:String(e)}; }
+  FR.busy = false; renderChanges();
+}
+async function frReplace(){
+  FR.to = ($('#frTo')||{}).value || '';
+  if(!FR.to.trim()){ FR.said='Type what it should become.'; renderChanges(); return; }
+  if(!confirm(`Change “${FR.find.trim()}” to “${FR.to.trim()}” in every file it is in?`)) return;
+  let j=null;
+  try{ j = await (await fetch('/api/review/act',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({do:'site_replace', ids:[], data:{find:FR.find.trim(), replace_with:FR.to.trim()}})})).json(); }
+  catch(e){ j={ok:false,error:String(e)}; }
+  FR.said = (j && (j.head||j.error)) || 'No answer from the server.';
+  if(j && j.ok) FR.result = null;
+  renderChanges();
+}
+
+async function changeAgain(id, act){
+  CHG.said = act==='retry_change' ? 'Trying it again…' : 'Dropping it…';
+  renderChanges();
+  let j=null;
+  try{
+    const r = await fetch('/api/review/act',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({do:act, ids:[id]})});
+    j = await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
+  CHG.said = (j && (j.head || j.error)) || 'No answer from the server.';
+  await openChanges(CHG.view);
+}
+
+function renderChanges(){
+  const B = $('#chgBody'), d = CHG.data;
+  $('#chgAllBtn').classList.toggle('on', CHG.view==='all');
+  $('#chgOutBtn').classList.toggle('on', CHG.view==='outside');
+  $('#chgLook').textContent = CHG.busy ? 'Looking…' : 'Check the site now';
+
+  if(!d){ B.innerHTML = `<p style="color:var(--muted);font-size:12.5px">Reading the log…</p>`; return; }
+  $('#chgHead').textContent = d.ok && d.head ? '· '+d.head : '';
+
+  let H = findReplaceBox();
+  if(CHG.said) H += `<div class="warnbox" style="margin-bottom:14px">${esc(CHG.said)}</div>`;
+  if(!d.ok){
+    B.innerHTML = H + `<div class="warnbox"><b>Could not read the log.</b><br>${esc(d.error||'no detail')}</div>`;
+    return;
+  }
+  /* WHAT YOU APPROVED THAT DID NOT GO ON. "i asked to change the mail it did
+     not change the dummy mail on webiste" — a failed change was one red line in
+     the log and his yes was spent. Now it waits here with the reason, for a
+     Try again (tests first, as always) or a Drop it. */
+  const nd = d.not_done || [];
+  if(nd.length){
+    H += `<div style="margin-bottom:18px"><div class="gh etch" style="margin-bottom:8px">`
+      + `Approved, but not on your site yet</div>`
+      + nd.map(x=>`<div style="border-left:2px solid var(--danger);padding:2px 0 10px 12px;margin-bottom:10px">
+          <div style="font-size:12.5px;line-height:1.6">${esc(x.what)}</div>
+          <div style="font-size:11.5px;color:var(--danger);margin-top:3px;line-height:1.5">${esc(x.why||'it could not be carried out')}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:7px;align-items:center">
+            <button class="pbtn" style="width:auto;padding:6px 12px;margin:0" onclick="changeAgain(${Number(x.id)},'retry_change')">Try again</button>
+            <button class="pbtn" style="width:auto;padding:6px 12px;margin:0;border-color:var(--line2);background:var(--panel2);color:var(--muted)" onclick="changeAgain(${Number(x.id)},'drop_change')">Drop it</button>
+            <span style="font-size:10.5px;color:var(--faint)">${esc(x.when||'')}</span>
+          </div></div>`).join('')
+      + `</div>`;
+  }
+  const rows = d.changes || [];
+  if(!rows.length){
+    B.innerHTML = H + `<p style="color:var(--muted);font-size:12.5px;line-height:1.7">`
+      + esc(d.head || '') + `<br><br>`
+      + `Every page is fingerprinted, so from here on anything that moves shows up — `
+      + `whether the agency did it, you did it in the file manager, or your hosting `
+      + `company did it without telling you.</p>`;
+    return;
+  }
+  H += rows.map(c=>{
+    const theirs = c.source !== 'agency';
+    const edge = !c.ok ? 'var(--danger)' : theirs ? 'var(--amber)' : 'var(--ok)';
+    const tag  = !c.ok ? 'refused' : theirs ? 'not the agency' : 'the agency';
+    return `<div style="border-left:2px solid ${edge};padding:2px 0 10px 12px;margin-bottom:14px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+        <b style="font-size:13px;font-weight:600">${esc(c.page||'the site')}</b>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;
+              text-transform:uppercase;color:${edge}">${esc(tag)}</span>
+        <span style="font-size:10.5px;color:var(--faint)">${esc(c.when||'')}</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-top:4px">
+        ${esc(c.summary || c.action || '')}</div>`
+      /* WHAT changed, line by line. "there is section about website changes but
+         it did not gave the detailed berief about that" — the summary said a
+         page had moved and how many bytes by, which is a smoke alarm rather
+         than a fire report. The backend now compares the page against the last
+         snapshot it took, so these are things like "looks like new writing was
+         published", "a phone number was added", "code was added — new script
+         from tracker.unknown-host.ru". See coordination/changelog.describe. */
+      /* THE APPROVAL BEHIND IT. "i want to know what the program had
+         changed" — for the agency's own writes, what he said yes to and why,
+         read from the approval queue (coordination/changelog.because). */
+      + ((c.because && c.because.length) ? `<ul style="margin:7px 0 0;padding-left:16px;
+              font-size:12px;color:var(--glass);line-height:1.7">`
+          + c.because.map(l=>`<li>${esc(l)}</li>`).join('') + `</ul>` : '')
+      + ((c.detail && c.detail.length) ? `<ul style="margin:7px 0 0;padding-left:16px;
+              font-size:12px;color:var(--fg);line-height:1.7">`
+          + c.detail.map(l=>`<li>${esc(l)}</li>`).join('') + `</ul>` : '')
+      + (c.error?`<div style="font-size:11.5px;color:var(--danger);margin-top:4px">${esc(c.error)}</div>`:'')
+      + (c.undo_cmd?`<div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+              color:var(--faint);margin-top:6px;overflow-x:auto;white-space:nowrap">
+              undo &nbsp;${esc(c.undo_cmd)}</div>`:'')
+      + `</div>`;
+  }).join('');
+  if(CHG.view!=='all' && d.total > rows.length){
+    H += `<button class="pbtn" onclick="openChanges('all')">Show all ${d.total} &rarr;</button>`;
+  }
+  B.innerHTML = H;
+}
+
+/* ---- READING THE TRAFFIC ---------------------------------------------------
+   The floor shows that two sectors spoke. This shows what they said. Both read
+   the same rows, so the beam and the thread can never tell different stories. */
+async function openComms(){
+  openPanel('commPanel');
+  renderComms();
+  await pullComms();
+  renderComms();
+}
+
+function renderComms(){
+  const T=COMM_THREADS||[];
+  $('#commHead').textContent = COMM_HEAD ? '· '+COMM_HEAD : '';
+  if(!T.length){
+    $('#commBody').innerHTML =
+      `<p style="color:var(--muted);font-size:12.5px;line-height:1.6">`
+      + `No sector has asked another for anything yet. This fills in on its own: `
+      + `Leads asks Security to clear a lead before anyone contacts it, Content `
+      + `asks SEO whether a keyword is worth writing for, and anything wanting a `
+      + `change to the live site asks IT. Press <b>Run the day</b> and they will `
+      + `start talking.</p>`;
+    return;
+  }
+  // Deliberately NOT the .act class — that is a fixed-column flex row built for
+  // one-line events, and a conversation folded into its 38px time column comes
+  // out as a vertical stack of single letters. This has its own layout.
+  const tone = t => t.tone==='amber' ? 'var(--amber)'
+                  : t.tone==='live'  ? 'var(--glass)' : 'var(--muted)';
+  const state = t => t.state==='closed' ? 'closed'
+                   : t.state==='answered' ? 'answered'
+                   : t.waited>10800 ? 'waiting '+t.ago : t.state;
+  $('#commBody').innerHTML = T.map(t=>`
+    <div style="border-left:2px solid ${tone(t)};padding:2px 0 10px 12px;margin-bottom:16px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+        <b style="font-size:13px;font-weight:600">${esc(t.from)} &rarr; ${esc(t.to)}</b>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+              letter-spacing:.08em;text-transform:uppercase;color:${tone(t)}">
+          ${esc(state(t))}</span>
+        <span style="font-size:10.5px;color:var(--faint)">${esc(t.ago)}${
+          t.handler?' · '+esc(t.handler):''}</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${esc(t.subject)}</div>
+      ${(t.messages||[]).map(m=>`
+        <div style="margin-top:9px;font-size:12px;line-height:1.6">
+          <span style="font-weight:600">${esc(m.author)}</span>
+          <span style="color:var(--faint);font-size:10px;font-family:'IBM Plex Mono',monospace">
+            ${esc(m.when || m.hhmm)}</span>
+          <div style="white-space:pre-wrap;color:var(--ink);margin-top:1px">${
+            esc((m.body||'').slice(0,1200))}</div>
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+/* The bottom strip: one line, only while something is actually happening. A
+   ticker that is always on is wallpaper — you stop reading it. */
+function renderTicker(){
+  const a=(LIVE&&LIVE.activity)||{}, run=(LIVE&&LIVE.run)||{};
+  const running = !!(run.run && run.run.running);
+  const newest = (a.events||[]).find(e=>e.level==='live')||(a.events||[])[0];
+  const on = running || (a.live>0);
+  $('#ticker').classList.toggle('on', on);
+  if(!on) return;
+  $('#tickLabel').textContent = running ? (run.head||'running') : 'live';
+  $('#tickLine').textContent = newest
+    ? `${newest.hhmm} · ${newest.who} ${newest.verb} — ${newest.what}`
+    : 'starting…';
+}
+
+/* ---- THE RUN BUTTON -------------------------------------------------------
+   Four views, in the order the owner asked for: check, then his instructions,
+   then work, then what happened. Never one screen — a single "go" button that
+   silently preflights is a button people press without reading. ------------ */
+const RUN = {view:'idle', check:null, busy:false, force:false, orders:{}, note:'',
+             touched:false, saved:'',
+             // This run only: the sectors he left ticked. MD, IT, Security and
+             // Report always run and are not offered as ticks at all.
+             skip:{},
+             // Stop takes two presses and a few seconds; all three states are
+             // visible or he presses it again while it is already stopping.
+             confirmStop:false, stopping:false, stopMsg:'', leftMsg:''};
+const RUN_SECTORS = [
+  ['IT','IT & Site Health'],['Content','Content & Social'],['SEO','SEO & Rankings'],
+  ['Leads','Leads & Outreach'],['Report','Reports'],['Security','Security'],
+];
+// The ones he can leave out of a run. The other four are the agency itself.
+const RUN_OPTIONAL = ['Content','SEO','Leads'];
+const RUN_ALWAYS = ['MD','IT','Security','Report'];
+function runOnly(){
+  const off=RUN_OPTIONAL.filter(k=>RUN.skip[k]);
+  return off.length ? RUN_OPTIONAL.filter(k=>!RUN.skip[k]).concat(['Director','IT','Security','Report']) : [];
+}
+
+function renderRunButton(){
+  const run=(LIVE&&LIVE.run&&LIVE.run.run)||null;
+  const btn=$('#runBtn');
+  const live = !!(run && run.running);
+  btn.classList.toggle('busy', live);
+  $('#runLabel').textContent = live
+    ? (((LIVE.run.progress||[0,0])[0])+'/'+((LIVE.run.progress||[0,0])[1])+' · running')
+    : 'Run the day';
+}
+
+function openRun(){
+  openPanel('runPanel');
+  const run=(LIVE&&LIVE.run&&LIVE.run.run)||null;
+  // Start from the orders already standing for today rather than blank boxes —
+  // otherwise saving from this panel silently wipes what he set this morning.
+  if(!RUN.touched) RUN.orders = Object.assign({}, (LIVE&&LIVE.orders)||{});
+  // Never re-open on a half-pressed Stop. Confirming something you started
+  // asking for a panel-open ago is how a day gets stopped by accident.
+  RUN.confirmStop = false;
+  RUN.view = (run && run.running) ? 'progress' : (RUN.check ? 'orders' : 'idle');
+  renderRun();
+}
+
+function renderRun(){
+  const B=$('#runBody');
+  if(RUN.view==='idle')           B.innerHTML = runIdle();
+  else if(RUN.view==='checking')  B.innerHTML = runChecking();
+  else if(RUN.view==='orders')    B.innerHTML = runCheckResult()+runOrders();
+  else if(RUN.view==='ordersonly')B.innerHTML = runOrders(true);
+  else                            B.innerHTML = runProgress();
+}
+
+function standingOrders(){
+  const o=(LIVE&&LIVE.orders)||{};
+  const keys=Object.keys(o);
+  if(!keys.length) return '';
+  return `<div class="pgroup"><div class="gh etch">Your orders standing for today</div>`
+    + keys.map(k=>`<div class="chk ok"><span class="m">→</span><span>${esc(k)}`
+        + `<small>${esc(o[k])}</small></span></div>`).join('')
+    + `<p style="font-size:11px;color:var(--faint);margin:8px 0 0">The MD plans around these.</p></div>`;
+}
+
+/* ---- LEFT OVER FROM LAST TIME ----------------------------------------------
+   "add a button that should say resume or start from where you left ... it will
+    finish that unanswered and queued tasks first as if we do not either delete
+    or finish those unanswered or queued tasks they can make garbage for us and
+    also the double load on models"
+
+   Three choices, in order of how much they do. Resume clears up and then runs
+   only what did not finish and the sectors that have work waiting. Clear up
+   only does the clear-up — no model, nothing new. Put the leftovers away lets
+   the rest go, keeping every reason and everything that is his.
+   coordination/leftovers.py and day_run.start(resume=True) do the work. ----- */
+let LEFT = null;
+async function pullLeftovers(){
+  try{ const r = await fetch('/api/leftovers'); LEFT = await r.json(); }
+  catch(e){ LEFT = null; }
+  renderResumeButton();
+  if(RUN.view==='idle' && $('#runPanel').classList.contains('open')) renderRun();
+}
+function leftWorth(){
+  const running = !!(LIVE&&LIVE.run&&LIVE.run.run&&LIVE.run.run.running);
+  return !!(LEFT && LEFT.ok && !running && !LEFT.day_running && (LEFT.resumable || LEFT.garbage>0));
+}
+function renderResumeButton(){
+  const btn = $('#resumeBtn'); if(!btn) return;
+  const show = leftWorth();
+  btn.style.display = show ? '' : 'none';
+  if(show) $('#resumeLabel').textContent = LEFT.resumable ? 'Resume' : 'Clear leftovers';
+}
+function openLeftovers(){
+  openPanel('runPanel');
+  RUN.confirmStop = false; RUN.view = 'idle';
+  renderRun();
+  pullLeftovers();
+}
+function leftoversBlock(){
+  if(!leftWorth()) return RUN.leftMsg
+    ? `<div class="pgroup"><p style="font-size:12.5px;color:var(--muted);line-height:1.6;margin:0">${esc(RUN.leftMsg)}</p></div>` : '';
+  const lr = LEFT.last_run||{}, un = lr.unfinished||[], rq = LEFT.requests||{}, tk = LEFT.tasks||{};
+  const pl = (n,a,b)=> n===1 ? a : (b||a+'s');
+  const rows = [];
+  if(un.length) rows.push(['■', `The last run stopped with ${un.length} of ${lr.total} steps not done`,
+    un.slice(0,5).map(u=>u.label).join(' · ') + (un.length>5 ? ` · and ${un.length-5} more` : '')]);
+  const rooms = Object.entries(LEFT.by_room||{}).map(([k,v])=>
+    `${k}: ${[v.questions?v.questions+' '+pl(v.questions,'question'):'', v.jobs?v.jobs+' '+pl(v.jobs,'job'):''].filter(Boolean).join(', ')}`).join(' · ');
+  const q = (rq.waiting||0)+(rq.dead_claims||0), j = (tk.open||0)+(tk.dead_claims||0);
+  if(q||j) rows.push(['▤', `${q} ${pl(q,'question')} and ${j} ${pl(j,'job')} still waiting`, rooms]);
+  const g = [[(rq.duplicates||0)+(tk.duplicates||0),'copy','copies'],[rq.chases,'chase'],[rq.handoffs,'hand-off'],
+             [rq.orphans,'thread whose job had ended','threads whose job had ended'],
+             [(rq.dead_claims||0)+(tk.dead_claims||0),'held by a desk that had stopped','held by a desk that had stopped'],
+             [tk.stale,'job untouched for days','jobs untouched for days'],
+             [tk.notices,'reminder turned into a job no desk can do','reminders turned into jobs no desk can do'],
+             [tk.orders_unrouted,'of your orders with no desk yet','of your orders with no desk yet'],
+             [tk.handoff_jobs,'hand-off filed as a job','hand-offs filed as jobs'],
+             [LEFT.dead_runs,'run left open by a closed program','runs left open by a closed program']]
+            .filter(([n])=>n>0).map(([n,a,b])=>`${n} ${pl(n,a,b)}`).join(' · ');
+  if(LEFT.garbage) rows.push(['✓', `${LEFT.garbage} can be cleared up without a model`, g]);
+  if(tk.yours) rows.push(['!', `${tk.yours} ${pl(tk.yours,'decision')} waiting on you`, 'left alone — they are yours to make']);
+  const sub = 'border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px';
+  return `<div class="pgroup left"><div class="gh etch">Left over from last time</div>`
+    + rows.map(([m,t,d])=>`<div class="chk"><span class="m" style="color:var(--amber)">${m}</span><span>${esc(t)}`
+        + (d?`<small>${esc(d)}</small>`:'') + `</span></div>`).join('')
+    + (RUN.leftMsg ? `<p style="font-size:12px;color:var(--muted);line-height:1.6;margin:10px 0 0">${esc(RUN.leftMsg)}</p>` : '')
+    + (LEFT.resumable ? `<button class="pbtn" style="margin-top:12px" ${RUN.busy?'disabled':''} onclick="doResume()">
+        Resume where it left off</button>
+        <p style="font-size:11.5px;color:var(--faint);margin:6px 0 0;line-height:1.55">Clears up first, then runs only what did
+        not finish and the sectors with work waiting. What finished last time is not repeated, and the MD does not
+        plan new work on top.</p>` : '')
+    + `<button class="pbtn" style="${sub}" ${RUN.busy?'disabled':''} onclick="doTidy()">Clear up only — no model, nothing new</button>`
+    + `<button class="pbtn" style="${sub}" ${RUN.busy?'disabled':''} onclick="doPutAway()">Put the leftovers away</button>`
+    + `</div>`;
+}
+async function leftPost(url){
+  try{ const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); return await r.json(); }
+  catch(e){ return {ok:false, error:'Could not reach the office server.'}; }
+}
+async function doResume(){
+  RUN.busy = true; RUN.leftMsg = 'Checking the setup, then picking up where it left off…'; renderRun();
+  const j = await leftPost('/api/run/resume');
+  RUN.busy = false;
+  if(!j.ok || j.nothing){
+    RUN.leftMsg = j.why || j.error || 'It did not start.';
+    await pullLeftovers(); renderRun(); return;
+  }
+  RUN.leftMsg = ''; RUN.view = 'progress'; RUN.confirmStop = false; RUN.stopping = false; RUN.stopMsg = '';
+  renderRun(); renderResumeButton();
+  for(let i=0;i<8;i++){
+    await new Promise(r=>setTimeout(r,1000));
+    const s = await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+    renderResumeButton();
+    if(RUN.view==='progress') renderRun();
+  }
+}
+async function doTidy(){
+  RUN.busy = true; RUN.leftMsg = 'Clearing up…'; renderRun();
+  const j = await leftPost('/api/leftovers/tidy');
+  RUN.busy = false;
+  RUN.leftMsg = j.head || j.error || 'Done.';
+  await pullLeftovers(); renderRun();
+}
+async function doPutAway(){
+  if(!confirm('Put the leftovers away?\n\nEvery question still waiting is closed with a note, and every queued job '
+             + 'is withdrawn without being done. Nothing is deleted, and your own decisions and anything you posted '
+             + 'yourself are left alone.')) return;
+  RUN.busy = true; RUN.leftMsg = 'Putting the leftovers away…'; renderRun();
+  const j = await leftPost('/api/leftovers/put-away');
+  RUN.busy = false;
+  RUN.leftMsg = j.head || j.error || 'Done.';
+  await pullLeftovers(); renderRun();
+}
+
+function runIdle(){
+  return leftoversBlock()+standingOrders()+`<div class="pgroup">
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.65;margin:0 0 14px">
+      Pressing this checks the whole program first — the filing cabinet, every sector's
+      brain and keys, whether each pipeline even loads, and every API and connector —
+      then asks what you want out of today, and only then starts work.</p>
+    <p style="font-size:12px;color:var(--faint);line-height:1.6;margin:0 0 14px">
+      The check calls your models and your shelf APIs for real, so it costs a little and
+      takes a moment. That is the point: a saved key is not a working key.</p>
+    <button class="pbtn" onclick="doCheck(false)">Check everything</button>
+    <button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+            onclick="doCheck(true)">Quick check — read the config, call nothing</button>
+    <button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+            onclick="RUN.view='ordersonly';renderRun()">Just set today's orders</button>
+  </div>`;
+}
+
+/* THE BAR USED TO SIT AT 35% AND NEVER MOVE.
+   It was a hardcoded width, which is the one thing on this screen that was
+   pretending. He asked, reasonably, whether the check was real or "just
+   another fooling ui" — the CHECK is real, and the bar was not, so the bar is
+   gone. In its place: a stripe that is honestly indeterminate, a counter of
+   seconds that is real, and the actual list of what is being called, so what
+   it is doing can be read rather than trusted. */
+let CHECK_T0 = 0, CHECK_TIMER = null;
+
+function runChecking(){
+  const el = s => `<div style="display:flex;gap:9px;align-items:baseline;
+      font-size:12.5px;color:var(--muted);padding:3px 0">
+      <span style="color:var(--glass)">·</span><span>${s}</span></div>`;
+  return `<div class="pgroup">
+    <div class="bar indet"><i></i></div>
+    <p style="font-size:12.5px;color:var(--glass);margin:10px 0 2px">
+      Checking — <span id="chkSecs">0</span>s elapsed. Leave it open.</p>
+    <p style="font-size:11.5px;color:var(--faint);margin:0 0 12px">
+      Nothing is guessed here. Each of these is done for real, in this order:</p>
+    ${el('the filing cabinet opens, and every table it needs is there')}
+    ${el('each sector’s settings and the keys it borrows')}
+    ${el('every pipeline is imported in its own process — a typo in one file '
+        + 'shows up here instead of forty minutes into the run')}
+    ${el('every model routed to every sector is CALLED once')}
+    ${el('every shelf API is called once')}
+    ${el('the notification route is proved, so approvals can reach you')}
+  </div>`;
+}
+
+function startCheckClock(){
+  CHECK_T0 = Date.now();
+  clearInterval(CHECK_TIMER);
+  CHECK_TIMER = setInterval(()=>{
+    const s = $('#chkSecs');
+    if(!s){ clearInterval(CHECK_TIMER); return; }
+    s.textContent = Math.round((Date.now()-CHECK_T0)/1000);
+  }, 1000);
+}
+
+async function doCheck(quick){
+  RUN.view='checking'; renderRun(); startCheckClock();
+  let j=null;
+  try{
+    const r=await fetch('/api/run/check',{method:'POST',headers:{'Content-Type':'application/json'},
+                                          body:JSON.stringify({quick:!!quick})});
+    j=await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
+  clearInterval(CHECK_TIMER);
+  RUN.check=j; RUN.view='orders'; renderRun();
+  const s=await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+}
+
+function chk(tone,mark,text,sub){
+  return `<div class="chk ${tone}"><span class="m">${mark}</span><span>${esc(text)}`
+       + (sub?`<small>${esc(sub)}</small>`:'')+`</span></div>`;
+}
+
+function runCheckResult(){
+  const c=RUN.check;
+  if(!c) return '';
+  if(c.ok===false) return `<div class="pgroup"><div class="warnbox"><b>The check itself failed.</b><br>${esc(c.error||'no detail')}</div></div>`;
+  const sect=(c.sectors&&c.sectors.sectors)||[];
+  let H = `<div class="pgroup"><div class="gh etch">The check — ${esc(c.head||'')}</div>`;
+  H += chk(c.cabinet.ok?'ok':'bad', c.cabinet.ok?'✓':'✕', c.cabinet.name, c.cabinet.says);
+  sect.forEach(s=>{
+    const tone={ready:'ok',unchecked:'dim',thin:'warn',blocked:'bad'}[s.state]||'dim';
+    const mark={ready:'✓',unchecked:'·',thin:'!',blocked:'✕'}[s.state]||'·';
+    H += chk(tone, mark, s.label+' — '+s.state,
+             s.says + (s.brain_does ? ' · its model '+s.brain_does : ''));
+  });
+  const badPipes=(c.pipelines||[]).filter(p=>!p.ok);
+  H += badPipes.length
+     ? badPipes.map(p=>chk('bad','✕',p.name+' will not load',p.says)).join('')
+     : chk('ok','✓',`All ${(c.pipelines||[]).length} pipelines load`,'every sector’s code imports cleanly');
+  H += `</div>`;
+
+  if((c.blocking||[]).length){
+    H += `<div class="pgroup"><div class="warnbox"><b>${c.blocking.length} thing${c.blocking.length>1?'s':''} stop${c.blocking.length>1?'':'s'} the day running.</b>`
+       + `<ul style="margin:8px 0 0 16px;padding:0">`+c.blocking.map(b=>`<li>${esc(b)}</li>`).join('')+`</ul></div>`
+       + `<div class="tick ${RUN.force?'on':''}" onclick="RUN.force=!RUN.force;renderRun()">`
+       + `<span class="bx"></span><span>Run anyway. I understand those sectors will do nothing, `
+       + `and the run will be recorded as forced.</span></div></div>`;
+  }
+  if((c.warnings||[]).length){
+    H += `<div class="pgroup"><div class="gh etch">Worth knowing</div>`
+       + c.warnings.map(w=>chk('warn','!',w)).join('')+`</div>`;
+  }
+  return H;
+}
+
+function runOrders(ordersOnly){
+  const c=RUN.check, blocked=!ordersOnly && (c&&(c.blocking||[]).length)&&!RUN.force;
+  let H=`<div class="pgroup"><div class="gh etch">What do you want out of today?</div>
+    <p style="font-size:11.5px;color:var(--muted);margin:0 0 12px;line-height:1.6">
+      Anything you type here goes on the board <b>before</b> the MD plans, so it plans
+      around your words instead of over them. Leave a box empty and that sector takes
+      the MD's allocation as usual.</p>
+    <div class="field"><label>For the whole agency (optional)</label>
+      <textarea id="runNote" placeholder="e.g. two villa jobs finished this week — get them online">${esc(RUN.note)}</textarea></div>`;
+  if(!ordersOnly){
+    H+=`<div class="field"><label>Which sectors work this time?</label>`
+      +`<p style="font-size:11.5px;color:var(--muted);margin:0 0 8px;line-height:1.6">`
+      +`${RUN_ALWAYS.join(', ')} always run. Untick a sector to leave it out of this run only — `
+      +`it spends none of your Claude allowance, and nothing changes for the next run.</p>`
+      + RUN_OPTIONAL.map(k=>`<div class="tick pick ${RUN.skip[k]?'':'on'}" onclick="collectOrders();RUN.skip['${k}']=!RUN.skip['${k}'];renderRun()">`
+          +`<span class="bx"></span><span>${esc(k)}</span></div>`).join('')
+      +`</div>`;
+  }
+  RUN_SECTORS.forEach(([k,label])=>{
+    if(RUN.skip[k]) return;
+    H+=`<div class="field"><label>${esc(label)}</label>`
+      +`<textarea data-sec="${escA(k)}" oninput="RUN.touched=true" placeholder="today's order for ${esc(label)}">${esc(RUN.orders[k]||'')}</textarea></div>`;
+  });
+  if(RUN.saved) H+=`<p style="font-size:12px;color:var(--ok);margin:0 0 10px">${esc(RUN.saved)}</p>`;
+  if(ordersOnly){
+    H+=`<button class="pbtn" onclick="saveOrders()">Save today's orders</button>`;
+  }else{
+    H+=`<button class="pbtn" ${blocked?'disabled style="opacity:.45;cursor:not-allowed"':''} onclick="doStart()">`
+      +(blocked?'Blocked — fix the list above, or tick "run anyway"':'Start the day')+`</button>`;
+    H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+          onclick="saveOrders()">Save the orders without running</button>`;
+  }
+  H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+        onclick="RUN.check=null;RUN.view='idle';RUN.saved='';renderRun()">`
+    +(ordersOnly?'Back':'Check again')+`</button></div>`;
+  return H;
+}
+
+function collectOrders(){
+  RUN.note = ($('#runNote')&&$('#runNote').value||'').trim();
+  // A box hidden because its sector is unticked keeps what was typed in it,
+  // so ticking the sector back does not lose his words.
+  const kept={};
+  RUN_SECTORS.forEach(([k])=>{ if(RUN.skip[k] && RUN.orders[k]) kept[k]=RUN.orders[k]; });
+  RUN.orders = kept;
+  document.querySelectorAll('#runBody textarea[data-sec]').forEach(t=>{
+    const v=(t.value||'').trim(); if(v) RUN.orders[t.dataset.sec]=v;
+  });
+}
+
+async function saveOrders(){
+  collectOrders();
+  let j=null;
+  try{
+    const r=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
+                                       body:JSON.stringify({orders:RUN.orders})});
+    j=await r.json();
+  }catch(e){ j={ok:false,why:String(e)}; }
+  RUN.saved = (j&&j.ok) ? `Saved — ${(j.set||[]).join(', ')||'nothing to save'}.`
+                        : `Not saved. ${(j&&(j.why||j.error))||'unknown error'}`;
+  const s=await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+  renderRun();
+}
+
+async function doStart(){
+  collectOrders();
+  RUN.busy=true;
+  let j=null;
+  try{
+    const r=await fetch('/api/run/start',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({note:RUN.note, force:RUN.force, only:runOnly(),
+        // an order for a sector left out of this run would sit on the board
+        // for a run it is not in — so it is not sent
+        orders:Object.fromEntries(Object.entries(RUN.orders).filter(([k])=>!RUN.skip[k]))})});
+    j=await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
+  RUN.busy=false;
+  if(!j || !j.ok){
+    $('#runBody').insertAdjacentHTML('afterbegin',
+      `<div class="pgroup"><div class="warnbox"><b>It did not start.</b><br>${esc((j&&(j.why||j.error))||'no detail')}</div></div>`);
+    return;
+  }
+  RUN.view='progress'; RUN.confirmStop=false; RUN.stopping=false; RUN.stopMsg='';
+  renderRun();
+  // poll hard for a moment so the first step appears immediately rather than
+  // on the next slow tick — the owner just pressed a button and deserves a sign
+  for(let i=0;i<6;i++){
+    await new Promise(r=>setTimeout(r,900));
+    const s=await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+    if(RUN.view==='progress') renderRun();
+  }
+}
+
+function runProgress(){
+  const R=(LIVE&&LIVE.run)||{};
+  const run=R.run;
+  if(!run) return `<div class="pgroup"><p style="color:var(--muted);font-size:12.5px">Starting…</p></div>`;
+  const [done,total]=R.progress||[0,0];
+  const pct = total? Math.round(done/total*100) : 0;
+  let H=`<div class="pgroup"><div class="gh etch">${esc(R.head||run.status)}</div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <p style="font-size:11.5px;color:var(--muted);font-family:'IBM Plex Mono',monospace">${done}/${total} steps`
+    + (run.running?` · refreshing every ${Math.round(POLL_MS/1000)}s`:'')+`</p>`;
+  if(run.forced) H+=`<div class="warnbox" style="margin-top:10px"><b>Forced.</b> You started this with
+    ${(run.blocking||[]).length} known problem${(run.blocking||[]).length===1?'':'s'} — those sectors will do nothing.</div>`;
+  if((run.only_sectors||[]).length) H+=`<p style="font-size:12px;color:var(--muted);margin:10px 0 0">
+    This run only: <b>${esc(run.only_sectors.join(', '))}</b>. The rest sat it out and spent nothing.</p>`;
+  if(run.resume_of) H+=`<p style="font-size:12px;color:var(--amber);margin:10px 0 0">
+    Picked up where the last run left off — what had finished was not repeated.</p>`;
+  if(run.tidied && (run.tidied.done||[]).length) H+=`<p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.6">
+    Cleared up first: ${esc(run.tidied.done.join('; '))}.</p>`;
+  H+=stopControl(R);
+  /* THE DAY'S LAST WORD. "the program should complete the task" — after the
+     main pass the day goes round again for what is still open, and when it
+     stops it says what is left and why, rather than leaving him a Run button. */
+  const lo=run.left_open;
+  if(lo && !run.running){
+    H+=`<div style="margin-top:12px;font-size:12px;line-height:1.65;color:var(--muted)">`
+      + (lo.rounds ? `Went round <b>${Number(lo.rounds)}</b> more time${lo.rounds===1?'':'s'} for the work still open. ` : '')
+      + (lo.why ? `Stopped because ${esc(lo.why)}.` : '') + `</div>`;
+    if((lo.left||[]).length){
+      H+=`<div class="warnbox" style="margin-top:10px"><b>Still open</b><ul style="margin:6px 0 0;padding-left:16px;line-height:1.65">`
+        + lo.left.map(l=>`<li>${esc(l)}</li>`).join('') + `</ul></div>`;
+    }
+  }
+  H+=`</div><div class="pgroup">`;
+  (R.steps||[]).forEach(s=>{
+    const st=oneOf(s.status,['waiting','ok','idle','failed','running','skipped','stopped']);
+    const mark={ok:'✓',idle:'–',failed:'✕',running:'▸',waiting:'·',skipped:'–',stopped:'■'}[st];
+    H+=`<div class="step ${st}"><span class="n">${mark}</span><span class="t">${esc(s.label)}`
+      +(s.summary?`<small>${esc(s.summary)}</small>`:'')+`</span></div>`;
+  });
+  // What Claude did for each sector this run, from Claude's own report of
+  // every call — how many, how many tokens, how long, on which model.
+  const cu=run.claude_usage||{}, ck=Object.keys(cu).sort();
+  if(ck.length){
+    const NAME={md:'Managing Director',security:'Security',it:'IT',content:'Content',seo:'SEO',
+                leads:'Leads',critic:'Critic',report:'Report'};
+    const tot=ck.reduce((a,k)=>a+cu[k].tokens_in+cu[k].tokens_out,0);
+    H+=`</div><div class="pgroup"><div class="gh etch">Claude this run · ${tot.toLocaleString()} tokens</div>`
+      + ck.map(k=>{const u=cu[k];
+          return `<div class="step ok"><span class="n">·</span><span class="t">${esc(NAME[k]||k)} — `
+            +`${u.calls} call${u.calls===1?'':'s'}, ${(u.tokens_in+u.tokens_out).toLocaleString()} tokens, ${u.seconds}s`
+            +`<small>${esc((u.models||[]).join(', '))}${u.answered<u.calls?` · ${u.calls-u.answered} did not answer`:''}</small></span></div>`;}).join('');
+  }
+  H+=`</div><div class="pgroup"><button class="pbtn" onclick="openOrders()">See your orders — what is done and what is left →</button>`
+    + `<button class="pbtn" style="margin-top:8px" onclick="openActivity()">See what each agent did →</button>`;
+  if(!run.running) H+=`<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+        onclick="RUN.check=null;RUN.view='idle';RUN.stopMsg='';renderRun()">Back</button>`;
+  H+=`</div>`;
+  return H;
+}
+
+/* ---- THE STOP BUTTON ------------------------------------------------------
+   "there is no any stop button that makes the agents or overseer to understand
+   that the task is stopped by the user."
+
+   Two presses, not one. Stopping mid-day kills whatever step is in flight, and
+   a single red button next to a progress bar is a button people hit by
+   accident. The second press is the confirmation, and it says what it costs.
+
+   While the stop is in flight the button is disabled and says so — the run
+   takes a few seconds to put its tools down, and a live-looking button in that
+   window gets pressed four more times. -------------------------------------- */
+function stopControl(R){
+  const run=R.run||{};
+  if(!run.running){
+    return RUN.stopMsg
+      ? `<p style="font-size:12px;color:var(--muted);margin:10px 0 0;line-height:1.6">${esc(RUN.stopMsg)}</p>`
+      : '';
+  }
+  if(RUN.stopping || R.stopping){
+    return `<p style="font-size:12px;color:var(--amber);margin:12px 0 0;line-height:1.6">
+      Stopping — waiting for what is mid-task to put its tools down. This takes a few seconds.</p>`;
+  }
+  if(!RUN.confirmStop){
+    return `<button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:12px"
+      onclick="RUN.confirmStop=true;renderRun()">Stop the day</button>`;
+  }
+  return `<div class="warnbox" style="margin-top:12px"><b>Stop it now?</b><br>
+      Whatever a sector is in the middle of is cut off, and the steps behind it will not run.
+      What has already finished is kept. You can press Run again whenever you like.</div>
+    <button class="pbtn" style="margin-top:8px" onclick="doStop()">Yes — stop the day</button>
+    <button class="pbtn" style="border-color:var(--line2);background:var(--panel2);color:var(--muted);margin-top:8px"
+      onclick="RUN.confirmStop=false;renderRun()">No, let it finish</button>`;
+}
+
+async function doStop(){
+  RUN.confirmStop=false; RUN.stopping=true; RUN.stopMsg=''; renderRun();
+  let j=null;
+  try{
+    const r=await fetch('/api/run/stop',{method:'POST',headers:{'Content-Type':'application/json'},
+                                         body:JSON.stringify({})});
+    j=await r.json();
+  }catch(e){ j={ok:false,why:String(e)}; }
+  RUN.stopping=false;
+  RUN.stopMsg=(j&&(j.why||j.error))||'No answer from the server — reload and check the run panel.';
+  const s=await pullLive(); if(s){ LIVE=s; applyLive(s); renderFloor(); renderPerf(); }
+  renderRun();
+}
+
 async function boot(){
   renderFloor(); renderPerf();          // draw immediately from what we have
   LIVE = await pullLive();
   if(LIVE){ applyLive(LIVE); renderFloor(); renderPerf(); }
 }
-setInterval(async ()=>{ const j=await pullLive(); if(j){ LIVE=j; applyLive(j); renderFloor(); renderPerf(); } }, 15000);
+
+/* The floor polls faster while a day is running. At 15 seconds a pipeline that
+   claims, works and finishes inside one tick is never once seen 'working' —
+   the bulbs go straight from dark to done and the office looks like nothing
+   happened. Four seconds is the difference between a live floor and a report. */
+let POLL_MS = 15000, pollTimer = null, WAS_LIVE = false;
+function schedulePoll(){
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async ()=>{
+    const j = await pullLive();
+    if(j){ LIVE=j; applyLive(j); renderFloor(); renderPerf(); }
+    const live = !!(j && j.run && j.run.run && j.run.run.running);
+    if(WAS_LIVE && !live) pullLeftovers();   // a run just ended: what is left now?
+    WAS_LIVE = live;
+    renderResumeButton();
+    POLL_MS = live ? 4000 : 15000;
+    /* AND REDRAW THE RUN PANEL. It used to be left out, so the progress bar
+       moved for the first six polls after he pressed Start — doStart's own
+       little loop — and then froze for the rest of the day. He watched a bar
+       stuck at 3/18 while the office floor beside it carried on updating, and
+       reasonably concluded the run had died.
+
+       Opening the panel while a day is already running has the same problem
+       from the other end: openRun picks the progress view, and without this
+       the numbers would be whatever they were when the page loaded. */
+    if(RUN.view==='progress'){ renderRun(); }
+    else if(live && RUN.view==='idle' && !RUN.check){ RUN.view='progress'; renderRun(); }
+    schedulePoll();
+  }, POLL_MS);
+}
+schedulePoll();
 renderSiteMenu();renderConns();boot();
+pullLeftovers(); setInterval(pullLeftovers, 60000);
+// The beams are real rows now, so they have to be fetched. Slower than the
+// animation: the traffic changes when a pipeline runs, not every two seconds.
+pullComms(); setInterval(pullComms, 30000);
 setInterval(fireComm,2200);
 setInterval(()=>{const d=new Date();$('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');},1000);
 document.addEventListener('click',e=>{if(!e.target.closest('.site-switch'))$('#siteMenu').classList.remove('open');});
+
+/* The agency name comes from .env (AGENCY_NAME) via /api/settings, so renaming
+   the firm is one field on the setup screen rather than an edit in every file.
+   The name in the markup is the default, so the page is right before this
+   lands and simply corrects itself if he has chosen another. */
+/* /api/brand, not /api/settings. Settings also carries the SMTP user and the
+   model routing, and it sits behind the Setup password now — a
+   front-of-house screen should not be reaching into the key cupboard to learn
+   what the firm is called. /api/brand returns the name and the website label
+   and nothing else. Falls back to the old route so an older server still
+   renders the name rather than showing the placeholder for ever. */
+async function brandPayload(){
+  try{
+    const r = await fetch('/api/brand');
+    if(r.ok){ const j = await r.json();
+      if(j && j.ok) return {agencyName:j.agencyName, website:j.website}; }
+  }catch(e){}
+  try{
+    const r = await fetch('/api/settings'); if(!r.ok) return null;
+    const j = await r.json();
+    return {agencyName:(j.optional||{}).agencyName, website:j.website};
+  }catch(e){ return null; }
+}
+
+(async function brand(){
+  await loadAccount();
+  try{
+    const j = await brandPayload(); if(!j) return;
+    const n = (j.agencyName || '').trim();
+    if(n){
+      const el = document.getElementById('brandName');
+      if(el){ const wasUpper = el.textContent === el.textContent.toUpperCase();
+              el.textContent = wasUpper ? n.toUpperCase() : n; }
+      document.title = n + document.title.replace(/^[^\u2014]*/, '');
+    }
+    // ...and the WEBSITE, which is a different thing from the agency and used
+    // to be a constant in this file. Whatever he saved on setup is what shows.
+    applySite(j && j.website);
+  }catch(e){}
+})();
+
+function applySite(w){
+  const st = SITES[CURRENT]; if(!st) return;
+  // Signed into an account: its open website is what this page is about, even
+  // before that website's own settings say so.
+  const acc = ACCOUNT && ACCOUNT.signedIn && (ACCOUNT.sites||[]).find(x=>x.id===ACCOUNT.open);
+  if(acc && !(w && w.siteConfigured)){
+    w = {siteConfigured:true, siteName:acc.name, siteHost:(acc.url||'').replace(/^https?:\/\//,'').replace(/\/$/,''),
+         siteInitials:siteFav(acc.url||acc.name)};
+  }
+  if(w && w.siteConfigured){
+    st.name = w.siteName || w.siteHost || 'Your website';
+    st.url  = w.siteHost || '';
+    st.fav  = w.siteInitials || '\u2014';
+    st.configured = true;
+  }else{
+    // Never fill this in. A name here that he did not enter is a name he will
+    // spend an afternoon trying to find and change.
+    st.name = 'No website saved';
+    st.url  = 'set it on the setup screen';
+    st.fav  = '\u2014';
+    st.configured = false;
+  }
+  const cs=$('#curSite'), cf=$('#curFav');
+  // A FEW WORDS IN THE BAR, THE WHOLE THING IN THE DROPDOWN.
+  // "worlddealtechnicalservices.com" took a third of the header, and every
+  // character of it after "worlddeal" told him nothing he did not know. The
+  // full name is one click away and is also the tooltip.
+  if(cs){ cs.textContent = shortSite(st.name); cs.parentElement.title = st.name; }
+  if(cf) cf.textContent = st.fav;
+  renderSiteMenu();
+}
 </script>
 </body>
 </html>

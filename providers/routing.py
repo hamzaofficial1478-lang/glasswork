@@ -1,90 +1,79 @@
 """
-routing.py — per-task provider binding. There is NO global "AI provider": each
-task binds independently to primary / secondary / fallback models, with a hard
-cost-tier guard and visible failover.
+routing.py — the doors every sector knocks on for an answer.
+
+Behind them is the Claude team (providers/claude_team.py): each sector thinks
+with the Claude model the owner chose for it, steps down a model or over to
+the backup account when it has to, and says so on the result.
+
+This file used to be a cascade over API keys from any provider — primary,
+secondary, fallbacks, a cost-tier guard and a load balancer. The owner retired
+all of it: "each time one or 2 models always give message of failure, so we
+will remove all of them and will integrate the Claude". The function names and
+the shapes they return are kept exactly, because two dozen callers ask through
+them and none of them needed to know what answers.
 """
-from . import client, store
 
 
-def _ordered_ids(route: dict):
-    ids = []
-    if route.get("primary"):
-        ids.append(route["primary"])
-    # secondary counts as a fallback here unless the task marks it as fusion
-    if route.get("secondary") and route.get("secondary_mode", "fallback") == "fallback":
-        ids.append(route["secondary"])
-    ids += list(route.get("fallback") or [])
-    seen, out = set(), []
-    for i in ids:
-        if i and i not in seen:
-            seen.add(i)
-            out.append(i)
-    return out
-
-
-def _candidates(task: str):
-    route = store.get_routing().get(task)
-    if not route:
-        return [], None
-    out = []
-    for mid in _ordered_ids(route):
-        cred, model = store.find_model(mid)
-        if cred and model and model.get("enabled", True):
-            out.append((cred, model))
-    return out, route
+def _team():
+    # Imported when first asked, not when the package loads: `python -m
+    # providers.local_cli` would otherwise find itself already imported and
+    # print a RuntimeWarning at the top of the owner's terminal.
+    from . import claude_team, local_cli
+    return claude_team, local_cli
 
 
 def resolve_task(task: str) -> dict:
     """
-    Ordered, usable (credential, model) candidates for a task, after the enable
-    toggle and the cost-tier guard. This is the clean read interface other code
-    uses; it never returns a secret.
+    Who would answer for this sector, in order — without asking anything.
+    Never returns a secret; there are none to return.
     """
-    cands, route = _candidates(task)
-    if route is None:
-        return {"ok": False, "error": f"no routing configured for task '{task}'", "candidates": []}
-    if not route.get("enabled", True):
-        return {"ok": False, "error": f"task '{task}' is disabled", "candidates": []}
-    paid_allowed = route.get("paid_allowed", True)
-    usable = [(c, m) for c, m in cands if paid_allowed or m.get("cost_tier") != "paid"]
-    if not usable:
-        if cands and not paid_allowed:
-            return {"ok": False,
-                    "error": f"task '{task}' allows only free providers, but only paid ones are configured",
-                    "candidates": []}
-        return {"ok": False, "error": f"task '{task}' has no usable provider yet", "candidates": []}
+    claude_team, local_cli = _team()
+    s = claude_team.normalise(task)
+    if s not in claude_team.DEFAULT_TEAM:
+        return {"ok": False, "task": s, "candidates": [],
+                "error": (f"'{task}' is not a sector the Claude team has. "
+                          f"It has: {', '.join(claude_team.SECTORS)}")}
+    from . import engines
+    ready, why = engines.available()
+    if not ready:
+        return {"ok": False, "task": s, "error": why, "candidates": []}
+    eng = engines.engine()
+    if eng != engines.CLAUDE_CODE:
+        first = engines.model_for(s, eng)
+        return {"ok": True, "task": s,
+                "route": {"primary": first, "enabled": True, "timeout": engines.BUDGET},
+                "candidates": [
+                    {"credential_id": f"{eng}:key", "credential_name": f"{engines.NAME[eng]} API key",
+                     "model_id": m, "api_model_id": m, "cost_tier": "per use"}
+                    for m in [first] + engines._below(eng, first)]}
+    labels = {a["id"]: a["label"] for a in claude_team.accounts()}
     return {
-        "ok": True, "task": task, "route": route,
+        "ok": True, "task": s,
+        "route": {"primary": claude_team.model_for(s), "enabled": True,
+                  "timeout": claude_team.BUDGET},
         "candidates": [
-            {"credential_id": c["id"], "credential_name": c["name"], "model_id": m["id"],
-             "api_model_id": m["api_model_id"], "cost_tier": m.get("cost_tier")}
-            for c, m in usable
-        ],
+            {"credential_id": f"claude:{aid}", "credential_name": labels[aid],
+             "model_id": m, "api_model_id": m, "cost_tier": "plan"}
+            for aid, m in claude_team.candidates(s)],
     }
 
 
-def call_task(task: str, messages, max_tokens: int = 512) -> dict:
+def call_task(task: str, messages, max_tokens: int = 512, timeout: int = 0) -> dict:
+    """Ask this sector's Claude. See claude_team.call for the full story."""
+    return _team()[0].call(task, messages, max_tokens, timeout)
+
+
+def deliberate(task: str, messages, max_tokens: int = 512, verdict_of=None) -> dict:
     """
-    Run a task: try its candidates in order, cascade on failure/timeout/rate-limit,
-    and return the output plus a visible failover trail. The cost-tier guard is
-    hard — if paid isn't allowed and only paid providers exist, it refuses rather
-    than spending.
+    Put one question to two different Claude models — the sector's own and the
+    Critic's — and report whether they agree. For the handful of judgements
+    where being wrong costs real money: how the MD allocates the day, and
+    whether Security clears something. The value is the DISAGREEMENT; a split
+    goes to the owner, never to a vote.
+
+    Every call in here is marked demanding (providers/effort.py), so it thinks
+    harder than an ordinary one.
     """
-    r = resolve_task(task)
-    if not r["ok"]:
-        return {"ok": False, "task": task, "error": r["error"], "failovers": []}
-    route = r["route"]
-    timeout = int(route.get("timeout", 120))
-    failovers = []
-    for cand in r["candidates"]:
-        cred, model = store.find_model(cand["model_id"])
-        res = client.chat(cred, model, messages, max_tokens=max_tokens, timeout=timeout)
-        if res["ok"]:
-            store.record_usage(task, cred["id"], model["id"], calls=1, spend=0.0)
-            return {"ok": True, "task": task,
-                    "used": {"credential": cred["name"], "model": model["api_model_id"]},
-                    "output": res["output"], "failovers": failovers}
-        failovers.append({"model": model["api_model_id"], "status": res["status"],
-                          "cause": res.get("cause")})
-    return {"ok": False, "task": task, "error": "all providers for this task failed",
-            "failovers": failovers}
+    from . import effort
+    with effort.demanding(f"a judgement where being wrong costs money ({task})"):
+        return _team()[0].deliberate(task, messages, max_tokens, verdict_of)

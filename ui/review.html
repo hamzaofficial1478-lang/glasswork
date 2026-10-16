@@ -1,0 +1,1407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mail room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!--
+  THE REVIEW PAGE. What the agency has written, read in full before any of it
+  leaves the building: every drafted mail, ticked by him before it is sent, and
+  every written page, read before it goes on his website — including the pages
+  the checks held back, which used to be on no screen at all.
+
+  The office's own look (same tokens, same two faces), because this is a room
+  of the same building, not a different product. Dark only, like the office.
+  Everything is read from /api/review and decided through /api/review/act;
+  coordination/review.py is where the rules live.
+-->
+<style>
+:root{
+  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
+  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
+  --text:#e7eff3; --muted:#7d919c; --faint:#54666f;
+  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.14);
+  --amber:#eaa543; --amber-dim:rgba(234,165,67,.13);
+  --danger:#e5565b; --danger-dim:rgba(229,86,91,.13); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:120px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Space Grotesk',system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;font-size:14px;line-height:1.55}
+button,input{font-family:inherit}
+a{color:var(--glass)}
+.etch{font-family:'IBM Plex Mono',ui-monospace,monospace;text-transform:uppercase;letter-spacing:.18em;
+  color:var(--etch);font-size:10px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
+
+header{position:sticky;top:0;z-index:20;background:rgba(12,18,22,.92);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line)}
+.bar{max-width:1080px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.bar h1{font-size:17px;margin:0;font-weight:600;letter-spacing:-.01em}
+.bar .back{margin-left:auto;font-size:13px;color:var(--muted);text-decoration:none;
+  border:1px solid var(--line2);border-radius:9px;padding:6px 11px}
+.bar .back:hover{color:var(--text)}
+.tabs{max-width:1080px;margin:0 auto;padding:0 16px;display:flex;gap:4px}
+.tab{padding:9px 14px 10px;border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);
+  cursor:pointer;font-size:14px;font-weight:500;display:flex;gap:8px;align-items:center;white-space:nowrap}
+.tab.on{color:var(--text);border-bottom-color:var(--glass)}
+.count{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:1px 7px;border-radius:999px;
+  background:var(--panel2);color:var(--muted)}
+.tab.on .count.hot,.count.hot{background:var(--amber);color:#1a1206;font-weight:600}
+
+main{max-width:1080px;margin:0 auto;padding:22px 16px 120px}
+section{display:none}
+section.on{display:block}
+h2{font-size:15px;font-weight:600;margin:30px 0 4px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+h2:first-child{margin-top:0}
+h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
+.lede{color:var(--muted);margin:0 0 14px;max-width:68ch;font-size:13px}
+
+.strip{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px}
+.fact{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 13px;min-width:0}
+.fact .v{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.fact .l{font-size:11.5px;color:var(--muted)}
+.fact.warn{border-color:rgba(234,165,67,.5);background:var(--amber-dim)}
+.fact.warn .v{color:var(--amber)}
+
+.notice{border:1px solid var(--line2);background:var(--panel);border-radius:12px;padding:12px 14px;margin:0 0 16px;
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}
+.notice.amber{border-color:rgba(234,165,67,.5);background:var(--amber-dim)}
+.notice p{margin:0;flex:1 1 280px;min-width:0}
+
+.btn{padding:8px 14px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);color:var(--text);
+  cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--etch)}
+.btn.go{border-color:rgba(92,192,136,.55);color:var(--ok);background:var(--ok-dim)}
+.btn.go:hover{background:rgba(92,192,136,.2)}
+.btn.glass{border-color:var(--glass);color:var(--glass);background:var(--glass-dim)}
+.btn.stop:hover{border-color:var(--danger);color:var(--danger);background:var(--danger-dim)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.quiet{background:transparent}
+
+.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.tools .sp{flex:1}
+.tools label{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);cursor:pointer}
+
+/* ---- a drafted mail ---- */
+.mails{display:grid;gap:12px}
+.mail{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px 14px 14px;
+  display:grid;grid-template-columns:28px 1fr;gap:4px 10px;transition:border-color .12s}
+.mail.picked{border-color:var(--glass);box-shadow:0 0 0 1px var(--glass) inset}
+.mail input[type=checkbox]{width:18px;height:18px;margin:3px 0 0;accent-color:var(--glass);cursor:pointer}
+.mhead{display:flex;gap:6px 12px;flex-wrap:wrap;align-items:baseline;min-width:0}
+.mhead b{font-size:15px}
+.addr{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--glass);overflow-wrap:anywhere}
+.meta{grid-column:2;color:var(--muted);font-size:12px}
+.subj{grid-column:2;margin-top:8px;font-weight:600}
+.subj span{color:var(--muted);font-weight:400}
+.body{grid-column:2;white-space:pre-wrap;margin:6px 0 0;font-size:13.5px;line-height:1.65;color:#d5e1e6;
+  max-width:70ch;overflow-wrap:anywhere}
+.notes{grid-column:2;margin-top:8px;font-size:12px;color:var(--amber)}
+
+.bottombar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(19,29,35,.97);
+  border-top:1px solid var(--line2);transform:translateY(110%);visibility:hidden;
+  transition:transform .18s,visibility .18s}
+.bottombar.on{transform:none;visibility:visible}
+.bottombar .in{max-width:1080px;margin:0 auto;padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.bottombar .in p{margin:0;flex:1 1 200px;font-size:13px}
+
+/* ---- a collected lead ---- */
+.leads{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.lead{display:grid;grid-template-columns:28px minmax(0,1.4fr) minmax(0,1.2fr) minmax(0,1fr);gap:4px 12px;
+  align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.lead:last-child{border-bottom:0}
+.lead.picked{background:var(--glass-dim)}
+.lead input{width:17px;height:17px;accent-color:var(--glass);cursor:pointer;margin:0}
+.lead .who b{display:block;overflow-wrap:anywhere}
+.lead .who span{color:var(--muted);font-size:12px}
+.lead .st{font-size:12px;color:var(--muted)}
+.lead.off{opacity:.62}
+.more-leads{padding:10px 14px;font-size:12.5px;color:var(--muted)}
+@media (max-width:640px){
+  .lead{grid-template-columns:24px 1fr;}
+  .lead .addr,.lead .st{grid-column:2}
+}
+
+/* ---- a written page ---- */
+.page{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 12px}
+.page.held{border-color:rgba(234,165,67,.35)}
+.page h3{margin:0;font-size:15.5px;font-weight:600;text-wrap:balance}
+.page .meta{margin-top:3px}
+.page .why{font-size:13px;color:#cbd8de;margin:8px 0 0;max-width:72ch}
+.reasons{margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--amber)}
+.reasons li{margin:2px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+.row .msg{font-size:12.5px;color:var(--muted)}
+.frame{margin-top:12px;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:#fff}
+.frame iframe{display:block;width:100%;height:70vh;border:0;background:#fff}
+.pill{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
+.pill.ok{border-color:rgba(92,192,136,.5);color:var(--ok)}
+.pill.bad{border-color:rgba(229,86,91,.5);color:var(--danger)}
+.pill.amber{border-color:rgba(234,165,67,.5);color:var(--amber)}
+
+/* ---- a post ready for his own blog backend ---- */
+.steps{margin:10px 0 0;padding-left:20px;font-size:13px;color:#cbd8de;max-width:72ch}
+.steps li{margin:2px 0}
+.fields{display:grid;gap:10px;margin-top:12px}
+.field{border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--panel2);min-width:0}
+.field .lab{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.field .lab b{color:var(--text);font-weight:500;font-size:12.5px}
+.field .lab .sp{flex:1}
+.field .val{margin-top:5px;font-size:13.5px;overflow-wrap:anywhere}
+.field .val.mono{font-size:12.5px;color:var(--glass)}
+.field .long{margin-top:6px;max-height:120px;overflow:auto;font-size:12px;line-height:1.5;color:#b9c9d0;
+  white-space:pre-wrap;overflow-wrap:anywhere;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.btn.copy{padding:4px 11px;font-size:12px}
+.btn.copy.done{border-color:rgba(92,192,136,.55);color:var(--ok)}
+.pics{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+.pic{width:168px;font-size:11.5px;color:var(--muted)}
+.pic img{display:block;width:168px;height:112px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--raise)}
+.pic .row{margin-top:6px;gap:6px}
+.posted{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.posted input{flex:1 1 280px;min-width:0;padding:8px 10px;border-radius:9px;border:1px solid var(--line2);
+  background:var(--bg);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.plain{margin-top:10px;border:1px solid rgba(234,165,67,.45);background:var(--amber-dim);border-radius:10px;
+  padding:9px 12px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.plain p{margin:0;flex:1 1 260px}
+.go-blog{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.go-blog .msg{font-size:12.5px;color:var(--muted)}
+.moving{margin-top:12px;border-radius:10px;padding:9px 12px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.moving.bad{border:1px solid rgba(229,86,91,.45);background:var(--danger-dim)}
+.moving p{margin:0;flex:1 1 260px}
+.bnotes{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)}
+details.copyin{margin-top:12px}
+details.copyin>summary{cursor:pointer;font-size:13px;color:var(--glass)}
+.conn ol{margin:6px 0 0;padding-left:20px}
+details.seo{margin-top:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:9px 12px}
+details.seo>summary{cursor:pointer;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;list-style:none}
+details.seo>summary::-webkit-details-marker{display:none}
+.score{font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line2)}
+.score.good{border-color:rgba(92,192,136,.55);color:var(--ok)}
+.score.mid{border-color:rgba(234,165,67,.55);color:var(--amber)}
+.score.low{border-color:rgba(229,86,91,.55);color:var(--danger)}
+.seo h4{margin:12px 0 4px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.kw{display:flex;flex-wrap:wrap;gap:6px}
+.kw span{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
+.kw span.on{border-color:rgba(92,192,136,.5);color:var(--ok)}
+.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 14px;font-size:12.5px}
+.checks .y{color:var(--ok)} .checks .n{color:var(--danger)}
+table.rank{width:100%;border-collapse:collapse;font-size:12.5px}
+table.rank td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:top}
+table.rank td.n{font-family:'IBM Plex Mono',monospace;color:var(--muted);white-space:nowrap}
+
+.log{width:100%;border-collapse:collapse;font-size:12.5px}
+.logwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.log th{text-align:left;font-weight:500;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line);
+  font-size:11.5px;white-space:nowrap}
+.log td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.log tr:last-child td{border-bottom:0}
+.log td.n{white-space:nowrap;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+
+.empty{color:var(--muted);font-size:13px;padding:14px 0}
+.busy{display:inline-flex;gap:8px;align-items:center;color:var(--glass);font-size:13px}
+.busy::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--glass);animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.busy::before{animation:none}.bottombar{transition:none}}
+
+.toast{position:fixed;left:50%;top:76px;transform:translateX(-50%);z-index:40;max-width:min(560px,calc(100% - 32px));
+  background:var(--raise);border:1px solid var(--line2);border-radius:10px;padding:10px 14px;font-size:13px;
+  box-shadow:0 14px 40px rgba(0,0,0,.45);display:none}
+.toast.on{display:block}
+.toast.good{border-color:rgba(92,192,136,.6)}
+.toast.bad{border-color:rgba(229,86,91,.6)}
+
+/* ---- the campaign ---- */
+.camp{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:16px;align-items:start}
+.camp .frame{margin-top:0}
+.camp .frame iframe{height:820px}
+.camp-top{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:baseline;margin:0 0 8px;font-size:13px;color:var(--muted)}
+.camp-top b{color:var(--text);font-weight:600}
+.side{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:14px;min-width:0}
+.side h3{margin:0;font-size:14px;font-weight:600}
+.side .hint{font-size:12px;color:var(--muted);margin:3px 0 0}
+.field{display:grid;gap:5px}
+.field label{font-size:12px;color:var(--etch)}
+.field input,.field textarea{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:8px;
+  color:var(--text);padding:8px 10px;font-family:inherit;font-size:13px;line-height:1.45}
+.field textarea{resize:vertical;min-height:64px}
+.field input:focus,.field textarea:focus{border-color:var(--glass);outline:none}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.side details summary{cursor:pointer;font-size:13px;color:var(--glass)}
+.side details[open] summary{margin-bottom:10px}
+.side details .field+.field{margin-top:10px}
+.state{border-radius:10px;padding:10px 12px;font-size:13px;border:1px solid var(--line2)}
+.state.draft{border-color:rgba(234,165,67,.5);background:var(--amber-dim)}
+.state.approved{border-color:rgba(92,192,136,.5);background:var(--ok-dim)}
+.state b{display:block;font-size:13.5px}
+.checks{margin:6px 0 0;padding-left:18px;font-size:12.5px}
+.checks li{margin:2px 0}
+.checks .stop{color:var(--danger)}
+.checks .note{color:var(--amber)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow .btn{flex:1 1 auto}
+.build{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:14px;max-width:640px}
+details.old{margin-top:34px;border-top:1px solid var(--line);padding-top:16px}
+details.old>summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--muted)}
+details.old[open]>summary{color:var(--text)}
+@media (max-width:900px){.camp{grid-template-columns:1fr}.camp .frame iframe{height:70vh}}
+
+/* ---- the simple Mail room: two cards, plain words ---- */
+.status{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.chip{display:inline-flex;gap:7px;align-items:center;background:var(--panel);border:1px solid var(--line);
+  border-radius:999px;padding:6px 12px;font-size:13px}
+.chip b{font-weight:600}
+.chip.ok{border-color:rgba(92,192,136,.5)}
+.chip.ok::before,.chip.warn::before,.chip.bad::before{content:"";width:8px;height:8px;border-radius:50%}
+.chip.ok::before{background:var(--ok)}
+.chip.warn{border-color:rgba(234,165,67,.55)}
+.chip.warn::before{background:var(--amber)}
+.chip.bad{border-color:rgba(229,86,91,.55)}
+.chip.bad::before{background:var(--danger)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:0 0 16px}
+.card-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.card-head h2{margin:0;font-size:16px}
+.card-head .sp{flex:1}
+.num{width:24px;height:24px;border-radius:50%;background:var(--glass-dim);color:var(--glass);
+  display:inline-flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;flex:none}
+.summary{display:grid;gap:4px;margin:0 0 12px}
+.summary .subject{font-size:15.5px;font-weight:600}
+.summary .line{font-size:13px;color:var(--muted)}
+.panel{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+.panel .frame{margin-top:0}
+.panel .frame iframe{height:760px}
+.editor{display:grid;gap:12px;max-width:720px}
+.more{font-size:12.5px;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.linkbtn{background:none;border:0;color:var(--glass);cursor:pointer;padding:0;font:inherit;font-size:12.5px}
+.linkbtn:hover{text-decoration:underline}
+.rtabs{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 14px}
+.rtab{border:1px solid var(--line2);background:transparent;color:var(--muted);border-radius:999px;
+  padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
+.rtab b{font-family:'IBM Plex Mono',monospace;font-weight:600;margin-left:4px}
+.rtab.on{background:var(--glass-dim);border-color:var(--glass);color:var(--text)}
+.rtab.alert b{color:var(--danger)}
+.say{font-size:13px;color:var(--muted);margin:0 0 12px;max-width:72ch}
+.rrow{display:grid;grid-template-columns:28px minmax(0,1.4fr) minmax(0,1.3fr) minmax(0,1.2fr);gap:4px 12px;
+  align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.rrow:last-child{border-bottom:0}
+.rrow.picked{background:var(--glass-dim)}
+.rrow input{width:17px;height:17px;accent-color:var(--glass);cursor:pointer;margin:0}
+.rrow .who b{display:block;overflow-wrap:anywhere;font-weight:600}
+.rrow .who span{color:var(--muted);font-size:12px}
+.rrow .res{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.rlist{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+.sending{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--glass);
+  background:var(--glass-dim);border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:13px}
+.bar2{flex:1 1 180px;height:6px;border-radius:999px;background:var(--line);overflow:hidden}
+.bar2 i{display:block;height:100%;background:var(--glass)}
+.sendrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.sendrow .sp{flex:1}
+.btn.big{padding:10px 18px;font-size:14px;font-weight:600}
+@media (max-width:640px){
+  .rrow{grid-template-columns:24px 1fr}
+  .rrow .addr,.rrow .res{grid-column:2}
+  .panel .frame iframe{height:65vh}
+}
+
+@media (max-width:640px){
+  .tab .more{display:none}
+  .tab{padding:9px 10px 10px}
+  .mail{grid-template-columns:24px 1fr;padding:12px}
+  .frame iframe{height:60vh}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div>
+      <div class="etch">Before it leaves the building</div>
+      <h1 id="roomName">Review</h1>
+    </div>
+    <a class="back" href="/">&larr; Back to the office</a>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab on" id="tabMails" role="tab" onclick="show('mails')">Mail room<span class="more">&nbsp;· write and send</span> <span class="count" id="nMails">–</span></button>
+    <button class="tab" id="tabPages" role="tab" onclick="show('pages')">Posts<span class="more">&nbsp;· read and approve</span> <span class="count" id="nPages">–</span></button>
+  </div>
+</header>
+
+<main>
+  <section id="mails" class="on">
+    <div class="status" id="mailStatus"></div>
+    <div id="mailNotice"></div>
+
+    <div class="card" id="campCard"></div>
+
+    <div class="card" id="sendCard">
+      <div class="card-head"><span class="num">2</span><h2>Send it</h2></div>
+      <div id="recWarn"></div>
+      <div class="rtabs" id="recTabs" role="tablist"></div>
+      <div id="recBody"></div>
+    </div>
+
+    <details class="old" id="oldWrap">
+      <summary id="oldHead">One-off drafts from before the campaign</summary>
+      <p class="lede" style="margin-top:12px">Mails the agency wrote one lead at a time, before the
+        campaign. The campaign replaces them &mdash; sending it to a lead puts that lead's draft away.
+        You can still send or discard these yourself.</p>
+      <div class="tools" id="mailTools">
+        <label><input type="checkbox" id="pickAll" onchange="pickAll(this.checked)"> Tick all</label>
+        <span class="sp"></span>
+        <button class="btn stop" onclick="discardOld()">Put them all away</button>
+      </div>
+      <div class="mails" id="mailList"></div>
+      <div id="mailHeld"></div>
+      <div id="mailApproved"></div>
+    </details>
+  </section>
+
+  <section id="pages">
+    <div class="strip" id="pageFacts"></div>
+    <div id="pageNotice"></div>
+    <h2>Ready for your blog <small id="blogHead"></small></h2>
+    <p class="lede">Blog posts go into your own blog backend, so they appear in your blog list and
+      open at <span class="mono">blog-details.php</span> in your theme &mdash; never as pages of their
+      own. Press <b>Put it on my blog</b> and IT adds it straight to your blog after the tests, or copy
+      it in yourself.</p>
+    <div id="blogConn"></div>
+    <div id="blogList"></div>
+    <div id="blogDone"></div>
+    <div id="pagesBlock">
+    <h2>Pages ready for your yes <small id="pageHead"></small></h2>
+    <p class="lede">Pages of their own are no longer made &mdash; every post goes into your blog.
+      Anything still listed here is from before that.</p>
+    <div id="pageList"></div>
+    <div id="pageApproved"></div>
+    </div>
+    <h2>Held back by the checks <small id="heldHead"></small></h2>
+    <p class="lede">These were written but did not pass, so they cannot go on the site as they
+      are. Send one back to be written again, or drop it.</p>
+    <div id="heldList"></div>
+    <h2>Already decided</h2>
+    <div id="pageRecent"></div>
+  </section>
+</main>
+
+<div class="bottombar" id="sendBar">
+  <div class="in">
+    <p id="sendText">Nothing ticked</p>
+    <button class="btn stop" id="discardBtn" onclick="discardPicked()">Discard ticked</button>
+    <button class="btn go" id="sendBtn" onclick="sendPicked()">Send ticked now</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/stale.js"></script>
+<script>
+/* The Mail room's buttons need a server that knows them. An old one gets a
+   banner, not a silent "unknown action". */
+try{ Stale.check(['campaign-retry','campaign-domain','sent-csv']); }catch(e){}
+</script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const escA = s => esc(s).replace(/'/g, '&#39;');
+let DATA = null;
+const PICKED = new Set();     // one-off draft ids he has ticked — survives every refresh
+const OPEN = new Set();       // pages whose preview he has opened
+let WORKING = false;          // a button press in flight: do not redraw under it
+
+function show(which){
+  $('#roomName').textContent = which === 'pages' ? 'Posts room' : 'Mail room';
+  document.title = which === 'pages' ? 'Posts room' : 'Mail room';
+  for(const id of ['mails','pages']){
+    $('#'+id).classList.toggle('on', id===which);
+    $('#tab'+id[0].toUpperCase()+id.slice(1)).classList.toggle('on', id===which);
+  }
+  const path = which === 'pages' ? '/posts' : '/mail';
+  if(location.pathname !== path) history.replaceState(null, '', path);
+  drawBar();
+}
+
+function ago(t){
+  if(!t) return '';
+  const s = Math.max(0, Math.floor(Date.now()/1000) - t);
+  if(s < 60) return 'just now';
+  if(s < 3600) return Math.floor(s/60) + 'm ago';
+  if(s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function toast(text, kind){
+  const t = $('#toast');
+  t.textContent = text; t.className = 'toast on ' + (kind||'');
+  clearTimeout(toast._t); toast._t = setTimeout(()=>{ t.className='toast'; }, 9000);
+}
+
+// A slow answer says so, and a lost one gives up and tries again on the next
+// tick — the room is never left blank with no word as to why.
+async function load(){
+  if(WORKING) return;
+  const ctl = window.AbortController ? new AbortController() : null;
+  const slow = setTimeout(()=>{ if(!DATA) toast('Still reading — the agency is busy mid-run. This fills in on its own.'); }, 8000);
+  const cut = ctl ? setTimeout(()=>ctl.abort(), 60000) : 0;
+  try{
+    const r = await fetch('/api/review', ctl ? {signal: ctl.signal} : {});
+    const j = await r.json();
+    if(!j.ok){ toast(j.error || 'Could not read what is waiting.', 'bad'); return; }
+    DATA = j;
+  }catch(e){
+    toast(e && e.name === 'AbortError'
+      ? 'The office took too long to answer. It will try again on its own.'
+      : 'Could not reach the office server — is it still running?', 'bad');
+    return;
+  }finally{ clearTimeout(slow); clearTimeout(cut); }
+  draw();
+}
+
+function draw(){
+  const m = DATA.mails, p = DATA.pages;
+  // Drop ticks on mail that is no longer waiting.
+  const live = new Set(m.waiting.map(x=>x.id));
+  for(const id of [...PICKED]) if(!live.has(id)) PICKED.delete(id);
+
+  // The tab counts what needs him: a mail waiting for his OK, or mail that did not go.
+  const needs = ((m.campaign||{}).exists && m.campaign.status !== 'approved' ? 1 : 0)
+              + (m.recipients||[]).filter(r=>r.state==='stuck').length;
+  const nb = (p.for_blog||[]).length;
+  const np = p.waiting.length + p.held.length + nb + (p.failed||0);
+  $('#nMails').textContent = needs; $('#nMails').classList.toggle('hot', needs>0);
+  $('#nPages').textContent = np; $('#nPages').classList.toggle('hot', p.waiting.length + nb > 0);
+  drawMails(m); drawPages(p); drawBar();
+}
+
+// ---------------------------------------------------------------- mail ----
+// "the ui or mail room is seems complex fix it ui to easy to understand"
+//
+// Two cards. 1 · Your mail: what it says, and one button to approve it. 2 ·
+// Send it: four tabs — who can get it, who has, who did not and why, who
+// cannot. Everything else (the editor, the agency rewrite, the notes) is one
+// click away instead of on screen all the time.
+function drawMails(m){
+  const c = m.campaign || {};
+  const pf = m.preflight || {ok: true, problems: []};
+  const rec = m.recipients || [];
+  const left = Math.max(0, (m.cap||0) - (m.sent_today||0));
+  const stuck = rec.filter(r=>r.state==='stuck').length;
+  const chips = [];
+  if(!c.exists) chips.push(`<span class="chip warn">Campaign: <b>not built yet</b></span>`);
+  else if(c.status==='approved') chips.push(`<span class="chip ok">Campaign: <b>approved</b></span>`);
+  else chips.push(`<span class="chip warn">Campaign: <b>waiting for your OK</b></span>`);
+  chips.push(`<span class="chip${left===0?' warn':''}">Sent today: <b>${m.sent_today||0} of ${m.cap||0}</b></span>`);
+  chips.push(m.ready ? `<span class="chip">From: <b class="mono" style="font-size:12px">${esc(m.from)}</b></span>`
+                     : `<span class="chip bad">Your email: <b>not set up</b></span>`);
+  if(pf.sending) chips.push(`<span class="chip ok"><span class="busy" style="font-size:13px">Sending now</span></span>`);
+  if(stuck) chips.push(`<span class="chip bad"><b>${stuck}</b> did not go</span>`);
+  $('#mailStatus').innerHTML = chips.join('');
+
+  const notes = [];
+  if(!m.ready) notes.push(`<div class="notice amber"><p>Your email is not set up, so nothing can be sent.
+    Add it on <a href="/setup">Setup &rarr; Integrations &rarr; Email (SMTP)</a>.</p></div>`);
+  if(!DATA.sectors.Leads) notes.push(`<div class="notice amber"><p>Leads is switched off, so nothing is
+    sent. Turn it back on in the office.</p></div>`);
+  $('#mailNotice').innerHTML = notes.join('');
+
+  drawCampaign(m);
+  drawRecipients(m);
+
+  // ---- the one-off drafts from before the campaign, folded away ----
+  const held = m.held || [];
+  const nOld = m.waiting.length + held.length;
+  $('#oldWrap').style.display = nOld || m.approved.length ? '' : 'none';
+  $('#oldHead').textContent = `One-off drafts from before the campaign (${nOld})`;
+  $('#mailTools').style.display = m.waiting.length ? '' : 'none';
+  $('#pickAll').checked = m.waiting.length>0 && m.waiting.every(x=>PICKED.has(x.id));
+  $('#mailList').innerHTML = m.waiting.map(x=>`<article class="mail${PICKED.has(x.id)?' picked':''}" data-id="${x.id}">
+      <input type="checkbox" aria-label="Send to ${escA(x.company||x.to)}" ${PICKED.has(x.id)?'checked':''}
+             onchange="pick(${x.id}, this.checked)">
+      <div class="mhead"><b>${esc(x.company||'(no company name)')}</b><span class="addr">${esc(x.to)}</span></div>
+      <div class="meta">written ${esc(ago(x.queued_at))}</div>
+      <div class="subj"><span>Subject:</span> ${esc(x.subject)}</div>
+      <div class="body">${esc(x.body)}</div>
+    </article>`).join('');
+  $('#mailHeld').innerHTML = held.length ? `<h2>Stopped by the Auditor <small>${held.length}</small></h2>
+    <div class="mails">${held.map(x=>`<article class="mail" style="border-color:rgba(229,86,91,.45)">
+      <span></span>
+      <div class="mhead"><b>${esc(x.company||'(no company name)')}</b><span class="addr">${esc(x.to)}</span></div>
+      <div class="notes" style="color:var(--danger)">${(x.why||[]).map(esc).join('<br>')}</div>
+      <div class="subj"><span>Subject:</span> ${esc(x.subject)}</div>
+      <div class="body">${esc(x.body)}</div>
+    </article>`).join('')}</div>` : '';
+  $('#mailApproved').innerHTML = '';
+}
+
+// ---- 1 · Your mail ----
+// Redrawn only when the campaign itself changes or he opens a panel — a
+// refresh every few seconds must never wipe what he is halfway through typing.
+let CAMP_SIG = '';
+let CAMP_DIRTY = false;
+let PANEL = null;                 // null = the default for the state; 'preview' | 'change' | 'test' | ''
+function campSig(c){ return c.exists ? [c.id, c.updated_at, c.status, c.approved_at].join('|') : 'none'; }
+function openPanel(which){
+  PANEL = (PANEL === which) ? '' : which;
+  drawCampaign(DATA.mails, true);
+}
+
+function drawCampaign(m, force){
+  const c = m.campaign || {};
+  const sig = campSig(c) + '|' + (m.writing?1:0) + '|' + PANEL;
+  if(!force && sig === CAMP_SIG && $('#campCard').innerHTML) return;
+  if(!force && CAMP_DIRTY && $('#campCard').contains(document.activeElement)) return;
+  CAMP_SIG = sig; CAMP_DIRTY = false;
+
+  if(!c.exists){
+    $('#campCard').innerHTML = `<div class="card-head"><span class="num">1</span><h2>Your mail</h2></div>
+      ${c.error ? `<div class="notice amber"><p>The campaign could not be read: ${esc(c.error)}</p></div>` : ''}
+      <p class="say">One mail from ${esc(c.business||'your company')}, laid out with your services and your
+        photographs, sent to every lead you tick. Add an offer if you have one &mdash; it is shown word for word.</p>
+      <div class="editor">
+        <div class="field"><label for="bOffer">Your offer (optional)</label>
+          <input id="bOffer" maxlength="160" placeholder="e.g. 10% off shower glass booked this month"></div>
+        <div class="pair">
+          <div class="field"><label for="bUntil">Valid until (optional)</label>
+            <input id="bUntil" maxlength="40" placeholder="e.g. 31 October"></div>
+          <div class="field"><label for="bFocus">Lead with (optional)</label>
+            <input id="bFocus" maxlength="160" placeholder="e.g. repairs for property managers"></div>
+        </div>
+        <div class="btnrow"><button class="btn go big" id="buildBtn" onclick="buildCampaign(this)">Build my mail</button></div>
+      </div>`;
+    return;
+  }
+
+  const panel = PANEL === null ? (c.status === 'approved' ? '' : 'preview') : PANEL;
+  const a = c.audit || {};
+  const stops = a.blocking || [];
+  const notes = [...(a.warnings||[]), ...(c.warnings||[])];
+  const cp = c.copy || {};
+  const approved = c.status === 'approved';
+  const f = (id, label, v, attrs='') => `<div class="field"><label for="${id}">${label}</label>
+      <input id="${id}" value="${escA(v||'')}" ${attrs} oninput="CAMP_DIRTY=true"></div>`;
+  const t = (id, label, v, rows=3) => `<div class="field"><label for="${id}">${label}</label>
+      <textarea id="${id}" rows="${rows}" oninput="CAMP_DIRTY=true">${esc(v||'')}</textarea></div>`;
+
+  let body = '';
+  if(panel === 'preview') body = `<div class="panel">
+      <div class="say" style="margin-bottom:8px">Exactly as ${esc(c.for_name||'a lead')} will see it — each lead is greeted by their own name.</div>
+      <div class="frame"><iframe sandbox title="Your campaign mail" srcdoc="${escA(c.html)}"></iframe></div></div>`;
+  else if(panel === 'change') body = `<div class="panel"><div class="editor">
+      <div class="pair">
+        ${f('cOffer', 'Your offer — shown word for word (leave empty for none)', c.offer, 'maxlength="160"')}
+        ${f('cUntil', 'Valid until', c.offer_until, 'maxlength="40"')}
+      </div>
+      <div class="pair">
+        ${f('cPhone', 'Phone', c.phone, 'maxlength="30"')}
+        ${f('cWhats', 'WhatsApp', c.whatsapp, 'maxlength="30"')}
+      </div>
+      ${f('cSubject', 'Subject line', cp.subject, 'maxlength="70"')}
+      ${f('cHeadline', 'Headline', cp.headline, 'maxlength="80"')}
+      ${t('cPre', 'Line under the headline', cp.preheader, 2)}
+      ${t('cIntro', 'Introduction (a blank line between paragraphs)', cp.intro, 6)}
+      ${t('cWhy', 'Why clients choose us (one per line)', (cp.why_us||[]).join('\n'), 4)}
+      ${t('cCta', 'The invitation above the buttons', cp.cta, 3)}
+      <div class="btnrow"><button class="btn go" onclick="saveCampaign(this)">Save changes</button></div>
+      ${approved ? '<div class="say" style="margin:0">Saving a change puts it back to “waiting for your OK”, so you read it again before more goes out.</div>' : ''}
+      <div class="more">Or:
+        <button class="linkbtn" ${m.writing||!DATA.sectors.Leads?'disabled':''} onclick="rewriteCampaign(this)">${m.writing ? 'the agency is rewriting it…' : 'have the agency rewrite the wording'}</button> ·
+        <button class="linkbtn" onclick="startOver(this)">start again from your website</button>
+      </div>
+      ${notes.length ? `<details><summary class="say" style="cursor:pointer;margin:0">Notes from the checks (${notes.length})</summary>
+        <ul class="checks">${notes.map(s=>`<li class="note">${esc(s)}</li>`).join('')}</ul></details>` : ''}
+    </div></div>`;
+  else if(panel === 'test') body = `<div class="panel"><div class="editor">
+      <div class="say" style="margin:0">It arrives exactly as your leads get it. Try your personal Gmail as well —
+        mail to your own address never leaves your mail server, so it cannot show whether outside delivery works.</div>
+      <div class="pair">
+        <div class="field"><label for="cTest">Send a test to</label>
+          <input id="cTest" type="email" maxlength="120" value="${escA(DATA.mails.from||'')}" oninput="CAMP_DIRTY=true"></div>
+        <div class="field"><label>&nbsp;</label><button class="btn" ${DATA.mails.ready?'':'disabled'} onclick="testCampaign(this)">Send the test</button></div>
+      </div></div></div>`;
+
+  $('#campCard').innerHTML = `<div class="card-head"><span class="num">1</span><h2>Your mail</h2>
+      <span class="pill ${approved?'ok':'amber'}">${approved ? 'approved' : 'waiting for your OK'}</span>
+      <span class="sp"></span>
+      ${approved ? '' : `<button class="btn go big" ${stops.length?'disabled':''} onclick="approveCampaign(this)">Approve it</button>`}
+    </div>
+    <div class="summary">
+      <div class="subject">${esc(c.subject)}</div>
+      <div class="line">${c.offer ? `Offer: <b style="color:var(--text)">${esc(c.offer)}</b>${c.offer_until?` · valid until ${esc(c.offer_until)}`:''}` : 'No offer'}
+        ${c.photos ? `· ${c.photos} photograph${c.photos===1?'':'s'} of your work` : ''}</div>
+    </div>
+    ${stops.length ? `<div class="notice" style="display:block;border-color:rgba(229,86,91,.5);background:var(--danger-dim)">
+      <p style="margin:0 0 4px"><b>It cannot be approved yet:</b></p>
+      <ul class="checks" style="margin:0">${stops.map(s=>`<li class="stop">${esc(s)}</li>`).join('')}</ul>
+      <p style="margin:6px 0 0">Press <b>Change it</b> to put this right.</p></div>` : ''}
+    <div class="btnrow" style="max-width:520px">
+      <button class="btn${panel==='preview'?' glass':''}" onclick="openPanel('preview')">${panel==='preview'?'Hide':'Preview'}</button>
+      <button class="btn${panel==='change'?' glass':''}" onclick="openPanel('change')">Change it</button>
+      <button class="btn${panel==='test'?' glass':''}" onclick="openPanel('test')">Send me a test</button>
+    </div>
+    ${body}`;
+}
+
+async function campAct(what, data, ids){
+  WORKING = true;
+  let j;
+  try{
+    const r = await fetch('/api/review/act', {method:'POST', headers:{'Content-Type':'application/json'},
+                                               body: JSON.stringify({do: what, ids: ids||[], data: data||{}})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  WORKING = false;
+  if(j && !j.ok && j.error === 'unknown action')
+    j.error = 'The office program is older than this page, so it does not know this button yet. '
+            + 'Nothing was sent. Close the black window the office runs in and start it again with '
+            + 'python run.py, then press the button again.';
+  return j;
+}
+const val = id => ($('#'+id) ? $('#'+id).value : undefined);
+
+async function buildCampaign(btn){
+  btn.disabled = true; btn.innerHTML = '<span class="busy">Reading your website for photographs…</span>';
+  const j = await campAct('campaign_create', {offer: val('bOffer')||'', offer_until: val('bUntil')||'', focus: val('bFocus')||''});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  PANEL = 'preview'; CAMP_SIG = ''; await load();
+}
+async function saveCampaign(btn, quiet){
+  const data = {offer: val('cOffer'), offer_until: val('cUntil'), phone: val('cPhone'), whatsapp: val('cWhats'),
+                subject: val('cSubject'), headline: val('cHeadline'), preheader: val('cPre'),
+                intro: val('cIntro'), why_us: val('cWhy'), cta: val('cCta')};
+  for(const k of Object.keys(data)) if(data[k] === undefined) delete data[k];
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  const j = await campAct('campaign_save', data);
+  if(!quiet || !j.ok) toast(j.head || j.error || 'Saved.', j.ok ? 'good' : 'bad');
+  CAMP_DIRTY = false; CAMP_SIG = ''; if(j.ok && !quiet) PANEL = 'preview';
+  await load();
+  return j;
+}
+async function approveCampaign(btn){
+  if(CAMP_DIRTY){ const s = await saveCampaign(null, true); if(!s.ok) return; }
+  const c = DATA.mails.campaign || {};
+  if(!confirm('Approve this mail' + (c.offer ? ` — including your offer “${c.offer}”` : '') +
+              '?\n\nNothing is sent yet: you tick who gets it next.')) return;
+  btn.disabled = true; btn.textContent = 'Approving…';
+  const j = await campAct('campaign_approve');
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) PANEL = '';
+  CAMP_SIG = ''; await load();
+}
+async function rewriteCampaign(btn){
+  if(CAMP_DIRTY){ const s = await saveCampaign(null, true); if(!s.ok) return; }
+  btn.disabled = true; btn.textContent = 'starting…';
+  let j;
+  try{
+    const r = await fetch('/api/review/start/campaign-rewrite', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({focus: ''})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  toast(j.ok ? 'The agency is rewriting it — the new version appears here in about a minute.'
+             : (j.error || 'Could not start it.'), j.ok ? 'good' : 'bad');
+  setTimeout(load, 2500);
+}
+async function testCampaign(btn){
+  const to = (val('cTest')||'').trim();
+  if(!to){ toast('Type the address to send the test to.', 'bad'); return; }
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const j = await campAct('campaign_test', {to});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  btn.disabled = false; btn.textContent = 'Send the test';
+  if(!j.ok) await load();
+}
+async function startOver(btn){
+  if(!confirm('Start again from your website? The current wording is put away and a fresh mail is built. Your offer is kept.')) return;
+  const c = DATA.mails.campaign || {};
+  btn.disabled = true; btn.textContent = 'reading your website…';
+  const j = await campAct('campaign_create', {offer: c.offer||'', offer_until: c.offer_until||'', focus: (c.copy||{}).focus||''});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  PANEL = 'preview'; CAMP_SIG = ''; await load();
+}
+
+// ---- 2 · Send it ----
+const RECPICK = new Set();
+let RTAB = null;                   // 'ready' | 'sent' | 'failed' | 'cant'
+function groups(all){
+  return {
+    ready:  all.filter(r=>r.state==='ready'),
+    queued: all.filter(r=>r.state==='queued'),
+    sent:   all.filter(r=>r.state==='sent'||r.state==='bounced').sort((a,b)=>(b.sent_at||0)-(a.sent_at||0)),
+    failed: all.filter(r=>r.state==='stuck'),
+    cant:   all.filter(r=>r.state==='no'),
+  };
+}
+function drawRecipients(m){
+  const all = m.recipients || [];
+  const g = groups(all);
+  const c = m.campaign || {};
+  const pf = m.preflight || {ok: true, problems: []};
+  const live = new Set(g.ready.map(r=>r.id));
+  for(const id of [...RECPICK]) if(!live.has(id)) RECPICK.delete(id);
+  if(RTAB === null) RTAB = g.ready.length ? 'ready' : (g.failed.length || g.queued.length ? 'failed' : 'sent');
+  const bounced = g.sent.filter(r=>r.state==='bounced').length;
+
+  // What stops every mail, above everything else.
+  const warn = [];
+  if(!pf.ok) warn.push(`<div class="notice amber" style="display:block">
+      <p style="margin:0 0 8px"><b>Mail cannot go out yet.</b></p>
+      ${(pf.problems||[]).map(x=>`<p style="margin:0 0 8px">${esc(x)}</p>`).join('')}
+      ${pf.fix_domain ? `<div class="btnrow"><button class="btn go" onclick="fixDomain('${escA(pf.fix_domain)}', this)">
+        Use ${esc(pf.fix_domain)} as my sending domain</button>
+        <a class="btn quiet" href="/setup" style="text-decoration:none">Or change it on Setup</a></div>` : ''}
+    </div>`);
+  if(pf.sending || g.queued.length){
+    const today = g.queued.filter(r=>!/tomorrow/.test(r.why||''));
+    const tomorrow = g.queued.length - today.length;
+    const done = m.sent_today||0;
+    if(pf.sending) warn.push(`<div class="sending"><span class="busy">Sending — one every few seconds.</span>
+        <span>${today.length} still to go${tomorrow?`, ${tomorrow} tomorrow`:''}. You can leave this page.</span>
+        <div class="bar2"><i style="width:${Math.round(100*done/Math.max(1,done+today.length))}%"></i></div></div>`);
+    else if(tomorrow) warn.push(`<div class="sending">${tomorrow} approved mail${tomorrow===1?' goes':'s go'} with tomorrow's allowance
+        (your limit is ${m.cap||0} a day).</div>`);
+  }
+  $('#recWarn').innerHTML = warn.join('');
+
+  const tab = (key, label, n, alert) => `<button class="rtab${RTAB===key?' on':''}${alert&&n?' alert':''}" role="tab"
+      onclick="RTAB='${key}';drawRecipients(DATA.mails)">${label}<b>${n}</b></button>`;
+  $('#recTabs').innerHTML = tab('ready', 'Ready to send', g.ready.length)
+    + tab('sent', 'Sent', g.sent.length)
+    + tab('failed', 'Not sent yet', g.failed.length + g.queued.length, g.failed.length > 0)
+    + tab('cant', "Can't send", g.cant.length);
+
+  const row = (r, pick, res) => `<div class="rrow${RECPICK.has(r.id)?' picked':''}">
+      ${pick ? `<input type="checkbox" aria-label="Send to ${escA(r.company||r.email)}" ${RECPICK.has(r.id)?'checked':''}
+          onchange="pickRec(${r.id}, this.checked)">` : '<span></span>'}
+      <div class="who"><b>${esc(r.company||'(no name)')}</b><span>${[r.area,(r.segment||'').replace(/_/g,' ')].filter(Boolean).map(esc).join(' · ')}</span></div>
+      <div class="addr">${esc(r.email||'no email address')}</div>
+      <div class="res">${res}</div></div>`;
+  const list = rows => rows.length ? `<div class="rlist">${rows.join('')}</div>` : '';
+  let html = '';
+
+  if(RTAB === 'ready'){
+    const can = c.exists && c.status==='approved' && m.ready && pf.ok && DATA.sectors.Leads;
+    const why = !c.exists ? 'Build your mail first (card 1)'
+              : c.status!=='approved' ? 'Approve your mail first (card 1)'
+              : !m.ready ? 'Set up your email first' : !pf.ok ? 'Put the problem above right first' : '';
+    const left = Math.max(0, (m.cap||0) - (m.sent_today||0));
+    html = g.ready.length ? `<p class="say">Tick who gets it and press Send. Mails go one at a time, a few seconds apart,
+        from your own email. A business is only ever written to once.</p>
+      <div class="sendrow">
+        <label class="say" style="margin:0;display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" ${g.ready.every(r=>RECPICK.has(r.id))?'checked':''} onchange="pickRecs(this.checked)"> Tick all</label>
+        <span class="sp"></span>
+        ${RECPICK.size > left ? `<span class="say" style="margin:0;color:var(--amber)">${left} go today, the rest tomorrow</span>` : ''}
+        <button class="btn go big" ${can && RECPICK.size ? '' : 'disabled'} title="${escA(why)}" onclick="sendCampaign(this)">
+          ${!can ? esc(why) : RECPICK.size ? `Send to ${RECPICK.size}` : 'Tick who gets it'}</button>
+      </div>
+      ${list(g.ready.slice(0, 200).map(r => row(r, true, r.old_draft ? 'replaces its one-off draft' : '')))}`
+      : `<div class="empty">Everyone with an address has been written to. New leads appear here when the Hunter finds them.</div>`;
+  }
+  else if(RTAB === 'sent'){
+    const sentIds = new Set(g.sent.map(r=>r.id));
+    for(const id of [...SENTPICK]) if(!sentIds.has(id)) SENTPICK.delete(id);
+    const sentRow = r => `<div class="rrow${SENTPICK.has(r.id)?' picked':''}">
+        <input type="checkbox" aria-label="Pick ${escA(r.company||r.email)}" ${SENTPICK.has(r.id)?'checked':''}
+          onchange="SENTPICK[this.checked?'add':'delete'](${r.id}); drawRecipients(DATA.mails)">
+        <div class="who"><b>${esc(r.company||'(no name)')}</b><span>${[r.area,(r.segment||'').replace(/_/g,' ')].filter(Boolean).map(esc).join(' · ')}</span></div>
+        <div class="addr">${esc(r.email)}</div>
+        <div class="res">${r.state==='bounced'
+          ? `<span class="pill bad">came back</span> <span style="color:var(--danger)">${esc(r.why)}</span>`
+          : `<span class="pill ok">sent</span> ${r.sent_at ? esc(ago(r.sent_at)) : ''}${/Sent folder/.test(r.why||'') && !/no copy/.test(r.why||'') ? ' · copy in Sent' : ''}`}</div></div>`;
+    html = `<p class="say">Your mail server took these and sent them on${m.copies_in_sent === true ? ' — a copy of each is in your mailbox’s Sent folder' : m.copies_in_sent === false ? ' (a copy could not be saved to your Sent folder this time)' : ''}.
+        If one comes back (a wrong address, a full mailbox), it shows here as <b>came back</b> — press
+        <b>Check for bounces</b> to look in your inbox now. A business on this list is never mailed again,
+        even after you delete it from here.</p>
+      <div class="sendrow">
+        ${g.sent.length ? `<label class="say" style="margin:0;display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" ${g.sent.length && g.sent.every(r=>SENTPICK.has(r.id))?'checked':''}
+            onchange="g_sentAll(this.checked)"> Tick all</label>` : ''}
+        <span class="sp"></span>
+        <a class="btn" href="/api/mail/sent.csv" download>Download as CSV</a>
+        <button class="btn" onclick="checkBounces(this)">Check for bounces</button>
+        ${g.sent.length ? `<button class="btn stop" ${SENTPICK.size ? '' : 'disabled'} onclick="deleteSent(false, this)">
+          ${SENTPICK.size ? `Delete ${SENTPICK.size}` : 'Tick to delete'}</button>` : ''}
+      </div>
+      ${list(g.sent.map(sentRow)) || '<div class="empty">Nothing sent yet.</div>'}
+      ${bounced ? `<p class="say" style="margin-top:10px">${bounced} came back — those addresses are wrong or closed, and they are not written to again.</p>` : ''}`;
+  }
+  else if(RTAB === 'failed'){
+    // Stuck ones with the reason, and the ones on their way — all on this tab,
+    // so pressing Try again never sends him somewhere else to watch.
+    const ids = new Set(g.failed.map(r=>r.id));
+    for(const id of [...STUCKPICK]) if(!ids.has(id)) STUCKPICK.delete(id);
+    const stuckRow = r => `<div class="rrow${STUCKPICK.has(r.id)?' picked':''}">
+        <input type="checkbox" aria-label="Pick ${escA(r.company||r.email)}" ${STUCKPICK.has(r.id)?'checked':''}
+          onchange="STUCKPICK[this.checked?'add':'delete'](${r.id}); drawRecipients(DATA.mails)">
+        <div class="who"><b>${esc(r.company||'(no name)')}</b><span>${[r.area,(r.segment||'').replace(/_/g,' ')].filter(Boolean).map(esc).join(' · ')}</span></div>
+        <div class="addr">${esc(r.email)}</div>
+        <div class="res"><span style="color:var(--danger)">${esc(plainWhy(r.why))}</span></div></div>`;
+    const going = g.queued.map(r => row(r, false, /tomorrow/.test(r.why||'')
+        ? '<span class="pill">goes tomorrow</span> <span style="color:var(--muted)">today\'s allowance is used</span>'
+        : '<span class="busy">sending now…</span>'));
+    html = (g.failed.length || g.queued.length) ? `<p class="say">Approved, and not sent yet. ${g.failed.length
+        ? 'The reason is next to each one. Most often your mail server was busy for a moment — press Try again. If one keeps failing, tick it and delete it.'
+        : 'These are on their way.'}</p>
+      ${g.failed.length ? `<div class="sendrow">
+        <label class="say" style="margin:0;display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" ${g.failed.every(r=>STUCKPICK.has(r.id))?'checked':''} onchange="stuckAll(this.checked)"> Tick all</label>
+        <span class="sp"></span>
+        <button class="btn stop" ${STUCKPICK.size ? '' : 'disabled'} onclick="dropStuck(this)">${STUCKPICK.size ? `Delete ${STUCKPICK.size}` : 'Tick to delete'}</button>
+        <button class="btn go big" ${pf.ok && DATA.sectors.Leads && !pf.sending ? '' : 'disabled'} onclick="retryStuck(this)">${pf.sending ? 'Sending…' : 'Try again'}</button></div>` : ''}
+      ${list(g.failed.map(stuckRow).concat(going))}`
+      : `<div class="empty">Nothing is waiting. Every approved mail has gone.</div>`;
+  }
+  else {
+    html = g.cant.length ? `<p class="say">These cannot be sent the mail, and why.</p>
+      ${list(g.cant.map(r => row(r, false, esc(r.why||''))))}` : `<div class="empty">None.</div>`;
+  }
+  $('#recBody').innerHTML = html;
+}
+
+// The mail server's own words, shortened to what he needs.
+const SENTPICK = new Set();          // sent mails he has ticked to delete
+function g_sentAll(on){
+  const sent = groups(DATA.mails.recipients || []).sent;
+  sent.forEach(r => on ? SENTPICK.add(r.id) : SENTPICK.delete(r.id));
+  drawRecipients(DATA.mails);
+}
+async function deleteSent(everything, btn){
+  const n = SENTPICK.size;
+  if(!confirm(`Delete ${n} sent mail${n===1?'':'s'} from this list?\n\nThe words of each mail are wiped. `
+      + `The agency still remembers these businesses were written to, so none is listed or mailed again. `
+      + `Download the CSV first if you want a copy.`)) return;
+  btn.disabled = true;
+  const j = await campAct(everything ? 'sent_delete_all' : 'sent_delete', {}, [...SENTPICK]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) SENTPICK.clear();
+  await load();
+}
+
+function plainWhy(w){
+  w = String(w||'');
+  if(/kept dropping|timed out|handshake|10054|unexpectedly closed|reset/i.test(w))
+    return 'your mail server was busy and dropped the connection — try again';
+  if(/refused the login|password/i.test(w)) return 'your mail server refused the password — check it on Setup';
+  if(/Outreach domain/i.test(w)) return w;
+  return w.length > 140 ? w.slice(0, 137) + '…' : w;
+}
+
+function pickRec(id, on){ on ? RECPICK.add(id) : RECPICK.delete(id); drawRecipients(DATA.mails); }
+function pickRecs(on){
+  for(const r of (DATA.mails.recipients||[])) if(r.state==='ready') on ? RECPICK.add(r.id) : RECPICK.delete(r.id);
+  drawRecipients(DATA.mails);
+}
+async function sendCampaign(btn){
+  const ids = [...RECPICK];
+  if(!ids.length) return;
+  const m = DATA.mails;
+  const names = (m.recipients||[]).filter(r=>RECPICK.has(r.id)).map(r=>r.company||r.email);
+  if(!confirm(`Send your mail to ${ids.length} lead${ids.length===1?'':'s'} from ${m.from}?\n\n`
+      + `They go one at a time, a few seconds apart.\n\n` + names.join('\n'))) return;
+  btn.disabled = true; btn.textContent = 'Starting…';
+  const j = await campAct('campaign_send', {}, ids);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  RECPICK.clear();
+  if(j.ok) RTAB = 'sent';
+  await load();
+}
+async function retryStuck(btn){
+  btn.disabled = true; btn.textContent = 'Starting…';
+  const j = await campAct('campaign_retry', {}, STUCKPICK.size ? [...STUCKPICK] : []);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  await load();
+}
+const STUCKPICK = new Set();          // mails that did not go, ticked to delete
+function stuckAll(on){
+  groups(DATA.mails.recipients || []).failed.forEach(r => on ? STUCKPICK.add(r.id) : STUCKPICK.delete(r.id));
+  drawRecipients(DATA.mails);
+}
+async function dropStuck(btn){
+  const n = STUCKPICK.size;
+  if(!confirm(`Delete ${n} mail${n===1?'':'s'} that did not go?\n\nThey will not be sent, and `
+      + `${n===1?'that business is':'those businesses are'} taken off your lists. `
+      + `${n===1?'It is':'They are'} kept on file, so the Hunter does not collect ${n===1?'it':'them'} again.`)) return;
+  btn.disabled = true;
+  const j = await campAct('campaign_drop', {}, [...STUCKPICK]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) STUCKPICK.clear();
+  await load();
+}
+async function checkBounces(btn){
+  btn.disabled = true; btn.textContent = 'Looking in your inbox…';
+  const j = await campAct('campaign_bounces');
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  btn.disabled = false; btn.textContent = 'Check for bounces';
+  await load();
+}
+async function fixDomain(domain, btn){
+  if(!confirm(`Set your outreach sending domain to ${domain}?\n\nThat is the domain your email account `
+      + `already sends from. Cold mail will only ever go out from it.`)) return;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const j = await campAct('campaign_domain', {domain});
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  await load();
+}
+async function discardOld(){
+  if(!confirm('Put away every one-off draft? None of them will be sent. The campaign is not affected.')) return;
+  const j = await campAct('discard_old');
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  PICKED.clear();
+  await load();
+}
+
+function pick(id, on){
+  on ? PICKED.add(id) : PICKED.delete(id);
+  const el = document.querySelector(`.mail[data-id="${id}"]`);
+  if(el) el.classList.toggle('picked', on);
+  const all = (DATA?.mails.waiting||[]);
+  $('#pickAll').checked = all.length>0 && all.every(x=>PICKED.has(x.id));
+  drawBar();
+}
+function pickAll(on){
+  for(const x of (DATA?.mails.waiting||[])) on ? PICKED.add(x.id) : PICKED.delete(x.id);
+  drawMails(DATA.mails); drawBar();
+}
+
+function drawBar(){
+  const n = PICKED.size, onMails = $('#mails').classList.contains('on');
+  $('#sendBar').classList.toggle('on', n>0 && onMails);
+  $('#sendText').textContent = n ? `${n} ticked` + (DATA?.mails.ready ? ` — they go from ${DATA.mails.from}` : ' — your email is not set up yet') : 'Nothing ticked';
+  $('#sendBtn').textContent = n ? `Send ${n} now` : 'Send ticked now';
+  $('#sendBtn').disabled = !n || !DATA?.mails.ready || !DATA?.sectors.Leads;
+  $('#discardBtn').textContent = n ? `Discard ${n}` : 'Discard ticked';
+}
+
+async function act(what, ids){
+  WORKING = true;
+  let j;
+  try{
+    const r = await fetch('/api/review/act', {method:'POST', headers:{'Content-Type':'application/json'},
+                                               body: JSON.stringify({do: what, ids})});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  WORKING = false;
+  return j;
+}
+
+async function sendPicked(){
+  const ids = [...PICKED];
+  if(!ids.length) return;
+  const to = (DATA.mails.waiting||[]).filter(x=>PICKED.has(x.id)).map(x=>x.company||x.to);
+  if(!confirm(`Send ${ids.length} mail${ids.length===1?'':'s'} from ${DATA.mails.from} now?\n\n` + to.join('\n'))) return;
+  $('#sendBtn').disabled = true; $('#sendBtn').textContent = 'Sending…';
+  const j = await act('send', ids);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  for(const s of (j.sent||[])) PICKED.delete(s.id);
+  await load();
+}
+
+async function discardPicked(){
+  const ids = [...PICKED];
+  if(!ids.length) return;
+  if(!confirm(`Discard ${ids.length} draft${ids.length===1?'':'s'}? They will never be sent.`)) return;
+  const j = await act('discard', ids);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) ids.forEach(i=>PICKED.delete(i));
+  await load();
+}
+
+// --------------------------------------------------------------- pages ----
+function preview(html){
+  // PHP includes cannot run here; show the page's own body without them.
+  return String(html||'').replace(/<\?php[\s\S]*?\?>/g, '');
+}
+
+function frameFor(kind, id, html){
+  const key = kind+':'+id;
+  if(!OPEN.has(key)) return '';
+  if(!html) return `<div class="empty">There is no finished page to show for this one.</div>`;
+  // sandbox with nothing allowed: no scripts, no forms, no navigation. The page
+  // was written by a model and is shown as a picture of itself.
+  return `<div class="frame"><iframe sandbox title="Preview of the page" srcdoc="${escA(preview(html))}"></iframe></div>`;
+}
+
+function toggle(kind, id){
+  const key = kind+':'+id;
+  OPEN.has(key) ? OPEN.delete(key) : OPEN.add(key);
+  drawPages(DATA.pages);
+}
+
+// ------------------------------------------------------- SEO's keywords ----
+// "the seo sector finds the keywords according to the post then it gives those
+//  keywords to the post room" — what SEO planned, who ranks, and how the post
+// measured up against the plan.
+function seoPanel(seo){
+  if(!seo || !seo.primary) return '';
+  const sc = seo.score, cls = sc == null ? '' : sc >= 80 ? 'good' : sc >= 60 ? 'mid' : 'low';
+  const used = new Set(seo.used || []);
+  return `<details class="seo"><summary><b>Keywords from SEO</b>
+      <span class="mono" style="color:var(--glass)">“${esc(seo.primary)}”</span>
+      ${sc == null ? '' : `<span class="score ${cls}">${sc}/100</span>`}
+      <span style="color:var(--muted);font-size:12px">${(seo.used||[]).length} of ${(seo.secondary||[]).length} supporting keywords used${seo.words ? ` · ${seo.words} words (aim ${seo.target_words})` : ''}</span></summary>
+    ${(seo.items||[]).length ? `<h4>How the post measures up</h4><div class="checks">${seo.items.map(i=>
+      `<div class="${i.ok?'y':'n'}">${i.ok?'✓':'✕'} ${esc(i.what)}</div>`).join('')}</div>` : ''}
+    ${(seo.secondary||[]).length ? `<h4>Supporting keywords</h4><div class="kw">${seo.secondary.map(k=>
+      `<span class="${used.has(k)?'on':''}">${used.has(k)?'✓ ':''}${esc(k)}</span>`).join('')}</div>` : ''}
+    ${(seo.questions||[]).length ? `<h4>Questions it answers</h4><div class="kw">${seo.questions.map(q=>`<span>${esc(q)}</span>`).join('')}</div>` : ''}
+    <h4>Who ranks for “${esc(seo.primary)}”</h4>
+    ${(seo.ranking||[]).length ? `<table class="rank">${seo.ranking.map(r=>{
+        const read = (seo.competitors||[]).find(c=>c.position===r.position);
+        return `<tr><td class="n">#${r.position}</td><td>${esc(r.domain)}<br><span style="color:var(--muted)">${esc(r.title)}</span></td>
+          <td class="n">${read ? read.words+' words' : ''}</td></tr>`;}).join('')}</table>
+        <p style="margin:6px 0 0;font-size:12.5px;color:var(--muted)">${seo.our_position ? `Your site is at #${seo.our_position} for this.` : 'Your site is not in the top 10 for this yet.'}</p>`
+      : `<p style="margin:0;font-size:12.5px;color:var(--muted)">${esc((seo.notes||[]).find(n=>/who ranks/.test(n)) || 'Not checked.')}
+         ${/Setup/.test((seo.notes||[]).join(' ')) ? ' <a href="/setup">Open Setup</a>' : ''}</p>`}
+    ${(seo.notes||[]).filter(n=>!/who ranks/.test(n)).map(n=>`<p style="margin:6px 0 0;font-size:12px;color:var(--muted)">${esc(n)}</p>`).join('')}
+  </details>`;
+}
+
+// ----------------------------------------------------------- his blog ----
+// "i had build the BAckend from where the blogs get uploaded and the blog is
+//  blog.php" — a post goes into his backend a piece at a time, each with its
+// own Copy button, and he says when it is up.
+const BLOG = {};                 // id -> post, for the Copy buttons
+const POSTED = {};               // id -> the address he typed, kept across refreshes
+let BLOGSIG = '';
+
+async function copyText(text, btn){
+  let ok = false;
+  try{ await navigator.clipboard.writeText(text); ok = true; }catch(e){}
+  if(!ok){
+    const t = document.createElement('textarea');
+    t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try{ ok = document.execCommand('copy'); }catch(e){}
+    t.remove();
+  }
+  if(btn){
+    const was = btn.textContent;
+    btn.textContent = ok ? 'Copied' : 'Could not copy';
+    btn.classList.toggle('done', ok);
+    setTimeout(()=>{ btn.textContent = was; btn.classList.remove('done'); }, 1600);
+  }
+  if(!ok) toast('Your browser would not copy it. Open "Read the post", select the text and press Ctrl+C.', 'bad');
+}
+function copyField(id, key, btn){ const p = BLOG[id]; if(p) copyText(String(p[key] || ''), btn); }
+function copyAlt(id, i, btn){ const img = ((BLOG[id] || {}).images || [])[i]; if(img) copyText(img.alt || '', btn); }
+
+function field(id, key, label, value, opts){
+  opts = opts || {};
+  if(!value) return '';
+  return `<div class="field"><div class="lab"><b>${esc(label)}</b>${opts.hint ? `<span>${esc(opts.hint)}</span>` : ''}<span class="sp"></span>
+    <button class="btn copy" onclick="copyField(${id}, '${key}', this)">Copy</button></div>
+    ${opts.long ? `<div class="long">${esc(value)}</div>` : `<div class="val${opts.mono ? ' mono' : ''}">${esc(value)}</div>`}</div>`;
+}
+
+function plainCopy(x, site){
+  const pp = x.plain_page;
+  if(pp.down) return `<div class="plain"><p>The plain copy at <span class="mono">/${esc(pp.page)}</span> is being
+    taken down (${esc(pp.down)}). Once IT has done it, that address sends visitors to your blog.</p></div>`;
+  return `<div class="plain"><p>This post was put up earlier as a page of its own at
+    <a href="${escA(site + '/' + pp.page)}" target="_blank" rel="noopener">/${esc(pp.page)}</a> &mdash; outside your blog
+    and not in your blog list. Put it on your blog, then delete that page.</p>
+    <button class="btn stop" onclick="blogAct('take_down', ${x.id}, this)">Delete that page</button></div>`;
+}
+
+function drawConn(bk){
+  const check = `<button class="btn glass" onclick="blogCheck(this)">${bk.checked_at ? 'Check again' : 'Check the connection'}</button>`;
+  if(bk.ok) return `<div class="notice conn"><p>Connected to your blog &mdash; the <span class="mono">${esc(bk.table)}</span> table,
+      ${esc(bk.posts)} post${bk.posts==1?'':'s'}${bk.checked_at ? ', checked '+esc(ago(bk.checked_at)) : ''}.</p>${check}</div>`;
+  if(bk.old_connector) return `<div class="notice amber conn" style="display:block"><p style="margin:0 0 4px"><b>One step on your
+      side before the agency can post to your blog.</b> Your website has the older connector file.</p>
+      <ol><li>In hPanel open <b>File Manager</b> and go into your website's <span class="mono">agency-api</span> folder.</li>
+        <li>Upload <span class="mono">paste-into-your-site/agency-api.php</span> from the agency folder on your PC, and rename it
+          <span class="mono">index.php</span>, replacing the old one. Leave <span class="mono">token.php</span> as it is.</li>
+        <li>Press the button below.</li></ol><div style="margin-top:10px">${check}</div></div>`;
+  if(bk.error) return `<div class="notice amber conn"><p>The agency could not reach your blog: ${esc(bk.error)}</p>${check}</div>`;
+  return `<div class="notice conn"><p>The agency has not looked at your blog backend yet.</p>${check}</div>`;
+}
+
+function moveNote(x){
+  const m = x.moving;
+  if(!m) return '';
+  if(m.status === 'approved') return `<div class="moving"><span class="busy">${m.what === 'posting'
+      ? 'IT is putting it on your blog — tests first, then the post.'
+      : m.what === 'reposting' ? 'IT is putting it up again — tests first.' : 'IT is taking it off your blog.'}</span></div>`;
+  const again = m.what === 'removing' ? 'blog_unpublish' : m.what === 'reposting' && x.on_backend ? 'blog_repost' : 'blog_publish';
+  return `<div class="moving bad"><p>${m.what === 'posting' ? 'It did not go on your blog'
+      : m.what === 'reposting' ? 'It was not put up again' : 'It was not taken off'}:
+      ${esc(m.note || 'no reason was given')}</p>
+      <button class="btn" onclick="toBlog('${again}', ${x.id}, this)">Try again</button></div>`;
+}
+
+function drawBlog(p){
+  const list = p.for_blog || [], done = p.on_blog || [];
+  const bk = p.blog_backend || {};
+  const site = String(p.blog_home || '').replace(/\/blog\.php$/, '');
+  const sig = JSON.stringify([list.map(x=>[x.id, x.title, (x.plain_page||{}).down, x.moving]),
+                              done.map(x=>[x.id, x.url, (x.plain_page||{}).down, x.moving]),
+                              [bk.ok, bk.checked_at, bk.error, bk.old_connector],
+                              [...OPEN].filter(k=>k.startsWith('b:'))]);
+  if(sig === BLOGSIG) return;         // never redraw under his typing
+  BLOGSIG = sig;
+  for(const x of list) BLOG[x.id] = x;
+  $('#blogConn').innerHTML = drawConn(bk);
+  $('#blogHead').textContent = list.length ? `${list.length} post${list.length===1?'':'s'}` : '';
+  $('#blogList').innerHTML = list.length ? list.map(x=>`
+    <article class="page" data-id="${x.id}">
+      <h3>${esc(x.title)}</h3>
+      <div class="meta">${[x.keyword ? 'for “'+x.keyword+'”' : '', x.at ? 'written '+ago(x.at) : ''].filter(Boolean).map(esc).join(' &middot; ')}</div>
+      ${x.plain_page ? plainCopy(x, site) : ''}
+      ${seoPanel(x.seo)}
+      ${x.moving && x.moving.status === 'approved' ? moveNote(x) : `
+      ${moveNote(x)}
+      ${x.moving ? '' : `<div class="go-blog"><button class="btn go" onclick="toBlog('blog_publish', ${x.id}, this)">Put it on my blog</button>
+        <span class="msg">${bk.ok ? 'IT adds it to your blog after the tests.' : 'Needs the connection above — or copy it in yourself.'}</span></div>`}`}
+      <div class="row">
+        <button class="btn quiet" onclick="toggle('b', ${x.id})">${OPEN.has('b:'+x.id) ? 'Hide the post' : 'Read the post'}</button>
+        <span style="flex:1"></span>
+        <button class="btn stop" onclick="blogAct('blog_drop', ${x.id}, this)">Drop it</button>
+        <button class="btn" onclick="blogAct('blog_rewrite', ${x.id}, this)">Write it again</button>
+      </div>
+      ${frameFor('b', x.id, x.html ? '<h1>' + esc(x.title) + '</h1>' + x.html : '')}
+      <details class="copyin" ${OPEN.has('c:'+x.id) || (!bk.ok && !OPEN.has('c-:'+x.id)) ? 'open' : ''} ontoggle="copyOpen(${x.id}, this.open)">
+      <summary>Copy it in yourself instead</summary>
+      <ol class="steps">
+        <li>Open your blog backend and start a new post.</li>
+        <li>Copy each piece below into the matching box. If the article box has a <b>Source</b> or <b>&lt;&gt;</b> button, paste the HTML there; if it is a plain box, use the plain text.</li>
+        <li>Save the pictures and upload them to the post.</li>
+        <li>Publish it in your backend, then press <b>I put it on my blog</b> below.</li>
+      </ol>
+      <div class="fields">
+        ${field(x.id, 'title', 'Title', x.title)}
+        ${field(x.id, 'slug', 'Link name', x.slug, {mono:true, hint:'the slug — what comes after ?slug='})}
+        ${field(x.id, 'meta', 'Short description', x.meta, {hint:'for your blog list and for Google'})}
+        ${field(x.id, 'keywords', 'Keywords', x.keywords)}
+        ${field(x.id, 'html', 'The article — HTML', x.html, {long:true, hint:'with headings and pictures in place'})}
+        ${field(x.id, 'text', 'The article — plain text', x.text, {long:true, hint:'for a plain box'})}
+        ${(x.images||[]).length ? `<div class="field"><div class="lab"><b>Pictures</b><span>open one, then right-click → Save image as</span></div>
+          <div class="pics">${x.images.map((img, i)=>`<div class="pic">
+            <a href="${escA(img.src)}" target="_blank" rel="noopener"><img src="${escA(img.src)}" alt="${escA(img.alt)}" loading="lazy"></a>
+            <div style="margin-top:4px">${img.own ? 'Your own photo' : esc(img.credit || 'Illustrative photo — keep its caption')}</div>
+            <div class="row"><a class="btn copy" href="${escA(img.src)}" target="_blank" rel="noopener">Open</a>
+              ${img.alt ? `<button class="btn copy" onclick="copyAlt(${x.id}, ${i}, this)">Copy alt text</button>` : ''}</div>
+          </div>`).join('')}</div></div>` : ''}
+      </div>
+      <div class="posted">
+        <input id="posted${x.id}" value="${escA(POSTED[x.id] ?? x.url)}" oninput="POSTED[${x.id}]=this.value"
+               aria-label="The post's address on your blog" spellcheck="false">
+        <button class="btn" onclick="blogPosted(${x.id}, this)">I put it on my blog</button>
+      </div>
+      </details>
+    </article>`).join('')
+    : `<div class="empty">No post is waiting to go on your blog.</div>`;
+
+  $('#blogDone').innerHTML = done.length ? `<div class="logwrap" style="margin-bottom:6px"><table class="log">
+    <tr><th>On your blog</th><th>Address</th></tr>
+    ${done.map(x=>`<tr><td>${esc(x.title)}${(x.backend_notes||[]).length ? `<ul class="bnotes">${x.backend_notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+        ${moveNote(x)}${x.on_backend && !x.moving ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn copy" onclick="toBlog('blog_repost', ${x.id}, this)">Put it up again</button>
+          <button class="btn copy stop" onclick="toBlog('blog_unpublish', ${x.id}, this)">Take it off my blog</button></div>` : ''}${x.plain_page && !x.plain_page.down
+        ? `<br><span style="color:var(--amber)">the plain copy is still at /${esc(x.plain_page.page)}</span>
+           <button class="btn copy stop" onclick="blogAct('take_down', ${x.id}, this)">Take it down</button>`
+        : (x.plain_page ? `<br><span style="color:var(--muted)">plain copy: ${esc(x.plain_page.down)}</span>` : '')}</td>
+      <td>${x.url ? `<a class="addr" href="${escA(x.url)}" target="_blank" rel="noopener">${esc(x.url)}</a>` : ''}</td></tr>`).join('')}
+    </table></div>` : '';
+}
+
+async function blogAct(what, id, btn){
+  const words = {blog_drop:'Drop this post? It will not be offered again.',
+                 blog_rewrite:'Send this post back to be written again?',
+                 take_down:'Delete that page from your website? A copy is kept on your server. IT runs the tests first.'}[what];
+  if(words && !confirm(words)) return;
+  btn.disabled = true;
+  const j = await campAct(what, {}, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  BLOGSIG = '';
+  await load();
+}
+
+function copyOpen(id, open){
+  OPEN.delete('c:'+id); OPEN.delete('c-:'+id);
+  OPEN.add((open ? 'c:' : 'c-:') + id);
+}
+
+async function toBlog(what, id, btn){
+  const words = {blog_publish:'Put this post on your blog? IT runs the tests first, then adds it to your blog backend.',
+                 blog_unpublish:'Take this post off your blog? Only a post the agency added can be taken off.',
+                 blog_repost:'Put this post up again? It is taken off your blog and put back as it would go now — with headings, bold key words and its cover picture. IT runs the tests first.'}[what];
+  if(!confirm(words)) return;
+  btn.disabled = true;
+  const j = await campAct(what, {}, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  BLOGSIG = '';
+  await load();
+}
+
+async function blogCheck(btn){
+  btn.disabled = true; btn.textContent = 'Looking at your blog…';
+  const j = await campAct('blog_check', {}, []);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  BLOGSIG = '';
+  await load();
+}
+
+async function blogPosted(id, btn){
+  const url = ($('#posted'+id) || {}).value || '';
+  btn.disabled = true;
+  const j = await campAct('blog_posted', {url}, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  if(j.ok) delete POSTED[id];
+  BLOGSIG = '';
+  btn.disabled = false;
+  await load();
+}
+
+function drawPages(p){
+  drawBlog(p);
+  $('#pageFacts').innerHTML = [
+    `<div class="fact${(p.for_blog||[]).length?' warn':''}"><div class="v">${(p.for_blog||[]).length}</div><div class="l">ready for your blog</div></div>`,
+    `<div class="fact${p.waiting.length?' warn':''}"><div class="v">${p.waiting.length}</div><div class="l">pages for your yes</div></div>`,
+    `<div class="fact"><div class="v">${p.held.length}</div><div class="l">held back by the checks</div></div>`,
+    `<div class="fact"><div class="v">${p.to_write}</div><div class="l">briefed, waiting to be written</div></div>`,
+    p.held_for_seo ? `<div class="fact"><div class="v">${p.held_for_seo}</div><div class="l">waiting on SEO to clear</div></div>` : '',
+    `<div class="fact"><div class="v">${p.published}</div><div class="l">on your website</div></div>`,
+  ].join('');
+
+  const notes = [];
+  if(p.writing) notes.push(`<div class="notice"><span class="busy">Content is writing a page…</span>
+    <p>It appears here when it is finished, usually within a few minutes.</p></div>`);
+  else if(p.to_write > 0 && DATA.sectors.Content) notes.push(`<div class="notice"><p><b>${p.to_write}</b> page${p.to_write===1?' is':'s are'}
+    briefed and waiting to be written. Content writes one per run, or now if you ask.</p>
+    <button class="btn glass" onclick="startJob('write-page', this)">Write the next page now</button></div>`);
+  if(p.failed) notes.push(`<div class="notice amber"><p><b>${p.failed} page${p.failed===1?'':'s'} could not be published.</b>
+    The reason is under Already decided, with a Try again button.</p>
+    <button class="btn" onclick="document.getElementById('pageRecent').scrollIntoView({behavior:'smooth'})">Show me</button></div>`);
+  if(DATA.other_site_changes) notes.push(`<div class="notice"><p>${DATA.other_site_changes} other change${DATA.other_site_changes===1?'':'s'} to your
+    site ${DATA.other_site_changes===1?'is':'are'} waiting in the office under <a href="/">Waiting on you</a>.</p></div>`);
+  if((p.upcoming||[]).length) notes.push(`<div class="notice" style="display:block"><p style="margin:0 0 6px"><b>Next to be written</b></p>
+    ${p.upcoming.map(u=>`<div style="font-size:12.5px;color:var(--muted);padding:2px 0">${esc(u.title)}`
+      + (u.keyword?` — for “${esc(u.keyword)}”`:'')
+      + (u.held_for_seo?` <span class="pill">waiting on SEO</span>`:'') + `</div>`).join('')}</div>`);
+  $('#pageNotice').innerHTML = notes.join('');
+
+  $('#pageHead').textContent = p.waiting.length ? `${p.waiting.length} page${p.waiting.length===1?'':'s'}` : '';
+  $('#pageList').innerHTML = p.waiting.length ? p.waiting.map(x=>`
+    <article class="page" data-id="${x.id}">
+      <h3>${esc(x.title)}</h3>
+      <div class="meta">${[x.file ? 'will be /'+x.file : '', x.keyword ? 'for “'+x.keyword+'”' : '', 'written '+ago(x.queued_at)].filter(Boolean).map(esc).join(' &middot; ')}</div>
+      ${x.why?`<p class="why">${esc(x.why)}</p>`:''}
+      ${(x.warnings||[]).length?`<ul class="reasons">${x.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:''}
+      ${seoPanel(x.seo)}
+      <div class="row">
+        <button class="btn quiet" onclick="toggle('w', ${x.id})">${OPEN.has('w:'+x.id)?'Hide the page':'Read the page'}</button>
+        <span style="flex:1"></span>
+        <button class="btn stop" onclick="decidePage('reject_page', ${x.id}, this)">Turn down</button>
+        <button class="btn go" onclick="decidePage('publish', ${x.id}, this)">Approve for the website</button>
+      </div>
+      ${frameFor('w', x.id, x.html)}
+    </article>`).join('')
+    : `<div class="empty">No service page is waiting for you.</div>`;
+
+  // An approved page that could not go yet says why, and when it goes by itself.
+  const rest = p.site_resting || {};
+  const waitingNote = x => /waiting/.test(x.note||'') ? `<div style="font-size:12.5px;color:var(--amber);margin-top:4px">${esc(x.note)}</div>` : '';
+  $('#pageApproved').innerHTML = p.approved.length ? `<h2>Approved, waiting to go live</h2>
+    <div class="notice" style="display:block">
+    ${p.approved.map(x=>`<p style="margin:0 0 8px"><b>${esc(x.title)}</b>${waitingNote(x)}</p>`).join('')}
+    <p style="margin:0 0 10px;color:var(--muted)">${rest.until
+      ? `The agency paused contact with your website (${esc(rest.why||'it stopped answering')}) and tries again by itself at
+         ${new Date(rest.until*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}. If your site opens fine on your phone, press the button to try now.`
+      : `IT runs the tests, then puts ${p.approved.length===1?'it':'them'} on your website.`}</p>
+    ${p.publishing ? '<span class="busy">IT is running the tests and publishing…</span>'
+                   : `<button class="btn glass" onclick="startJob('publish-now', this)">${rest.until ? 'My site opens fine — try now' : 'Put it live now'}</button>`}</div>` : '';
+
+  $('#heldHead').textContent = p.held.length ? `${p.held.length} page${p.held.length===1?'':'s'}` : '';
+  $('#heldList').innerHTML = p.held.length ? p.held.map(x=>`
+    <article class="page held" data-id="${x.id}">
+      <h3>${esc(x.title||'(untitled)')}</h3>
+      <div class="meta">${[x.keyword ? 'for “'+x.keyword+'”' : ''].filter(Boolean).map(esc).join('')}</div>
+      ${(x.why||[]).length?`<ul class="reasons">${x.why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`:''}
+      <div class="row">
+        <button class="btn quiet" onclick="toggle('h', ${x.id})">${OPEN.has('h:'+x.id)?'Hide the page':'Read what was written'}</button>
+        <span style="flex:1"></span>
+        <button class="btn stop" onclick="decidePage('discard_page', ${x.id}, this)">Drop it</button>
+        <button class="btn glass" onclick="decidePage('rewrite', ${x.id}, this)">Write it again</button>
+      </div>
+      ${frameFor('h', x.id, x.html)}
+    </article>`).join('')
+    : `<div class="empty">Nothing is held back.</div>`;
+
+  // Pages of their own are not made any more; the section shows only leftovers.
+  $('#pagesBlock').style.display = (p.waiting.length || p.approved.length) ? '' : 'none';
+  const label = (s, note) => /Ready for your blog/.test(note||'') ? '<span class="pill">moved to your blog</span>'
+    : ({applied:'<span class="pill amber">a page on your site</span>', failed:'<span class="pill bad">could not publish</span>',
+        removed:'<span class="pill ok">deleted from your site</span>',
+        rejected:'<span class="pill">turned down</span>'}[s] || `<span class="pill">${esc(s)}</span>`);
+  const delRow = x => {
+    if(x.status !== 'applied') return '';
+    const m = x.removing;
+    if(m && m.status === 'approved') return `<div style="margin-top:8px"><span class="busy">IT is deleting it — tests first.</span></div>`;
+    return `${m && m.status === 'failed' ? `<div style="margin-top:6px;color:var(--danger)">It was not deleted: ${esc(m.note)}</div>` : ''}
+      <div style="margin-top:6px;color:var(--muted)">A page of its own, outside your blog. Put the post in your blog from
+        Ready for your blog, then delete this page.</div>
+      <div class="row" style="margin-top:8px"><button class="btn stop" onclick="decidePage('remove_page', ${x.id}, this)">Delete from website</button></div>`;
+  };
+  $('#pageRecent').innerHTML = p.recent.length ? `<div class="logwrap"><table class="log">
+    <tr><th>Page</th><th>What happened</th></tr>
+    ${p.recent.map(x=>`<tr><td>${esc(x.title)}${x.file?'<br><span class="addr">/'+esc(x.file)+'</span>':''}</td>
+      <td>${label(x.status, x.note)}${x.note?'<br><span style="color:var(--muted)">'+esc(x.note)+'</span>':''}
+        ${delRow(x)}
+        ${x.status === 'failed' ? `<div class="row" style="margin-top:8px">
+          <button class="btn go" onclick="decidePage('retry_page', ${x.id}, this)">Try again</button>
+          <button class="btn stop" onclick="decidePage('drop_page', ${x.id}, this)">Drop it</button></div>` : ''}</td></tr>`).join('')}
+    </table></div>` : `<div class="empty">Nothing decided yet.</div>`;
+}
+
+async function decidePage(what, id, btn){
+  const words = {publish:'Approve this page for your website? IT runs the tests before it goes live.',
+                 reject_page:'Turn this page down? It will not be published.',
+                 rewrite:'Send this page back to be written again?',
+                 retry_page:'Try putting this page on your website again? IT runs the tests first.',
+                 drop_page:'Drop this page? It will not be published.',
+                 remove_page:'Delete this page from your website? A copy is kept on your server, so it can be put back. IT runs the tests first.',
+                 discard_page:'Drop this held page?'}[what];
+  if(!confirm(words)) return;
+  btn.disabled = true;
+  const j = await act(what, [id]);
+  toast(j.head || j.error || 'Done.', j.ok ? 'good' : 'bad');
+  await load();
+}
+
+async function startJob(job, btn){
+  btn.disabled = true; btn.textContent = 'Starting…';
+  let j;
+  try{
+    const r = await fetch('/api/review/start/'+job, {method:'POST'});
+    j = await r.json();
+  }catch(e){ j = {ok:false, error:'Could not reach the office server.'}; }
+  if(!j.ok){ toast(j.error || 'Could not start it.', 'bad'); btn.disabled = false; return; }
+  toast({'draft-mails':'Writing a mail for each lead. They appear here as they are finished.',
+         'write-page':'Content is writing the next page.',
+         'publish-now':'IT is running the tests; approved pages go live when they pass.'}[job], 'good');
+  setTimeout(load, 2500);
+}
+
+// Faster while a desk is working, so "writing…" turns into mail on its own.
+function tick(){
+  load().finally(()=>{
+    const busy = DATA && (DATA.mails.writing || (DATA.mails.preflight||{}).sending
+                          || DATA.pages.writing || DATA.pages.publishing);
+    setTimeout(tick, busy ? 6000 : 30000);
+  });
+}
+
+// /mail and /posts are the two rooms; /review opens either from its hash.
+const ROOM = location.pathname.startsWith('/posts') ? 'pages'
+           : location.pathname.startsWith('/mail') ? 'mails'
+           : (location.hash === '#pages' ? 'pages' : 'mails');
+show(ROOM);
+tick();
+</script>
+</body>
+</html>

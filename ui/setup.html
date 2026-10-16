@@ -3,28 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Glassworks Agency — Setup</title>
+<title>Botix — Setup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/botix.css">
 <style>
-:root{
-  --bg:#0c1216; --panel:#131d23; --panel2:#182530; --raise:#1d2c35;
-  --wall:#33484f; --walltop:#3f5860;
-  --line:#25343c; --line2:#3a515b; --etch:#84a4b1;
-  --text:#e7eff3; --muted:#7d919c; --faint:#54666f;
-  --glass:#54cbd9; --glass-dim:rgba(84,203,217,.15);
-  --amber:#eaa543; --amber-dim:rgba(234,165,67,.15);
-  --danger:#e5565b; --danger-dim:rgba(229,86,91,.14); --ok:#5cc088; --ok-dim:rgba(92,192,136,.13);
-}
 *{box-sizing:border-box}
-body{margin:0;background:radial-gradient(900px 500px at 70% -60px,rgba(84,203,217,.05),transparent 60%),var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
-.etch{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
-a{color:var(--glass);text-decoration:none}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased;min-height:100vh}
+.etch{font-family:var(--mono);text-transform:uppercase;letter-spacing:.2em;color:var(--etch);font-size:10px}
+a{color:var(--link);text-decoration:none}
 button{font-family:inherit}
-code{font-family:'IBM Plex Mono',monospace}
+code{font-family:var(--mono)}
 
-header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:rgba(12,18,22,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+header{position:fixed;top:0;left:0;right:0;height:58px;z-index:50;display:flex;align-items:center;gap:16px;padding:0 22px;background:var(--bar-bg);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .brand{display:flex;flex-direction:column;gap:2px}.brand b{font-size:14px}.brand span{font-size:9px}
 .badge{display:flex;align-items:center;gap:9px;padding:7px 13px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2);font-size:13px}
 .badge .fav{width:20px;height:20px;border-radius:6px;background:var(--glass-dim);border:1px solid var(--glass);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--glass)}
@@ -36,18 +29,18 @@ main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 .title{font-size:22px;font-weight:600;margin:0 0 6px}
 .lead{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 26px;max-width:64ch}
 
-.card{background:linear-gradient(180deg,rgba(20,32,38,.72),rgba(10,16,20,.55));border:1px solid var(--line2);border-radius:14px;margin-bottom:20px;overflow:hidden;box-shadow:inset 0 1px 0 var(--walltop),0 8px 20px rgba(0,0,0,.22)}
+.card{background:var(--surface);border:1px solid var(--line2);border-radius:14px;margin-bottom:20px;overflow:hidden;box-shadow:var(--shadow)}
 .card.optional{border-style:dashed;border-color:var(--line)}
 .card-h{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
 .card-h .ic{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
 .card-h b{font-size:14px;display:block}
 .card-h small{color:var(--muted);font-size:11px}
-.optpill{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);border:1px solid var(--amber);background:var(--amber-dim);border-radius:999px;padding:3px 9px}
+.optpill{margin-left:auto;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);border:1px solid var(--amber);background:var(--amber-dim);border-radius:999px;padding:3px 9px}
 .card-b{padding:18px}
 
 .field{margin:0 0 14px}.field:last-child{margin-bottom:0}
 .field label{display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:6px}
-.field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:'IBM Plex Mono',monospace}
+.field input,.field select{width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px;font-family:var(--mono)}
 .field input::placeholder{color:var(--faint)}
 .field input:focus,.field select:focus{outline:none;border-color:var(--glass);box-shadow:0 0 0 3px var(--glass-dim)}
 .hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45}
@@ -61,10 +54,10 @@ main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 .hidden{display:none}
 
 .pbtn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass-dim);color:var(--glass);font-weight:600;font-size:13.5px;cursor:pointer}
-.pbtn:disabled{opacity:.55;cursor:default}.pbtn:hover:not(:disabled){background:rgba(84,203,217,.22)}
+.pbtn:disabled{opacity:.55;cursor:default}.pbtn:hover:not(:disabled){background:var(--accent-soft)}
 .mini{padding:7px 11px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--text);font-size:12px;cursor:pointer}
 .mini:hover{border-color:var(--glass);color:var(--glass)}
-.mini.del{border-color:rgba(229,86,91,.4);color:var(--danger)}
+.mini.del{border-color:var(--bad-line);color:var(--danger)}
 .mini.del:hover{background:var(--danger-dim)}
 .btnrow{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
 
@@ -75,28 +68,28 @@ main{max-width:760px;margin:0 auto;padding:88px 22px 80px}
 #pfOut .warn{color:var(--amber)}#pfOut .dim{color:var(--muted)}
 #pfOut li{list-style:disc}
 
-.cred{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:rgba(24,37,48,.4)}
+.cred{border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:14px;background:var(--sunken)}
 .cred-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.cred-h b{font-size:13.5px}.cred-h .mono{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
-.endpoint{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--etch);margin:2px 0 10px;word-break:break-all}
+.cred-h b{font-size:13.5px}.cred-h .mono{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.endpoint{font-family:var(--mono);font-size:10.5px;color:var(--etch);margin:2px 0 10px;word-break:break-all}
 .models{margin-top:12px;border-top:1px dashed var(--line);padding-top:12px}
 .model{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:9px;background:var(--panel2)}
 .model-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.model-top .mid{font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500}
-.tagchip{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:1px 7px}
+.model-top .mid{font-family:var(--mono);font-size:12.5px;font-weight:500}
+.tagchip{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:1px 7px}
 .tagchip.paid{color:var(--amber);border-color:var(--amber)}
 .tagchip.free{color:var(--ok);border-color:var(--ok)}
-.caps{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px}
+.caps{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:6px}
 .caps .y{color:var(--ok)}.caps .n{color:var(--danger)}.caps .q{color:var(--amber)}
 .testout{margin-top:8px;font-size:12px;line-height:1.5}
-.testout.ok{color:#bfe9cf}.testout.err{color:#f2b6b8}
-.testout pre{background:#0d1418;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:11px;color:var(--muted);max-height:240px;white-space:pre-wrap;word-break:break-word}
+.testout.ok{color:var(--done)}.testout.err{color:var(--stuck)}
+.testout pre{background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:11px;color:var(--muted);max-height:240px;white-space:pre-wrap;word-break:break-word}
 details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 
 .banner{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:12.5px;line-height:1.5;display:none}
 .banner.show{display:block}
-.banner.ok{border:1px solid var(--ok);background:var(--ok-dim);color:#bfe9cf}.banner.ok b{color:var(--ok)}
-.banner.err{border:1px solid var(--danger);background:var(--danger-dim);color:#f2b6b8}
+.banner.ok{border:1px solid var(--ok-line);background:var(--ok-dim);color:var(--done)}.banner.ok b{color:var(--ok)}
+.banner.err{border:1px solid var(--bad-line);background:var(--danger-dim);color:var(--stuck)}
 .foot{margin-top:22px;display:flex;align-items:flex-start;gap:8px;color:var(--muted);font-size:11.5px;line-height:1.5}
 .foot .lock{color:var(--glass)}
 </style>
@@ -104,7 +97,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 <body>
 
 <header>
-  <div class="brand"><b>Glassworks Agency</b><span class="etch">Setup</span></div>
+  <div class="brand"><b id="brandName">Botix</b><span class="etch">Setup</span></div>
   <div class="badge"><span class="fav">GD</span><span>First-time setup</span></div>
   <div class="spacer"></div>
   <a class="htab" href="/">Office</a>
@@ -114,7 +107,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 
 <main>
   <h1 class="title">Wire up the agency</h1>
-  <p class="lead">Each section below has its <b>own Save button</b> — saving one never touches another. Add your AI providers, point each part of the agency at one, and you're running. Secrets are written on the server only, masked after saving, and never committed to git.</p>
+  <p class="lead">Each section below has its <b>own Save button</b> — saving one never touches another. Every sector thinks with Claude; pick which Claude model each one uses, and you're running. Secrets are written on the server only, masked after saving, and never committed to git.</p>
 
   <!-- WEBSITE ------------------------------------------------------------- -->
   <section class="card">
@@ -122,8 +115,14 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
     <div class="card-b">
       <div class="field">
         <label for="siteUrl">Website address</label>
-        <input id="siteUrl" placeholder="https://glassworks.ae" inputmode="url">
+        <input id="siteUrl" placeholder="https://yourbusiness.ae" inputmode="url">
         <div class="hint">The address people type to reach your site, including <code>https://</code>.</div>
+      </div>
+      <div class="field">
+        <label for="siteName">What to call it on screen <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+        <input id="siteName" placeholder="leave blank to use the address">
+        <div class="hint">Shown in the office header and the website switcher. Leave it
+          blank and your domain is used, which is at least always correct.</div>
       </div>
       <span style="display:block;font-size:12px;font-weight:500;margin-bottom:6px">Website mode</span>
       <div class="seg" id="modeSeg">
@@ -140,40 +139,48 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
           <div class="hint">Only for full access. The secret token your site checks before any change.</div></div>
       </div>
       <div class="btnrow"><button class="pbtn" id="saveWebsite">Save website</button><span class="inl dim" id="siteMsg"></span></div>
-    </div>
-  </section>
 
-  <!-- AI PROVIDERS -------------------------------------------------------- -->
-  <section class="card">
-    <div class="card-h"><div class="ic">🧠</div><div><b>2 · AI providers</b><small>One credential (base URL + key) can hold many models. Use any provider.</small></div></div>
-    <div class="card-b">
-      <div id="credList"><p class="hint">Loading providers…</p></div>
-
-      <div class="cred" style="border-style:dashed">
-        <div class="cred-h"><b>Add a provider</b></div>
-        <div class="row">
-          <div class="field"><label>Provider name</label><input id="np_name" placeholder="e.g. Forge"><div class="hint">Just a label for you.</div></div>
-          <div class="field"><label>Auth style</label>
-            <select id="np_auth"><option value="bearer">Bearer (most common)</option><option value="x-api-key">x-api-key (Anthropic)</option><option value="token">Token</option><option value="custom">Custom header…</option></select>
-            <div class="hint">How the provider expects the key. Bearer works for most.</div></div>
+      <div id="connectBox" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+        <span style="display:block;font-size:13px;font-weight:600;margin-bottom:6px">Connect it the easy way</span>
+        <p class="hint" id="connState" style="margin:0 0 10px">Checking how your website is connected…</p>
+        <div class="btnrow" style="flex-wrap:wrap;gap:8px">
+          <button class="pbtn" id="connZip" type="button">Download your connector</button>
+          <button class="mini" id="connCheck" type="button">Check</button>
+          <button class="mini" id="connRo" type="button">Use read-only</button>
         </div>
-        <div class="field np_customwrap hidden"><label>Custom header name</label><input id="np_custom" placeholder="X-Api-Key"></div>
-        <div class="field"><label>Base URL</label><input id="np_base" placeholder="https://api.forge.tld/v1" inputmode="url">
-          <div class="hint">The endpoint address the provider gave you. Paste the whole thing — it's tidied to the base automatically. Leave blank only for official Anthropic.</div></div>
-        <div class="field"><label>API key</label><input id="np_key" type="password" placeholder="paste key">
-          <div class="hint">Stored on the server only, masked after saving.</div></div>
-        <div class="field"><label>Credit / balance note (optional)</label><input id="np_note" placeholder="e.g. 20 USD promo credit"><div class="hint">Handy for promo gateways with odd credit limits.</div></div>
-        <div class="btnrow"><button class="pbtn" id="addCred">Save provider</button><span class="inl dim" id="addCredMsg"></span></div>
+        <p class="hint" style="margin-top:8px">The download is made for your website, with its secret already inside.
+          Upload the zip into the folder your home page is in, choose <b>Extract</b>, then press <b>Check</b>.</p>
+        <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px">My website is WordPress</summary>
+          <p class="hint" style="margin:8px 0">In WordPress open <b>Users → Profile → Application Passwords</b>, type a name,
+            press <b>Add New</b>, and paste the password it shows here. No file to upload.</p>
+          <div class="field"><label for="wpUser">WordPress username</label><input id="wpUser" autocomplete="off"></div>
+          <div class="field"><label for="wpPass">Application password</label><input id="wpPass" type="password" autocomplete="off"></div>
+          <div class="btnrow"><button class="mini" id="connWp" type="button">Save and check</button></div>
+          <p class="hint" style="margin:14px 0 6px"><b>Then, once: the Botix helper.</b> Pages and posts need nothing more.
+            For titles, descriptions and the other tags in each page's head — what the Fix button puts right — install
+            the free helper plugin: download it, then in WordPress open <b>Plugins → Add New → Upload Plugin</b>,
+            choose the zip (do not unzip it), <b>Install Now</b>, <b>Activate</b>. It updates itself after that.</p>
+          <div class="btnrow"><button class="mini" id="connHelper" type="button">Download the WordPress helper</button>
+            <span class="inl dim" id="helperState"></span></div>
+        </details>
+        <span class="inl dim" id="connMsg"></span>
       </div>
     </div>
   </section>
 
-  <!-- ROUTING ------------------------------------------------------------- -->
+  <!-- THE CLAUDE TEAM ----------------------------------------------------- -->
   <section class="card">
-    <div class="card-h"><div class="ic">🔀</div><div><b>3 · Who runs what</b><small>Point each part of the agency at a model. Each row saves on its own.</small></div></div>
+    <div class="card-h"><div class="ic">🧠</div><div><b>2 · The Claude team</b><small>Which Claude model each sector thinks with. Each row saves on its own.</small></div></div>
     <div class="card-b">
-      <p class="hint" style="margin-top:0;margin-bottom:14px">Each sector's brain is a <b>text (LLM) model</b>, so only your LLM models appear here — image and embedding models live on <b>the shelf</b> below, borrowed when needed. The <b>MD</b> row is the most important (it runs the Managing Director &amp; Critic). A <b>fallback</b> is used if the first choice fails.</p>
-      <div id="routeList"><p class="hint">Loading…</p></div>
+      <p class="hint" style="margin-top:0;margin-bottom:14px">Every sector thinks with Claude, using the login Claude Code already has on this machine — no API keys. Nothing above <b>Opus 5</b> can be picked. If a model is slow or busy, that sector steps down to the next model (Opus 5 → Opus 4.8 → 4.7 → 4.6 → Sonnet → Haiku) and every other sector steps round it too, for a few minutes. <b>MD, Security and IT</b> are the main three: when the main account's allowance runs out they move to the backup account at their full model, and the others give way.</p>
+      <div id="teamState" class="hint" style="margin:0 0 12px">Loading…</div>
+      <div id="teamList"></div>
+      <div class="btnrow"><button class="pbtn" id="teamTest">Test every model</button><button class="mini" id="teamForget">Try every model at the top again</button><span class="inl dim" id="teamMsg"></span></div>
+      <div class="hint">The test makes one tiny real call per model, on each signed-in account. It uses a little of your Claude allowance and can take a minute or two.</div>
+      <div id="teamTestOut" class="testout"></div>
+      <details style="margin-top:12px"><summary>Adding a backup Claude account</summary>
+        <div class="hint" style="margin-top:8px">In PowerShell, in the agency folder, run:<br><code>python -m providers.claude_team --login-backup</code><br>A browser opens — sign in with the <b>other</b> account. Its login is kept in its own folder, so it never signs your main account out, and the folder is saved to <code>.env</code> as <code>CLAUDE_BACKUP_DIR</code>. Restart the server afterwards.</div>
+      </details>
     </div>
   </section>
 
@@ -206,9 +213,37 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
         <p class="hint" style="margin-top:0;margin-bottom:10px">Your site's real search clicks and queries. Create a Google service account, give it access to your property, then paste its JSON key.</p>
         <div class="field"><label>Property</label><input id="gsc_prop" placeholder="sc-domain:glassworks.ae"><div class="hint">Either <code>sc-domain:yoursite.ae</code> or the full <code>https://…</code> property.</div></div>
         <div class="field"><label>Service-account JSON key</label>
-          <textarea id="gsc_json" rows="4" placeholder="leave blank to keep saved" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:12px;font-family:'IBM Plex Mono',monospace"></textarea>
+          <textarea id="gsc_json" rows="4" placeholder="leave blank to keep saved" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:12px;font-family:var(--mono)"></textarea>
           <div class="hint">Paste the whole JSON file. Kept in a git-ignored file on the server, never shown back.</div></div>
-        <div class="btnrow"><button class="pbtn" id="saveGsc">Save Search Console</button><span class="inl dim" id="gscMsg"></span></div>
+        <div class="btnrow"><button class="pbtn" id="saveGsc">Save Search Console</button><button class="mini" id="testGsc">Test</button><span class="inl dim" id="gscMsg"></span></div>
+        <div class="hint">Test asks Google straight away whether the agency can read your property, and says exactly what to change if not.</div>
+      </div>
+
+      <div class="cred">
+        <div class="cred-h"><b>Google search — who ranks for a keyword</b> <small style="color:var(--muted);font-weight:400">optional · closed to new users</small></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px"><b>Google has closed this to new customers</b> (its
+          Custom Search JSON API stopped taking new sign-ups in 2025, and new search engines can no longer search the
+          whole web). If you did not already have one, <b>leave this empty</b> — there is nothing to type in Google's
+          "sites to search" box that makes it work. SEO still researches every keyword, reads your rivals' pages and
+          uses Search Console without it; only the "who is on page one for this keyword" list is missing.</p>
+        <div class="field"><label>Search engine ID</label><input id="cse_id" placeholder="e.g. 017576662512468239146:omuauf_lfve"></div>
+        <div class="field"><label>API key</label><input id="cse_key" type="password" placeholder="leave blank to keep saved"></div>
+        <div class="btnrow"><button class="pbtn" id="saveCse">Save Google search</button><span class="inl dim" id="cseMsg"></span></div>
+      </div>
+
+      <div class="cred">
+        <div class="cred-h"><b>TomTom — businesses on the map</b></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Where Leads finds UAE businesses by area: name, trade,
+          address, phone and website — then reads each website for its email. The alternative to Google Places, with
+          no Google account needed. Free up to a daily allowance, which covers this business's searching. If you also
+          have a Google Places key, Google is tried first and TomTom takes over whenever Google refuses.</p>
+        <ol class="hint" style="margin:0 0 10px;padding-left:18px;line-height:1.7">
+          <li>Go to <code>developer.tomtom.com</code> and create a free account.</li>
+          <li>Open <b>Dashboard → Keys</b>. Copy your key (or press <b>Create key</b> and make sure <b>Search API</b> is ticked).</li>
+          <li>Paste it below, press <b>Save</b>, then <b>Test</b>.</li>
+        </ol>
+        <div class="field"><label>TomTom API key</label><input id="tt_key" type="password" placeholder="paste key"></div>
+        <div class="btnrow"><button class="pbtn" id="saveTomtom">Save TomTom</button><button class="mini" id="testTomtom">Test</button><span class="inl dim" id="ttMsg"></span></div>
       </div>
 
     </div>
@@ -218,7 +253,7 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
   <section class="card">
     <div class="card-h"><div class="ic">🗄️</div><div><b>5 · The shelf (shared API cabinet)</b><small>Shared capability APIs any agent can borrow — one holder at a time, everyone else queues</small></div></div>
     <div class="card-b">
-      <p class="hint" style="margin-top:0">Each sector has its own brain (set above). Everything else — SEO data, stock graphics, email delivery, the crawler — lives here and is <b>borrowed</b>: an agent takes a shelf's lock, uses it, hands it back. Different shelves run at once; two agents wanting the same shelf take turns. Outside data is flagged for Security; spend counts against the cap.</p>
+      <p class="hint" style="margin-top:0">Each sector thinks with its own Claude model (set above), which is never lent out. Everything else — SEO data, stock graphics, email delivery, the crawler — lives here and is <b>borrowed</b>: an agent takes a shelf's lock, uses it, hands it back. Different shelves run at once; two agents wanting the same shelf take turns. Outside data is flagged for Security; spend counts against the cap.</p>
 
       <div class="cred">
         <div class="cred-h"><b>Live shelf board</b>
@@ -226,6 +261,14 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
           <button class="mini" id="shelfRefresh">Refresh</button>
         </div>
         <div id="shelfBoard"><p class="hint">Loading…</p></div>
+      </div>
+
+      <div class="cred">
+        <div class="cred-h"><b>Usage and limits</b>
+          <button class="mini" id="usageRefresh" style="margin-left:auto">Refresh</button>
+        </div>
+        <p class="hint" style="margin-top:0">What you have used of each outside service. <b>Counts are facts</b> — the agency knows exactly how many requests it made. <b>Money is an estimate</b> from the rates you set below, not an invoice. Always confirm the bill on the provider's own dashboard.</p>
+        <div id="usageBoard"><p class="hint">Loading…</p></div>
       </div>
 
       <div class="hint" style="margin:14px 0 8px"><b>Tool APIs on the shelf</b> — add the 3rd-party services here; each sits on a capability shelf.</div>
@@ -264,21 +307,47 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
   <section class="card optional">
     <div class="card-h"><div class="ic">➕</div><div><b>6 · Optional extras</b><small>Not required to start — add whenever you're ready</small></div><span class="optpill">Optional</span></div>
     <div class="card-b">
-      <div class="row">
-        <div class="field"><label>DataForSEO login</label><input id="dfsLogin" placeholder="you@email.com"><div class="hint">For rank tracking. Skip to run without it.</div></div>
-        <div class="field"><label>DataForSEO password</label><input id="dfsPassword" type="password" placeholder="leave blank to keep saved"><div class="hint">API password from the DataForSEO dashboard.</div></div>
+      <!-- DataForSEO used to have its own two fields here, under "Optional
+           extras", which is a place that reads as "things still to do". It is
+           not optional-extra shaped: it is a paid keyword API, and a paid API
+           belongs on the seo_data SHELF with the others if he ever wants one.
+           Removed rather than reworded, because the owner asked twice and a
+           smaller label on a box he does not need is not the same as not
+           having the box. Any login already saved in .env keeps working. -->
+
       </div>
+      <div class="field"><label>Your agency's name</label><input id="agencyName" placeholder="Your agency's name"><div class="hint">Shown on every screen and on your alerts. This is <b>your</b> firm, not the client site you work on.</div></div>
+      <div class="field"><label>Outreach domain</label><input id="outreachDomain" placeholder="yourcompany.com"><div class="hint">The part after the @ in the address your mail is sent from &mdash; if your email is team@yourcompany.com, put yourcompany.com. Cold mail only ever goes out from this domain, so it must match your email account on the Integrations tab.</div></div>
+
+      <!-- Algolia: search on YOUR OWN site. Three values, two very different
+           rules, so they get their own block and their own warning. -->
+      <div class="gh etch" style="margin-top:18px">Site search (Algolia) — optional</div>
+      <p class="hint" style="margin:2px 0 10px">Lets a visitor type &ldquo;shower glass&rdquo; and land on that page instead of hunting your menu. Algolia searches <b>your</b> site — it is not a crawler and cannot read anyone else&rsquo;s.</p>
       <div class="row">
-        <div class="field"><label>Telegram bot token</label><input id="telegramToken" type="password" placeholder="leave blank to keep saved"><div class="hint">From @BotFather — lets the agency message you.</div></div>
-        <div class="field"><label>Telegram chat ID</label><input id="telegramChatId" placeholder="123456789"><div class="hint">Your chat ID from @userinfobot.</div></div>
+        <div class="field"><label>Application ID</label><input id="algoliaAppId" placeholder="0NXMST2VFN"><div class="hint">Public. Identifies your account.</div></div>
+        <div class="field"><label>Index name</label><input id="algoliaIndex" placeholder="glasswork_site"><div class="hint">Created on the first index run. Leave blank for the default.</div></div>
       </div>
-      <div class="field"><label>Outreach domain</label><input id="outreachDomain" placeholder="mail.glassworks.ae"><div class="hint">Only needed for cold outreach. Use a subdomain, not your main domain.</div></div>
+      <div class="field"><label>Search-Only API Key</label><input id="algoliaSearchKey" placeholder="963ef0…"><div class="hint">Public <b>by design</b> — this one goes into the page so the search box can query from a visitor&rsquo;s browser. It can only read.</div></div>
+      <div class="field"><label>Write API Key</label><input id="algoliaWriteKey" type="password" placeholder="leave blank to keep saved"><div class="hint"><b>Secret.</b> It can add, change and delete every record in your index. It stays on the server and is never put in the page — the widget builder refuses to hand over a snippet containing it. If you have ever pasted this key anywhere public, regenerate it in the Algolia dashboard.</div></div>
+      <!-- Crawler rates. Not a price list — the owner's own numbers, because
+           there is no single Zyte price to hardcode and a confident wrong one
+           would quietly break his spend cap. -->
+      <div class="gh etch" style="margin-top:18px">What a crawler fetch costs you — optional</div>
+      <p class="hint" style="margin:2px 0 10px">Zyte bills <b>per successful request</b>, and the price depends on the site and your volume discount, so nobody can hardcode it. Put your own rates here and every report totals real money instead of guessing. Leave blank and the cheapest tier is assumed — deliberately, because an estimate that flatters the bill lets the spend cap sail past the real spend. Take the numbers from a Zyte invoice or their cost estimator.</p>
       <div class="row">
-        <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15.</div></div>
+        <div class="field"><label>Cost per plain fetch (USD)</label><input id="zyteCostFetch" type="number" min="0" step="0.0001" placeholder="0.0001"><div class="hint">A raw HTTP fetch through Zyte — no browser.</div></div>
+        <div class="field"><label>Cost per render (USD)</label><input id="zyteCostRender" type="number" min="0" step="0.0001" placeholder="0.0015"><div class="hint">A full browser render. This is the one that costs money — it is used only when a free fetch comes back empty.</div></div>
+      </div>
+      <div class="field"><label>Use the paid crawler on your own website?</label>
+        <select id="crawlerOwnSite"><option value="">No — free fetches only (recommended)</option><option value="1">Yes — render my own pages if they arrive empty</option></select>
+        <div class="hint">Your own site is the one site that never blocks you, so it is read for free. Switch this on only if some of your pages are built by JavaScript and turn up blank in the search index — the run will tell you if they do, and name the price before you decide.</div></div>
+
+      <div class="row">
+        <div class="field"><label>Daily spend cap (USD)</label><input id="spendCap" type="number" min="0" step="1" placeholder="15"><div class="hint">Defaults to 15. Crawler renders now count against this — a render is refused, not billed, once the cap is spent.</div></div>
         <div class="field"><label>Daily outreach cap</label><input id="outreachCap" type="number" min="0" step="1" placeholder="25"><div class="hint">Defaults to 25.</div></div>
       </div>
-      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testTg">Test Telegram</button><button class="mini" id="tgPing">Message me</button><span class="inl dim" id="optMsg"></span></div>
-      <div class="hint"><b>Test Telegram</b> checks the bot and that it can reach your chat, silently. <b>Message me</b> posts a real message to your chat so you can see it arrive.</div>
+      <div class="btnrow"><button class="pbtn" id="saveOptional">Save optional</button><button class="mini" id="testAlgolia">Test search</button><button class="mini" id="alertsWhat">What needs me?</button><span class="inl dim" id="optMsg"></span></div><div id="alertsPreview"></div>
+      <div class="hint">Alerts wait for you in the app, on your computer and your phone, next to the button that answers them. <b>What needs me?</b> lists what the agency would put in front of you right now.</div>
     </div>
   </section>
 
@@ -299,6 +368,22 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
       </div>
 
       <div class="cred">
+        <div class="cred-h"><b>Who you actually bid against</b><span class="inl dim" id="cmpHead"></span></div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">The firms SEO watches. <b>Only these are ever crawled</b> — the agency will not decide who your competition is, because you know and it does not. Add the ones you lose jobs to.</p>
+        <div class="field" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:2;min-width:180px"><label>Company name</label>
+            <input id="cmpName" placeholder="Al Noor Glass &amp; Aluminium" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px"></div>
+          <div style="flex:2;min-width:180px"><label>Their website</label>
+            <input id="cmpDomain" placeholder="alnoorglass.ae" style="width:100%;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:10px 12px;font-size:13px"></div>
+          <button class="pbtn" id="cmpAdd">Add rival</button>
+        </div>
+        <div class="hint">The website is what identifies them — the same domain is never added twice, whatever you call it.</div>
+        <div class="btnrow" style="margin-top:10px"><button class="mini" id="cmpFind">Go and find some (free, OpenStreetMap)</button><span class="inl dim" id="cmpMsg"></span></div>
+        <div id="cmpWaiting" style="margin-top:12px"></div>
+        <div id="cmpList" style="margin-top:12px"></div>
+      </div>
+
+      <div class="cred">
         <div class="cred-h"><b>What your website says you sell</b></div>
         <p class="hint" style="margin-top:0;margin-bottom:10px">Reads your own site and checks it against the agency's service list. Anything on your site that the agency doesn't know about <b>cannot be targeted or written about</b> — this is how you find those.</p>
         <div class="btnrow"><button class="pbtn" id="readSite">Read my website</button><span class="inl dim" id="siteSvcMsg"></span></div>
@@ -310,9 +395,9 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
 
   <!-- PREFLIGHT ------------------------------------------------------------ -->
   <section class="card">
-    <div class="card-h"><div class="ic">🧪</div><div><b>8 · Preflight — test everything at once</b><small>Every brain, every shelf API, every channel — and whether your fallbacks actually work</small></div></div>
+    <div class="card-h"><div class="ic">🧪</div><div><b>8 · Preflight — test everything at once</b><small>The Claude team, every shelf API, every channel — and whether your fallbacks actually work</small></div></div>
     <div class="card-b">
-      <p class="hint" style="margin-top:0">Testing a primary only tells you today works. This tests <b>every link in every chain</b>, so you find out now — not at 2am when a provider rate-limits — whether losing a primary actually costs you anything. Each result is one of:
+      <p class="hint" style="margin-top:0">Checks each Claude account is signed in, asks each model on the team to say OK, and tests <b>every API on every shelf</b> — so you find out now, not at 2am, whether losing a primary actually costs you anything. Each result is one of:
         <b>COVERED</b> (two or more links work, you're safe), <b>SINGLE</b> (only one works — a single point of failure, even if you thought you had a fallback), or <b>DOWN</b> (nothing works).</p>
       <div class="btnrow">
         <button class="pbtn" id="runPreflight">Run full check</button>
@@ -327,27 +412,56 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
   <div class="foot"><span class="lock">🔒</span><span>Keys are written to the server only (a git-ignored file), shown back masked as <code>****1234</code>, and never committed. Check the <a href="/status">status page</a> to see which provider each part is using.</span></div>
 </main>
 
+<script src="/stale.js"></script>
 <script>
+/* Say so, on screen, when the running server is older than this page. */
+try{ Stale.check(['site-name','setup-unlock']); }catch(e){}
+
 const $ = (s)=>document.querySelector(s);
 const esc = (s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Attribute-safe: quotes escaped too, for anything going inside title="...".
+const escA = (s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+/* One brand, one place. The agency name lives in .env (AGENCY_NAME) and is
+   served with the settings, so renaming the firm is a field on this screen and
+   not a hunt through eleven files — which is how it came to say the wrong name
+   in eleven places at once. */
+function setBrand(name){
+  if(!name) return;
+  const el=document.getElementById('brandName');
+  if(el) el.textContent = (el.textContent||'').toUpperCase()===(el.textContent||'')
+    ? name.toUpperCase() : name;
+  document.title = name + document.title.replace(/^[^\u2014]*/, '');
+}
 async function api(method, url, body){
   const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,cache:'no-store'});
   let j={}; try{ j=await r.json(); }catch(_){}
+  // The setup ticket runs out after a few minutes, on purpose. When it does,
+  // say so and send him back through the door rather than letting every field
+  // on the screen fail with an unexplained "Request failed (401)".
+  if(r.status===401 && j && j.needsSetupUnlock){
+    if(!window.__setupExpired){
+      window.__setupExpired = true;
+      alert('Setup has locked itself again. You will be asked for your password.');
+      location.href = '/setup';
+    }
+    j.error = 'Setup locked — asking for your password again.';
+    return j;
+  }
+  // A route this server has never heard of is not "request failed", it is a
+  // server older than this page. Name it.
+  if(r.status===404 && j && j.notFound){
+    j.error = 'The running program does not have this yet — restart it and try again.';
+    return j;
+  }
   if(!r.ok && !j.error) j.error = 'Request failed ('+r.status+')';
   return j;
 }
 function inl(el,kind,msg){ el.className='inl '+kind; el.textContent=msg; }
 
-const TASKS = [
-  {task:'md',label:'Managing Director & Critic'},
-  {task:'it',label:'IT sector'},{task:'content',label:'Content sector'},
-  {task:'seo',label:'SEO sector'},{task:'leads',label:'Leads sector'},
-  {task:'report',label:'Report sector'},{task:'security',label:'Security sector'},
-];
-const CATS = ['LLM','Image','Embedding'];  // Vision is auto-detected as an LLM capability
 const TIERS = ['unknown','free','paid'];
 
-let STORE = {credentials:[], routing:{}, tools:[], toolShelves:[], shelfKinds:{}};
+let STORE = {tools:[], toolShelves:[], shelfKinds:{}};
 
 /* ---- website ---- */
 let mode='readonly';
@@ -362,197 +476,130 @@ $('#modeSeg').addEventListener('click',e=>{const b=e.target.closest('button[data
 $('#saveWebsite').onclick=async()=>{
   const btn=$('#saveWebsite');btn.disabled=true;inl($('#siteMsg'),'dim','Saving…');
   const j=await api('POST','/api/website',{mode,siteUrl:$('#siteUrl').value.trim(),
+    siteName:$('#siteName').value.trim(),
     apiBase:$('#apiBase').value.trim(),apiToken:$('#siteApiToken').value});
   btn.disabled=false;
   if(j.ok){ inl($('#siteMsg'),'ok','✓ Saved ('+(j.mode==='full'?'Full access':'Read-only')+', database '+(j.database||'ready')+')'); $('#siteApiToken').value=''; }
   else inl($('#siteMsg'),'err','✕ '+(j.error||'failed'));
 };
 
-/* ---- providers ---- */
-$('#np_auth').onchange=()=>document.querySelector('.np_customwrap').classList.toggle('hidden',$('#np_auth').value!=='custom');
-$('#addCred').onclick=async()=>{
-  const btn=$('#addCred');btn.disabled=true;inl($('#addCredMsg'),'dim','Saving…');
-  const j=await api('POST','/api/providers/credential',{
-    name:$('#np_name').value.trim(),auth_style:$('#np_auth').value,
-    auth_header_name:$('#np_custom').value.trim(),base_url:$('#np_base').value.trim(),
-    api_key:$('#np_key').value,credit_note:$('#np_note').value.trim()});
-  btn.disabled=false;
-  if(j.ok){ ['np_name','np_base','np_key','np_note','np_custom'].forEach(id=>$('#'+id).value='');
-    inl($('#addCredMsg'),'ok','✓ Provider saved'); await loadProviders(); }
-  else inl($('#addCredMsg'),'err','✕ '+(j.error||'failed'));
+/* ---- connect the website the easy way (pipelines/connect.py) ---- */
+function connLine(c){
+  if(!c || !c.ok) return 'Could not read the connection.';
+  if(c.kind==='wordpress') return c.connected ? '✓ Connected through WordPress as '+esc(c.wp_user)+'.'
+      +(c.helper ? ' The Botix helper is installed (version '+Number(c.helper)+').' : ' Install the Botix helper once (below) so Fix can set titles and descriptions.')
+    : 'WordPress is chosen'+(c.wp_user?' ('+esc(c.wp_user)+')':'')+' — press Check.';
+  if(c.kind==='php' && c.connected) return '✓ Connected through your connector at '+esc(c.base)+'.';
+  if(c.kind==='php' && c.has_secret) return 'A connector is made for this website. Upload it, then press Check.';
+  return 'Read-only: the agency changes nothing on your website and hands each change to you.';
+}
+async function loadConn(){ const c=await api('GET','/api/connect'); $('#connState').innerHTML=connLine(c); }
+function connSay(j){ inl($('#connMsg'), j.ok?'ok':'err', (j.ok?'✓ ':'✕ ')+esc(j.head||j.error||'')); loadConn(); }
+$('#connZip').onclick=async()=>{
+  inl($('#connMsg'),'dim','Making your connector…');
+  const r=await fetch('/api/connect/connector.zip',{cache:'no-store'});
+  if(!r.ok || (r.headers.get('content-type')||'').includes('json')){
+    const j=await r.json().catch(()=>({})); inl($('#connMsg'),'err','✕ '+esc(j.error||'could not make it')); return; }
+  const blob=await r.blob(); const a=document.createElement('a');
+  const m=/filename="([^"]+)"/.exec(r.headers.get('content-disposition')||'');
+  a.href=URL.createObjectURL(blob); a.download=m?m[1]:'connector.zip'; document.body.appendChild(a); a.click(); a.remove();
+  inl($('#connMsg'),'ok','✓ Downloaded. Upload it, Extract it, then press Check.'); loadConn();
 };
+$('#connHelper').onclick=async()=>{
+  inl($('#helperState'),'dim','Getting the helper…');
+  const r=await fetch('/api/connect/wordpress-helper.zip',{cache:'no-store'});
+  if(!r.ok || (r.headers.get('content-type')||'').includes('json')){
+    const j=await r.json().catch(()=>({})); inl($('#helperState'),'err','✕ '+esc(j.error||'could not make it')); return; }
+  const blob=await r.blob(); const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='botix-helper.zip'; document.body.appendChild(a); a.click(); a.remove();
+  inl($('#helperState'),'ok','✓ Downloaded. Upload it in Plugins → Add New → Upload Plugin, Activate, then press Check.');
+};
+$('#connCheck').onclick=async()=>{ inl($('#connMsg'),'dim','Knocking on your website…'); connSay(await api('POST','/api/connect/check',{})); };
+$('#connRo').onclick=async()=>{ connSay(await api('POST','/api/connect/readonly',{})); };
+$('#connWp').onclick=async()=>{
+  inl($('#connMsg'),'dim','Checking with WordPress…');
+  const j=await api('POST','/api/connect/wordpress',{user:$('#wpUser').value.trim(),password:$('#wpPass').value,site:$('#siteUrl').value.trim()});
+  $('#wpPass').value=''; connSay(j);
+};
+loadConn();
 
-function modelOptions(selected){
-  let opts='<option value="">— none —</option>';
-  STORE.credentials.forEach(c=>c.models.forEach(m=>{
-    if((m.category||'LLM').toUpperCase()!=='LLM') return;  // a sector's brain is a text model only
-    const label=esc(c.name+' · '+m.api_model_id+' ('+m.cost_tier+')');
-    opts+='<option value="'+m.id+'"'+(m.id===selected?' selected':'')+'>'+label+'</option>';
-  }));
-  return opts;
-}
-
-function capsInner(caps){
-  const g=v=>v===true?'<span class="y">✓</span>':v===false?'<span class="n">✗</span>':'<span class="q">?</span>';
-  return Object.entries(caps||{}).map(([k,v])=>k+' '+g(v)).join('&nbsp;&nbsp;');
-}
-function capLine(caps){
-  if(!caps||!Object.keys(caps).length) return '';
-  return '<div class="caps">'+capsInner(caps)+'</div>';
-}
-
-function renderCredentials(){
-  const host=$('#credList');
-  if(!STORE.credentials.length){ host.innerHTML='<p class="hint">No providers yet — add one below.</p>'; return; }
-  host.innerHTML = STORE.credentials.map(c=>{
-    const models=(c.models||[]).map(m=>{
-      const tier=m.cost_tier||'unknown';
-      return `<div class="model" data-cid="${c.id}" data-mid="${m.id}">
-        <div class="model-top">
-          <span class="mid">${esc(m.api_model_id)}</span>
-          <span class="tagchip">${esc(m.category||'LLM')}</span>
-          <span class="tagchip ${tier}">${esc(tier)}</span>
-          <button class="mini test">Test &amp; detect</button>
-          <button class="mini del delModel">Delete</button>
-        </div>
-        ${capLine(m.detected_capabilities)}
-        <div class="testout"></div>
-      </div>`;
-    }).join('');
-    return `<div class="cred" data-cid="${c.id}">
-      <div class="cred-h"><b>${esc(c.name)}</b><span class="mono">${esc(c.key_masked||'no key')} · ${esc(c.auth_style)}</span></div>
-      <div class="endpoint">${esc(c.base_url||'(no base url)')}${c.base_url?' → '+esc(c.base_url)+'/chat/completions':''}</div>
-      <div class="row">
-        <div class="field"><label>Name</label><input class="c_name" value="${esc(c.name)}"></div>
-        <div class="field"><label>Auth style</label><select class="c_auth">
-          ${['bearer','x-api-key','token','custom'].map(a=>`<option value="${a}"${a===c.auth_style?' selected':''}>${a}</option>`).join('')}
-        </select></div>
-      </div>
-      <div class="field"><label>Base URL</label><input class="c_base" value="${esc(c.base_url)}"></div>
-      <div class="field"><label>API key</label><input class="c_key" type="password" placeholder="leave blank to keep ${esc(c.key_masked||'')}"></div>
-      <div class="field"><label>Credit note</label><input class="c_note" value="${esc(c.credit_note||'')}"></div>
-      <div class="btnrow">
-        <button class="pbtn saveCred">Save this provider</button>
-        <button class="mini del delCred">Delete provider</button>
-        <span class="inl dim credMsg"></span>
-      </div>
-      <div class="models">
-        <div class="hint" style="margin-bottom:8px"><b>Models under this provider</b></div>
-        ${models||'<p class="hint">No models yet.</p>'}
-        <div class="row" style="margin-top:8px">
-          <div class="field"><label>Model id (exact)</label><input class="m_id" list="ml_${c.id}" placeholder="e.g. claude-opus-4-8">
-            <datalist id="ml_${c.id}"></datalist></div>
-          <div class="field"><label>Category</label><select class="m_cat">${CATS.map(x=>`<option>${x}</option>`).join('')}</select></div>
-          <div class="field"><label>Cost</label><select class="m_tier">${TIERS.map(x=>`<option>${x}</option>`).join('')}</select></div>
-        </div>
-        <div class="btnrow">
-          <button class="mini addModel">Add model</button>
-          <button class="mini fetchModels">Fetch available models</button>
-          <span class="inl dim mMsg"></span>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-  wireCredEvents();
-}
-
-function wireCredEvents(){
-  document.querySelectorAll('#credList .cred').forEach(card=>{
-    const cid=card.dataset.cid;
-    const msg=card.querySelector('.credMsg');
-    card.querySelector('.saveCred').onclick=async()=>{
-      inl(msg,'dim','Saving…');
-      const j=await api('POST','/api/providers/credential',{id:cid,
-        name:card.querySelector('.c_name').value.trim(),auth_style:card.querySelector('.c_auth').value,
-        base_url:card.querySelector('.c_base').value.trim(),api_key:card.querySelector('.c_key').value,
-        credit_note:card.querySelector('.c_note').value.trim()});
-      if(j.ok){ inl(msg,'ok','✓ Saved'); await loadProviders(); } else inl(msg,'err','✕ '+(j.error||'failed'));
-    };
-    card.querySelector('.delCred').onclick=async()=>{
-      if(!confirm('Delete this provider and its models?'))return;
-      const j=await api('POST','/api/providers/credential/delete',{id:cid});
-      if(j.ok) await loadProviders(); else inl(msg,'err','✕ '+(j.error||'failed'));
-    };
-    const mMsg=card.querySelector('.mMsg');
-    card.querySelector('.addModel').onclick=async()=>{
-      const mid=card.querySelector('.m_id').value.trim();
-      if(!mid){ inl(mMsg,'err','Enter a model id'); return; }
-      inl(mMsg,'dim','Adding…');
-      const j=await api('POST','/api/providers/model',{credential_id:cid,model:{
-        api_model_id:mid,category:card.querySelector('.m_cat').value,cost_tier:card.querySelector('.m_tier').value}});
-      if(j.ok){ inl(mMsg,'ok','✓ Added'); await loadProviders(); } else inl(mMsg,'err','✕ '+(j.error||'failed'));
-    };
-    card.querySelector('.fetchModels').onclick=async()=>{
-      inl(mMsg,'dim','Fetching… (up to 90s)');
-      const j=await api('POST','/api/providers/fetch-models',{credential_id:cid});
-      if(j.ok && j.models && j.models.length){
-        const dl=card.querySelector('#ml_'+cid); dl.innerHTML=j.models.map(m=>`<option value="${esc(m)}">`).join('');
-        inl(mMsg,'ok','✓ '+j.models.length+' models — type in the box to pick');
-      } else inl(mMsg,'err','✕ '+(j.error||('status '+(j.status||'?')+' — enter the model id manually')));
-    };
-    card.querySelectorAll('.model').forEach(row=>{
-      const mid=row.dataset.mid, out=row.querySelector('.testout');
-      row.querySelector('.delModel').onclick=async()=>{
-        const j=await api('POST','/api/providers/model/delete',{credential_id:cid,model_id:mid});
-        if(j.ok) await loadProviders();
-      };
-      row.querySelector('.test').onclick=async()=>{
-        out.className='testout'; out.textContent='Testing… (up to 120s)';
-        const j=await api('POST','/api/providers/test',{credential_id:cid,model_id:mid});
-        if(!j.ok){ out.className='testout err'; out.textContent='✕ '+(j.error||'failed'); return; }
-        // update the capability line in place — do NOT re-render (that would wipe this result)
-        if(j.capabilities){
-          let capsEl=row.querySelector('.caps');
-          if(!capsEl){ capsEl=document.createElement('div'); capsEl.className='caps'; row.querySelector('.model-top').insertAdjacentElement('afterend',capsEl); }
-          capsEl.innerHTML=capsInner(j.capabilities);
-        }
-        const t=j.test||{};
-        if(t.ok){ out.className='testout ok'; out.innerHTML='✓ Reply: '+esc((t.output||'').slice(0,200)); }
-        else if(t.ok===null){ out.className='testout'; out.innerHTML=esc(t.cause||'Detected by signature'); }
-        else {
-          out.className='testout err';
-          const status=(t.status===0||t.status==null)?'no HTTP response (couldn’t connect)':('HTTP '+t.status);
-          out.innerHTML='✕ '+esc(status)+' — '+esc(t.cause||'')+
-            '<details open><summary>Raw request / response</summary><pre>'+esc(JSON.stringify(t.raw||{},null,2))+'</pre></details>';
-        }
-      };
-    });
+/* ---- the Claude team ---- */
+// One row per sector: the model it thinks with, saved on its own. Nothing
+// above Opus 5 is offered — the server refuses it too.
+let TEAM = null;
+function teamStateLine(t){
+  if(!t || !t.ok) return '<span style="color:var(--danger)">✕ '+esc((t&&t.error)||'Could not read the team')+'</span>';
+  if(!t.ready) return '<span style="color:var(--danger)">✕ Claude Code is not ready on this machine.</span>'
+    +'<pre style="white-space:pre-wrap;font-size:11.5px;color:var(--muted);background:var(--sunken);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px">'+esc(t.why||'')+'</pre>';
+  const accs=(t.accounts||[]).map(a=>{
+    const who=a.email?(' as '+esc(a.email)):'';
+    return a.ok?('<span style="color:var(--ok)">✓ '+esc(a.label)+' signed in'+who+'</span>')
+               :('<span style="color:var(--amber)">! '+esc(a.label)+': '+esc(a.why||'not signed in')+'</span>');
   });
+  if((t.accounts||[]).length<2) accs.push('<span class="dim">no backup account yet</span>');
+  const struggling=(t.struggling||[]).map(h=>'<div style="color:var(--amber)">! '+esc(h.why)+' — tried again in '+h.back_in_minutes+' min</div>').join('');
+  const cli=t.cli?'<div class="dim" style="margin-top:4px;font-family:\'IBM Plex Mono\',monospace;font-size:10.5px">Claude Code: '+esc(t.cli)+'</div>':'';
+  return accs.join(' · ')+struggling+cli;
 }
-
-/* ---- routing ---- */
-function renderRouting(){
-  const host=$('#routeList');
-  host.innerHTML = TASKS.map(t=>{
-    const r=STORE.routing[t.task]||{};
-    return `<div class="cred" data-task="${t.task}">
-      <div class="cred-h"><b>${esc(t.label)}</b></div>
-      <div class="row">
-        <div class="field"><label>Primary model</label><select class="r_primary">${modelOptions(r.primary)}</select></div>
-        <div class="field"><label>Fallback model</label><select class="r_fallback">${modelOptions((r.fallback&&r.fallback[0])||'')}</select></div>
-      </div>
-      <div class="btnrow">
-        <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><input type="checkbox" class="r_paid" ${r.paid_allowed!==false?'checked':''}> allow paid providers</label>
-        <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><input type="checkbox" class="r_enabled" ${r.enabled!==false?'checked':''}> enabled</label>
-        <button class="pbtn saveRoute">Save</button>
-        <span class="inl dim rMsg"></span>
-      </div>
-    </div>`;
+function renderTeam(){
+  const host=$('#teamList');
+  // Claude, OpenAI or Gemini by API key: the models and the key live on the
+  // Engine page, and this section's Claude Code controls do not apply.
+  if(TEAM && TEAM.ok && TEAM.engine && TEAM.engine!=='claude_code'){
+    $('#teamState').innerHTML=(TEAM.ready?'<span style="color:var(--ok)">✓ ':'<span style="color:var(--danger)">✕ ')
+      +'This account thinks with '+esc(TEAM.engine_name||'an API key')+(TEAM.ready?'':' — '+esc(TEAM.why||'not ready'))+'</span>'
+      +' · <a href="/engine" style="color:var(--glass)">change it on the Engine page →</a>';
+    host.innerHTML=(TEAM.team||[]).map(r=>'<div class="hint" style="margin:4px 0">'+esc(r.label)+' — '+esc(r.model_label||r.model)+'</div>').join('');
+    ['#teamForget'].forEach(q=>{ const b=$(q); if(b) b.style.display='none'; });
+    return;
+  }
+  $('#teamState').innerHTML=teamStateLine(TEAM);
+  if(!TEAM || !TEAM.ok){ host.innerHTML=''; return; }
+  const today=(TEAM.usage_today&&TEAM.usage_today.sectors)||{};
+  host.innerHTML=(TEAM.team||[]).map(r=>{
+    const u=today[r.sector];
+    const used=u?(u.calls+' call'+(u.calls===1?'':'s')+' today · '+(u.tokens_in+u.tokens_out).toLocaleString()+' tokens'):'no calls today';
+    const opts=(TEAM.models||[]).map(m=>'<option value="'+m.id+'"'+(m.id===r.model?' selected':'')+'>'+esc(m.label)+'</option>').join('');
+    const suggested=(TEAM.models||[]).find(m=>m.id===r.default);
+    const off=r.model!==r.default && suggested ? ' · suggested: '+suggested.label : '';
+    return '<div class="cred" data-sector="'+r.sector+'" style="padding:10px 14px;margin-bottom:9px">'
+      +'<div class="row" style="align-items:center">'
+      +'<div style="flex:1;min-width:160px"><b style="font-size:13.5px">'+esc(r.label)+'</b>'
+      +(r.main?' <span class="tagchip" title="Keeps its full model on the backup account">main</span>':'')
+      +'<div class="hint" style="margin-top:2px">'+esc(used+off)+'</div></div>'
+      +'<div class="field" style="flex:0 0 150px;margin:0"><select class="t_model">'+opts+'</select></div>'
+      +'<button class="mini t_save">Save</button><span class="inl dim t_msg"></span></div></div>';
   }).join('');
-  document.querySelectorAll('#routeList .cred').forEach(row=>{
-    const task=row.dataset.task, msg=row.querySelector('.rMsg');
-    row.querySelector('.saveRoute').onclick=async()=>{
+  host.querySelectorAll('.cred[data-sector]').forEach(row=>{
+    const sector=row.dataset.sector, msg=row.querySelector('.t_msg');
+    row.querySelector('.t_save').onclick=async()=>{
       inl(msg,'dim','Saving…');
-      const fb=row.querySelector('.r_fallback').value;
-      const j=await api('POST','/api/routing',{task,route:{
-        primary:row.querySelector('.r_primary').value,
-        fallback:fb?[fb]:[],
-        paid_allowed:row.querySelector('.r_paid').checked,
-        enabled:row.querySelector('.r_enabled').checked}});
-      if(j.ok){ inl(msg,'ok','✓ Saved'); STORE.routing[task]=j.route; } else inl(msg,'err','✕ '+(j.error||'failed'));
+      const j=await api('POST','/api/team/set',{sector,model:row.querySelector('.t_model').value});
+      if(j.ok) inl(msg,'ok','✓ '+j.label+(j.note?(' — '+j.note):''));
+      else inl(msg,'err','✕ '+(j.error||'failed'));
     };
   });
 }
+async function loadTeam(){ TEAM=await api('GET','/api/team'); renderTeam(); }
+$('#teamTest').onclick=async()=>{
+  const btn=$('#teamTest'); btn.disabled=true;
+  inl($('#teamMsg'),'dim','Asking each model to say OK — this can take a minute or two…');
+  $('#teamTestOut').innerHTML='';
+  const j=await api('POST','/api/team/test',{});
+  btn.disabled=false;
+  const rows=(j&&j.results)||[];
+  if(!rows.length){ inl($('#teamMsg'),'err','✕ '+((j&&j.error)||'nothing came back')); return; }
+  inl($('#teamMsg'),j.ok?'ok':'warn',j.ok?'✓ Every model answered':'! Some models did not answer');
+  $('#teamTestOut').innerHTML=rows.map(r=>'<div class="'+(r.ok?'ok':'err')+'">'+(r.ok?'✓ ':'✕ ')
+    +esc(r.account)+' account · '+esc(r.label||r.model)+' — '
+    +(r.ok?('answered in '+r.seconds+'s'):esc(r.why||'did not answer'))+'</div>').join('');
+  loadTeam();
+};
+$('#teamForget').onclick=async()=>{
+  const j=await api('POST','/api/team/forget',{});
+  inl($('#teamMsg'),j.ok?'ok':'err',j.ok?'✓ Every model will be tried at the top again':'✕ '+(j.error||'failed'));
+  loadTeam();
+};
 
 /* ---- the shelf (shared API cabinet) ---- */
 const TOOL_AUTH=['bearer','raw','basic','x-api-key','token','custom'];
@@ -657,17 +704,44 @@ $('#addTool').onclick=async()=>{
 };
 
 function fmtDur(s){ s=Math.max(0,s|0); if(s<60)return s+'s'; const m=Math.floor(s/60); return m+'m '+(s%60)+'s'; }
+/* The brains are not on the shelf. Every sector thinks with its own Claude
+   model (the Claude team, section 2), which is never lent out — so nothing
+   here can be taken from the MD. The shelf is tools only. */
+/* What an empty shelf actually MEANS, one message per shelf. A blanket
+   "no APIs on this shelf yet" beside five shelves that nothing would ever open
+   sent the owner hunting for keys he did not need. */
+const SHELF_EMPTY={
+  seo_data:'empty, and that is fine \u2014 SEO runs on Search Console, autocomplete and your own enquiries at no cost. A key here adds search volumes and rank tracking on top.',
+  maps:'empty \u2014 fine if TomTom is saved under Integrations. Otherwise Leads finds businesses on OpenStreetMap only; TomTom or a Google Places key finds more.',
+  stock_images:'empty \u2014 add Pexels, with Pixabay under it as the fallback, so Content has pictures.',
+  crawler:'empty \u2014 Zyte reads rival sites and JavaScript pages. Optional: plain fetches still work without it.',
+  email:'no route configured \u2014 set SMTP up under Integrations, or outreach has no way to send.',
+  other:'nothing filed here \u2014 this is where a tool saved without a shelf lands.',
+};
 function renderShelfBoard(shelves){
   const host=$('#shelfBoard'); if(!host) return;
   if(!shelves||!shelves.length){ host.innerHTML='<p class="hint">No shelves configured yet.</p>'; return; }
-  host.innerHTML=shelves.map(s=>{
+  const tools=shelves.filter(s=>s.kind!=='model');
+  host.innerHTML =
+    '<p class="hint" style="margin:2px 0 10px">The brains are the Claude team above — one per sector, never shared, so nothing here can override the MD.</p>'
+    + (tools.length
+      ? '<div class="gh etch" style="margin-top:16px">Shelves — borrowed, one agent at a time</div>'
+      + '<p class="hint" style="margin:2px 0 10px">Shared capability APIs. An agent takes the lock, uses it, hands it back; everyone else queues.</p>'
+      + shelfRows(tools) : '');
+}
+function shelfRows(shelves){
+  return shelves.map(s=>{
     const st=s.state||{}, h=st.holder;
     const holderTxt=h
       ? `<span class="y">● in use</span> by <b>${esc(h.agent)}</b> · held ${fmtDur(h.held_for_s)} · ${fmtDur(h.expires_in_s)} left`
       : `<span class="q">○ idle</span>`;
+    // "optional" is the honest word for a shelf with nothing on it. Every
+    // remaining shelf has a pipeline that works without it, so an empty one is
+    // a choice rather than a chore. The shelves that could never be filled at
+    // all have been removed.
     const items=(s.items||[]).length
-      ? (s.items||[]).map((it,i)=>`<span class="tagchip${it.enabled?'':' n'}">${i?'↳ ':''}${esc(it.name)}</span>`).join(' ')
-      : '<span class="hint">no APIs on this shelf yet</span>';
+      ? (s.items||[]).map((it,i)=>`<span class="tagchip${it.enabled?'':' n'}" title="${escA(it.note||it.name)}">${i?'↳ ':''}${esc(it.name)}</span>`).join(' ')
+      : `<span class="hint">${esc(SHELF_EMPTY[s.shelf]||'nothing here yet — optional')}</span>`;
     const queue=(st.queue||[]).length
       ? `<div class="caps"><b>Queue:</b> ${st.queue.map((q,i)=>`${i+1}. ${esc(q.agent)} <span class="mono">(${esc(q.reason||'')}${q.data_class==='external'?' · ⚑external':''})</span> waiting ${fmtDur(q.waited_s)}`).join(' &nbsp; ')}</div>`
       : '';
@@ -686,16 +760,59 @@ async function loadShelves(){
   else { const host=$('#shelfBoard'); if(host) host.innerHTML='<p class="hint">Could not load the shelf board.</p>'; }
 }
 if($('#shelfRefresh')) $('#shelfRefresh').onclick=loadShelves;
+
+/* ---- usage and limits ----
+   An unmetered row is rendered as "not counted here", never as a bar sitting
+   at zero. A visitor searching from their own browser never touches this
+   machine, and a meter that implied otherwise would be the most expensive kind
+   of wrong: reassuring. */
+const USAGE_WHEN={day:'today',month:'this month',now:'right now'};
+function renderUsage(meters, spent){
+  const host=$('#usageBoard'); if(!host) return;
+  if(!meters||!meters.length){ host.innerHTML='<p class="hint">Nothing metered yet.</p>'; return; }
+  const rows=meters.map(m=>{
+    const when=USAGE_WHEN[m.period]||esc(m.period);
+    if(m.verdict==='unmetered'){
+      return `<div class="model"><div class="model-top"><span class="mid">${esc(m.label)}</span>
+        <span class="tagchip n">not counted here</span></div>
+        <div class="caps">${esc(m.why_unmetered)}. Plan allowance ${(m.allowance||0).toLocaleString()} per ${esc(m.period)} — the real number is at <b>${esc(m.where)}</b>.</div></div>`;
+    }
+    const cls={ok:'q',idle:'q',watch:'y',over:'n'}[m.verdict]||'q';
+    const dot={ok:'○',idle:'○',watch:'●',over:'●'}[m.verdict]||'○';
+    const bar=m.allowance?`<div style="height:6px;border-radius:4px;background:var(--panel2);overflow:hidden;margin-top:7px">
+        <div style="height:6px;width:${Math.min(100,m.pct||0)}%;background:${m.verdict==='over'?'var(--bad,#e05555)':m.verdict==='watch'?'var(--warn,#d9a441)':'var(--ok,#3fa96a)'}"></div></div>`:'';
+    const count=m.allowance
+      ? `${(m.used||0).toLocaleString()} of ${(m.allowance||0).toLocaleString()} ${when} (${m.pct}%)`
+      : `${(m.used||0).toLocaleString()} ${when}`;
+    return `<div class="model"><div class="model-top"><span class="mid">${esc(m.label)}</span>
+      <span class="${cls}">${dot} ${count}</span>
+      ${m.usd?`<span class="dim" style="margin-left:auto;font-size:12px">about $${Number(m.usd).toFixed(4)}</span>`:''}</div>
+      ${bar}
+      ${m.note?`<div class="caps">${esc(m.note)}</div>`:''}
+      ${(m.verdict==='watch'||m.verdict==='over')?`<div class="testout">then: ${esc(m.then)} · ${esc(m.where)}</div>`:''}
+    </div>`;
+  }).join('');
+  host.innerHTML=rows+`<p class="hint" style="margin-bottom:0">Estimated third-party API spend today: <b>about $${Number(spent||0).toFixed(4)}</b> — your rates, not their invoice.</p>`;
+}
+async function loadUsage(){
+  const j=await api('GET','/api/usage');
+  if(j&&j.ok) renderUsage(j.meters,j.spent_today);
+  else { const host=$('#usageBoard'); if(host) host.innerHTML='<p class="hint">Could not read the usage meter'+(j&&j.error?': '+esc(j.error):'')+'.</p>'; }
+}
+if($('#usageRefresh')) $('#usageRefresh').onclick=loadUsage;
 setInterval(()=>{ const a=$('#shelfAuto'); if(a&&a.checked) loadShelves(); },5000);
 
 /* ---- optional ---- */
 $('#saveOptional').onclick=async()=>{
   const btn=$('#saveOptional');btn.disabled=true;inl($('#optMsg'),'dim','Saving…');
-  const j=await api('POST','/api/optional',{dfsLogin:$('#dfsLogin').value.trim(),dfsPassword:$('#dfsPassword').value,
-    telegramToken:$('#telegramToken').value,telegramChatId:$('#telegramChatId').value.trim(),
-    outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim()});
+  const j=await api('POST','/api/optional',{
+    algoliaAppId:$('#algoliaAppId').value.trim(),algoliaSearchKey:$('#algoliaSearchKey').value.trim(),
+    algoliaWriteKey:$('#algoliaWriteKey').value.trim(),algoliaIndex:$('#algoliaIndex').value.trim(),
+    agencyName:$('#agencyName').value.trim(),outreachDomain:$('#outreachDomain').value.trim(),spendCap:$('#spendCap').value.trim(),outreachCap:$('#outreachCap').value.trim(),
+    zyteCostFetch:$('#zyteCostFetch').value.trim(),zyteCostRender:$('#zyteCostRender').value.trim(),
+    crawlerOwnSite:$('#crawlerOwnSite').value});
   btn.disabled=false;
-  if(j.ok){ inl($('#optMsg'),'ok','✓ Saved'); ['dfsPassword','telegramToken'].forEach(id=>$('#'+id).value=''); }
+  if(j.ok){ inl($('#optMsg'),'ok','✓ Saved');  }
   else inl($('#optMsg'),'err','✕ '+(j.error||'failed'));
 };
 
@@ -711,6 +828,9 @@ $('#saveEmail').onclick=()=>saveIntegration('email',{
   SMTP_HOST:$('#em_host').value.trim(),SMTP_PORT:$('#em_port').value.trim(),SMTP_USER:$('#em_user').value.trim(),
   SMTP_PASS:$('#em_pass').value,MAIL_FROM:$('#em_from').value.trim(),MAIL_FROM_NAME:$('#em_fromname').value.trim()
 },$('#saveEmail'),$('#emailMsg'),['em_pass']);
+$('#saveCse').onclick=()=>saveIntegration('serp',{
+  GOOGLE_CSE_ID:$('#cse_id').value.trim(),GOOGLE_CSE_KEY:$('#cse_key').value.trim()
+},$('#saveCse'),$('#cseMsg'),['cse_key']);
 $('#saveGsc').onclick=()=>saveIntegration('gsc',{
   GSC_PROPERTY:$('#gsc_prop').value.trim(),GSC_SERVICE_ACCOUNT_JSON:$('#gsc_json').value
 },$('#saveGsc'),$('#gscMsg'),['gsc_json']);
@@ -811,11 +931,58 @@ async function testChannel(which, btn, msg, notify){
   else                  inl(msg,'err','✕ '+r.detail);
 }
 $('#testEmail').onclick=()=>testChannel('email',$('#testEmail'),$('#emailMsg'));
-$('#testTg').onclick   =()=>testChannel('telegram',$('#testTg'),$('#optMsg'));
-$('#tgPing').onclick   =()=>testChannel('telegram',$('#tgPing'),$('#optMsg'),true);
+$('#saveTomtom').onclick=()=>saveIntegration('maps',{
+  TOMTOM_API_KEY:$('#tt_key').value.trim()
+},$('#saveTomtom'),$('#ttMsg'),['tt_key']);
+$('#testTomtom').onclick=async ()=>{
+  const btn=$('#testTomtom'), msg=$('#ttMsg');
+  btn.disabled=true; inl(msg,'dim','Asking TomTom…');
+  const j=await api('POST','/api/integrations/test-tomtom',{});
+  btn.disabled=false;
+  if(j && j.ok) inl(msg,'ok','✓ '+(j.why||'working'));
+  else inl(msg,'err','✕ '+((j&&(j.why||j.error))||'no answer'));
+};
+$('#testGsc').onclick=async ()=>{
+  const btn=$('#testGsc'), msg=$('#gscMsg');
+  btn.disabled=true; inl(msg,'dim','Asking Google…');
+  const j=await api('POST','/api/integrations/test-gsc',{});
+  btn.disabled=false;
+  if(j && j.ok) inl(msg,'ok','✓ '+(j.why||'working'));
+  else inl(msg,'err','✕ '+((j&&(j.why||j.error))||'no answer'));
+};
+/* "What needs me?" — exactly what is waiting for the owner right now, and why
+   each one is (or is not) worth his attention. Progress is not on this list. */
+const URG={now:['n','NOW — a customer or your enquiry path is affected'],
+           today:['y','TODAY — the agency is waiting on you, or money is involved'],
+           digest:['q','goes in the daily digest']};
+$('#alertsWhat').onclick = async ()=>{
+  const host=$('#alertsPreview'); host.innerHTML='<p class="hint">Reading…</p>';
+  const j=await api('GET','/api/notify/preview');
+  if(!j||!j.ok){ host.innerHTML='<p class="hint">Could not read it'+(j&&j.error?': '+esc(j.error):'')+'.</p>'; return; }
+  const all=j.alerts||[], waiting=(j.waiting||[]).map(a=>a.key);
+  const phone=all.filter(a=>a.urgency!=='digest');
+  let out='<div class="cred"><div class="cred-h"><b>What needs you right now</b></div>';
+  if(!phone.length){
+    out+='<p class="hint" style="margin:0">Nothing — and that is the system working. '
+       + 'Something lands here only when the agency is stopped waiting for you, a customer is waiting, or money is involved.</p>';
+  } else {
+    out+=all.map(a=>{const u=URG[a.urgency]||['q',a.urgency];
+      const dup=waiting.includes(a.key)?'':' <span class="dim">(already shown — will not repeat today)</span>';
+      return '<div class="model"><div class="model-top"><span class="'+u[0]+'">'+esc(a.urgency.toUpperCase())+'</span>'
+        +'<span class="mid">'+esc(a.title)+'</span>'+dup+'</div>'
+        +'<div class="caps">'+esc((a.body||'').slice(0,220))+'</div>'
+        +'<div class="testout">'+esc(u[1])+'</div></div>';}).join('');
+  }
+  out+='<p class="hint" style="margin-bottom:0"><b>You get:</b> a dead contact form, a lead replying, '
+     + 'anything waiting on your approval, the spend cap, a plan allowance running out.<br>'
+     + '<b>You do not get:</b> progress. Briefs written, pages audited and leads found go in the one '
+     + 'daily digest — so an alert stays rare enough that you still look when one arrives.</p></div>';
+  host.innerHTML=out;
+};
+$('#testAlgolia').onclick=()=>testChannel('algolia',$('#testAlgolia'),$('#optMsg'));
 
 /* ---- preflight ---- */
-const PF_TONE={COVERED:'ok',SINGLE:'warn',DOWN:'err',EMPTY:'dim'};
+const PF_TONE={COVERED:'ok',SINGLE:'warn',DOWN:'err',EMPTY:'dim',UNKNOWN:'dim'};
 function pfMark(ok){ return ok===true?'<span class="ok">✓</span>':ok===false?'<span class="err">✕</span>':'<span class="dim">·</span>'; }
 function pfChain(chain){
   if(!chain||!chain.length) return '';
@@ -831,9 +998,12 @@ function pfBlock(title, rows){
 }
 function renderPreflight(d){
   const out=[];
-  out.push(pfBlock('Sector brains — survives losing its primary?', (d.routing||[]).map(r=>
+  out.push(pfBlock('Claude accounts', ((d.team&&d.team.accounts)||[]).map(a=>
+    '<div style="margin-top:6px;font-size:12px">'+pfMark(!!a.ok)+' <b>'+esc(a.label)+'</b> '+
+    '<span style="color:var(--muted)">'+esc(a.ok?(a.email?('signed in as '+a.email):'signed in'):(a.why||'not signed in'))+'</span></div>')));
+  out.push(pfBlock('The Claude team — each sector on the main account, and on the backup', (d.routing||[]).map(r=>
     '<div style="margin-top:8px"><span class="'+(PF_TONE[r.cover]||'dim')+'"><b>'+esc(r.cover)+'</b></span> '+
-    '<b>'+esc(r.task)+'</b> '+(r.error?'<span class="dim">'+esc(r.error)+'</span>':'')+pfChain(r.chain)+'</div>')));
+    '<b>'+esc(r.label||r.task)+'</b> '+pfChain(r.chain)+'</div>')));
   const shelves=(d.shelf||[]).filter(s=>s.cover!=='EMPTY');
   out.push(pfBlock('Shelf APIs — survives losing its primary?', shelves.map(s=>
     '<div style="margin-top:8px"><span class="'+(PF_TONE[s.cover]||'dim')+'"><b>'+esc(s.cover)+'</b></span> '+
@@ -876,39 +1046,101 @@ async function loadSettings(){
   if(!j||!j.ok) return;
   const w=j.website||{}, o=j.optional||{};
   $('#siteUrl').value=w.siteUrl||'';
+  // Only fill the name box with an EXPLICIT name. The server falls back to the
+  // domain for display, and echoing that fallback into the field would silently
+  // turn "no name set" into a saved name he never typed.
+  $('#siteName').value=(w.siteName && w.siteName!==w.siteHost) ? w.siteName : '';
   setMode(w.mode||'readonly');
   $('#apiBase').value=w.apiBase||'';
   if(w.apiTokenSet) $('#siteApiToken').placeholder='saved — leave blank to keep';
   if(j.configured) inl($('#siteMsg'),'ok','✓ Saved ('+(w.mode==='full'?'Full access':'Read-only')+') — edit and re-save to change');
-  $('#dfsLogin').value=o.dfsLogin||'';
-  $('#telegramChatId').value=o.telegramChatId||'';
+  $('#algoliaAppId').value=o.algoliaAppId||'';
+  $('#algoliaSearchKey').value=o.algoliaSearchKey||'';
+  $('#algoliaIndex').value=o.algoliaIndex||'';
+  // the write key is never sent back to the browser, only whether it is set
+  $('#algoliaWriteKey').placeholder = o.algoliaWriteKeySet
+    ? 'saved — leave blank to keep it' : 'paste your Write API Key';
   $('#outreachDomain').value=o.outreachDomain||'';
+  $('#agencyName').value=o.agencyName||'';
+  if(o.agencyName) setBrand(o.agencyName);
   $('#spendCap').value=o.spendCap||'';
   $('#outreachCap').value=o.outreachCap||'';
-  if(o.dfsPasswordSet) $('#dfsPassword').placeholder='saved — leave blank to keep';
-  if(o.telegramTokenSet) $('#telegramToken').placeholder='saved — leave blank to keep';
+  $('#zyteCostFetch').value=o.zyteCostFetch||'';
+  $('#zyteCostRender').value=o.zyteCostRender||'';
+  $('#crawlerOwnSite').value=o.crawlerOwnSite?'1':'';
   const ig=j.integrations||{}, em=ig.email||{}, gsc=ig.gsc||{};
   $('#em_host').value=em.host||''; $('#em_port').value=em.port||''; $('#em_user').value=em.user||'';
   $('#em_from').value=em.from||''; $('#em_fromname').value=em.fromName||'';
   if(em.passSet) $('#em_pass').placeholder='saved — leave blank to keep';
   $('#gsc_prop').value=gsc.property||'';
   if(gsc.serviceAccountSet) $('#gsc_json').placeholder='saved — leave blank to keep';
+  const serp=ig.serp||{};
+  $('#cse_id').value=serp.id||'';
+  if(serp.keySet) $('#cse_key').placeholder='saved — leave blank to keep';
+  if((ig.tomtom||{}).keySet) $('#tt_key').placeholder='saved — leave blank to keep';
 }
 
 async function loadProviders(){
   const p=await api('GET','/api/providers');
-  const r=await api('GET','/api/routing');
-  STORE.credentials=(p&&p.credentials)||[];
   STORE.tools=(p&&p.tools)||[];
   STORE.toolShelves=(p&&p.tool_shelves)||[];
   STORE.shelfKinds=(p&&p.shelf_kinds)||{};
-  STORE.routing=(r&&r.routing)||{};
-  renderCredentials(); renderRouting(); renderTools(); fillToolShelfSelect();
+  renderTools(); fillToolShelfSelect();
   loadShelves();
+  loadUsage();
 }
+
+// ---- competitors ------------------------------------------------------------
+// Only confirmed rivals are ever crawled, so this screen is the whole gate.
+function renderCompetitors(s){
+  if(!s || !s.ok){ $('#cmpHead').textContent=''; return; }
+  $('#cmpHead').textContent = s.head || '';
+  const wait=(s.suggested||[]), on=(s.confirmed||[]);
+  $('#cmpWaiting').innerHTML = !wait.length ? '' :
+    `<div class="hint" style="color:var(--amber);margin-bottom:6px">⚠ ${wait.length} firm(s) put forward by the SEO desk, waiting for your yes. Nothing is crawled until you say.</div>`
+    + wait.map(r=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)">
+        <div style="flex:1"><b>${esc(r.name||'')}</b> <span class="dim">${esc(r.domain||'no website on file')}</span>
+        ${(r.evidence||[]).length?`<div class="hint" style="margin:2px 0 0">people searched: ${esc((r.evidence||[]).slice(0,3).join(', '))}</div>`:''}</div>
+        <button class="mini cmpYes" data-n="${esc(r.name||'')}">Yes, a rival</button>
+        <button class="mini cmpNo" data-n="${esc(r.name||'')}">Not a rival</button></div>`).join('')
+    + `<div class="btnrow" style="margin-top:8px"><button class="mini" id="cmpAll">Accept all ${wait.length}</button></div>`;
+  $('#cmpList').innerHTML = !on.length
+    ? '<div class="hint">No rivals on file yet. Until you add at least one, the rival-watch pass has nothing to look at and says so.</div>'
+    : on.map(r=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)">
+        <div style="flex:1"><b>${esc(r.name||'')}</b> <span class="dim">${esc(r.domain||'')}</span></div>
+        <button class="mini cmpDel" data-n="${esc(String(r.id))}">Remove</button></div>`).join('');
+  document.querySelectorAll('.cmpDel').forEach(b=>b.onclick=()=>cmpDo({action:'remove',which:b.dataset.n}));
+  document.querySelectorAll('.cmpNo').forEach(b=>b.onclick=()=>cmpDo({action:'reject',name:b.dataset.n}));
+  document.querySelectorAll('.cmpYes').forEach(b=>b.onclick=()=>cmpDo({action:'confirm_all'}));
+  const all=$('#cmpAll'); if(all) all.onclick=()=>cmpDo({action:'confirm_all'});
+}
+async function cmpDo(body){
+  inl($('#cmpMsg'),'dim','Saving…');
+  const j=await api('POST','/api/competitors',body);
+  if(j && j.ok){ inl($('#cmpMsg'),'ok','Saved'); renderCompetitors(j); }
+  else inl($('#cmpMsg'),'bad',(j&&j.error)||'Could not save');
+}
+async function loadCompetitors(){ renderCompetitors(await api('GET','/api/competitors')); }
+$('#cmpAdd').onclick = async ()=>{
+  const name=$('#cmpName').value.trim(), domain=$('#cmpDomain').value.trim();
+  if(!name||!domain){ inl($('#cmpMsg'),'bad','Both a name and a website.'); return; }
+  await cmpDo({action:'add',name,domain});
+  $('#cmpName').value=''; $('#cmpDomain').value='';
+};
+$('#cmpFind').onclick = async ()=>{
+  const b=$('#cmpFind'); b.disabled=true;
+  inl($('#cmpMsg'),'dim','Looking across the emirates — this takes a minute…');
+  const j=await api('POST','/api/competitors',{action:'find'});
+  b.disabled=false;
+  if(j && j.ok){ inl($('#cmpMsg'),'ok','Done'); renderCompetitors(j); }
+  else inl($('#cmpMsg'),'bad',(j&&j.error)||'Could not look');
+};
+
 loadSettings();
+loadTeam();
 loadProviders();
 loadTargets();
+loadCompetitors();
 </script>
 </body>
 </html>

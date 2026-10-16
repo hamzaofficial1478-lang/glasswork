@@ -1,15 +1,13 @@
 """
 tests.py — run: python3 -m providers.tests
 
-Covers the two things that caused real bugs: URL joining across awkward inputs,
-and the guarantee that the probe/test path and the production path build a
-byte-identical URL + headers for the same credential.
+The shelf tools' key checks, the preflight's verdicts, and the routes to the
+owner. The Claude team has its own suite (providers/team_tests.py); the URL
+joining and request-shape tests went with the API-key model providers.
 """
 import sys
 
 from . import auth
-from .request import build_chat_request
-from .urls import chat_endpoint, join_url, models_endpoint, normalize_base
 
 _fail = []
 
@@ -20,21 +18,6 @@ def check(name, got, want):
     else:
         print(f"FAIL  {name}\n        got:  {got!r}\n        want: {want!r}")
         _fail.append(name)
-
-
-def test_urls():
-    print("URL joiner:")
-    check("normalize host/v1", normalize_base("https://h/v1"), "https://h/v1")
-    check("normalize host/v1/", normalize_base("https://h/v1/"), "https://h/v1")
-    check("normalize full endpoint", normalize_base("https://h/v1/chat/completions"), "https://h/v1")
-    check("normalize host", normalize_base("https://h"), "https://h")
-    check("normalize host/", normalize_base("https://h/"), "https://h")
-    check("normalize /models endpoint", normalize_base("https://h/v1/models"), "https://h/v1")
-    check("chat endpoint from full paste", chat_endpoint("https://h/v1/chat/completions"),
-          "https://h/v1/chat/completions")
-    check("join no double slash", join_url("https://h/v1/", "/chat/completions"),
-          "https://h/v1/chat/completions")
-    check("models endpoint", models_endpoint("https://h/v1"), "https://h/v1/models")
 
 
 def test_auth():
@@ -125,7 +108,8 @@ def test_preflight_cover():
     fallback is configured — that is the failure people don't see coming.
     """
     print("Fallback cover verdicts:")
-    from .preflight import _cover, COVERED, SINGLE, DOWN, EMPTY, _ModelCache
+    from .preflight import (_cover, _verdict, COVERED, SINGLE, DOWN, EMPTY,
+                            UNKNOWN)
     check("two of two work -> COVERED", _cover(2, 2), COVERED)
     check("two of three work -> COVERED", _cover(2, 3), COVERED)
     check("primary works, fallback dead -> SINGLE", _cover(1, 2), SINGLE)
@@ -133,13 +117,16 @@ def test_preflight_cover():
     check("nothing works -> DOWN", _cover(0, 2), DOWN)
     check("nothing configured -> EMPTY", _cover(0, 0), EMPTY)
 
-    # a brain shared by five sectors must cost one call, not five
-    calls = []
-    cache = _ModelCache(quick=True)
-    for _ in range(5):
-        cache.test({"id": "c"}, {"id": "m1"})
-        calls.append(len(cache.seen))
-    check("shared model tested once", (len(cache.seen), calls[-1]), (1, 1))
+    # 'I did not look' is not 'I looked and it is dead'. Under --quick every
+    # link comes back ok=None, and reading that as DOWN made the cheap check
+    # announce that every sector in the agency had no working brain.
+    quick = [{"ok": None}, {"ok": None}]
+    check("not called -> UNKNOWN, not DOWN", _verdict(quick), UNKNOWN)
+    check("tested and dead -> DOWN", _verdict([{"ok": False}, {"ok": False}]), DOWN)
+    check("one alive, one untested -> SINGLE",
+          _verdict([{"ok": True}, {"ok": None}]), SINGLE)
+    check("one dead, one untested -> UNKNOWN",
+          _verdict([{"ok": False}, {"ok": None}]), UNKNOWN)
 
 
 def test_integrations_unconfigured():
@@ -151,9 +138,11 @@ def test_integrations_unconfigured():
     print("Channel checks (no network):")
     from . import integrations as ig
     blank = ig.test_all(env={})
-    check("both report not-configured", [r["ok"] for r in blank], [None, None])
-    check("covers telegram and email",
-          sorted(r["integration"] for r in blank), ["email", "telegram"])
+    check("all report not-configured", [r["ok"] for r in blank], [None] * len(blank))
+    # Pinned by name, not by count, so adding a channel is a deliberate edit here
+    # rather than a number that silently drifts.
+    check("covers every channel", sorted(r["integration"] for r in blank),
+          ["algolia", "email", "telegram"])
 
     half = ig.test_email(env={"SMTP_HOST": "h", "SMTP_USER": "u"})
     check("half-filled SMTP is a failure, not 'unset'", half["ok"], False)
@@ -163,29 +152,40 @@ def test_integrations_unconfigured():
     check("no telegram token -> unset, not broken", tg["ok"], None)
 
 
-def test_probe_equals_production():
-    print("Probe == production request shape:")
-    cred = {"base_url": "https://h/v1/chat/completions",  # deliberately pasted full
-            "api_key": "K", "auth_style": "bearer"}
-    msgs = [{"role": "user", "content": "ok"}]
-    # both paths build the request via the same function
-    prod_url, prod_h, _ = build_chat_request(cred, "the-model", msgs, max_tokens=5)
-    probe_url, probe_h, _ = build_chat_request(cred, "the-model", msgs, max_tokens=5)
-    check("identical URL", prod_url, probe_url)
-    check("identical headers", prod_h, probe_h)
-    check("URL from normalized base", prod_url, "https://h/v1/chat/completions")
-    check("single auth header", [k for k in prod_h if k.lower() in ("authorization", "x-api-key")],
-          ["Authorization"])
+def test_the_owner_can_always_be_reached():
+    """
+    Everything that notifies the owner goes through one function. Alerts live in
+    the app (his computer and his Android phone), so the owner can always be
+    reached: with nothing else set up the alert is kept in the app, and saying
+    so is the honest answer. Telegram, if an older setup has a bot, gets a copy,
+    and a Telegram that fails never loses the alert.
+    """
+    print("One route to the owner, and nothing is lost:")
+    from . import integrations as ig
+
+    plain = ig.send_message("anything", env={})
+    check("with nothing set up the alert is kept in the app", (plain["ok"], plain["integration"]), (True, "app"))
+    real = ig.send_telegram
+    try:
+        ig.send_telegram = lambda text, env=None, timeout=20: {"integration": "telegram", "ok": True, "detail": "Delivered."}
+        check("an older Telegram bot still gets a copy",
+              ig.send_message("x", env={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"})["integration"], "telegram")
+        ig.send_telegram = lambda text, env=None, timeout=20: {"integration": "telegram", "ok": False, "detail": "chat not found"}
+        down = ig.send_message("x", env={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"})
+        check("a Telegram that fails never loses the alert", (down["ok"], down["integration"]), (True, "app"))
+        check("and says what Telegram said", "chat not found" in down["detail"], True)
+    finally:
+        ig.send_telegram = real
+    check("the old phone-topic channel is gone", hasattr(ig, "send_ntfy") or hasattr(ig, "test_ntfy"), False)
 
 
 def main():
-    test_urls()
     test_auth()
     test_405_retry()
     test_400_means_key_accepted()
     test_preflight_cover()
     test_integrations_unconfigured()
-    test_probe_equals_production()
+    test_the_owner_can_always_be_reached()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

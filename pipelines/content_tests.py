@@ -32,7 +32,7 @@ def _fresh_db():
     """A real cabinet built from the real schema, in a temp dir."""
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
-    schema = (Path(__file__).parents[1] / "coordination" / "schema.sql").read_text()
+    schema = (Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8")
     con = sqlite3.connect(db)
     con.executescript(schema)
     con.commit()
@@ -250,6 +250,92 @@ def test_end_to_end_on_a_temp_cabinet():
         board.DB = real_db
 
 
+def test_a_routed_model_s_subject_is_no_longer_walked_past():
+    print("The magic word — a subject Content used to ignore:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        for ph, ar, it in [("glass partition dubai", "Dubai", "buy"),
+                           ("glass partition dubai price", "Dubai", "buy"),
+                           ("office glass partition dubai", "Dubai", "buy")]:
+            con.execute("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)", (ph, ar, it))
+        con.commit(); con.close()
+        # No "keyword" anywhere in it. This is what a routed SEO model writes,
+        # and the old substring filter dropped every one of them in silence.
+        board.post_request("SEO", "Content",
+                           "Service pages worth building this month", "the gap list")
+        r = cb.run(agent="content-writer")
+        check("Content claimed it", r["ok"], True)
+        check("and briefed off the back of it", r["stored"] >= 1, True)
+    finally:
+        board.DB = real_db
+
+
+def test_pages_seo_cleared_stop_being_blocked():
+    print("SEO's clearance reaches the queue, not just the thread:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        for ph, ar, it in [("glass partition dubai", "Dubai", "buy"),
+                           ("glass partition dubai price", "Dubai", "buy"),
+                           ("pergola abu dhabi", "Abu Dhabi", "buy"),
+                           ("pergola abu dhabi price", "Abu Dhabi", "buy")]:
+            con.execute("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)", (ph, ar, it))
+        con.commit()
+
+        board.post_request("SEO", "Content", "Keyword-gap list ready", "gaps")
+        r = cb.run(agent="content-writer")
+        blocked = [p["title"] for p in r["pages"] if p["status"] == "blocked_on_seo"]
+        check("something is held for SEO", len(blocked) >= 1, True)
+
+        # SEO answers the clearance thread Content opened.
+        rid = board.open_requests_for("SEO")[0]["id"]
+        board.reply_request(rid, "seo-strategist",
+                            "  CLEAR   " + blocked[0] + "  — 2 tracked phrases, both buying.")
+
+        again = cb.run(agent="content-writer")
+        check("the pass reports the unblocking", 
+              [f["title"] for f in (again.get("unblocked") or [])], [blocked[0]])
+        left = con.execute("SELECT status FROM content_queue WHERE title=?",
+                           (blocked[0],)).fetchone()["status"]
+        check("and the row is writable now", left, "briefed")
+        con.close()
+    finally:
+        board.DB = real_db
+
+
+def test_a_page_seo_did_not_clear_stays_blocked():
+    print("And it does not free what SEO held:")
+    real_db = board.DB
+    board.DB = _fresh_db()
+    try:
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        for ph, ar, it in [("glass partition dubai", "Dubai", "buy"),
+                           ("glass partition dubai price", "Dubai", "buy"),
+                           ("pergola abu dhabi", "Abu Dhabi", "buy"),
+                           ("pergola abu dhabi price", "Abu Dhabi", "buy")]:
+            con.execute("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)", (ph, ar, it))
+        con.commit()
+        board.post_request("SEO", "Content", "Keyword-gap list ready", "gaps")
+        r = cb.run(agent="content-writer")
+        blocked = [p["title"] for p in r["pages"] if p["status"] == "blocked_on_seo"]
+        rid = board.open_requests_for("SEO")[0]["id"]
+        board.reply_request(rid, "seo-strategist",
+                            "  HOLD    " + blocked[0] + "  — one phrase, no buying intent.")
+        again = cb.run(agent="content-writer")
+        check("nothing unblocked", again.get("unblocked"), None)
+        still = con.execute("SELECT status FROM content_queue WHERE title=?",
+                            (blocked[0],)).fetchone()["status"]
+        check("still held", still, "blocked_on_seo")
+        con.close()
+    finally:
+        board.DB = real_db
+
+
 def main():
     test_clustering()
     test_specific_service_beats_generic()
@@ -259,6 +345,9 @@ def main():
     test_claim_is_atomic()
     test_rerun_does_not_duplicate()
     test_end_to_end_on_a_temp_cabinet()
+    test_a_routed_model_s_subject_is_no_longer_walked_past()
+    test_pages_seo_cleared_stop_being_blocked()
+    test_a_page_seo_did_not_clear_stays_blocked()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: {_fail}")

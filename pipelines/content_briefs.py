@@ -33,7 +33,7 @@ import re
 import sqlite3
 import time
 
-from coordination import board
+from coordination import board, deskwork, inbox, uae
 
 # The service taxonomy, same grounding the SEO Strategist used. A phrase has to
 # name a service we actually sell, or it cannot become a page.
@@ -52,6 +52,17 @@ SERVICES = [
 ]
 AREAS = ["Dubai Marina", "Business Bay", "Downtown Dubai", "Jumeirah Village Circle",
          "Al Quoz", "Al Barsha", "Abu Dhabi", "Sharjah", "Dubai"]
+
+# The lists above are the owner's. Any other website's services and areas come
+# from its own business profile (coordination/profile.py).
+from coordination import profile as _profile  # noqa: E402
+
+if not _profile.is_starter():
+    from . import services as _svc
+    SERVICES = [(s["label"], list(dict.fromkeys([s["label"]] + list(s["names"]))))
+                for s in _svc.SERVICES.values()]
+    AREAS = uae.search_areas(9)
+WIDE = "UAE-wide" if _profile.is_starter() else "everywhere"
 
 # What every page on this site has to do, because the business's edge is real
 # finished work and fast replies — not word count. These are brief requirements,
@@ -115,8 +126,8 @@ def cluster(rows):
 def make_brief(g, rank):
     """A brief a human could actually write from, grounded in the real phrases."""
     svc, area = g["service"], g["area"]
-    where = f" in {area}" if area else " across Dubai, Abu Dhabi & Sharjah"
-    title = f"{svc.title()}{where}".replace("Uae", "UAE")
+    where = f" in {area}" if area else f" across {uae.served_phrase('&')}"
+    title = f"{svc.title()}{where}".replace("Uae", "UAE").replace("The Uk", "the UK")
     primary = sorted(g["phrases"], key=len)[0]      # shortest = the head term
     secondary = [p for p in sorted(set(g["phrases"])) if p != primary][:10]
     return {
@@ -125,7 +136,7 @@ def make_brief(g, rank):
         "url": "/" + _slug(f"{svc} {area}" if area else svc),
         "type": "service_page",
         "service": svc,
-        "area": area or "UAE-wide",
+        "area": area or WIDE,
         "primary_keyword": primary,
         "secondary_keywords": secondary,
         "evidence": {
@@ -189,31 +200,206 @@ def critic_check(briefs, gap_count, already=()):
     return (len(reasons) == 0, reasons)
 
 
+def is_briefing_work(job) -> bool:
+    """A job for this pass: about briefs, or at least not asking for a post written."""
+    return (job.wants("brief", "keyword", "gap", "plan", "topics")
+            or not job.wants("write", "publish", "post", "blog", "article",
+                             "case study", "rewrite", "draft"))
+
+
 def run(agent="content-writer", max_briefs=6, draft_allowance=1):
+    """
+    Brief the next pages — from SEO's handoff, or from a job the MD posted.
+
+    CONTENT USED TO WORK FROM ONE DOOR ONLY: a keyword handoff request from
+    SEO. Everything else it refused, on the honest grounds that Content does
+    not invent work nobody asked for. The flaw was that a task on the Content
+    board IS somebody asking. He posted "write a case study about the Marina
+    pergola", it sat open for days, and Content reported — correctly, and
+    uselessly — that there was nothing to claim.
+
+    A board task is now the second door. It cannot mint work on its own, and
+    the Critic and the no-drafting-spree gate are unchanged; it just stops the
+    desk walking past a job addressed to it.
+    """
     with board.agent_run(agent) as run_row:
-        out = _brief(agent, max_briefs, draft_allowance)
+        # The briefs pass and the writing pass both run as content-writer. A
+        # job that asks for a post to be WRITTEN — "write 1 post and publish on
+        # website" — is the writing pass's, and this pass used to take it, make
+        # six briefs out of the words in it, and mark it done with no post
+        # written. It now hands such a job back for content_write, and takes
+        # only what is about briefing.
+        with deskwork.at_the_desk("Content", agent, run_row,
+                                  takes=is_briefing_work) as job:
+            out = _brief(agent, max_briefs, draft_allowance, job)
+            deskwork.settle(job, out, made=out.get("stored"),
+                            what="page brief")
+        # _brief claims and answers ONE request — the handoff it briefs from.
+        # Everything else addressed to Content is read here, so a second and
+        # third message in the same day are not left to age. Four of the nine
+        # edges that went nowhere pointed at this sector.
+        post = inbox.read_post("Content", agent)
+        out["post"] = post
         if out.get("ok"):
-            run_row.note(f"briefed {out.get('stored', 0)} page(s)"
-                         + (f", {out['already_briefed']} already done"
-                            if out.get("already_briefed") else ""))
+            note = (f"briefed {out.get('stored', 0)} page(s)"
+                    + (f", {out['already_briefed']} already done"
+                       if out.get("already_briefed") else ""))
         else:
-            run_row.note(out.get("error", "nothing to brief"))
+            note = out.get("error", "nothing to brief")
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
 
 
-def _brief(agent, max_briefs, draft_allowance):
+def _reply(claimed, agent, body, close=False):
+    """
+    Answer the request this work came from — if it came from one.
+
+    Work off a board task has no request behind it, and there is nothing to
+    reply to. Saying so here once beats three `if claimed:` guards buried in
+    the flow, where the next person to add a fourth reply forgets one and
+    Content silently stops answering SEO.
+    """
+    if not claimed:
+        return None
+    return board.reply_request(claimed["id"], agent, body, close=close)
+
+
+def take_seo_clearance(con, agent) -> list:
+    """
+    Read SEO's answer and unblock the pages it cleared.
+
+    Content holds a page at status='blocked_on_seo' until SEO says the search
+    demand behind it is real. Nothing ever read the answer, so even after SEO
+    started replying the rows stayed blocked for ever and Content wrote one
+    page a day at most — the clearance loop closed on the thread and nowhere
+    that mattered.
+
+    Matching is done by asking seo_gap which of OUR OWN titles it cleared, so
+    Content never parses SEO's wording. That is the same mistake as the
+    "keyword" subject filter, and it is not being made twice.
+    """
+    from . import seo_gap
+
+    blocked = [dict(r) for r in con.execute(
+        "SELECT id, title FROM content_queue WHERE status='blocked_on_seo'")]
+    if not blocked:
+        return []
+    titles = [b["title"] for b in blocked]
+
+    # Every thread Content opened with SEO that SEO has since replied on.
+    with board._conn() as bc:
+        threads = bc.execute(
+            "SELECT r.id FROM requests r WHERE r.from_sector='Content'"
+            "   AND r.to_sector='SEO'"
+            "   AND EXISTS (SELECT 1 FROM request_msgs m"
+            "                WHERE m.request_id=r.id AND m.author!='Content')"
+            " ORDER BY r.created_at DESC LIMIT 20").fetchall()
+        replies = []
+        for t in threads:
+            replies += [m["body"] for m in bc.execute(
+                "SELECT body FROM request_msgs WHERE request_id=? AND author!='Content'"
+                " ORDER BY id", (t["id"],)).fetchall()]
+
+    cleared = []
+    for reply in replies:
+        cleared += [t for t in seo_gap.cleared_from(reply, titles) if t not in cleared]
+    if not cleared:
+        return []
+
+    freed = []
+    for b in blocked:
+        if b["title"] in cleared:
+            con.execute("UPDATE content_queue SET status='briefed' WHERE id=?",
+                        (b["id"],))
+            freed.append({"id": b["id"], "title": b["title"]})
+    con.commit()
+    return freed
+
+
+def _brief(agent, max_briefs, draft_allowance, job=None):
     con = sqlite3.connect(board.DB)
     con.row_factory = sqlite3.Row
     try:
+        # 0. Anything stuck in our own name, first.
+        #
+        # A request an agent claimed and then died on sits at status='claimed'
+        # for ever. The inbox below lists status='open' only, so the sector
+        # cannot see it — while the Overseer counts it as this sector ignoring
+        # the question. That combination ran for nineteen days: "Content has
+        # not answered SEO" on the owner's phone every morning, and this
+        # function reporting, correctly, that there was nothing to claim.
+        #
+        # Checking here rather than only in the Overseer's pass means the
+        # sector unsticks itself the moment somebody runs it, instead of
+        # needing a second command in the right order.
+        try:
+            board.release_dead_request_claims()
+        except Exception:
+            pass                       # never let housekeeping stop the work
+
+        # 0b. Pages SEO has since cleared stop being blocked. This runs before
+        #     the claim below, so a pass that finds no new handoff can still
+        #     free yesterday's held pages — that is real work, and reporting
+        #     "nothing to brief" while three cleared pages sit blocked is the
+        #     kind of quiet contradiction the owner keeps catching.
+        try:
+            freed = take_seo_clearance(con, agent)
+        except Exception:
+            freed = []
+
         # 1. claim the handoff SEO left on the board (atomic — no grabbing)
-        waiting = [r for r in board.open_requests_for("Content")
-                   if "keyword" in (r["subject"] or "").lower()]
+        #
+        # THE MAGIC WORD. This used to read:
+        #
+        #     waiting = [r for r in board.open_requests_for("Content")
+        #                if "keyword" in (r["subject"] or "").lower()]
+        #
+        # and it worked, by luck, for exactly as long as nobody routed a model
+        # to SEO. The template subject SEO falls back to is "Keyword-gap list
+        # ready", which contains the word. Give SEO a brain and the brain
+        # writes the subject in its own voice — "Service pages worth building
+        # this month" — which does not, so Content walked straight past the one
+        # message it exists to answer. Nothing errored. Nothing was logged. The
+        # better the SEO model, the more certainly Content heard nothing.
+        #
+        # Proved both ways on a throwaway cabinet before this was changed:
+        #     "Keyword-gap list ready"                  -> seen
+        #     "Service pages worth building this month" -> not seen
+        #
+        # Content now claims anything addressed to it. If it cannot brief from
+        # a request it says so on the thread, which is a worse outcome for that
+        # one message and a far better one than a filter that quietly drops
+        # every message somebody bothered to write well.
+        waiting = board.open_requests_for("Content")
+        # Brief from a hand-off that is ABOUT pages, first. The inbox answers
+        # the others on receipt (inbox.answer_handoff): AEO/GEO fixes are edits
+        # to live pages and go to IT's list, guest posts wait on the owner. A
+        # briefs pass that claimed one of those could only reply with a brief
+        # nobody asked for. Tagged kinds decide, not words in the subject.
+        from coordination import inbox as _inbox
+        not_briefs = ("aeo_fixes", "guest_posts", "gsc_down")
+        first = ("keyword_gaps", "pages")
+        waiting = sorted((r for r in waiting
+                          if _inbox.handoff_kind(dict(r)) not in not_briefs),
+                         key=lambda r: 0 if _inbox.handoff_kind(dict(r)) in first else 1)
         claimed = None
         for r in waiting:
             if board.claim_request(r["id"], agent):
                 claimed = r
                 break
-        if not claimed:
+        if not claimed and not job and freed:
+            # A pass that unblocked pages did something, and must not report
+            # "nothing to claim" over the top of it. This is the outcome after
+            # SEO answers: no new handoff, but yesterday's held pages are now
+            # writable, and content_write can pick them up on the next step.
+            return {"ok": True, "agent": agent, "stored": 0,
+                    "unblocked": freed,
+                    "summary": (f"{len(freed)} page(s) SEO has cleared are no longer "
+                                f"blocked and are ready to write: "
+                                + ", ".join(f["title"] for f in freed))}
+        if not claimed and not job:
             # Not a fault: Content is refusing to invent work nobody asked for.
             # Say WHY, and what the cabinet actually holds, so the fix is obvious.
             kw = con.execute("SELECT count(*) FROM keywords").fetchone()[0]
@@ -235,6 +421,20 @@ def _brief(agent, max_briefs, draft_allowance):
                 for r in con.execute(
                     "SELECT phrase, area, intent FROM keywords ORDER BY id DESC LIMIT 200")]
 
+        # If the MD named a subject, brief THAT subject. Reading two hundred
+        # phrases and returning whatever clustered largest is how "write a case
+        # study about the Marina pergola" turned into six shower-glass pages.
+        asked_about, narrowed = [], []
+        if job:
+            asked_about = job.words()
+            narrowed = [r for r in rows
+                        if any(w in r[0].lower() for w in asked_about)]
+            # Only narrow when the job actually matches something we track. A
+            # subject with no phrases behind it is a reason to say so, not a
+            # reason to brief nothing.
+            if narrowed:
+                rows = narrowed
+
         # 3. cluster into page candidates, then drop any page already briefed.
         #    Re-running must not mint a second /glass-partition-dubai to compete
         #    with the first one.
@@ -248,18 +448,37 @@ def _brief(agent, max_briefs, draft_allowance):
                 break
         briefs = fresh
 
-        result = {"ok": True, "agent": agent, "claimed_request": claimed["id"],
+        result = {"ok": True, "agent": agent,
+                  "claimed_request": claimed["id"] if claimed else None,
+                  "from_task": job.id if job else None,
+                  "asked_about": asked_about,
+                  "narrowed_to_subject": bool(narrowed),
                   "keywords_read": len(rows), "clusters": len(groups),
                   "briefs": len(briefs), "already_briefed": len(skipped)}
 
         if not briefs:
-            board.reply_request(
-                claimed["id"], agent,
-                f"Nothing new to brief — all {len(skipped)} page candidates from this gap "
-                "list are already in the content queue. Send fresh gaps and I'll pick them up.",
-                close=True)
-            result.update({"stored": 0, "critic": "skipped",
-                           "note": "every candidate page was already briefed"})
+            why = (f"Nothing new to brief — all {len(skipped)} page candidates from this "
+                   "gap list are already in the content queue. Send fresh gaps and I'll "
+                   "pick them up.")
+            # THE EMPTY TABLE FIRST, because it is the cause and the others are
+            # symptoms. A full day run reported "no tracked phrase mentions
+            # queue, briefed, real, facts" — words out of the MD's instruction,
+            # blamed for a table that had nothing in it at all. That sends him
+            # looking at the wording of a task when the fault was upstream in
+            # SEO, which is where this now points.
+            if not rows:
+                why = ("Nothing to brief: SEO's keyword table is empty, so there "
+                       "is no search demand to build a page on. That is an SEO "
+                       "problem, not a Content one — see what 'SEO finds the "
+                       "gaps' said in today's run.")
+            elif job and asked_about and not narrowed:
+                why = ("Nothing to brief on that subject: no tracked phrase mentions "
+                       + ", ".join(asked_about[:4])
+                       + ". SEO has to find the phrases before Content can build a page "
+                         "on them — or say it plainly and I will write it from the job "
+                         "itself rather than from search data.")
+            _reply(claimed, agent, why, close=True)
+            result.update({"stored": 0, "critic": "skipped", "note": why})
             return result
 
         # 5. the MD's gate: exactly one template brief, the rest wait on SEO
@@ -269,9 +488,9 @@ def _brief(agent, max_briefs, draft_allowance):
         # 6. critic
         ok, reasons = critic_check(briefs, len(rows), already)
         if not ok:
-            board.reply_request(claimed["id"], agent,
-                                "Could not brief this yet — the Critic rejected it: "
-                                + "; ".join(reasons))
+            _reply(claimed, agent,
+                   "Could not brief this yet — the Critic rejected it: "
+                   + "; ".join(reasons))
             result.update({"stored": 0, "critic": "rejected", "critic_reasons": reasons})
             return result
 
@@ -304,8 +523,8 @@ def _brief(agent, max_briefs, draft_allowance):
         con.commit()
 
         ready_one = next((s for s in stored if s["status"] == "briefed"), None)
-        board.reply_request(
-            claimed["id"], agent,
+        _reply(
+            claimed, agent,
             f"Briefed. {len(stored)} page candidates from {len(rows)} tracked phrases.\n"
             f"Ready to draft (1, per the MD's gate): {ready_one['title'] if ready_one else '—'}\n"
             f"Held for your volume/difficulty call: {len(stored) - 1}\n"
