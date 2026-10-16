@@ -114,6 +114,50 @@ TOKENS = {"blog": 9000, "service_page": 5000}
 LENGTH = {"blog": "1,000 to 1,400 words", "service_page": "600 to 900 words"}
 FEWEST = {"blog": 850, "service_page": 450}
 
+
+# THE PLAN'S WORDS. "cannot write posts more then 1 a day and words
+# limitations" — Starter 300–400, Growth up to 800, Pro up to 1,200
+# (coordination/licence). No plan, no limit: the lengths above.
+def _plan_words() -> int:
+    try:
+        from coordination import licence
+        return licence.post_words()
+    except Exception:
+        return 0
+
+
+def length_words(kind) -> str:
+    most = _plan_words()
+    if most:
+        return f"{round(most * 0.75):,} to {most:,} words"
+    return LENGTH.get(kind, LENGTH["service_page"])
+
+
+def fewest_words(kind) -> int:
+    least = FEWEST.get(kind, FEWEST["service_page"])
+    most = _plan_words()
+    return min(least, round(most * 0.75)) if most else least
+
+
+def trim_to_plan(page):
+    """A post longer than the plan allows, ended at the last whole paragraph that fits."""
+    most = _plan_words()
+    html = str((page or {}).get("html") or "")
+    if not most or words_in(page) <= most:
+        return page
+    parts = re.split(r"(</(?:p|ul|ol|table|blockquote|figure|h2|h3|h4|div)>)", html, flags=re.I)
+    blocks = [parts[i] + (parts[i + 1] if i + 1 < len(parts) else "") for i in range(0, len(parts), 2)]
+    kept, n = [], 0
+    for b in blocks:
+        w = words_in({"html": b})
+        if n + w > most and kept:
+            break
+        kept.append(b)
+        n += w
+    while kept and re.search(r"<h[2-4]\b[^>]*>.*</h[2-4]>\s*$", kept[-1], re.I | re.S):
+        kept.pop()                      # never end on a heading with nothing under it
+    return {**page, "html": "".join(kept).strip()}
+
 # What gives writing away as machine-made, and what no tradesman says. Found in
 # a draft, it goes back once with the phrases named. Not a trick to fool a
 # detector — these are the phrases that make a reader stop trusting a page.
@@ -397,9 +441,14 @@ def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
                  else "the whole UAE" if profile.is_starter()
                  else "all of " + countries.in_a_sentence(profile.country()))
         lines.append(f"THE AREA: {whole} — " + ", ".join(facts.get("areas") or []))
-    lines.append("HOW LONG: " + (f"about {pack['target_words']} words" if pack and
-                                 pack.get("target_words") else LENGTH.get(kind, LENGTH['service_page']))
-                 + " — full, specific and useful; never padded")
+    most = _plan_words()
+    if most:
+        lines.append(f"HOW LONG: {length_words(kind)} — never more than {most:,}; full, specific "
+                     "and useful within that, never padded")
+    else:
+        lines.append("HOW LONG: " + (f"about {pack['target_words']} words" if pack and
+                                     pack.get("target_words") else LENGTH.get(kind, LENGTH['service_page']))
+                     + " — full, specific and useful; never padded")
     for m in (brief.get("must_include") or []):
         # The photographs are handled below, from real files; the old brief
         # line about them would only make the writer leave a gap.
@@ -478,11 +527,15 @@ def voice_problems(page, kind="service_page") -> list:
     """Why a draft reads thin or machine-made, in words the writer can act on."""
     out = []
     n = words_in(page)
-    least = FEWEST.get(kind, FEWEST["service_page"])
+    least = fewest_words(kind)
+    most = _plan_words()
     if n < least:
-        out.append(f"it is {n} words; this should be {LENGTH.get(kind)}. Add real "
+        out.append(f"it is {n} words; this should be {length_words(kind)}. Add real "
                    "substance — how the job is done, the options and their "
                    "trade-offs, what goes wrong, what to ask — not padding")
+    elif most and n > most:
+        out.append(f"it is {n} words; it must be no more than {most:,}. Cut it down: "
+                   "keep the most useful parts, drop repetition")
     text = re.sub(r"<[^>]+>", " ", str((page or {}).get("html") or "")).lower()
     tells = [t for t in AI_TELLS if t in text]
     if tells:
@@ -935,7 +988,15 @@ def _write(agent, dry_run, only_id, limit, job=None):
         # still queued — which is a partial success and reads like one, instead
         # of a failure that threw away real work.
         deadline = _deadline()
+        from coordination import licence
         for row in waiting:
+            # THE PLAN'S POSTS A DAY, before a word is asked for: a look here,
+            # counted once the post is banked below.
+            allowed = licence.take("posts", dry=True)
+            if not allowed.get("ok"):
+                held.append({"id": row["id"], "title": row["title"], "plan": True,
+                             "why": str(allowed.get("error")) + " It stays queued."})
+                continue
             if deadline and time.time() > deadline:
                 held.append({"id": row["id"], "title": row["title"],
                              "why": (f"ran out of time this pass — {len(pages)} "
@@ -966,6 +1027,8 @@ def _write(agent, dry_run, only_id, limit, job=None):
                                              site=facts.get("site") or "")
             except Exception:
                 pack = {}
+            if pack and _plan_words():           # the plan's words win over the rivals' length
+                pack["target_words"] = min(int(pack.get("target_words") or _plan_words()), _plan_words())
             seo_check = (lambda pg: seo_keywords.check(pg, pack, kind)) if pack else \
                 (lambda pg: {"problems": [], "score": None})
             got = _ask_the_writer(brief, facts, kind=kind, images=images, pack=pack)
@@ -974,7 +1037,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
                              "why": got.get("error")})
                 continue
 
-            page = got["page"]
+            page = trim_to_plan(got["page"])
             # ONE SECOND GO, TOLD WHY: too short, phrases that read as
             # machine-written, or something the Critic needs. Kept only if it
             # is better than the first.
@@ -995,7 +1058,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
                     if len(second) < len(first) or (
                             len(second) == len(first)
                             and words_in(again["page"]) > words_in(page)):
-                        page, got = again["page"], again
+                        page, got = trim_to_plan(again["page"]), again
             ok, reasons = critic_check(page, brief, facts)
             short = [v for v in voice_problems(page, kind) if v.startswith("it is ")]
             if short and kind == "blog":
@@ -1028,7 +1091,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
                     art2 = _standalone(fixed["page"], brief, images)
                     v2 = auditor.check_page(art2, brief, site_host=host)
                     if v2["pass"] and critic_check(fixed["page"], brief, facts)[0]:
-                        page, got, article, verdict = fixed["page"], fixed, art2, v2
+                        page, got, article, verdict = trim_to_plan(fixed["page"]), fixed, art2, v2
             if not verdict["pass"]:
                 held.append({"id": row["id"], "title": row["title"],
                              "why": "the Auditor held it: " + verdict["blocking"][0]})
@@ -1048,6 +1111,8 @@ def _write(agent, dry_run, only_id, limit, job=None):
                         con.execute("UPDATE content_queue SET type=? WHERE id=?",
                                     (kind, row["id"]))
                         con.commit()
+                if not dry_run:
+                    licence.take("posts")
                 pages.append({"id": row["id"], "title": blog["title"], "kind": kind,
                               "images": len(images or []), "page": blog["url"],
                               "how": "for-your-blog", "words": verdict["words"],
@@ -1090,6 +1155,8 @@ def _write(agent, dry_run, only_id, limit, job=None):
             if not dry_run and kind != (row.get("type") or ""):
                 con.execute("UPDATE content_queue SET type=? WHERE id=?", (kind, row["id"]))
                 con.commit()
+            if not dry_run:
+                licence.take("posts")
             pages.append({"id": row["id"], "title": page.get("title") or row["title"],
                           "kind": kind, "images": len(images or []),
                           "page": page_file, "how": how, "words": verdict["words"],

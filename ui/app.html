@@ -136,6 +136,15 @@ ol.feed li:last-child{border-bottom:0}
 .steps{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:14px;font-size:15px;line-height:1.55}
 .steps .btn{margin-left:6px}
 @media (max-width:760px){.upd-banner{left:12px;right:12px;bottom:84px;max-width:none}}
+.plan-bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:14px 16px;
+  border-radius:12px;background:var(--stuck-bg);border:1px solid var(--line);font-size:15px;margin-bottom:20px}
+.plan-bar b{font-weight:600}
+.keybox #keyIn{font-family:'Geist Mono',ui-monospace,monospace;font-size:17px;letter-spacing:.06em;text-transform:uppercase}
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 20px;padding:16px 20px;font-size:15px;
+  font-variant-numeric:tabular-nums}
+.plan-grid span{display:block;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+.plan-meter{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;font-size:14.5px}
+.plan-meter .mono{font-variant-numeric:tabular-nums}
 
 /* phone */
 .tabs{display:none}
@@ -495,7 +504,7 @@ const $ = (q) => document.querySelector(q);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = (n) => '$' + Number(n || 0).toFixed(2);
-const S = {me: null, brand: null, engine: null, state: null, siteIdx: 0};
+const S = {me: null, brand: null, engine: null, state: null, siteIdx: 0, licence: null};
 const SITE_COLOURS = [['#E8834F', '#E8834F'], ['#4D6A96', '#8FAEDB']];
 
 /* ---- theme: the computer's, unless chosen in Settings ---- */
@@ -2844,6 +2853,7 @@ function settings(main) {
   const many = (me.sites || []).length > 1;
   main.innerHTML = `<div class="page narrow">${head('Settings',
     many ? 'Each website has its own settings. Your AI, phone and password are shared by both.' : '')}
+    <section id="planBox" hidden style="display:flex;flex-direction:column;gap:8px"></section>
     <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This website</h2><div class="card">
       ${row('/business', 'Your business', 'What you do, where, what you sell and who buys it')}
       ${row('/setup', 'Website and connection', 'Its address, and how the agency reaches it')}
@@ -2891,6 +2901,7 @@ function settings(main) {
   main.querySelectorAll('[data-theme-pick]').forEach((b) => b.onclick = () => { theme(b.dataset.themePick); buildSiteMenu(); settings(main); });
   $('#updCheck').onclick = () => checkUpdate();
   installRow();
+  if (planOn()) { planCard(); licence(true).then(() => { if (VIEW.r === 'settings') planCard(); }); }
 }
 /* A NEW VERSION. Asked plainly — nothing about this copy goes with the
    question. Only a version signed with the developer's key is installed, and
@@ -2937,6 +2948,134 @@ async function undoUpdate() {
   if (!confirm('Go back to the version before the last update?')) return;
   const j = await api('/api/update/rollback', {});
   toast(j.why || j.error || (j.ok ? 'Done.' : 'Nothing to go back to.'));
+}
+
+/* ======================= YOUR PLAN (coordination/licence.py) =======================
+   "when ever user will login to new device the program will ask for special
+   key ... the program will automatically detect that which user enter that key
+   and what had registered under that key". A copy given out with plans asks
+   for the key once on each computer, shows the plan as the Home signed it, and
+   says plainly when it has paused and why. The owner's own copy has no plan. */
+const PLAN_STATUS = {trial: ['Trial', 'work'], active: ['Active', 'done'], past_due: ['Payment overdue', 'wait'],
+  cancelled: ['Cancelled', 'stuck'], expired: ['Ended', 'stuck'], trial_used: ['Trial already used', 'stuck'], pending: ['Being confirmed', 'wait']};
+const dayOf = (ts) => ts ? new Date(Number(ts) * 1000).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'}) : '';
+async function licence(beat) {
+  const j = await ask(beat ? '/api/licence?beat=1' : '/api/licence');
+  if (j && j.ok !== false) S.licence = j;
+  return S.licence;
+}
+const planOn = () => !!(S.licence && S.licence.on);
+const needsKey = () => planOn() && !!S.licence.need_key;
+function planLinks(l) {
+  return (l.portal_url ? `<a class="btn small" href="${esc(l.portal_url)}" target="_blank" rel="noopener">Manage or renew your plan</a>` : '')
+    + (l.pricing_url ? `<a class="btn ${l.portal_url ? 'ghost' : ''} small" href="${esc(l.pricing_url)}" target="_blank" rel="noopener">See the plans</a>` : '');
+}
+/* Botix has paused: said at the top of every screen, with what to do about it. */
+function planBar() {
+  const page = $('#main .page');
+  const old = $('#planBar'); if (old) old.remove();
+  if (!page || !planOn() || needsKey() || S.licence.working) return;
+  const l = S.licence, bar = document.createElement('div');
+  bar.id = 'planBar'; bar.className = 'plan-bar'; bar.setAttribute('role', 'status');
+  bar.innerHTML = `<span class="grow"><b>Botix has paused.</b> ${esc(l.error || 'Your plan is not active.')}</span>
+    <span style="display:flex;gap:8px;flex-wrap:wrap">${planLinks(l)}<button class="btn ghost small" type="button" id="planAgain">Check again</button></span>`;
+  page.prepend(bar);
+  $('#planAgain').onclick = async () => { $('#planAgain').disabled = true; S.licence = await api('/api/licence/check', {}); KEPT.clear(); route(); };
+}
+/* The key, once on each computer. */
+function keyScreen(main) {
+  const l = S.licence || {}, mail = l.support_email || '';
+  const lead = l.moved ? 'Your key is now in use on another computer. Enter it again here to move it back.'
+    : l.has_key && l.error ? esc(l.error)
+    : 'Each plan comes with a key. Enter it once on this computer and Botix keeps to the plan you bought.';
+  main.innerHTML = `<div class="page narrow">${head('Enter your Botix key', lead)}
+    <div class="card keybox" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <label style="display:flex;flex-direction:column;gap:6px"><b style="font-weight:600">Your key</b>
+        <input id="keyIn" autocomplete="off" spellcheck="false" placeholder="BTX-XXXXX-XXXXX-XXXXX-XXXXX" aria-describedby="keyHelp"></label>
+      <label style="display:flex;flex-direction:column;gap:6px"><b style="font-weight:600">This computer's name</b>
+        <input id="keyName" class="plain-in" maxlength="60" value="${esc(l.computer || 'My computer')}">
+        <span class="muted" style="font-size:13.5px">So you can tell your computers apart if the key ever moves.</span></label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn" type="button" id="keyGo">Use this key</button>
+        <span class="muted" id="keySay" style="font-size:14px"></span></div>
+      <div id="keyMove"></div>
+    </div>
+    <p class="muted" id="keyHelp" style="font-size:14px">It is in the email you got when you paid, and on the page you saw straight after.
+      Lost it? ${mail ? `Write to <a href="mailto:${esc(mail)}">${esc(mail)}</a> or ` : ''}<a href="#help">report a problem</a> and you'll get a new one.
+      The key works on one computer at a time; entering it on another computer moves it there.</p></div>`;
+  const go = async (move) => {
+    const key = $('#keyIn').value.trim();
+    if (!key) { $('#keySay').textContent = 'Type or paste your key first.'; return; }
+    $('#keyGo').disabled = true; $('#keySay').textContent = move ? 'Moving your key here…' : 'Checking your key…';
+    const r = await api('/api/licence/activate', {key, move, name: $('#keyName').value.trim()});
+    $('#keyGo').disabled = false;
+    if (r && r.in_use) {
+      const pcs = (r.computers || []).map((c) => `<li><b style="font-weight:600">${esc(c.name)}</b> <span class="muted">— since ${esc(dayOf(c.since))}${c.seen ? ', last used ' + esc(dayOf(c.seen)) : ''}</span></li>`).join('');
+      $('#keySay').textContent = '';
+      $('#keyMove').innerHTML = `<div class="note" style="display:flex;flex-direction:column;gap:10px"><span>${esc(r.error)}</span>
+        ${pcs ? `<ul style="margin:0;padding-left:20px">${pcs}</ul>` : ''}
+        <span class="muted" style="font-size:13.5px">A key can move ${Number(r.moves_left || 0)} more time${Number(r.moves_left) === 1 ? '' : 's'} this month.</span>
+        <span><button class="btn small" type="button" id="keyMoveGo"${Number(r.moves_left || 0) ? '' : ' disabled'}>Move it to this computer</button></span></div>`;
+      $('#keyMoveGo').onclick = () => go(true);
+      return;
+    }
+    if (r && r.on && r.has_key) {
+      S.licence = r; KEPT.clear();
+      toast(r.working ? `Your ${r.plan_name || ''} plan is on. Welcome.` : (r.error || 'Your key is saved.'));
+      route(); return;
+    }
+    $('#keySay').textContent = (r && r.error) || 'That key did not work.';
+  };
+  $('#keyGo').onclick = () => go(false);
+  $('#keyIn').onkeydown = (e) => { if (e.key === 'Enter') go(false); };
+  $('#keyIn').focus();
+}
+/* The Settings card: the plan, its dates, what is left today, and this computer. */
+function planCard() {
+  const box = $('#planBox'); if (!box) return;
+  if (!planOn()) { box.hidden = true; return; }
+  const l = S.licence; box.hidden = false;
+  if (!l.plan) {
+    box.innerHTML = `<h2 class="label" style="margin:0">Your plan</h2><div class="card" style="padding:16px 20px">${esc(l.error || 'No plan yet.')}</div>`;
+    return;
+  }
+  const [stWord, stCls] = PLAN_STATUS[l.status] || [l.status || '', 'plain'];
+  const ends = l.cancel_at ? ['Ends', l.cancel_at] : l.status === 'trial' ? ['Trial ends', l.period_end]
+    : ['cancelled', 'expired'].includes(l.status) ? ['Ended', l.ends_at || l.period_end] : ['Renews', l.period_end];
+  const meters = (l.meters || []).map((m) => {
+    const pct = m.limit ? Math.min(100, Math.round(100 * m.used / m.limit)) : 0;
+    const cls = pct >= 100 ? 'over' : pct >= 80 ? 'hot' : '';
+    return `<div class="plan-meter"><span><b style="font-weight:600">${esc(m.label)}</b>
+      <span class="muted"> ${m.per === 'day' ? 'today' : 'this month'}${m.each === 'website' ? ', this website' : ''}</span></span>
+      <span class="${m.limit ? 'mono' : 'muted'}">${m.limit ? `${Number(m.used)} of ${Number(m.limit)}` : 'Not in this plan'}</span>
+      ${m.limit ? `<span class="meter" style="grid-column:1 / -1"><i class="${cls}" style="width:${pct}%"></i></span>` : ''}</div>`;
+  }).join('');
+  const extras = [l.post_words ? `Posts up to ${Number(l.post_words).toLocaleString('en-GB')} words` : '',
+    `${Number(l.websites || 1)} website${Number(l.websites) === 1 ? '' : 's'}`, ...(l.features || []).map((f) => f.label)].filter(Boolean);
+  box.innerHTML = `<h2 class="label" style="margin:0">Your plan</h2><div class="card">
+    <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600;font-size:17px">${esc(l.plan_name || l.plan)}</b>
+      <span class="muted" style="font-size:14px">${l.variant === 'ai' ? 'With Botix AI' : 'With your own AI key'} · ${esc(extras.join(' · '))}</span></span>
+      <span class="pill ${stCls}">${esc(stWord)}</span></div>
+    ${l.working ? '' : `<div class="row"><span class="grow">${esc(l.error)}</span></div>`}
+    <div class="plan-grid">
+      <div><span>Bought</span>${esc(dayOf(l.bought_at))}</div>
+      <div><span>On this plan since</span>${esc(dayOf(l.plan_since))}</div>
+      <div><span>${esc(ends[0])}</span>${esc(dayOf(ends[1])) || '—'}</div>
+      <div><span>Checked</span>${l.checked_at ? esc(dayOf(l.checked_at)) + ' ' + esc(when(l.checked_at)) : '—'}${l.offline ? ' <span class="muted">(offline)</span>' : ''}</div>
+    </div>
+    ${meters ? `<div style="display:flex;flex-direction:column;gap:14px;padding:4px 20px 18px">${meters}</div>` : ''}
+    <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600">This computer</b>
+      <span class="muted" style="font-size:14px">${esc(l.computer)} · key ending ${esc(l.key_hint)}${l.email ? ' · ' + esc(l.email) : ''}</span></span>
+      <button class="btn quiet small" type="button" id="planRelease">Give this computer's place back</button></div>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${planLinks(l)}
+      <button class="btn ghost small" type="button" id="planCheck">Check now</button><span class="muted" id="planSay" style="font-size:13.5px"></span></div>
+  </div>`;
+  $('#planCheck').onclick = async () => { $('#planCheck').disabled = true; S.licence = await api('/api/licence/check', {}); planCard(); planBar(); };
+  $('#planRelease').onclick = async () => {
+    if (!confirm('Give this computer\'s place back? Botix stops here until a key is entered again — do this before moving to a new computer.')) return;
+    const r = await api('/api/licence/release', {});
+    $('#planSay').textContent = r.head || r.error || '';
+    if (r.ok) { await licence(); route(); }
+  };
 }
 
 /* INSTALL THE APP. On the hosted office a browser can install Botix as an
@@ -3010,8 +3149,10 @@ async function redraw() {
   const a = document.activeElement;
   const keep = a && main.contains(a) && a.dataset ? a.dataset.agent || a.dataset.sector || a.dataset.room || a.dataset.tab || '' : '';
   const y = window.scrollY, gen = VIEW.gen;
+  if (needsKey()) return;
   await fn(VIEW.view);
   if (gen !== VIEW.gen) return;
+  planBar();
   window.scrollTo(0, y);
   if (keep) { const el = main.querySelector(`[data-agent="${CSS.escape(keep)}"], [data-sector="${CSS.escape(keep)}"], [data-room="${CSS.escape(keep)}"], [data-tab="${CSS.escape(keep)}"]`); if (el) el.focus({preventScroll: true}); }
 }
@@ -3032,8 +3173,11 @@ async function route() {
   // Nothing kept for this screen yet: say so within a blink, rather than leaving
   // the last screen up looking as though the click did nothing.
   const slow = setTimeout(() => { if (gen === VIEW.gen) main.classList.add('busy'); }, 120);
+  // No key on this computer yet (or it moved away): the key first, except to report a problem.
+  if (needsKey() && VIEW.r !== 'help') { clearTimeout(slow); keyScreen(VIEW.view); return; }
   try { await fn(VIEW.view); } finally { clearTimeout(slow); if (gen === VIEW.gen) main.classList.remove('busy'); }
   if (gen !== VIEW.gen) return;
+  planBar();
   const every = {today: 30000, waiting: 30000, activity: 15000, agency: 10000, leads: 20000, content: 20000, results: 30000, website: 30000}[VIEW.r];
   if (every) polling = setInterval(poll, every);
 }
@@ -3049,6 +3193,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
 (async function boot() {
   theme();
   await loadShell();
+  await licence();
   state();
   route();
   loadPublisher();
@@ -3057,6 +3202,13 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   setInterval(updateBanner, 6 * 3600 * 1000);
   setInterval(async () => { const e = await ask('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
   alertDevice(); setInterval(alertDevice, 2 * 60000);
+  // While the office is open it says so every few minutes: the same key running
+  // on a second computer at the same time is then refused there.
+  if (planOn()) setInterval(async () => {
+    const before = JSON.stringify([S.licence.working, S.licence.need_key]);
+    await licence(true);
+    if (JSON.stringify([S.licence.working, S.licence.need_key]) !== before) route();
+  }, 4 * 60000);
 })();
 </script>
 </body>

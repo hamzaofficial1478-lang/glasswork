@@ -30,10 +30,11 @@ def publisher_file() -> Path:
     return Path(os.environ.get("GLASSWORK_PUBLISHER_FILE") or PUBLISHER)
 # What a release carries of his: where his Home is, and the PUBLIC halves of
 # his keys — one checks his signature on updates, one seals what a copy sends
-# him. Neither can be used to sign or to open anything.
-PUBLIC_KEYS = ("home_url", "update_url", "update_key", "postbox_key", "support_email")
+# him, one checks the plan his Home signs for a customer (coordination/licence).
+# None of them can be used to sign or to open anything.
+PUBLIC_KEYS = ("home_url", "update_url", "update_key", "postbox_key", "support_email", "licence_key")
 DEFAULTS = {"name": "Botix", "company": "TECH DUO", "version": "0.0.0", "tagline": "", "support_email": "",
-            "update_url": "", "update_key": "", "postbox_key": "", "home_url": ""}
+            "update_url": "", "update_key": "", "postbox_key": "", "home_url": "", "licence_key": ""}
 
 # HIS SIDE OF THE PROGRAM — his Reports room, putting versions out, the
 # Home's own code and his guides — and his client's own files (the business
@@ -41,7 +42,8 @@ DEFAULTS = {"name": "Botix", "company": "TECH DUO", "version": "0.0.0", "tagline
 # website, which goes up on his hosting by hand. On his computer only:
 # never in a release, never in the installer (both leave these out), so a copy
 # he gives out has none of it. A path ending in "/" is a whole folder.
-PUBLISHER_ONLY = ("coordination/publisher.py", "coordination/publish_tests.py", "ui/publisher.js",
+PUBLISHER_ONLY = ("coordination/publisher.py", "coordination/publish_tests.py", "coordination/licence_tests.py",
+                  "ui/publisher.js",
                   "publish-to-your-site/", "docs/", ".github/", ".claude/", "CLAUDE.md", "START-HERE.md", "README.md", "runner/",
                   "website/", "coordination/website_tests.py",
                   "paste-into-your-site/1-localbusiness-every-page.html",

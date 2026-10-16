@@ -67,7 +67,7 @@ ACCOUNT_KEYS = frozenset({
 # other config file is about one website.
 ACCOUNT_CONFIG = frozenset({"providers.local.json", "claude_team.local.json",
                             "engine.local.json", "report-brand.local.json",
-                            "support-reports.local.json"})
+                            "support-reports.local.json", "licence.local.json"})
 MACHINE_CONFIG = frozenset({"claude_code.local.json"})
 
 
@@ -599,6 +599,16 @@ def add_site(account_id, name, url="") -> dict:
         names = ", ".join(s.get("name") or s["id"] for s in have)
         return {"ok": False, "error": f"an account holds {MAX_SITES} websites "
                                       f"({names}) — remove one before adding another"}
+    # The plan's websites (coordination/licence): one on Starter, two on Growth and Pro.
+    try:
+        from . import licence
+        most = licence.websites()
+    except Exception:
+        most = None
+    if most is not None and len(have) >= most:
+        return {"ok": False, "plan": True,
+                "error": f"Your plan covers {most} website{'s' if most != 1 else ''}. "
+                         "Upgrade to add another, or remove one first."}
     host = _host(url)
     if host and any(_host(s.get("url")) == host for s in have):
         return {"ok": False, "error": f"{host} is already one of this account's websites"}

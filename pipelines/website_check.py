@@ -1018,6 +1018,12 @@ def new(url, depth="quick") -> dict:
     except NotAllowed as e:
         return {"ok": False, "error": str(e)}
     depth = "full" if depth == "full" else "quick"
+    # THE PLAN: Website Check reports this month. A look now; counted when the
+    # report is made (run), so a website that does not answer costs nothing.
+    from coordination import licence
+    allowed = licence.take("checks", dry=True)
+    if not allowed.get("ok"):
+        return {"ok": False, "plan": True, "error": allowed.get("error")}
     c = _conn()
     _settle(c)
     busy = c.execute("SELECT host FROM website_checks WHERE status='running' LIMIT 1").fetchone()
@@ -1071,6 +1077,11 @@ def run(cid) -> dict:
         rep["progress"] = _progress(row["host"], cid, rep)
         _set(cid, status="done", phase="Done", finished_at=int(time.time()), overall=rep["overall"],
              report=json.dumps(rep, ensure_ascii=False), pages_done=len(crawled["pages"]))
+        try:
+            from coordination import licence
+            licence.take("checks")
+        except Exception:
+            pass
         return {"ok": True, "id": cid, **rep}
     except Exception as e:
         _set(cid, status="failed", phase="Stopped", finished_at=int(time.time()), error=str(e)[:400])
@@ -1173,7 +1184,19 @@ def brand() -> dict:
         d = json.loads(workspace.read_secret(workspace.config_path(BRAND_FILE), "{}") or "{}")
     except Exception:
         d = {}
-    return d if isinstance(d, dict) else {}
+    d = d if isinstance(d, dict) else {}
+    if d.get("logo") and not own_logo():
+        d = {**d, "logo": ""}            # kept, and back on the reports the day the plan has it
+    return d
+
+
+def own_logo() -> bool:
+    """Reports with your own logo: on the plans that have it (coordination/licence)."""
+    try:
+        from coordination import licence
+        return licence.feature("own_logo")
+    except Exception:
+        return True
 
 
 def save_brand(name=None, logo=None, remove_logo=False) -> dict:

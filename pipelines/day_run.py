@@ -1729,7 +1729,11 @@ def no_orders(pre=None, quick=True) -> dict:
 
 
 def gate(orders=None, quick=True) -> dict:
-    """What the Run button asks first: are there orders? If not, the check."""
+    """What the Run button asks first: is the plan working, are there orders? If not, the check."""
+    from coordination import licence
+    plan = licence.working()
+    if not plan.get("ok"):
+        return {"ok": False, "plan": True, "why": plan.get("error") or "Your Botix plan is not active."}
     have = todays_orders(orders)
     if have:
         return {"ok": True, "orders": have}
@@ -1748,6 +1752,14 @@ def start(orders=None, note="", force=False, quick=False, skip_check=False,
     Every run clears up what the last one left first (leftovers.tidy — no
     model). `resume` then runs only what was left: see RESUME above.
     """
+    # THE PLAN FIRST. "when user will hit its plan program will stop working
+    # ... unless the user will update or renew the plan" — and the moment a
+    # plan is cancelled. Not even a check runs (coordination/licence).
+    from coordination import licence
+    plan = licence.working()
+    if not plan.get("ok"):
+        return {"ok": False, "ran": False, "refused": True, "plan": True,
+                "why": plan.get("error") or "Your Botix plan is not active."}
     pre = {"ready": True, "blocking": [], "warnings": []} if skip_check \
         else preflight(quick=quick)
     if not pre["ready"] and not force:

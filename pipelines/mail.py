@@ -597,14 +597,24 @@ def daily_cap() -> int:
     Read here rather than passed in: a cap the caller supplies is a cap the
     caller can forget.
     """
+    cap = DEFAULT_DAILY_CAP
     try:
         from coordination import targets as _targets
         for j in (_targets.status().get("jobs") or []):
             if j["name"] == "mails" and j.get("per_day"):
-                return int(j["per_day"])
+                cap = int(j["per_day"])
+                break
     except Exception:
         pass
-    return DEFAULT_DAILY_CAP
+    # Never above the plan's emails a day for this website (coordination/licence).
+    try:
+        from coordination import licence
+        plan = licence.cap("mails")
+        if plan is not None:
+            cap = min(cap, plan)
+    except Exception:
+        pass
+    return cap
 
 
 def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=None):
@@ -1127,6 +1137,14 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
                 "error": f"daily outreach cap reached ({already}/{cap}). Nothing sent. "
                          "Raise it on /setup → Daily orders if you really want more."}
 
+    # --- the plan: emails a day for this website, counted by the Home ---------
+    # A look first, counted once it has really gone — a mail the server
+    # refused is not one of the day's emails.
+    from coordination import licence
+    allowed = licence.take("mails", dry=True)
+    if not allowed.get("ok"):
+        return {"ok": False, "capped": True, "plan": True, "error": "not sent: " + str(allowed.get("error"))}
+
     # --- the sending domain, as the handbook requires ------------------------
     sender = sender_address()
     wrong = domain_problem(sender)
@@ -1150,6 +1168,7 @@ def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
     # It has gone. Record it before returning — a send we did not write down is
     # a send the cap cannot see and the Scanner cannot dedup against.
     row = log_outreach(lead.get("id"), draft)
+    licence.take("mails")
     return {"ok": True, "to": to, "outreach_log_id": row,
             "sent_today": already + 1, "cap": cap, "copied": bool(r.get("copied"))}
 

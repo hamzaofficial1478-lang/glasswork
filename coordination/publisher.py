@@ -26,6 +26,9 @@ it to a copy, or to any other report.
     postbox key  ~/.glasswork-publisher/postbox.key — opens the reports and locks
                  his records. Only its public half is given out.
     signing key  ~/.glasswork-publisher/signing.key — signs every version.
+    licence key  ~/.glasswork-publisher/licence.key — made when he switches plans
+                 on (licence_setup); his Home holds it too, to sign customers'
+                 plans. Only its public half is in a release.
   Back the .glasswork-publisher folder up: without the postbox key nobody, him
   included, can open his records or the reports still waiting.
 
@@ -39,6 +42,7 @@ it to a copy, or to any other report.
     python -m coordination.publisher --answer         JSON on stdin: {id, status, reply, fixed_in}
     python -m coordination.publisher --remove ID
     python -m coordination.publisher --online         how many use your online office (JSON on stdin {url, key} saves it first)
+    python -m coordination.publisher --licences       his customers' plans; JSON on stdin: {do: view|setup|list|settings|new|change|rekey|unbind, ...}
     python -m coordination.publisher --publish [--installer] [--notes TEXT] [--job FILE]
     python -m coordination.publisher --new-key KEYFILE
     python -m coordination.publisher --make-release DIR --key KEYFILE [--base-url URL]
@@ -70,7 +74,9 @@ except ImportError:  # pragma: no cover - run as a script
 
 ROOT = product.ROOT
 HOME_SOURCE = ROOT / "publish-to-your-site" / "glasswork-home" / "index.php"
+LICENCE_SOURCE = HOME_SOURCE.with_name("licences.php")
 HOME_NEEDED = 3                       # the Home that keeps nothing readable and counts nobody
+LICENCE_HOME = 4                      # the Home that knows plans, keys and payments
 STATUS_WORDS = support.STATUS_WORDS
 NOT_SET_UP = {"ok": False, "error": "This copy is not set up as the publisher yet."}
 
@@ -201,6 +207,7 @@ def home_zip() -> dict:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("glasswork-home/index.php", HOME_SOURCE.read_text(encoding="utf-8"))
+        z.writestr("glasswork-home/licences.php", LICENCE_SOURCE.read_text(encoding="utf-8"))
         # A fingerprint of the key, not the key: someone reading the hosting's
         # files still cannot collect, answer or put a version out.
         z.writestr("glasswork-home/home-key.php",
@@ -630,15 +637,213 @@ def _build_installer(tmp: Path) -> dict:
         return {"ok": False, "error": "the installer build said: " + ((p.stderr or p.stdout or "nothing")[-400:])}
 
 
+# ---------------------------------------------------------------------------
+# his customers: plans, keys and payments (the Home's licences.php)
+# ---------------------------------------------------------------------------
+#
+# "the program must have the knowledge who's new which user upgraded the plan
+# which user cancel the plan and at which date user buy the plan and what is
+# the expiry date of each user's plan". Stripe tells his Home the moment a
+# plan is bought, changed or cancelled; a plan he sells by hand (a bank
+# transfer) he makes here. Every copy he gives out asks the Home before each
+# job, and the Home's answer is signed with the licence key made below.
+
+# The plans on his website (website/botix.html), as limits on the work. He can
+# change any of them in the Customers room; the Home keeps what he saves.
+DEFAULT_PLANS = {
+    "starter": {"name": "Starter", "websites": 1, "post_words": 400, "devices": 1, "features": [],
+                "limits": {"leads": {"n": 7, "per": "day", "scope": "site"},
+                           "mails": {"n": 5, "per": "day", "scope": "site"},
+                           "posts": {"n": 1, "per": "day", "scope": "site"},
+                           "checks": {"n": 0, "per": "period", "scope": "account"}}},
+    "growth": {"name": "Growth", "websites": 2, "post_words": 800, "devices": 1, "features": [],
+               "limits": {"leads": {"n": 20, "per": "day", "scope": "site"},
+                          "mails": {"n": 15, "per": "day", "scope": "site"},
+                          "posts": {"n": 1, "per": "day", "scope": "site"},
+                          "checks": {"n": 1, "per": "period", "scope": "account"}}},
+    "pro": {"name": "Pro", "websites": 2, "post_words": 1200, "devices": 1, "features": ["own_logo"],
+            "limits": {"leads": {"n": 50, "per": "day", "scope": "site"},
+                       "mails": {"n": 30, "per": "day", "scope": "site"},
+                       "posts": {"n": 2, "per": "day", "scope": "site"},
+                       "checks": {"n": 1, "per": "period", "scope": "account"}}},
+}
+LICENCE_KINDS = ("leads", "mails", "posts", "checks")
+LICENCE_OPEN = ("licence-list", "licence-new", "licence-change", "licence-key", "licence-unbind", "licence-settings")
+
+
+def _licence_seed_path() -> Path:
+    return _signing_key_path().parent / "licence.key"
+
+
+def _licence_public(seed: bytes) -> str:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    k = Ed25519PrivateKey.from_private_bytes(seed)
+    return base64.b64encode(k.public_key().public_bytes(serialization.Encoding.Raw,
+                                                        serialization.PublicFormat.Raw)).decode()
+
+
+def licence_setup(replace=False) -> dict:
+    """
+    Make his licence key (kept here, beside his other keys), give it to his
+    Home so it can sign customers' plans, and put the public half in what a
+    release carries. Then the plans on his website, if the Home has none yet.
+    """
+    if not is_publisher():
+        return NOT_SET_UP
+    r = _ask("ping")
+    if not r.get("ok") or not r.get("owner"):
+        return {"ok": False, "error": "Your Home did not answer as yours — press Check on your Home first."}
+    if int(r.get("home") or 0) < LICENCE_HOME:
+        return {"ok": False, "old_home": True,
+                "error": "Your Home on the website is an older kind that knows nothing of plans. "
+                         "Download it again and upload it over the old one, then try again."}
+    path = _licence_seed_path()
+    if replace or not path.exists():
+        _private_file(path, secrets.token_bytes(32))
+    seed = path.read_bytes()
+    if len(seed) != 32:
+        return {"ok": False, "error": f"{path} is not a licence key — move it aside and try again"}
+    mine = _licence_public(seed)
+    got = _ask("licence-setup", "POST", {"seed": base64.b64encode(seed).decode(), "rotate": bool(replace)})
+    if not got.get("ok"):
+        held = _ask("licence-setup")
+        if held.get("public_key") != mine:
+            return {"ok": False, "different": True,
+                    "error": ("Your Home already holds a different licence key. Replacing it means every "
+                              "customer's copy needs the next version before it works again — do it only if "
+                              "the old key is lost or leaked." if held.get("public_key") else
+                              "Your Home could not take the licence key: " + str(got.get("error")))}
+        got = held
+    if not got.get("sodium", True):
+        return {"ok": False, "error": "Your hosting's PHP has no sodium, which the Home needs to sign plans. "
+                                      "Ask your hosting to switch it on (PHP 7.2 or newer has it)."}
+    if got.get("public_key") != mine:
+        return {"ok": False, "error": "Your Home answered with a different licence key than the one made here."}
+    p = _pub()
+    p.setdefault("public", {})["licence_key"] = mine
+    _save_pub(p)
+    s = licence_settings()
+    if s.get("ok") and not s.get("plans"):
+        s = licence_settings({"plans": DEFAULT_PLANS})
+    return {"ok": True, "public_key": mine, "keys_folder": str(path.parent), "settings": s,
+            "head": ("Plans are switched on. Every version you put out from now on asks for a key, and keeps "
+                     "to the plan bought with it. Your own copy never asks.")}
+
+
+def licence_view() -> dict:
+    p = _pub()
+    return {"ok": True, "on": bool((p.get("public") or {}).get("licence_key")),
+            "key_here": _licence_seed_path().exists(), "kinds": list(LICENCE_KINDS)}
+
+
+def _clean_plans(plans) -> dict:
+    """What he typed in the Customers room, as plans the Home can count against."""
+    out = {}
+    for pid, pl in (plans or {}).items():
+        pid = re.sub(r"[^a-z0-9_-]", "", str(pid).lower())[:30]
+        if not pid or not isinstance(pl, dict):
+            continue
+        limits = {}
+        for kind in LICENCE_KINDS:
+            lim = (pl.get("limits") or {}).get(kind)
+            if isinstance(lim, dict):
+                limits[kind] = {"n": max(0, min(100000, int(lim.get("n") or 0))),
+                                "per": lim.get("per") if lim.get("per") in ("day", "period") else "day",
+                                "scope": "account" if lim.get("scope") == "account" else "site"}
+        out[pid] = {"name": _cut(pl.get("name"), 40) or pid.title(),
+                    "websites": max(1, min(50, int(pl.get("websites") or 1))),
+                    "post_words": max(0, min(10000, int(pl.get("post_words") or 0))),
+                    "devices": max(1, min(20, int(pl.get("devices") or 1))),
+                    "features": [f for f in (pl.get("features") or []) if f in ("own_logo",)],
+                    "limits": limits}
+    return out
+
+
+def licence_settings(changes=None) -> dict:
+    if not is_publisher():
+        return NOT_SET_UP
+    if changes:
+        body = dict(changes)
+        if "plans" in body:
+            body["plans"] = _clean_plans(body["plans"])
+        if "prices" in body:
+            body["prices"] = {re.sub(r"[^A-Za-z0-9_]", "", str(k))[:80]: {
+                "plan": re.sub(r"[^a-z0-9_-]", "", str((v or {}).get("plan") or "").lower())[:30],
+                "variant": "ai" if (v or {}).get("variant") == "ai" else "own"}
+                for k, v in (body["prices"] or {}).items() if str(k).strip()}
+        return _ask("licence-settings", "POST", body)
+    return _ask("licence-settings")
+
+
+def licences() -> dict:
+    """Every customer: plan, status, bought, plan since, paid until, computers, today's work, history."""
+    if not is_publisher():
+        return NOT_SET_UP
+    return _ask("licence-list")
+
+
+def licence_new(plan, email="", name="", days=30, variant="own", trial=False, note="") -> dict:
+    """A plan sold by hand (a bank transfer, a friend): the key is shown to him once, to pass on."""
+    if not is_publisher():
+        return NOT_SET_UP
+    return _ask("licence-new", "POST", {"plan": plan, "email": email, "name": name, "days": int(days or 30),
+                                        "variant": variant, "status": "trial" if trial else "active", "note": note})
+
+
+def licence_change(lid, **change) -> dict:
+    """plan / variant / extend_days / until / restart / status ('cancelled' or 'active') / email / note."""
+    if not is_publisher():
+        return NOT_SET_UP
+    allowed = ("plan", "variant", "extend_days", "until", "restart", "status", "email", "note")
+    return _ask("licence-change", "POST", {"id": lid, **{k: v for k, v in change.items() if k in allowed}})
+
+
+def licence_rekey(lid) -> dict:
+    if not is_publisher():
+        return NOT_SET_UP
+    return _ask("licence-key", "POST", {"id": lid})
+
+
+def licence_unbind(lid, websites=False) -> dict:
+    if not is_publisher():
+        return NOT_SET_UP
+    return _ask("licence-unbind", "POST", {"id": lid, "websites": bool(websites)})
+
+
+def licence_do(body: dict) -> dict:
+    """One Customers-room action, from the office: {do, ...}."""
+    do = str(body.get("do") or "")
+    if do == "view":
+        return licence_view()
+    if do == "setup":
+        return licence_setup(bool(body.get("replace")))
+    if do == "list":
+        return licences()
+    if do == "settings":
+        return licence_settings(body.get("changes"))
+    if do == "new":
+        return licence_new(body.get("plan"), body.get("email") or "", body.get("name") or "", body.get("days") or 30,
+                           body.get("variant") or "own", bool(body.get("trial")), body.get("note") or "")
+    if do == "change":
+        return licence_change(body.get("id"), **(body.get("change") or {}))
+    if do == "rekey":
+        return licence_rekey(body.get("id"))
+    if do == "unbind":
+        return licence_unbind(body.get("id"), bool(body.get("websites")))
+    return {"ok": False, "error": "not something the Customers room does"}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="The publisher's side: reports, answers, versions.")
-    for f in ("view", "setup", "home-zip", "check-home", "collect", "inbox", "answer", "publish", "installer", "online"):
+    for f in ("view", "setup", "home-zip", "check-home", "collect", "inbox", "answer", "publish", "installer", "online",
+              "licences"):
         ap.add_argument("--" + f, action="store_true")
     for f in ("read", "remove", "notes", "job", "new-key", "make-release", "key", "base-url"):
         ap.add_argument("--" + f, default=None)
     a = ap.parse_args(argv)
     body = {}
-    if a.setup or a.answer or a.online:
+    if a.setup or a.answer or a.online or a.licences:
         try:
             body = json.loads(sys.stdin.read() or "{}")
         except Exception:
@@ -661,6 +866,8 @@ def main(argv=None) -> int:
                                encoding="utf-8")
         elif a.setup:
             r = setup(body.get("site"), body.get("email"))
+        elif a.licences:
+            r = licence_do(body)
         elif a.online:
             r = online(body["url"], body.get("key")) if "url" in body else online()
         elif a.home_zip:

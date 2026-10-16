@@ -28,6 +28,7 @@ publisher file, the keys and the data folder are all temporary.
 import io
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -221,8 +222,8 @@ def test_nobody_else_gets_in():
             opened = False
         check("someone who copies the website's files cannot open an envelope", opened, False)
         index = h.web / "glasswork-home" / "index.php"
-        index.write_text(index.read_text(encoding="utf-8").replace("const HOME_VERSION = 3;", "const HOME_VERSION = 2;"),
-                         encoding="utf-8")
+        older = re.sub(r"const HOME_VERSION = \d+;", "const HOME_VERSION = 2;", index.read_text(encoding="utf-8"))
+        index.write_text(older, encoding="utf-8")
         old = publisher.check_home()
         check("a Home older than this is not trusted with anything", (old.get("ok"), old.get("old_home")), (False, True))
 

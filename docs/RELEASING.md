@@ -52,7 +52,7 @@ How:
 Your download page is then `https://www.yourprogram.com/glasswork-home/` — the
 only link you give people. No client's website is ever named to them.
 
-### Your three keys — back them up
+### Your keys — back them up
 
 Made for you and kept on your computer, in the `.glasswork-publisher` folder in
 your Windows user folder (`C:\Users\<you>\.glasswork-publisher`):
@@ -64,6 +64,9 @@ your Windows user folder (`C:\Users\<you>\.glasswork-publisher`):
 - Your **Home key** (in `config/publisher.local.json`) — lets your program
   collect, answer and put versions out. The website holds only a fingerprint
   of it, not the key itself.
+- **licence.key** — made when you switch plans on (section 3b). Your Home
+  holds it too, to sign each customer's plan. Lose it and you can make a new
+  one, but every customer then needs the next version before their key works.
 
 **Copy the `.glasswork-publisher` folder to a USB stick** and keep it safe.
 Your records are in the program's `data/publisher` folder; copy that too if you
@@ -121,6 +124,74 @@ else downloads and no administrator password is needed.
 paid certificate, by choice. The first time, people click **More info → Run
 anyway**; your download page shows these steps under the button. Updates
 installed from inside the program never show it.
+
+## 3b. Plans, keys and payments
+
+"will the program be used as the plan the user buy" — yes, once you switch
+plans on. Every version you put out from then on asks for a key the first
+time it opens on a computer, and keeps to the plan bought with it, whichever
+AI the customer uses. Your own copy never asks.
+
+**Switch it on (once).**
+
+1. Download your Home again (Settings → Publisher → *Download it again*) and
+   upload it over the old one — the newest one knows about plans. Your
+   hosting's PHP needs *sodium* (PHP 7.2 or newer has it).
+2. Open **Customers** and press **Switch plans on**. A licence key is made on
+   this computer and given to your Home. Your three plans — Starter, Growth,
+   Pro, as on your website — are put there too. Change any number under
+   **Plans and payments**.
+3. Put a version out (section 2). Copies older than that version never ask
+   for a key.
+
+**Stripe, so purchases, upgrades and cancellations arrive by themselves.**
+
+1. In Stripe, make a product for each plan and a monthly price for each
+   (with your own AI key, and with Botix AI — six prices). On each price,
+   switch on a 14-day trial if you want one.
+2. Make a **Payment Link** for each price. Under *After payment*, choose
+   *Don't show confirmation page* and paste the **welcome address** from
+   Customers → Plans and payments. The buyer lands on a page with their key.
+3. In Stripe → Developers → **Webhooks**, add the **webhook address** from the
+   same screen, with the events `checkout.session.completed`,
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted` and `invoice.payment_failed`. Copy its
+   **signing secret** (it starts `whsec_`) into Plans and payments.
+4. Under *Which Stripe price is which plan*, paste each price's id
+   (`price_…`) and choose its plan.
+5. Switch on Stripe's **customer portal** and paste its link: that is where
+   customers renew, upgrade and cancel, and the program links to it.
+
+From then on: a purchase makes a customer and a key; an upgrade or downgrade
+changes their plan at once (the date is kept as "plan since"); a renewal
+moves their paid-until date; a cancellation stops their copy — at once, or at
+the end of the month they paid for, whichever you choose under *When a
+customer cancels* (if you change it, change the terms to match). A trial is
+given once per email address.
+
+**A plan sold by hand** (a bank transfer): Customers → **New customer, paid by
+hand**. The key is shown once — pass it on. Add time to it when they pay
+again.
+
+**One key, one computer.** A key runs on one computer at a time. Entered on a
+second one, it asks to move there; it can move three times a month (you can
+change that), and a copied folder running at the same time is refused. If a
+customer has a new computer and has used their moves, open them in Customers
+and press **Clear their computers**. It is not tied to an internet address:
+those change daily and a whole office shares one.
+
+**Without the internet** a copy carries on for three days within its plan,
+then pauses until it can check again. Work done offline is counted when it is
+back.
+
+**What it cannot do.** The program runs on the customer's own computer. That
+stops a key being passed round, which is how plans are lost in practice, but
+someone skilled enough to rewrite the program itself could get round any
+check on their own machine. On your online office nothing runs on their
+machine, so there the plan holds completely — one browser at a time, too.
+
+**Botix AI.** Plans "with Botix AI" need an AI engine you provide. It is not
+built yet: until it is, sell the plans with the customer's own AI key.
 
 ## 4. The reports
 

@@ -193,6 +193,10 @@ def describe(code, fix="", part="") -> dict:
 
 def start(code) -> dict:
     """Open a fix for one problem. One at a time: a second press waits for the first."""
+    from coordination import licence
+    plan = licence.working()                  # a stopped plan fixes nothing (coordination/licence)
+    if not plan.get("ok"):
+        return {"ok": False, "plan": True, "error": plan.get("error")}
     g = _gap(code)
     if not g or g.get("status") != "open":
         return {"ok": False, "error": "that problem is not on the list any more — check the website again"}

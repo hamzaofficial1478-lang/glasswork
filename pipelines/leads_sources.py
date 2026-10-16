@@ -682,7 +682,11 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
     in this function.
     """
     stored, dupes, refused, personal, filled = [], [], [], [], []
+    plan_stop, left = "", 0
     for c in candidates:
+        if plan_stop:
+            left += 1
+            continue
         ok, why = screen_lead(c)
         if not ok:
             refused.append({"company": c.get("company") or c.get("name"), "why": why})
@@ -700,6 +704,14 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
                 filled.append(c.get("company"))
             dupes.append(c.get("company"))
             continue
+        # THE PLAN, BEFORE IT IS STORED. "user buy a plan in which the program
+        # cannot fetch the leads more then 10" — a new lead is counted by the
+        # Home (coordination/licence); a duplicate above never is.
+        from coordination import licence
+        allowed = licence.take("leads")
+        if not allowed.get("ok"):
+            plan_stop, left = allowed.get("error") or "Your plan's leads for today are used up.", 1
+            continue
         # Stored WITH how we can reach them, so nobody has to re-derive it later
         # and get a different answer. See pipelines/harvest.py.
         lid = board.add_lead_if_new({**c, "source": c.get("source", "leads-hunter"),
@@ -709,9 +721,12 @@ def intake(candidates, agent="leads-hunter", sector="Leads") -> dict:
         else:
             stored.append({"id": lid, "company": c.get("company"),
                            "email": (c.get("email") or "").strip()})
-    return {"stored": stored, "duplicates": dupes, "refused": refused,
-            "personal_data_held": personal, "contacted": 0, "address_added": filled,
-            "agent": agent, "sector": sector}
+    out = {"stored": stored, "duplicates": dupes, "refused": refused,
+           "personal_data_held": personal, "contacted": 0, "address_added": filled,
+           "agent": agent, "sector": sector}
+    if plan_stop:
+        out.update(plan_stop=plan_stop, not_stored=left)
+    return out
 
 
 # ---- today's task: the source map -------------------------------------------

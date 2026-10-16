@@ -472,6 +472,8 @@ const SETUP_API = [
   "/api/connect",
   // The developer's Home: making it and its download carry his key.
   "/api/publisher/setup", "/api/publisher/home.zip", "/api/publisher/publish",
+  // His customers: their addresses, and making keys.
+  "/api/publisher/licences",
 ];
 // Reading the count needs no second password; setting the address, and seeing the owner key, does.
 const SETUP_POSTS = ["/api/publisher/online"];
@@ -580,6 +582,17 @@ app.post("/api/setup/unlock", express.urlencoded({ extended: false }), JSON_BODY
 });
 
 // Past the gate, and only past it.
+// A STOPPED PLAN STOPS EVERY JOB. "when someone cancel the plan the program
+// will at the same time will stop working even the user will add his llm".
+// Each job also asks for itself in Python (coordination/licence.py); this is
+// the one door in front of every button that starts work, so none is missed.
+const PLAN_JOBS = /^\/api\/(chat|business\/draft|run\/(start|resume)|review\/(start\/[^/]+|act)|approve|release|competitors|site\/(look|fix)|index-check|content\/(choose|write\/[^/]+)|check\/start)$/;
+app.use(async (req, res, next) => {
+  if (!LICENCE_ON || req.method !== "POST" || !PLAN_JOBS.test(req.path)) return next();
+  const w = await pyModule("coordination.licence", ["--working"], 60000);
+  if (w && w.ok === false && !w.off) return res.status(402).json({ ok: false, plan: true, error: w.error, why: w.error });
+  next();
+});
 app.use(express.static(path.join(__dirname, "ui")));
 
 /* ---- ANSWERS KEPT, WHILE THEY ARE STILL TRUE ---------------------------------
@@ -884,6 +897,22 @@ app.post("/api/quit", async (_q, res) => {
   res.json({ ok: true, why: "Closing. Open it again from the Start menu or the desktop whenever you like." });
   setTimeout(() => process.exit(0), 400);
 });
+/* ---- THE PLAN (coordination/licence.py) ----------------------------------------
+   "user buy a plan ... when user will hit its plan program will stop working".
+   The key entered once on each computer, the plan as the Home signed it, and a
+   beat every few minutes while the office is open, so the same key running on
+   two computers at once is told apart. */
+const LICENCE_KEY_SHAPE = (v) => String(v || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40);
+app.get("/api/licence", async (req, res) =>
+  res.json(await pyModule("coordination.licence", req.query.beat ? ["--status", "--beat"] : ["--status"], 60000)));
+app.post("/api/licence/check", async (_q, res) => res.json(await pyModule("coordination.licence", ["--check"], 60000)));
+app.post("/api/licence/activate", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.licence", ["--activate"], { key: LICENCE_KEY_SHAPE(b.key), move: !!b.move,
+    name: String(b.name || "").slice(0, 60) }, 60000));
+});
+app.post("/api/licence/release", async (_q, res) => res.json(await pyModule("coordination.licence", ["--release"], 60000)));
+
 // A new version: asked plainly, installed only when signed with the developer's key.
 app.get("/api/update", async (_q, res) => res.json(await pyModule("coordination.updates", ["--check", "--json"], 60000)));
 app.post("/api/update/apply", async (_q, res) =>
@@ -975,6 +1004,11 @@ app.get("/api/publisher/online", async (_q, res) => {
 app.post("/api/publisher/online", async (req, res) => {
   const b = req.body || {};
   res.json(await pyStdin("coordination.publisher", ["--online"], { url: textField(b.url, 300), key: textField(b.key, 200) }, 30000));
+});
+// His customers: plans, keys, payments (coordination/publisher.py licence_*). Behind the Setup password.
+app.post("/api/publisher/licences", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.publisher", ["--licences"], b, 120000));
 });
 app.get("/api/publisher/job", async (_q, res) => {
   try { res.json({ ok: true, ...JSON.parse(fs.readFileSync(publishJob(), "utf8")) }); }
@@ -1158,12 +1192,22 @@ async function pyAccounts(command, payload) {
 }
 
 // The rest of the request that signed someone in is answered as them (CTX.enterWith).
+// Copies given out with plans (a licence key in product.json). On a hosted
+// office, one account is then signed in in one browser at a time: a plan
+// bought for one person is not a login passed round an office.
+function licenceOn() {
+  if (process.env.GLASSWORK_LICENCE_KEY) return true;
+  try { return !!JSON.parse(fs.readFileSync(path.join(__dirname, "config", "product.json"), "utf8")).licence_key; }
+  catch (_) { return false; }
+}
+const LICENCE_ON = licenceOn();
 function startSession(res, account, name, keyHex, site) {
   if (!HOSTED) { SESSIONS_BY_TOKEN.clear(); SESSIONS.clear(); SETUP_TICKETS.clear(); }  // one at a time here
   const tok = crypto.randomBytes(32).toString("hex"), now = Date.now();
   const s = { token: tok, account, name, key: Buffer.from(keyHex, "hex"), site: site || null, made: now, seen: now,
               day: new Date(now).toISOString().slice(0, 10) };
   SESSIONS_BY_TOKEN.set(tok, s);
+  if (HOSTED && LICENCE_ON) endSession(s, true);
   if (HOSTED) countUse(account);
   CTX.enterWith(s);
   res.setHeader("Set-Cookie", `${ACCOUNT_COOKIE}=${tok}; ${COOKIE_FLAGS}`);
@@ -1339,7 +1383,7 @@ const API_CAPABILITIES = [
   "stuck", "release", "campaign-retry", "campaign-domain", "sent-csv",
   "test-gsc", "test-tomtom", "index-status", "index-check", "orders", "site-find",
   "account", "business", "engine", "connect", "check", "product", "update", "diagnostics",
-  "support", "publisher", "quit",
+  "support", "publisher", "quit", "licence",
 ];
 const SERVER_STARTED = Math.floor(Date.now() / 1000);
 // Which copy of the program this is, without saying where it lives: run.py
@@ -1417,7 +1461,7 @@ const ACCOUNT_KEYS = new Set([
   "PORT",
 ]);
 const ACCOUNT_CONFIG = new Set(["providers.local.json", "claude_team.local.json", "engine.local.json",
-  "report-brand.local.json", "support-reports.local.json"]);
+  "report-brand.local.json", "support-reports.local.json", "licence.local.json"]);
 const MACHINE_CONFIG = new Set(["claude_code.local.json"]);
 const LEGACY_ENV = path.join(__dirname, ".env");
 
@@ -1674,8 +1718,11 @@ function _pyFree(who) {
 }
 // What a program started for this request gets: the person's key and open
 // website, and nothing of anybody else's. Signed out, no website at all.
+// This office, since it started: the plan server tells two copies running on
+// one key apart by it (coordination/licence.py).
+const RUN_ID = crypto.randomBytes(8).toString("hex");
 function pyEnv() {
-  const env = { ...process.env }, s = me();
+  const env = { ...process.env, BOTIX_RUN: RUN_ID }, s = me();
   delete env.AGENCY_KEY; delete env.AGENCY_ACCOUNT; delete env.AGENCY_SITE;
   if (s) Object.assign(env, { AGENCY_KEY: s.key.toString("hex"), AGENCY_ACCOUNT: s.account, AGENCY_SITE: s.site || "" });
   else if (accountRequired()) env.AGENCY_ACCOUNT = "";
@@ -2266,6 +2313,7 @@ app.post("/api/run/start", async (req, res) => {
   // in day_run.start for the terminal; it is asked here as well because the
   // day runs detached, and an answer given there would never reach him.
   const gate = await pyStdin("pipelines.day_run", ["--gate"], { orders }, 300000);
+  if (gate && gate.plan) return res.json({ ok: false, started: false, plan: true, why: gate.why });
   if (gate && gate.no_orders) {
     return res.json({ ok: false, started: false, no_orders: true, check: gate.check,
       why: gate.why || "No orders for today, so the day was not started." });

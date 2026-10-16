@@ -10,6 +10,7 @@
  *   ...?do=collect / ack         (owner)  the owner's program takes the reports home
  *   ...?do=reply                 (owner)  the owner's program posts a sealed answer
  *   ...?do=upload / release      (owner)  putting a new version out
+ *   ...?do=licence-* / stripe / welcome      plans, keys and payments (licences.php)
  *
  * WHAT IT KEEPS — AND WHAT IT CANNOT READ
  *
@@ -31,7 +32,7 @@ declare(strict_types=1);
 @ini_set('display_errors', '0');
 ob_start();
 
-const HOME_VERSION = 3;
+const HOME_VERSION = 4;               // 4: plans, keys and payments (licences.php)
 const ENVELOPE_MAX = 600 * 1024;          // one sealed report, with its support file
 const CHUNK_MAX = 6 * 1024 * 1024;        // one piece of an upload
 const PER_ADDRESS_HOUR = 10;              // reports from one address in an hour
@@ -152,6 +153,11 @@ $do = preg_replace('/[^a-z-]/', '', strtolower((string)($_GET['do'] ?? '')));
 $raw = (string)file_get_contents('php://input');
 $body = $raw === '' ? [] : json_decode($raw, true);
 if (!is_array($body)) { refuse(400, 'that arrived incomplete'); }
+
+// --- plans, keys and payments: their own file ------------------------------------
+if ($do === 'stripe' || $do === 'welcome' || strncmp($do, 'licence-', 8) === 0) {
+    require __DIR__ . '/licences.php';
+}
 
 // --- the download page -------------------------------------------------------
 if ($do === '' && $method === 'GET') {

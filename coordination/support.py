@@ -84,9 +84,10 @@ def _ask(do, method="GET", body=None, key="", base=None, timeout=TIMEOUT, path=N
         except Exception:
             out = {}
         out = out if isinstance(out, dict) else {}
+        own = bool(out.get("error"))           # the Home's own words (a refusal), not a web server's page
         out.update(ok=False, status=e.code)
         out.setdefault("error", f"the Home answered {e.code}")
-        if e.code == 404 and "not something this address does" not in str(out["error"]):
+        if e.code == 404 and not own:
             out["error"] = "nothing answered at the Home's address — is the glasswork-home folder on the website?"
         return out
     except Exception as e:
