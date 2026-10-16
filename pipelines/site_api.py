@@ -49,6 +49,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 from coordination import board
 from coordination import site_traffic as traffic
@@ -63,6 +64,10 @@ TIMEOUT = 25
 # and all-or-nothing, robots.txt and llms.txt, and gentler on the host — a busy
 # page answers "busy" in seconds instead of holding one of its workers.
 CONNECTOR_NEWEST = 10
+# The Botix helper plugin for WordPress (paste-into-your-site/botix-helper.php):
+# the version in this copy of the program, sent to a site with an older one.
+WP_HELPER_NEWEST = 1
+WP_HELPER = Path(__file__).resolve().parents[1] / "paste-into-your-site" / "botix-helper.php"
 # The first version that can replace itself when the program has a newer one.
 SELF_UPDATING = 10
 # A change bigger than this goes packed to a version-9 connector. Small ones are
@@ -992,6 +997,15 @@ def put_robots(agent=AGENT, s=None, dry_run=False) -> dict:
             "why": "robots.txt tells search engines they are welcome and where your sitemap is."})
         return {"ok": False, "queued": cid, "error": refused}
     s = s or settings()
+    if s.get("kind") == "wordpress":
+        sm = wp_sitemap_url(s)
+        if not sm:
+            return {"ok": False, "error": WP_NO_SITEMAP}
+        if dry_run:
+            return {"ok": True, "dry_run": True, "head": f"would add Sitemap: {sm} to robots.txt"}
+        r = put_wp_meta({"site": {"robots_extra": f"Sitemap: {sm}"}}, agent=agent, s=s,
+                        summary="robots.txt now names your sitemap (through the Botix helper)")
+        return r if not r.get("ok") else {"ok": True, "head": f"robots.txt now names your sitemap ({sm})"}
     was = read_text_file("robots.txt", s=s)
     if not was.get("ok"):
         return was
@@ -1028,6 +1042,12 @@ def put_llms(agent=AGENT, s=None, dry_run=False) -> dict:
             "why": "llms.txt tells AI assistants who you are, what you do and where."})
         return {"ok": False, "queued": cid, "error": refused}
     text = bp.llms_for_his_site()
+    if (s or settings()).get("kind") == "wordpress":
+        if dry_run:
+            return {"ok": True, "dry_run": True, "text": text, "head": "would publish llms.txt"}
+        r = put_wp_meta({"site": {"llms": text}}, agent=agent, s=s,
+                        summary="llms.txt is on your website for AI assistants (through the Botix helper)")
+        return r if not r.get("ok") else {"ok": True, "head": "llms.txt is on your website for AI assistants to read"}
     if dry_run:
         return {"ok": True, "dry_run": True, "text": text, "head": "would write llms.txt"}
     r = put_text_file("llms.txt", text, agent=agent, s=s, summary="put llms.txt on your website")
@@ -1035,6 +1055,182 @@ def put_llms(agent=AGENT, s=None, dry_run=False) -> dict:
         return {"ok": False, "unreachable": r.get("unreachable"),
                 "error": r.get("error") or "llms.txt could not be written"}
     return {"ok": True, "head": "llms.txt is on your website for AI assistants to read"}
+
+
+# ---------------------------------------------------------------------------
+# WORDPRESS: THE BOTIX HELPER PLUGIN
+# ---------------------------------------------------------------------------
+#
+# "make wordpress sites fixes too with fix button" — a WordPress page's content
+# goes through WordPress's own REST API (pipelines/wp_bridge); its <head> goes
+# through the helper plugin, installed once and updating itself after that.
+# Every write is the Releaser's, logged, and can be put back.
+
+WP_NO_SITEMAP = ("your WordPress has no sitemap switched on. Turn it on in your SEO plugin (Yoast: SEO → Settings → "
+                 "Site features → XML sitemaps; Rank Math: Sitemap Settings), or remove whatever switched off "
+                 "WordPress's own (wp-sitemap.xml)")
+
+
+def wp_helper(s=None) -> dict:
+    """The helper plugin on his WordPress: {ok, helper (version), seo_plugin, blog_public, ...} or missing."""
+    s = s or settings()
+    if s.get("kind") != "wordpress":
+        return {"ok": False, "error": "not a WordPress connection"}
+    return call("/botix/health", s=s)
+
+
+def wp_meta(s=None) -> dict:
+    return call("/botix/meta", s=s)
+
+
+def put_wp_meta(change, agent=AGENT, s=None, summary="") -> dict:
+    """
+    Each page's own title, description, canonical, preview card or robots, by
+    address, and the site's robots.txt line, llms.txt, viewport and language —
+    kept by the helper. change = {"pages": {path: {key: value}}, "site": {...}}.
+    Releaser only; anyone else's is queued for his yes with the values in it.
+    """
+    refused = _may_write(agent)
+    if refused:
+        cid = _queue_for_him(agent, "wp_meta", "WordPress helper", {
+            "change": {"wp_meta": change},
+            "why": summary or "Titles, descriptions and other page tags, through the Botix helper on your WordPress."})
+        return {"ok": False, "queued": cid, "error": refused}
+    r = call("/botix/meta", "POST", change, s=s)
+    n = len((change or {}).get("pages") or {})
+    _log_write("wp_meta", "WordPress helper", agent, r,
+               summary=summary or (f"set the page tags for {n} page(s) through the Botix helper" if n
+                                   else "changed the site settings in the Botix helper"),
+               undo_cmd="python -m pipelines.site_api --wp-meta-undo")
+    return r
+
+
+def wp_meta_undo(agent=AGENT, s=None) -> dict:
+    """Put the helper's values back as they were before the last change. Like undo, not gated."""
+    r = call("/botix/meta-undo", "POST", {}, s=s)
+    return _log_write("restore", "WordPress helper", agent, r,
+                      summary="put the page tags in the Botix helper back as they were")
+
+
+def put_wp_settings(values, agent=AGENT, s=None) -> dict:
+    """WordPress's "discourage search engines" box (blog_public). Releaser only."""
+    refused = _may_write(agent)
+    if refused:
+        cid = _queue_for_him(agent, "wp_settings", "WordPress settings", {
+            "change": {"wp_settings": values},
+            "why": "Untick 'Discourage search engines from indexing this site' so Google lists your website."})
+        return {"ok": False, "queued": cid, "error": refused}
+    r = call("/botix/settings", "POST", values, s=s)
+    return _log_write("wp_settings", "WordPress settings", agent, r,
+                      summary=("search engines are allowed to list your website again (WordPress → Settings → Reading)"
+                               if values.get("blog_public") else "search engines are asked not to list your website"),
+                      undo_cmd="python -m pipelines.site_api --wp-settings-undo")
+
+
+def wp_sitemap_url(s=None, get=None) -> str:
+    """The sitemap his WordPress serves (its own, Yoast's or Rank Math's), or ''."""
+    s = s or settings()
+    home = (s.get("site") or "").rstrip("/")
+    if not home:
+        return ""
+    if get is None:
+        import requests
+        sess = requests.Session()
+        sess.headers["User-Agent"] = "Mozilla/5.0 (compatible; botix/1.0; read-only)"
+
+        def get(u):
+            r = sess.get(u, timeout=20, allow_redirects=True)
+            return r.status_code, r.text or ""
+    for path in ("/wp-sitemap.xml", "/sitemap_index.xml", "/sitemap.xml"):
+        try:
+            st, body = get(home + path)
+        except Exception:
+            continue
+        if st == 200 and re.search(r"<(urlset|sitemapindex)", body or ""):
+            return home + path
+    return ""
+
+
+def _wp_sitemap(agent, s, dry_run):
+    """WordPress keeps its own sitemap: it is found, named in robots.txt and given to Search Console."""
+    url = wp_sitemap_url(s)
+    if not url:
+        return {"ok": False, "error": WP_NO_SITEMAP}
+    if dry_run:
+        return {"ok": True, "dry_run": True, "url": url, "head": f"would give {url} to Search Console"}
+    refused = _may_write(agent)
+    if refused:
+        cid = _queue_for_him(agent, "publish_sitemap", "site", {
+            "change": {"call": "publish_sitemap"},
+            "why": "A sitemap tells Google every page your website has."})
+        return {"ok": False, "queued": cid, "error": refused}
+    named = put_wp_meta({"site": {"robots_extra": f"Sitemap: {url}"}}, agent=agent, s=s,
+                        summary="robots.txt now names your WordPress sitemap")
+    try:
+        from . import seo_intel
+        sub = seo_intel.gsc_submit_sitemap(url)
+    except Exception as e:
+        sub = {"ok": False, "why": f"{type(e).__name__}: {e}"}
+    head = (f"your WordPress sitemap is at {url}"
+            + ("" if named.get("ok") else " (robots.txt could not name it: " + str(named.get("error") or "")[:120] + ")")
+            + (", and Search Console has been given it" if sub.get("ok") else
+               f" — Search Console could not be given it automatically ({sub.get('why')}); in Search Console open "
+               f"Sitemaps and add {url.rsplit('/', 1)[-1]}"))
+    return {"ok": True, "url": url, "submitted": bool(sub.get("ok")), "head": head}
+
+
+def update_wp_helper(agent=AGENT, s=None, force=False) -> dict:
+    """
+    Bring the helper plugin on his WordPress up to the one in this copy of the
+    program, without him uploading anything — the same as the connector file
+    (update_connector). The helper checks the new copy is whole, newer, really
+    itself and runnable there, keeps the old one and puts it back if the new
+    one does not answer.
+    """
+    s = s or settings()
+    if s.get("kind") != "wordpress" or s.get("mode") != "full":
+        return {"ok": True, "unchanged": True, "head": "no WordPress helper on this connection"}
+    refused = _may_write(agent)
+    if refused:
+        return {"ok": False, "error": refused}
+    h = wp_helper(s)
+    if not h.get("ok"):
+        return {"ok": False, "missing": bool(h.get("missing")), "unreachable": h.get("unreachable"),
+                "error": h.get("error") or "the helper did not answer"}
+    have = int(h.get("helper") or 0)
+    if have >= WP_HELPER_NEWEST and not force:
+        return {"ok": True, "unchanged": True, "helper": have,
+                "head": f"the Botix helper on your WordPress is the newest (version {have})"}
+    if h.get("self_update"):
+        return {"ok": False, "manual": True, "helper": have, "error": str(h["self_update"])}
+    code = WP_HELPER.read_bytes()
+    r = call("/botix/self-update", "POST", {"version": WP_HELPER_NEWEST,
+                                            "code": base64.b64encode(code).decode("ascii"),
+                                            "sha256": hashlib.sha256(code).hexdigest()}, s=s)
+    if not r.get("ok"):
+        out = {"ok": False, "helper": have, "error": r.get("error") or "the helper did not take the new copy"}
+    elif r.get("unchanged"):
+        return {"ok": True, "unchanged": True, "helper": have, "head": r.get("head") or ""}
+    else:
+        after = wp_helper(s)
+        now = int(after.get("helper") or 0) if after.get("ok") else 0
+        out = {"ok": bool(after.get("ok")) and now == WP_HELPER_NEWEST, "from": have, "to": WP_HELPER_NEWEST,
+               "helper": now, "kept": r.get("kept") or "",
+               "head": r.get("head") or f"the Botix helper updated itself to version {WP_HELPER_NEWEST}"}
+        if not out["ok"]:
+            out["error"] = ("the helper took the new copy but did not answer as the new version afterwards: "
+                            + str(after.get("error") or f"it says version {now}")[:160])
+    try:
+        from coordination import changelog
+        changelog.record("connector", page="wp-content/plugins/botix-helper", agent=agent,
+                         summary=(out.get("head") if out.get("ok") else
+                                  f"tried to update the Botix helper from version {have} to {WP_HELPER_NEWEST} "
+                                  "and could not: " + str(out.get("error") or "")[:200]),
+                         backup=out.get("kept") or "", ok=bool(out.get("ok")),
+                         error="" if out.get("ok") else str(out.get("error") or "")[:300])
+    except Exception:
+        pass
+    return out
 
 
 def remove_head_block(page, block_id, agent=AGENT, s=None) -> dict:
@@ -1838,6 +2034,8 @@ def repair_share_buttons(agent=AGENT, s=None, dry_run=False) -> dict:
 def publish_sitemap(agent=AGENT, s=None, dry_run=False) -> dict:
     """Put the sitemap on his website and give it to Search Console. Releaser only."""
     from . import sitemap
+    if (s or settings()).get("kind") == "wordpress":
+        return _wp_sitemap(agent, s or settings(), dry_run)
     d = sitemap.discover()
     if not d.get("ok"):
         return {"ok": False, "error": "the sitemap could not be made: "
@@ -2835,6 +3033,12 @@ def main():
                     help="point every canonical tag at this site (Releaser)")
     ap.add_argument("--backups", action="store_true")
     ap.add_argument("--undo", metavar="PAGE", help="restore a page's last version")
+    ap.add_argument("--wp-meta-undo", action="store_true",
+                    help="WordPress: put the Botix helper's page tags back as they were before the last change")
+    ap.add_argument("--wp-settings-undo", action="store_true",
+                    help="WordPress: ask search engines not to list the site again (undoes the Fix button's change)")
+    ap.add_argument("--wp-helper-update", action="store_true",
+                    help="WordPress: bring the Botix helper plugin up to this copy's version (Releaser)")
     # The undo for one block the agency put in, as opposed to --undo, which
     # restores whatever the newest backup happens to be. The Fixer prints this
     # command alongside every block it proposes, so it has to exist: an undo
@@ -2974,6 +3178,12 @@ def main():
         for f in r.get("failed") or []:
             print(f"   REFUSED  {f['page']}: {f['why']}")
         return _say(r)
+    if a.wp_meta_undo or a.wp_settings_undo or a.wp_helper_update:
+        r = (wp_meta_undo(agent=a.agent, s=s) if a.wp_meta_undo else
+             put_wp_settings({"blog_public": 0}, agent=a.agent, s=s) if a.wp_settings_undo else
+             update_wp_helper(agent=a.agent, s=s))
+        print(json.dumps(r) if a.json else (r.get("head") or r.get("error") or json.dumps(r)))
+        return 0 if r.get("ok") else 1
     if a.undo_schema:
         r = undo_schema(agent=a.agent, s=s)
         if a.json:

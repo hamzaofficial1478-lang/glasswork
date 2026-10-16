@@ -156,6 +156,12 @@ details summary{cursor:pointer;color:var(--glass);font-size:12px;margin-top:6px}
           <div class="field"><label for="wpUser">WordPress username</label><input id="wpUser" autocomplete="off"></div>
           <div class="field"><label for="wpPass">Application password</label><input id="wpPass" type="password" autocomplete="off"></div>
           <div class="btnrow"><button class="mini" id="connWp" type="button">Save and check</button></div>
+          <p class="hint" style="margin:14px 0 6px"><b>Then, once: the Botix helper.</b> Pages and posts need nothing more.
+            For titles, descriptions and the other tags in each page's head — what the Fix button puts right — install
+            the free helper plugin: download it, then in WordPress open <b>Plugins → Add New → Upload Plugin</b>,
+            choose the zip (do not unzip it), <b>Install Now</b>, <b>Activate</b>. It updates itself after that.</p>
+          <div class="btnrow"><button class="mini" id="connHelper" type="button">Download the WordPress helper</button>
+            <span class="inl dim" id="helperState"></span></div>
         </details>
         <span class="inl dim" id="connMsg"></span>
       </div>
@@ -481,6 +487,7 @@ $('#saveWebsite').onclick=async()=>{
 function connLine(c){
   if(!c || !c.ok) return 'Could not read the connection.';
   if(c.kind==='wordpress') return c.connected ? '✓ Connected through WordPress as '+esc(c.wp_user)+'.'
+      +(c.helper ? ' The Botix helper is installed (version '+Number(c.helper)+').' : ' Install the Botix helper once (below) so Fix can set titles and descriptions.')
     : 'WordPress is chosen'+(c.wp_user?' ('+esc(c.wp_user)+')':'')+' — press Check.';
   if(c.kind==='php' && c.connected) return '✓ Connected through your connector at '+esc(c.base)+'.';
   if(c.kind==='php' && c.has_secret) return 'A connector is made for this website. Upload it, then press Check.';
@@ -497,6 +504,15 @@ $('#connZip').onclick=async()=>{
   const m=/filename="([^"]+)"/.exec(r.headers.get('content-disposition')||'');
   a.href=URL.createObjectURL(blob); a.download=m?m[1]:'connector.zip'; document.body.appendChild(a); a.click(); a.remove();
   inl($('#connMsg'),'ok','✓ Downloaded. Upload it, Extract it, then press Check.'); loadConn();
+};
+$('#connHelper').onclick=async()=>{
+  inl($('#helperState'),'dim','Getting the helper…');
+  const r=await fetch('/api/connect/wordpress-helper.zip',{cache:'no-store'});
+  if(!r.ok || (r.headers.get('content-type')||'').includes('json')){
+    const j=await r.json().catch(()=>({})); inl($('#helperState'),'err','✕ '+esc(j.error||'could not make it')); return; }
+  const blob=await r.blob(); const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='botix-helper.zip'; document.body.appendChild(a); a.click(); a.remove();
+  inl($('#helperState'),'ok','✓ Downloaded. Upload it in Plugins → Add New → Upload Plugin, Activate, then press Check.');
 };
 $('#connCheck').onclick=async()=>{ inl($('#connMsg'),'dim','Knocking on your website…'); connSay(await api('POST','/api/connect/check',{})); };
 $('#connRo').onclick=async()=>{ connSay(await api('POST','/api/connect/readonly',{})); };

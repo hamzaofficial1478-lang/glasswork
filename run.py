@@ -515,7 +515,7 @@ def tests():
             "pipelines.offer_tests",
             "pipelines.find_site_tests", "pipelines.site_api_tests", "pipelines.connect_tests",
             "pipelines.website_check_tests", "pipelines.blueprint_tests", "pipelines.site_map_tests", "pipelines.progress_tests",
-            "pipelines.seo_rules_tests", "pipelines.fixer_tests",
+            "pipelines.seo_rules_tests", "pipelines.fixer_tests", "pipelines.wp_fix_tests",
             "pipelines.secure_tests",
             "pipelines.security_tests",
             "pipelines.it_tests", "pipelines.fix_tests",

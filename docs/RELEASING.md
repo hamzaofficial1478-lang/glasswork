@@ -88,6 +88,27 @@ go back to the previous version from Settings.
 
 A version can only go out once; the next one needs a higher number.
 
+### The website side updates itself too
+
+Each new version also carries the newest **connector file** (for websites
+connected with a connector) and the newest **Botix helper plugin** (for
+WordPress websites). Nobody uploads either again: the first time Botix talks to
+a website after updating, it sends the newer copy, the website checks it is
+whole, newer and runnable, keeps the old one, and puts it back if the new one
+does not answer. The change list on the Website screen shows it happened.
+
+### Every change works on both kinds of website
+
+Anything that changes or checks a person's website is built for both ways of
+connecting — the connector file (PHP and HTML sites) **and** WordPress (its own
+REST API plus the Botix helper plugin). The tests hold the program to it:
+`pipelines/fixer_tests.py` runs the Fix button on a PHP website and
+`pipelines/wp_fix_tests.py` on a stand-in WordPress with the real helper plugin,
+and the second fails if a fix is added without a WordPress route. When the
+helper needs something new, its version goes up (`const BOTIX_HELPER` in
+`paste-into-your-site/botix-helper.php` and `WP_HELPER_NEWEST` in
+`pipelines/site_api.py`) so every WordPress site takes it by itself.
+
 ## 3. New people: one link
 
 Send them your download page (section 1). They press **Download for Windows**,

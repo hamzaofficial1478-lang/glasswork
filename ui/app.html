@@ -1522,6 +1522,9 @@ async function website(main) {
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${link.kind && link.kind !== 'readonly' ? '<button class="btn quiet small" type="button" id="testLink">Test the connection</button>' : ''}
         <a href="/setup" style="font-weight:500;font-size:14px">Connection settings</a></div>
       ${link.kind && link.kind !== 'readonly' ? `<div class="muted" id="linkSay" style="flex-basis:100%;font-size:13.5px">${linkLine(link)}</div>` : ''}
+      ${link.kind === 'wordpress' && conn.on && !link.helper ? `<div class="note" style="flex-basis:100%">Install the free Botix helper on your WordPress once, so Fix can set each page's title, description and preview card. It updates itself after that.
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><a class="btn small" href="/api/connect/wordpress-helper.zip">Download the WordPress helper</a>
+        <span class="muted" style="font-size:13.5px">In WordPress: Plugins → Add New → Upload Plugin → choose the zip → Install Now → Activate. Then press Test the connection.</span></div></div>` : ''}
       ${link.old_connector && !link.self_updating ? `<div class="note" style="flex-basis:100%">Your website has connector version ${Number(link.connector) || 'an older one'}, which cannot update itself. Upload the new one once, and from then on it updates itself whenever Botix has a newer one — you will not need to do this again.
         <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><a class="btn small" href="/setup#connectBox">Get the new connector</a>
         <span class="muted" style="font-size:13.5px">In Connection settings, press Download your connector, then put the agency-api folder from it on your website in place of the old one. Your secret stays the same.</span></div></div>` : ''}</section>
@@ -1745,7 +1748,7 @@ function linkLine(l) {
   const bits = [];
   if (l.latency_ms != null) bits.push(`answers in ${Number(l.latency_ms) < 1000 ? Number(l.latency_ms) + ' ms' : (Number(l.latency_ms) / 1000).toFixed(1) + ' s'}`);
   if (l.kind === 'php' && l.connector) bits.push(`connector version ${Number(l.connector)}${l.self_updating ? ', updates itself' : ''}`);
-  if (l.kind === 'wordpress') bits.push('through WordPress');
+  if (l.kind === 'wordpress') bits.push('through WordPress' + (l.helper ? `, Botix helper version ${Number(l.helper)} (updates itself)` : ''));
   if (l.checked_at) bits.push('last tested ' + when(l.checked_at));
   return esc(sentence(bits.join(' · ')));
 }

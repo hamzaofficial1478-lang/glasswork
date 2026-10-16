@@ -27,6 +27,25 @@ WHAT MAPS TO WHAT
   /blog-remove     move a post to the bin — only one the agency added
   /pages-remove    move a page to the bin (never the home page); the bin keeps it
 
+THE BOTIX HELPER PLUGIN (paste-into-your-site/botix-helper.php)
+
+A page's <head> — its title, description, canonical, preview card, "do not
+list me" line — is written by the theme and the SEO plugin, and WordPress's
+REST API has no way into it. The helper plugin, installed once, is that way
+in: each page's own values by address, shown through Yoast, Rank Math, All in
+One SEO or SEOPress when one is there, robots.txt's Sitemap line, llms.txt,
+and the "discourage search engines" box. It updates itself after that, the
+same way the connector file does.
+
+  /botix/health      the helper's version and what it can do (or: not installed)
+  /botix/meta        each page's values; set them
+  /botix/meta-undo   put the values back as they were before the last change
+  /botix/settings    the "discourage search engines" box
+  /botix/self-update a newer copy of the helper
+
+Pages and posts can also be named by their WordPress id — "pages/12",
+"posts/50" — so a post, not only a page, can be read, changed and put back.
+
 WHAT IT CANNOT DO, AND SAYS SO
 
 A theme's header and footer, and anything in a page builder's own storage,
@@ -84,10 +103,15 @@ RETRY_WAITS = (2, 5)
 PASSING = {408, 429, 502, 503, 504, 508, 520, 521, 522, 523, 524}
 
 
-def _req(s, path, method="GET", body=None, query=None, timeout=TIMEOUT):
+HELPER_MISSING = ("the Botix helper plugin is not on your WordPress yet. Install it once: Connection settings → "
+                  "Download the WordPress helper, then in WordPress Plugins → Add New → Upload Plugin → Activate. "
+                  "It keeps itself up to date after that.")
+
+
+def _req(s, path, method="GET", body=None, query=None, timeout=TIMEOUT, helper=False):
     """(status, json or None, error text). Never raises."""
     for n in range(len(RETRY_WAITS) + 1):
-        status, out, err, unsent = _req_once(s, path, method, body, query, timeout)
+        status, out, err, unsent = _req_once(s, path, method, body, query, timeout, helper)
         passing = status == 0 or status in PASSING
         if not passing or n == len(RETRY_WAITS) or not (method == "GET" or unsent):
             return status, out, err
@@ -95,8 +119,9 @@ def _req(s, path, method="GET", body=None, query=None, timeout=TIMEOUT):
     return status, out, err
 
 
-def _req_once(s, path, method, body, query, timeout):
-    url = api_root(s["site"]) + path
+def _req_once(s, path, method, body, query, timeout, helper=False):
+    root = api_root(s["site"])
+    url = (root[:-len("/wp/v2")] + "/botix/v1" if helper else root) + path
     if query:
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(query)
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -144,6 +169,15 @@ def _failed(status, err) -> dict:
     else:
         out["error"] = err
     return out
+
+
+_BY_ID = re.compile(r"^(pages|posts)/(\d+)$")
+
+
+def _by_id(page):
+    """('pages', 12) for 'pages/12' — a page or post named by its WordPress id — else None."""
+    m = _BY_ID.match(str(page or "").strip().strip("/"))
+    return (m.group(1), int(m.group(2))) if m else None
 
 
 def _slug_of(page) -> str:
@@ -222,6 +256,17 @@ def pages(s) -> dict:
 
 
 def read(s, page) -> dict:
+    ident = _by_id(page)
+    if ident:
+        kind, pid = ident
+        status, item, err = _req(s, f"/{kind}/{pid}", query={"context": "edit"})
+        if status == 404:
+            return {"ok": False, "status": 404, "error": "no such page"}
+        if status != 200 or not isinstance(item, dict):
+            return _failed(status, err)
+        return {"ok": True, "page": f"{kind}/{pid}", "html": _raw(item),
+                "bytes": len(_raw(item).encode("utf-8")), "changed": item.get("modified") or "",
+                "id": pid, "kind": kind, "link": item.get("link") or ""}
     slug = _slug_of(page)
     if slug in HOME_SLUGS:
         fid = _front_page_id(s)
@@ -244,6 +289,19 @@ def read(s, page) -> dict:
 
 
 def write(s, page, html) -> dict:
+    ident = _by_id(page)
+    if ident:
+        if not str(html or "").strip():
+            return {"ok": False, "status": 400, "error": "refusing to write an empty page"}
+        got = read(s, page)
+        if not got.get("ok"):
+            return got
+        if got["html"] == html:
+            return {"ok": True, "page": got["page"], "action": "unchanged", "backup": ""}
+        st, out, err = _req(s, f"/{got['kind']}/{got['id']}", "POST", {"content": html})
+        if st != 200:
+            return _failed(st, err)
+        return {"ok": True, "page": got["page"], "action": "updated", "backup": "WordPress revision", "id": got["id"]}
     slug = _slug_of(page)
     if not slug:
         return {"ok": False, "status": 400, "error": "which page?"}
@@ -291,8 +349,8 @@ def head_block(s, page, mark, block) -> dict:
             "backup": "WordPress revision"}
 
 
-def revisions(s, page_id) -> list:
-    st, out, _ = _req(s, f"/pages/{page_id}/revisions", query={"context": "edit", "per_page": 20})
+def revisions(s, page_id, kind="pages") -> list:
+    st, out, _ = _req(s, f"/{kind}/{page_id}/revisions", query={"context": "edit", "per_page": 20})
     return out if st == 200 and isinstance(out, list) else []
 
 
@@ -300,7 +358,8 @@ def rollback(s, page="", backup="") -> dict:
     got = read(s, page)
     if not got.get("ok"):
         return got
-    revs = revisions(s, got["id"])
+    kind = got.get("kind") or "pages"
+    revs = revisions(s, got["id"], kind)
     # Newest first. The newest revision is the page as it is now; the one
     # after it is how it was before the last change.
     older = [r for r in revs if _raw(r) != got["html"]]
@@ -309,7 +368,7 @@ def rollback(s, page="", backup="") -> dict:
     if not older:
         return {"ok": False, "status": 404, "error": "WordPress has no earlier version of this page"}
     back = older[0]
-    st, out, err = _req(s, f"/pages/{got['id']}", "POST", {"content": _raw(back)})
+    st, out, err = _req(s, f"/{kind}/{got['id']}", "POST", {"content": _raw(back)})
     if st != 200:
         return _failed(st, err)
     return {"ok": True, "page": got["page"], "restored": str(back.get("id")),
@@ -455,6 +514,47 @@ def page_remove(s, page) -> dict:
             "note": "in the WordPress bin — restore it there to put it back"}
 
 
+# ---- what a visitor's address is, in WordPress --------------------------------
+
+def find_object(s, url) -> dict:
+    """
+    The page or post a live address shows: {ok, page: 'pages/12'|'posts/50', html, id, kind}.
+    The home page is the front page WordPress is set to show; a home page that
+    lists the latest posts is not one object, and says so.
+    """
+    import urllib.parse as _u
+    path = (_u.urlparse(url).path or "/").strip("/")
+    slug = _slug_of(path)
+    if slug in HOME_SLUGS:
+        fid = _front_page_id(s)
+        if not fid:
+            return {"ok": False, "status": 404, "home": True,
+                    "error": "your home page lists your latest posts, so its words come from the posts and the theme"}
+        return read(s, f"pages/{fid}")
+    for kind in ("pages", "posts"):
+        item, (status, err) = _find(s, kind, slug)
+        if status != 200:
+            return _failed(status, err)
+        if item is not None:
+            return read(s, f"{kind}/{item['id']}")
+    return {"ok": False, "status": 404,
+            "error": "no page or post has this address — it may be an archive, a category or made by a plugin"}
+
+
+# ---- the Botix helper plugin ---------------------------------------------------
+
+def helper(s, path, method="GET", body=None) -> dict:
+    """One call to the helper plugin. Not installed is said as such (missing=True)."""
+    st, out, err = _req(s, path, method, body, helper=True, timeout=60 if path == "/self-update" else TIMEOUT)
+    if st == 404 and (not isinstance(out, dict) or out.get("code") == "rest_no_route"):
+        return {"ok": False, "status": 404, "missing": True, "error": HELPER_MISSING}
+    if st in (200, 201) and isinstance(out, dict):
+        return {"ok": True, **out} if "ok" not in out else out
+    if st in (0, 401, 403):
+        return _failed(st, err)
+    return {"ok": False, "status": st, "error": err}
+
+
 # ---------------------------------------------------------------------------
 # the one entrance site_api uses
 # ---------------------------------------------------------------------------
@@ -490,6 +590,12 @@ def call(path, method="GET", body=None, s=None) -> dict:
             return page_remove(s, body.get("page") or "")
         if route == "/picture" and method == "POST":
             return picture_add(s, body.get("data") or "", body.get("name") or "picture")
+        if route.startswith("/botix/"):
+            sub = route[len("/botix"):]
+            if sub in ("/health", "/meta", "/meta-undo", "/settings", "/self-update"):
+                return helper(s, sub, method, body if method == "POST" else None)
+        if route == "/find" and method == "POST":
+            return find_object(s, body.get("url") or "")
         if route == "/contact":
             return {"ok": False, "status": 404, "error": (
                 "the contact-form test is not available on a WordPress connection — "

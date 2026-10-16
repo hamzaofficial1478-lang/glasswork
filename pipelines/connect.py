@@ -25,7 +25,12 @@ THE THREE WAYS
                        as the zip is made; full access starts only when Check
                        proves it answers.
   WORDPRESS            a username and an Application Password, made inside
-                       WordPress (pipelines/wp_bridge.py). No file at all.
+                       WordPress (pipelines/wp_bridge.py). No file to upload
+                       for pages and posts. For titles, descriptions and the
+                       other tags in a page's head, the Botix helper plugin
+                       (paste-into-your-site/botix-helper.php), installed once
+                       from Plugins → Add New → Upload; it updates itself after
+                       that, the same way the connector file does.
   READ-ONLY            anything else, or not now. The agency does everything
                        but change the website; each change is handed over.
 
@@ -162,6 +167,61 @@ def connector_zip(new_secret=False) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# the WordPress helper plugin
+# ---------------------------------------------------------------------------
+
+HELPER_README = """\
+THE BOTIX HELPER FOR WORDPRESS — for {host}, made on {day}
+
+1. In WordPress open Plugins → Add New → Upload Plugin.
+2. Choose this zip (botix-helper.zip — do not unzip it) and press Install Now.
+3. Press Activate.
+
+That is all. Botix now sees the helper the next time it looks, and can put
+each page's own title, description and preview card right with the Fix
+button. The helper updates itself when Botix has a newer one: you will not
+need to upload it again.
+
+It changes nothing on its own. Only Botix, signed in with the Application
+Password you gave it, can ask it to — and only an administrator's password
+works. To stop it, deactivate or delete it in Plugins.
+"""
+
+
+def helper_zip() -> dict:
+    """The Botix helper plugin as a zip WordPress installs from Plugins → Add New → Upload."""
+    from . import site_api
+    if not site_api.WP_HELPER.exists():
+        return {"ok": False, "error": "the WordPress helper is missing from this copy of the program"}
+    host = urllib.parse.urlparse(_origin(_env().get("SITE_URL")) or "").netloc or "your website"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("botix-helper/botix-helper.php", site_api.WP_HELPER.read_text(encoding="utf-8"))
+        z.writestr("botix-helper/READ-ME-FIRST.txt", HELPER_README.format(host=host, day=time.strftime("%d %B %Y")))
+    return {"ok": True, "filename": "botix-helper.zip", "zip": buf.getvalue(), "version": site_api.WP_HELPER_NEWEST}
+
+
+def _wordpress_helper(saved_ok) -> dict:
+    """Is the helper on his WordPress, which version, and (if older) bring it up to date."""
+    from . import site_api
+    h = site_api.wp_helper()
+    if not h.get("ok"):
+        out = {"installed": False, "missing": bool(h.get("missing")), "error": h.get("error") or ""}
+        _save_state(helper=0, helper_seo="", helper_checked=int(time.time()))
+        return out
+    have = int(h.get("helper") or 0)
+    updated = None
+    if saved_ok and have < site_api.WP_HELPER_NEWEST and not h.get("self_update"):
+        updated = site_api.update_wp_helper(agent=site_api.AGENT)
+        if updated.get("ok") and updated.get("helper"):
+            have = int(updated["helper"])
+    _save_state(helper=have, helper_seo=h.get("seo_plugin") or "", helper_checked=int(time.time()))
+    return {"installed": True, "helper": have, "newest": site_api.WP_HELPER_NEWEST, "updated": updated,
+            "seo_plugin": h.get("seo_plugin") or "", "blog_public": h.get("blog_public"),
+            "self_update": h.get("self_update") or ""}
+
+
+# ---------------------------------------------------------------------------
 # checking, and the other two ways
 # ---------------------------------------------------------------------------
 
@@ -202,7 +262,9 @@ def check() -> dict:
         updated = site_api.update_connector(agent=site_api.AGENT)
         if updated.get("ok") and updated.get("connector"):
             version = int(updated["connector"])
-    return {"ok": bool(saved.get("ok")), "kind": kind, "mode": "full",
+    # WORDPRESS: the helper plugin, checked (and brought up to date) the same way.
+    helper = _wordpress_helper(bool(saved.get("ok"))) if kind == "wordpress" else None
+    return {"ok": bool(saved.get("ok")), "kind": kind, "mode": "full", "helper": helper,
             "connector": version, "newest": site_api.CONNECTOR_NEWEST, "latency_ms": took,
             "updated": updated,
             "self_updating": kind == "php" and version >= site_api.SELF_UPDATING,
@@ -255,6 +317,8 @@ def status() -> dict:
             "connector": st.get("connector") or 0, "newest": site_api.CONNECTOR_NEWEST,
             "latency_ms": st.get("latency_ms"),
             "self_updating": kind == "php" and int(st.get("connector") or 0) >= site_api.SELF_UPDATING,
+            "helper": int(st.get("helper") or 0) if kind == "wordpress" else 0,
+            "helper_newest": site_api.WP_HELPER_NEWEST, "helper_seo": st.get("helper_seo") or "",
             "old_connector": kind == "php" and bool(st.get("checked_ok"))
                              and int(st.get("connector") or 0) < site_api.CONNECTOR_NEWEST}
 
@@ -265,11 +329,20 @@ def main(argv=None) -> int:
     ap.add_argument("--zip-json", action="store_true",
                     help="the connector zip as base64 JSON, for the office")
     ap.add_argument("--new-secret", action="store_true")
+    ap.add_argument("--helper-zip-json", action="store_true",
+                    help="the WordPress helper plugin zip as base64 JSON, for the office")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--wordpress", action="store_true", help="read {user, password, site} on stdin")
     ap.add_argument("--readonly", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
+    if a.helper_zip_json:
+        r = helper_zip()
+        out = {k: v for k, v in r.items() if k != "zip"}
+        if r.get("ok"):
+            out["zip_b64"] = base64.b64encode(r["zip"]).decode("ascii")
+        print(json.dumps(out))
+        return 0 if r.get("ok") else 1
     if a.zip or a.zip_json:
         r = connector_zip(new_secret=a.new_secret)
         if r.get("ok") and a.zip:

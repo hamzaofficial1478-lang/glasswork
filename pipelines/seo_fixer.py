@@ -48,11 +48,19 @@ WHERE A PAGE'S HEAD IS WRITTEN
                             page gets its own title from one shared header. The
                             header's original tag stays as the fallback for any
                             page the agency has not written for.
-  anything else             WordPress, a site that builds every page through one
-                            front file with no header file found, a page whose
-                            file could not be found: nothing is guessed. The
-                            report says why, and gives the words so they can be
-                            pasted in by hand.
+  WordPress                 the head (title, description, canonical, preview
+                            card, "do not list me", viewport, language) through
+                            the Botix helper plugin, installed once and updating
+                            itself after that — shown through Yoast, Rank Math,
+                            All in One SEO or SEOPress when one is there; the
+                            page's own words (pictures, headings, links, the
+                            year) through WordPress's REST API, a revision kept
+                            for each. The theme's header and footer are not open
+                            to either, and the report says so where it matters.
+  anything else             a site that builds every page through one front file
+                            with no header file found, a page whose file could
+                            not be found: nothing is guessed. The report says
+                            why, and gives the words so they can be pasted in.
 
 WHAT THE BUTTON WILL NOT DO BY ITSELF
 
@@ -99,6 +107,17 @@ AUTO = {
     "copyright": "makes the copyright year in the footer always the current one",
     "scrub": "takes out characters nobody can see (zero-width spaces and the like) from the files that make each page",
 }
+# AND ON WORDPRESS. Every fix above has a WordPress route — "every time when you
+# will make any change or will update that should also be updated and build for
+# the wordpress too" — and fixer_tests fails if one is added without one.
+#   helper    the page's head, through the Botix helper plugin
+#   content   the page's or post's own content, through WordPress's REST API
+WP_ROUTE = {"title": "helper", "description": "helper", "canonical": "helper", "og": "helper",
+            "viewport": "helper", "lang": "helper", "noindex": "helper",
+            "h1": "content", "alt": "content", "lazy": "content", "noopener": "content",
+            "https_links": "content", "copyright": "content", "scrub": "content"}
+SEO_NAMES = {"yoast": "Yoast", "rankmath": "Rank Math", "aioseo": "All in One SEO", "seopress": "SEOPress"}
+
 # Routines in site_api the Releaser may call (it_release.ALLOWED_CALLS).
 CALLS = {"put_robots", "put_llms", "publish_sitemap", "apply_schema"}
 FIX_CALL = {"schema": "apply_schema"}
@@ -149,7 +168,16 @@ def describe(code, fix="", part="") -> dict:
         from . import it_release
         return {"auto": True, "call": call, "does": it_release.ALLOWED_CALLS.get(call, call), "needs": ""}
     if fix in AUTO:
-        return {"auto": True, "does": AUTO[fix], "needs": ""}
+        out = {"auto": True, "does": AUTO[fix], "needs": ""}
+        try:
+            from . import site_api
+            if site_api.settings().get("kind") == "wordpress":
+                out["wordpress"] = WP_ROUTE.get(fix, "")
+                out["does"] += (" (on WordPress, through the Botix helper plugin)" if WP_ROUTE.get(fix) == "helper"
+                                else " (on WordPress, in each page's own content)")
+        except Exception:
+            pass
+        return out
     needs = {"favicon_missing": "your logo, as a square picture",
              "robots_blocks_all": "your decision — it may be on purpose while the site is being built",
              "soft_404": "your hosting company or whoever built the site",
@@ -737,6 +765,11 @@ class Plan:
         self.calls = []
         self.words_by = ""
         self.notes = []
+        self.wp_meta = {"pages": {}, "site": {}}    # WordPress: through the Botix helper
+        self.wp_settings = {}
+
+    def empty(self):
+        return not (self.files or self.calls or self.wp_meta["pages"] or self.wp_meta["site"] or self.wp_settings)
 
     def edit(self, site, name, fn):
         cur = self.files.get(name, site.src.get(name))
@@ -1224,7 +1257,7 @@ def check_file(code, fetch, home):
         good = st == 200 and body.strip() and not body.lstrip()[:15].lower().startswith(("<!doctype", "<html"))
         return bool(good), f"llms.txt answered {st}"
     if code in ("sitemap_missing", "sitemap_incomplete"):
-        for u in (sitemap.live_url(home), home + "/sitemap.xml"):
+        for u in (sitemap.live_url(home), home + "/sitemap.xml", home + "/wp-sitemap.xml", home + "/sitemap_index.xml"):
             st, body = get(u)
             if st == 200 and re.search(r"<(urlset|sitemapindex)", body or ""):
                 if code == "sitemap_missing":
@@ -1274,6 +1307,13 @@ def _queue(plan, title):
     for call in plan.calls:
         ids.append(board.queue_site_change(FIXER, call, {"change": {"call": call},
                                                          "why": f"Fix button: {title}. Pressed by you in the office."}))
+    if plan.wp_meta["pages"] or plan.wp_meta["site"]:
+        meta = {k: v for k, v in plan.wp_meta.items() if v}
+        ids.append(board.queue_site_change(FIXER, "wp_meta", {"change": {"wp_meta": meta},
+                                                              "why": f"Fix button: {title}. Pressed by you in the office."}))
+    if plan.wp_settings:
+        ids.append(board.queue_site_change(FIXER, "wp_settings", {"change": {"wp_settings": plan.wp_settings},
+                                                                  "why": f"Fix button: {title}. Pressed by you in the office."}))
     _ = site_api
     return ids
 
@@ -1355,6 +1395,11 @@ def _run(run_id, fetch, read, smap, think, release):
             report.update({"state": "fixed", "headline": f"Already right on your live site ({seen}) — "
                                                          "nothing needed changing.", "already": 1, "total": 1})
             return _finish(run_id, report)
+        if site_api.settings().get("kind") == "wordpress" and d["call"] in ("put_robots", "put_llms"):
+            h = site_api.wp_helper()
+            if not h.get("ok"):
+                report.update({"state": "cannot", "headline": "Not fixed yet — " + str(h.get("error") or "")})
+                return _finish(run_id, report)
         plan = Plan()
         plan.calls = [d["call"]]
         _step(run_id, "Running the safety tests, then putting it on your website")
@@ -1403,6 +1448,10 @@ def _run(run_id, fetch, read, smap, think, release):
             _close_gap(code, fully=True)
         return _finish(run_id, report)
 
+    if site_api.settings().get("kind") == "wordpress":
+        return _finish(run_id, _wordpress(run_id, code, g, report, targets, todo, already, gone, before, looks,
+                                          fetch, think, release, over, others, home))
+
     _step(run_id, "Reading the files that make those pages")
     from . import site_map
     if read is None:
@@ -1419,9 +1468,9 @@ def _run(run_id, fetch, read, smap, think, release):
                                                       "each page: " + str((smap or {}).get("error") or "no map")})
         return _finish(run_id, report)
     if smap.get("kind") == "wordpress":
-        report.update({"state": "cannot", "headline": "Not fixed by the button — your site is WordPress, where "
-                                                      "titles and tags belong to your SEO plugin (Yoast or Rank Math), "
-                                                      "not to files the agency should edit."})
+        report.update({"state": "cannot", "headline": "Not fixed — your site is WordPress, but it is connected through "
+                                                      "the connector file. Connect it as WordPress (Connection settings → "
+                                                      "My website is WordPress) and the Fix button works through WordPress."})
         return _finish(run_id, report)
     site = Site(read, smap)
     plan = Plan()
@@ -1441,16 +1490,242 @@ def _run(run_id, fetch, read, smap, think, release):
         plan_images(fix, todo, looks, site, plan, think=think)
     elif fix in ("noopener", "https_links", "copyright", "scrub"):
         plan_source_edits(fix, todo, site, plan)
+    return _finish(run_id, _apply(run_id, code, g, report, plan, targets, todo, already, gone, before, over,
+                                  release, fetch, home, others, lambda u: _landed_files(u, plan, site, read)))
+
+
+# ---------------------------------------------------------------------------
+# WORDPRESS
+# ---------------------------------------------------------------------------
+
+class WPSite:
+    """
+    A WordPress site seen the way the plan functions see a file site: each page
+    a visitor reaches is one "file" — its page or post, named pages/12 or
+    posts/50 — holding that page's own content. The theme is not one of them.
+    """
+
+    def __init__(self):
+        self.src, self.ident, self.why = {}, {}, {}
+        self.users, self.includes, self.map = {}, {}, {"pages": []}
+
+    def file_for(self, url, live_html=""):
+        from . import site_api
+        key = _path_key(url)
+        if key not in self.ident:
+            got = site_api.call("/find", "POST", {"url": url})
+            if got.get("ok"):
+                self.ident[key] = got["page"]
+                self.src[got["page"]] = got.get("html")
+            else:
+                self.ident[key] = ""
+                self.why[key] = got.get("error") or "WordPress could not say which page this is"
+        return self.ident[key]
+
+    def load(self, names):
+        pass
+
+    def chain(self, name):
+        return [name] if name else []
+
+    def holder(self, name):
+        return ""
+
+    def html_tag_file(self, name):
+        return ""
+
+    def shared(self, name):
+        return False
+
+
+# What the plan functions say about files, said about WordPress.
+_WP_WORDS = (("the file that makes this page could not be found", None),
+             ("nothing to change was found written in the files that make this page",
+              "it is not in this page's own content — it comes from your theme (its header, footer or sidebar), "
+              "which WordPress does not let the agency change safely"),
+             ("are put on the page by code, not written in a file, so they cannot be changed here",
+              "are in your theme or added by a plugin, not in this page's content, so they cannot be changed here"),
+             ("the extra main headings are made by code the agency cannot follow",
+              "the extra main heading is in your theme (often the site name in the header), not in this page's "
+              "content"))
+
+
+def _wp_reason(why, site, url):
+    for old, new in _WP_WORDS:
+        if old in (why or ""):
+            return (why.replace(old, new) if new else
+                    "WordPress: " + site.why.get(_path_key(url), "this address is not a page or post"))
+    return why
+
+
+def _sync_heading_blocks(src):
+    """
+    A heading changed inside the block editor's markup keeps its block note in
+    step (<!-- wp:heading {"level":1} -->), so WordPress's editor does not call
+    the block broken. Level 2 is the editor's default and carries no note.
+    """
+    def fix(m):
+        attrs, space, level = m.group(1) or "", m.group(2), int(m.group(3))
+        try:
+            d = json.loads(attrs) if attrs.strip() else {}
+        except ValueError:
+            return m.group(0)
+        if level == 2:
+            d.pop("level", None)
+        else:
+            d["level"] = level
+        note = "<!-- wp:heading" + (" " + json.dumps(d, separators=(",", ":")) if d else "") + " -->"
+        return f"{note}{space}<h{level}"
+    return re.sub(r"<!-- wp:heading\s*(\{[^}]*\})?\s*-->(\s*)<h([1-6])", fix, src)
+
+
+def plan_wp_head(fix, code, targets, looks, plan, helper, think=None, others=()):
+    """The head of each page, through the Botix helper: values by address."""
+    seo = helper.get("seo_plugin") or ""
+    through = f" (shown through {SEO_NAMES[seo]})" if seo in SEO_NAMES else ""
+    if fix in HEAD_KEYS:
+        values, plan.words_by = _per_page_values(fix, targets, looks, think, list(others))
+        for u in targets:
+            p, vals = looks[u], dict(values[u])
+            for k, v in vals.items():
+                plan.value(u, k, v)
+            if fix == "og":
+                # Only what the page is missing: the theme or SEO plugin may print the rest.
+                vals = {k: v for k, v in vals.items() if not (
+                    k.startswith("og:") and R._meta_content(p, "property", k)) and not (
+                    k == "twitter:card" and R._meta_content(p, "name", "twitter:card"))}
+            if fix == "description" and not seo and R._meta_content(p, "name", "description"):
+                plan.skip(u, "your theme writes this page's description itself, and WordPress does not let the agency "
+                             "change theme files. With an SEO plugin (Yoast or Rank Math) the helper can set it; or "
+                             "paste the words below into your theme")
+                continue
+            if not vals:
+                plan.skip(u, "nothing is missing from this page's preview card")
+                continue
+            plan.wp_meta["pages"][_path_key(u)] = vals
+            plan.did(u, "set for this page through the Botix helper" + through)
+        return plan
+    if fix == "viewport":
+        for u in targets:
+            if code != "core-viewport" and R._meta(looks[u], "name", "viewport"):
+                plan.skip(u, "your theme writes its own phone-screen line, and a second one would make it worse; "
+                             "changing the theme's line means editing the theme — IT should look")
+                continue
+            plan.wp_meta["site"]["viewport"] = "1"
+            plan.did(u, "the phone-screen line is added to every page through the Botix helper")
+        return plan
+    if fix == "lang":
+        plan.wp_meta["site"]["lang"] = _language()
+        for u in targets:
+            plan.did(u, "the page's language is added through the Botix helper (it shows wherever your theme uses "
+                        "WordPress's language setting)")
+        return plan
+    if fix == "noindex":
+        hidden_all = int(helper.get("blog_public", 1) or 0) == 0
+        for u in targets:
+            if LOOKS_DELIBERATE.search(urllib.parse.urlparse(u).path) and not hidden_all:
+                plan.skip(u, "left hidden: it looks like a page hidden on purpose (a thank-you or test page). "
+                             "Tell IT if it should be on Google")
+                continue
+            if hidden_all:
+                plan.wp_settings = {"blog_public": 1}
+                plan.did(u, "WordPress's 'Discourage search engines' box (Settings → Reading) was ticked, which hides "
+                            "every page; it is now unticked")
+            else:
+                plan.wp_meta["pages"][_path_key(u)] = {"robots": "index"}
+                plan.did(u, "the 'do not list' line is taken off this page through the Botix helper" + through)
+        if hidden_all:
+            plan.notes.append("Every page was hidden by WordPress's own 'Discourage search engines' setting. Unticking "
+                              "it shows the whole site to Google — pages you hid on purpose with an SEO plugin stay "
+                              "hidden.")
+    return plan
+
+
+def _wordpress(run_id, code, g, report, targets, todo, already, gone, before, looks, fetch, think, release, over,
+               others, home):
+    """The Fix button on a WordPress site: the head through the helper, the words through the REST API."""
+    from . import site_api
+    fix = g.get("fix") or ""
+    route = WP_ROUTE.get(fix)
+    plan = Plan()
+    if route == "helper":
+        _step(run_id, "Asking the Botix helper on your WordPress")
+        h = site_api.wp_helper()
+        if not h.get("ok"):
+            if fix in HEAD_KEYS:
+                values, report["words_by"] = _per_page_values(fix, todo, looks, think, list(others))
+            else:
+                values = {u: {} for u in todo}
+            report["pages"] = [_page_row(u, "already", before[u][1]) for u in already] + \
+                              [_page_row(u, "skipped", "", {"values": values.get(u) or {}}) for u in todo] + \
+                              [_page_row(u, "gone", before[u][1]) for u in gone]
+            report.update({"state": "cannot", "helper_missing": bool(h.get("missing")),
+                           "headline": "Not fixed yet — " + str(h.get("error") or "the Botix helper did not answer")
+                                       + (" The words it would use are below." if fix in HEAD_KEYS else "")})
+            return report
+        _step(run_id, "Working out the change" + (" and writing the words" if fix in ("title", "description") else ""))
+        plan_wp_head(fix, code, todo, looks, plan, h, think=think, others=others)
+        if h.get("seo_plugin") in SEO_NAMES:
+            plan.notes.append(f"Shown through {SEO_NAMES[h['seo_plugin']]}, which you already use: nothing is printed "
+                              "twice, and anything you set there by hand for these pages is overridden by these words "
+                              "until you remove them.")
+    else:
+        _step(run_id, "Reading those pages' content from WordPress")
+        site = WPSite()
+        if fix == "h1":
+            plan_h1(code, todo, looks, site, plan)
+        elif fix in ("alt", "lazy"):
+            plan_images(fix, todo, looks, site, plan, think=think)
+        else:
+            plan_source_edits(fix, todo, site, plan)
+        for name in list(plan.files):
+            plan.files[name] = _sync_heading_blocks(plan.files[name])
+        for u, info in plan.pages.items():
+            if info.get("skip"):
+                info["skip"] = _wp_reason(info["skip"], site, u)
+        plan.notes.append("On WordPress the agency changes each page's own content; WordPress keeps the version before "
+                          "as a revision (Pages → the page → Revisions), so it can always be put back.")
+
+    def landed(u):
+        if route == "helper":
+            got = site_api.wp_meta()
+            held = ((got.get("meta") or {}).get(_path_key(u)) or {}) if got.get("ok") else {}
+            want = plan.wp_meta["pages"].get(_path_key(u)) or {}
+            return bool(want) and all(held.get(k) for k in want)
+        name = site.file_for(u)
+        if name not in plan.files:
+            return False
+        back = site_api.read_page(name)
+        return bool(back.get("ok")) and back.get("html") == plan.files[name]
+    report["platform"] = "wordpress"
+    return _apply(run_id, code, g, report, plan, targets, todo, already, gone, before, over, release, fetch, home,
+                  others, landed)
+
+
+def _landed_files(u, plan, site, read):
+    """Is this page's change in the files on the server (for the 'cache' answer)?"""
+    name = site.file_for(u)
+    holder = site.holder(name) if name else ""
+    back = read([n for n in plan.files if n in (name, holder) or n.endswith(META_FILE)]) if read else {}
+    return bool(back) and all(back.get(n) == plan.files[n] for n in back)
+
+
+def _apply(run_id, code, g, report, plan, targets, todo, already, gone, before, over, release, fetch, home, others,
+           landed):
+    """Queue the change, let the Releaser write it, look at the live pages again, and count."""
+    from . import site_api
     report["words_by"] = plan.words_by
-    report["files"] = sorted(plan.files)
-    if not plan.files:
+    report["files"] = sorted(plan.files) + (["WordPress helper"] if plan.wp_meta["pages"] or plan.wp_meta["site"]
+                                            else []) + (["WordPress settings"] if plan.wp_settings else [])
+    if plan.empty():
         report["pages"] = [_page_row(u, "already", before[u][1]) for u in already] + \
                           [_page_row(u, "skipped", (plan.pages.get(u) or {}).get("skip") or before[u][1],
                                      plan.pages.get(u)) for u in todo] + \
                           [_page_row(u, "gone", before[u][1]) for u in gone]
+        report["notes"] = plan.notes
         report.update({"state": "cannot", "headline": "Not fixed — nothing on your website could be changed "
                                                       "safely for this. The reasons are listed by page."})
-        return _finish(run_id, report)
+        return report
 
     _step(run_id, "Running the safety tests, then writing the change to your website")
     ids = _queue(plan, g["title"])
@@ -1459,29 +1734,38 @@ def _run(run_id, fetch, read, smap, think, release):
     applied = [r_ for r_ in rows.values() if r_["status"] == "applied"]
     waiting = [r_ for r_ in rows.values() if r_["status"] == "approved"]
     failed = [r_ for r_ in rows.values() if r_["status"] not in ("applied", "approved")]
-    report["written"] = [json.loads(r_["detail"] or "{}").get("change", {}).get("page") for r_ in applied]
+    changes = [json.loads(r_["detail"] or "{}").get("change", {}) for r_ in applied]
+    report["written"] = [c.get("page") or ("WordPress helper" if c.get("wp_meta") else
+                                           "WordPress settings" if c.get("wp_settings") else c.get("call") or "")
+                         for c in changes]
     if waiting and not applied:
         report["pages"] = [_page_row(u, "waiting", "", plan.pages.get(u)) for u in todo]
         report.update({"state": "waiting", "headline": "Approved, not on your website yet: " + report["release"]})
-        return _finish(run_id, report)
+        return report
 
     _step(run_id, "Checking your live website")
     if _home_alive(fetch, home) is False:
-        for name in report["written"]:
-            site_api.undo(page=name, agent=RELEASER)
+        for c in changes:
+            if c.get("wp_meta"):
+                site_api.wp_meta_undo(agent=RELEASER)
+            elif c.get("wp_settings"):
+                site_api.put_wp_settings({"blog_public": 0 if c["wp_settings"].get("blog_public") else 1},
+                                         agent=RELEASER)
+            elif c.get("page"):
+                site_api.undo(page=c["page"], agent=RELEASER)
         report.update({"state": "not_fixed", "put_back": report["written"],
                        "headline": "Not fixed — after the change your home page stopped answering properly, so every "
                                    "file this fix wrote was put back at once. Your site is as it was. IT will look at "
                                    "why."})
         _hand_over(g, extra="The Fix button's change made the home page stop answering and was put back.")
-        return _finish(run_id, report)
+        return report
     after, _looks = check_live(code, todo, fetch, others)
-    return _finish(run_id, _tally(run_id, code, g, report, targets, todo, already, gone, before, after, plan,
-                                  failed, waiting, over, read, site))
+    return _tally(run_id, code, g, report, targets, todo, already, gone, before, after, plan,
+                  failed, waiting, over, landed)
 
 
 def _tally(run_id, code, g, report, targets, todo, already, gone, before, after, plan, failed, waiting, over,
-           read, site):
+           landed):
     fixed = [u for u in todo if after[u][0] is not None and _ok(after[u][0])]
     still = [u for u in todo if u not in fixed]
     rows = [_page_row(u, "already", before[u][1]) for u in already]
@@ -1495,12 +1779,8 @@ def _tally(run_id, code, g, report, targets, todo, already, gone, before, after,
         if not why and after[u][0] is None:
             why = f"the page {after[u][1]} when checked afterwards"
         if not why and info.get("did"):
-            # Written, but the live page still shows the problem. Is it in the file?
-            name = site.file_for(u)
-            holder = site.holder(name) if name else ""
-            back = read([n for n in plan.files if n in (name, holder) or n.endswith(META_FILE)]) if read else {}
-            landed = all(back.get(n) == plan.files[n] for n in back) and bool(back)
-            if landed:
+            # Written, but the live page still shows the problem. Is it on the server?
+            if landed(u):
                 cached.append(u)
                 why = ("the change is in your files, but the live page still shows the old version — usually a "
                        "cache on your hosting; press Check again in an hour")

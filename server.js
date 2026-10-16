@@ -767,6 +767,16 @@ app.get("/api/connect/connector.zip", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.send(Buffer.from(r.zip_b64, "base64"));
 });
+// The Botix helper plugin for WordPress: the same file for everyone, no secret
+// in it. Installed once from Plugins → Add New → Upload; it updates itself.
+app.get("/api/connect/wordpress-helper.zip", async (_q, res) => {
+  const r = await pyConnect(["--helper-zip-json"], null, 60000);
+  if (!r.ok || !r.zip_b64) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", 'attachment; filename="botix-helper.zip"');
+  res.setHeader("Cache-Control", "no-store");
+  res.send(Buffer.from(r.zip_b64, "base64"));
+});
 app.post("/api/connect/check", async (_q, res) => res.json(await pyConnect(["--check"], null, 120000)));
 app.post("/api/connect/wordpress", async (req, res) => {
   const b = req.body || {};

@@ -359,6 +359,16 @@ def plan_of(row) -> dict:
                 "html": change["html"], "issue_id": issue,
                 "why": d.get("why") or "", "row": row}
 
+    # WORDPRESS, THROUGH THE BOTIX HELPER: each page's own tags by address, the
+    # site's robots.txt line and llms.txt (wp_meta), and the "discourage search
+    # engines" box (wp_settings). Their own shapes: neither is a page.
+    if isinstance(change, dict) and isinstance(change.get("wp_meta"), dict):
+        return {"do": "wp_meta", "meta": change["wp_meta"], "page": "WordPress helper",
+                "issue_id": issue, "why": d.get("why") or "", "row": row}
+    if isinstance(change, dict) and isinstance(change.get("wp_settings"), dict):
+        return {"do": "wp_settings", "values": change["wp_settings"], "page": "WordPress settings",
+                "issue_id": issue, "why": d.get("why") or "", "row": row}
+
     if isinstance(change, dict) and change.get("replace") and change.get("with"):
         return {"do": "replace", "find": change["replace"],
                 "to": change["with"], "pages": change.get("pages") or [],
@@ -624,7 +634,8 @@ def _work(agent, limit, dry_run, skip_tests):
     plans = [plan_of(r) for r in waiting]
     doable = [p for p in plans
               if p["do"] in ("head_block", "call", "replace", "new_page", "page",
-                             "blog_post", "blog_remove", "blog_repost", "remove_page")]
+                             "blog_post", "blog_remove", "blog_repost", "remove_page",
+                             "wp_meta", "wp_settings")]
     noted = [p for p in plans if p["do"] == "noted"]
     refused = [p for p in plans if p["do"] == "refuse"]
 
@@ -925,6 +936,39 @@ def _carry_out(agent, plan, skipped_tests) -> bool:
                 row["id"], "applied",
                 (r.get("head") or "text replaced")
                 + (" (tests were skipped at your request)" if skipped_tests else ""))
+            return True
+
+        if plan["do"] == "wp_meta":
+            r = site_api.put_wp_meta(plan["meta"], agent=agent)
+            if not r.get("ok"):
+                return _fail_or_wait(plan, r, "the Botix helper did not take the values")
+            # READ BACK: the helper's own record must now hold every value sent.
+            got = site_api.wp_meta()
+            held = (got.get("meta") or {}) if got.get("ok") else None
+            want = (plan["meta"].get("pages") or {})
+            missing = [p for p, vals in want.items() if held is not None and any(
+                v and (held.get(p) or {}).get(k) is None for k, v in (vals or {}).items())]
+            if held is not None and missing:
+                site_api.wp_meta_undo(agent=agent)
+                return _could_not(plan, "the helper did not keep the values for " + ", ".join(missing[:3])
+                                  + ", so the change was put back. Nothing has been left half-done.")
+            _close_ticket(plan.get("issue_id"))
+            board.mark_site_change(
+                row["id"], "applied",
+                (f"page tags set for {len(want)} page(s) through the Botix helper" if want
+                 else "site settings set through the Botix helper") + ("" if held is not None else UNCHECKED)
+                + (" (tests were skipped at your request)" if skipped_tests else ""))
+            return True
+
+        if plan["do"] == "wp_settings":
+            r = site_api.put_wp_settings(plan["values"], agent=agent)
+            if not r.get("ok"):
+                return _fail_or_wait(plan, r, "WordPress did not take the setting")
+            _close_ticket(plan.get("issue_id"))
+            board.mark_site_change(
+                row["id"], "applied",
+                ("search engines may list your website again" if plan["values"].get("blog_public")
+                 else "WordPress setting changed") + (" (tests were skipped at your request)" if skipped_tests else ""))
             return True
 
         # a named routine — the allow-list is checked in plan_of, not here

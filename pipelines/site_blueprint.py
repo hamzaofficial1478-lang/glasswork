@@ -256,7 +256,12 @@ def read_site(home, get=None, most=MOST_PAGES) -> dict:
         metas[u] = r[3] if len(r) > 3 else {}
         return st, html
     d = sitemap.discover(home, most=most, get=page_get)
-    if not d.get("ok"):
+    # EVERY PAGE HIDDEN is a finding, not a failure to read. WordPress's
+    # "Discourage search engines" box hides the whole site; the walk then lists
+    # nothing, and the check has to say so rather than "could not be read".
+    all_hidden = not d.get("ok") and any("noindex" in why and bodies.get(u)
+                                         for u, why in (d.get("left_out") or {}).items())
+    if not d.get("ok") and not all_hidden:
         return {"ok": False, "error": d.get("error") or "the home page could not be read"}
     pages = []
     for u in d["pages"]:
@@ -278,13 +283,36 @@ def read_site(home, get=None, most=MOST_PAGES) -> dict:
         if m:
             link_status[u] = int(m.group(1))
     files = {name: _file(get, f"{home}/{name}") for name in ("robots.txt", "llms.txt", "sitemap.xml")}
+    # Someone else's sitemap may live elsewhere: WordPress's own (wp-sitemap.xml),
+    # Yoast's and Rank Math's (sitemap_index.xml), or wherever robots.txt says.
+    if not _is_sitemap(files["sitemap.xml"]):
+        for u in _declared_sitemaps((files.get("robots.txt") or {}).get("text"), home) + \
+                [f"{home}/wp-sitemap.xml", f"{home}/sitemap_index.xml"]:
+            f = _file(get, u)
+            if _is_sitemap(f):
+                files["sitemap.xml"] = {**f, "url": u}
+                break
     files["sitemap.php"] = _file(get, sitemap.live_url(home))
     files["favicon.ico"] = _file(get, f"{home}/favicon.ico", head=True)
     probe = _file(get, f"{home}/botix-no-such-page-{_now() % 100000}")
     return {"ok": True, "home": home + "/", "pages": pages, "files": files,
             "not_found_status": probe.get("status"), "partial": bool(d.get("stopped")),
-            "left_out": left, "hidden": hidden, "link_status": link_status,
+            "left_out": left, "hidden": hidden, "link_status": link_status, "all_hidden": all_hidden,
             **_addresses(get, home, metas.get(home + "/") or {})}
+
+
+def _is_sitemap(f) -> bool:
+    return (f or {}).get("status") == 200 and bool(re.search(r"<(urlset|sitemapindex)", (f or {}).get("text") or ""))
+
+
+def _declared_sitemaps(robots, home) -> list:
+    """Sitemap addresses robots.txt names on his own site (other sites' are not his)."""
+    host = urllib.parse.urlparse(home).netloc.lower().removeprefix("www.")
+    out = []
+    for u in re.findall(r"(?im)^\s*sitemap\s*:\s*(\S+)", robots or ""):
+        if urllib.parse.urlparse(u).netloc.lower().removeprefix("www.") == host and u not in out:
+            out.append(u)
+    return out[:3]
 
 
 def _addresses(get, home, home_meta) -> dict:
@@ -450,7 +478,8 @@ def assess(site) -> dict:
         miss("sitemap_missing", "files", "IT", "high", "A sitemap",
              "The list of every page Google should know about. Without it Google finds "
              "pages only by following links, slowly, and Search Console has nothing to read.",
-             "neither sitemap.php nor sitemap.xml answered with a list of pages")
+             "no sitemap answered: not sitemap.php, sitemap.xml, wp-sitemap.xml, sitemap_index.xml "
+             "or one named in robots.txt")
     else:
         ok("sitemap_missing", "A sitemap")
         sm = ours if ours_ok else theirs
@@ -511,7 +540,8 @@ def assess(site) -> dict:
     # the rulebook below (i18n-lang, social-og), so they are not asked twice.
 
     # ---- pages a visitor looks for ---------------------------------------
-    if not site.get("partial"):
+    whole = not site.get("partial") and not site.get("all_hidden")
+    if whole:
         words = [" ".join((p["slug"], p["title"], p["h1"])).lower() for p in pages]
         sections = " ".join(re.findall(r"<h[1-4][^>]*>(.*?)</h[1-4]>", hh, re.I | re.S)).lower()
         sections = _plain(sections)
@@ -546,13 +576,15 @@ def assess(site) -> dict:
     # ---- his markets ---------------------------------------------------------
     # A page for each other country he sells in, and for a business selling
     # worldwide, one that says so — the page a search from there lands on.
-    if not site.get("partial"):
+    if whole:
         _markets(site, ok, miss)
 
     # ---- trust -------------------------------------------------------------
     contact = next((p for p in pages if re.search(r"\bcontact\b", p["slug"] + " " + p["title"].lower())), None)
     text = _plain(hh + " " + ((contact or {}).get("html") or ""))
-    if re.search(r"PostalAddress|<address\b|itemprop=[\"']address", hh + ((contact or {}).get("html") or ""), re.I) \
+    if not whole:
+        pass                              # nothing could be read as a visitor sees it, so nothing is called missing
+    elif re.search(r"PostalAddress|<address\b|itemprop=[\"']address", hh + ((contact or {}).get("html") or ""), re.I) \
             or re.search(r"\b(street|st\.|road|rd\.|avenue|building|bldg|floor|office\s+\d+|warehouse|"
                          r"p\.?\s?o\.?\s?box|industrial area)\b", text, re.I):
         ok("address", "The business address on the site")
@@ -589,10 +621,14 @@ def _rules(site, gaps, checked) -> dict:
     from . import seo_rules as R
     parsed = [R.parse(p["html"], p["url"], headers=p.get("headers"), ms=p.get("ms"))
               for p in site.get("pages") or [] if p.get("html")]
-    if not parsed:
-        return {}
     hidden = [R.parse(h["html"], h["url"], headers=h.get("headers"), ms=h.get("ms"))
               for h in site.get("hidden") or []]
+    if not parsed and hidden:
+        # Every page hidden: they are the site, the home page first.
+        parsed = sorted(hidden, key=lambda p: (not R._is_home(p), p["url"]))
+        hidden = []
+    if not parsed:
+        return {}
     missing = {g["code"]: g for g in gaps}
     files = {}
     for code, *_rest in R.EXTERNAL:
@@ -804,6 +840,7 @@ def check(home=None, get=None, plan=False, force=False, now=None, map_files=None
         return {"ok": False, "error": site.get("error")}
     got = assess(site)
     out = {"ok": True, "home": site["home"], "pages": len(site["pages"]), "partial": site["partial"],
+           "all_hidden": bool(site.get("all_hidden")),
            "gaps": got["gaps"], "have": got["have"], "checked": got["checked"], "seo": got.get("seo") or {}}
     # The same pages, matched to the files that make them (pipelines/site_map),
     # when the connector can read the files — one read of the site, two uses.
@@ -843,6 +880,9 @@ def _summary(r):
               f"{len(r.get('proposed') or [])} put to the MD")
     if r.get("partial"):
         s += " (the site asked us to slow down part-way, so page checks wait for the next look)"
+    if r.get("all_hidden"):
+        s += (" — every page asks Google not to list it, so the site cannot be found at all (on WordPress: "
+              "Settings → Reading → 'Discourage search engines'). Fix it first")
     return s
 
 
@@ -928,7 +968,8 @@ def sitemap_address(get=None) -> str:
     if not home:
         return ""
     get = get or _getter()
-    for url in (sitemap.live_url(home), home.rstrip("/") + "/sitemap.xml"):
+    for url in (sitemap.live_url(home), home.rstrip("/") + "/sitemap.xml", home.rstrip("/") + "/wp-sitemap.xml",
+                home.rstrip("/") + "/sitemap_index.xml"):
         f = _file(get, url)
         if f.get("status") == 200 and re.search(r"<(urlset|sitemapindex)", f.get("text") or ""):
             return url
