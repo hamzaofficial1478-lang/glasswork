@@ -15,8 +15,9 @@ TWO KINDS OF NUMBER, KEPT APART
                  Console. Exact, and about two days late — Google publishes them
                  that way, so the last day or two are missing rather than zero.
   the agency's   what it measures itself, written down once a day: pages on
-                 Google, how complete the website is (the blueprint), how fast
-                 the home page answered, leads found. Small facts, but they are
+                 Google, how complete the website is (the blueprint), its SEO
+                 score out of 100 (pipelines/seo_rules), how fast the home page
+                 answered, leads found. Small facts, but they are
                  the ones the agency's own work moves.
 
 Every number is counted, never estimated, and the screen says which is which.
@@ -32,7 +33,7 @@ import time
 from coordination import board
 
 DAYS = 90
-FIELDS = ("on_google", "pages", "have", "total", "speed_ms", "leads")
+FIELDS = ("on_google", "pages", "have", "total", "speed_ms", "leads", "seo_score")
 
 
 def _today(now=None):
@@ -45,6 +46,10 @@ def _tables(c):
         speed_ms INTEGER, leads INTEGER)""")
     c.execute("CREATE TABLE IF NOT EXISTS gsc_days (day TEXT PRIMARY KEY, clicks INTEGER, impressions INTEGER,"
               " position REAL)")
+    try:
+        c.execute("ALTER TABLE site_progress ADD COLUMN seo_score INTEGER")
+    except sqlite3.OperationalError:
+        pass
 
 
 def note(day=None, **fields):
@@ -90,7 +95,8 @@ def record() -> dict:
         from . import site_blueprint
         b = site_blueprint.stored()
         if b.get("checked_at"):
-            note(have=len(b.get("have") or []), total=len(b.get("have") or []) + len(b.get("gaps") or []))
+            note(have=len(b.get("have") or []), total=len(b.get("have") or []) + len(b.get("gaps") or []),
+                 seo_score=(b.get("seo") or {}).get("score"))
     except Exception:
         pass
     try:
@@ -158,6 +164,11 @@ def summary(days=DAYS, now=None) -> dict:
         pct = round(done["have"] / done["total"] * 100)
         f = round(first["have"] / first["total"] * 100) if first.get("total") else None
         tiles["complete"] = {"value": pct, "first": f}
+    scored = next((r for r in reversed(s) if r.get("seo_score") is not None), None)
+    if scored:
+        f = next((r["seo_score"] for r in s if r.get("seo_score") is not None), None)
+        tiles["seo"] = {"value": scored["seo_score"], "first": first.get("seo_score") if first.get("seo_score")
+                        is not None else f}
     gsc_ok, gsc_why = True, ""
     if not g:
         try:

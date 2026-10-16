@@ -109,6 +109,52 @@ def test_an_html_site_with_a_stale_php():
     check("the page head is in the page itself", m["head_file"], "index.html")
 
 
+def test_the_server_decides():
+    print("\nThe server decides which file it serves, not the file's extension:")
+    # An old index.html left beside the real index.php, with the same header and
+    # footer words in it — matching by words alone picks the old copy.
+    old_copy = (HEADER.replace("<?php echo $title; ?>", "Home")
+                + "<main><h1>Glass work done properly</h1><p>Shower screens, partitions and railings across "
+                  "the city.</p><p>Our old offer from years ago, still in this copy.</p></main>" + FOOTER)
+    files = dict(PHP_FILES, **{"index.html": old_copy,
+                               "index.php": "<?php $title='Home'; include 'includes/header.php'; ?>\n"
+                                            "<?php include 'parts/home-body.php'; ?>\n<?php include 'includes/footer.php'; ?>"})
+    blind = sm.build_from(PHP_PAGES[:1], list(files), _reader(files))
+    check("by words alone, the old copy wins (the bug he saw)", blind["home_file"], "index.html")
+    asked = []
+
+    def fetch(url):
+        asked.append(url)
+        if url.endswith("/index.php"):
+            return 200, PHP_PAGES[0]["html"], False          # the server answers with the home page
+        if url.endswith("/index.html"):
+            return 200, old_copy, False                      # an old page, not the home page
+        return 404, "", False
+    m = sm.build_from(PHP_PAGES[:1], list(files), _reader(files), fetch=fetch)
+    check("asked, the server says index.php", (m["home_file"], m["pages"][0]["sure"]), ("index.php", "server"))
+    check("  every candidate that exists was asked about", sorted(u.rsplit("/", 1)[1] for u in asked),
+          ["index.html", "index.php"])
+    check("  and it is still a PHP site", m["kind"], "php")
+
+    def redirects_home(url):
+        if url.endswith("/index.php"):
+            return 200, PHP_PAGES[0]["html"], True           # /index.php sends you to /
+        if url.endswith("/index.html"):
+            return 404, "", False
+        return 404, "", False
+    m = sm.build_from(PHP_PAGES[:1], list(files), _reader(files), fetch=redirects_home)
+    check("a redirect back to the home page still counts", m["home_file"], "index.php")
+
+    html_only = {"index.html": "<html><head><title>Home</title></head><body><h1>Frames and doors made to measure</h1></body></html>"}
+    live = [{"url": H + "/", "html": html_only["index.html"]}]
+    m = sm.build_from(live, list(html_only), _reader(html_only),
+                      fetch=lambda u: (200, html_only["index.html"], False) if u.endswith("index.html") else (404, "", False))
+    check("on a site that really is index.html, that is what it says", (m["home_file"], m["pages"][0]["sure"]),
+          ("index.html", "server"))
+    check("nobody's wording is wrong: two copies answering the same are told apart by words",
+          sm.same_page("<p>a b c</p>", "<p>a b c</p>"), 1.0)
+
+
 def test_a_front_file_site():
     print("\nPages made by one front file:")
     pages = [{"url": H + "/", "html": "<html><body><p>Home page words here ok</p></body></html>"},
@@ -149,7 +195,8 @@ def test_the_editors_follow_the_map():
 
 
 def main():
-    for t in (test_a_php_site, test_an_html_site_with_a_stale_php, test_a_front_file_site, test_a_short_read,
+    for t in (test_a_php_site, test_an_html_site_with_a_stale_php, test_the_server_decides, test_a_front_file_site,
+              test_a_short_read,
               test_the_editors_follow_the_map):
         t()
     print()

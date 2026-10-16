@@ -718,6 +718,42 @@ app.get("/api/site/traffic", async (_q, res) => res.json(await pyModule("coordin
 // website; POST looks again, gently, through the same one-a-second queue.
 app.get("/api/site/blueprint", async (_q, res) => res.json(await pyModule("pipelines.site_blueprint", ["--stored", "--json"], 20000)));
 app.post("/api/site/blueprint/check", async (_q, res) => res.json(await pyModule("pipelines.site_blueprint", ["--now", "--json"], 300000)));
+// THE FIX BUTTON (pipelines/seo_fixer). Pressing it is his yes for that one
+// problem: the fix is opened here (one at a time), then worked in the
+// background — the Releaser writes, the live pages are read again — and the
+// page asks for its state until the report is in. Nothing is written by this
+// process; a code is the only thing taken from the request.
+const FIX_CODE = /^[a-z0-9][a-z0-9_:.-]{1,79}$/;
+function startFix(args) {
+  const py = resolvePython();
+  if (!py) return NO_PY;
+  try {
+    const child = spawn(py.cmd, [...py.prefix, "-m", "pipelines.seo_fixer", ...args], {
+      cwd: __dirname, env: pyEnv(), detached: true, stdio: "ignore", windowsHide: true,
+    });
+    child.on("error", () => {});
+    child.unref();
+    return "";
+  } catch (e) { return "Could not start it: " + e.message; }
+}
+app.post("/api/site/fix", async (req, res) => {
+  const code = String((req.body || {}).code || "");
+  if (!FIX_CODE.test(code)) return res.json({ ok: false, error: "which problem?" });
+  const r = await pyModule("pipelines.seo_fixer", ["--start", code, "--json"], 20000);
+  if (!r || !r.ok || !r.id) return res.json(r || { ok: false, error: "could not start the fix" });
+  const err = startFix(["--run", String(parseInt(r.id, 10))]);
+  res.json(err ? { ok: false, error: err } : { ok: true, id: r.id });
+});
+app.get("/api/site/fix/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id < 1) return res.json({ ok: false, error: "no such fix" });
+  res.json(await pyModule("pipelines.seo_fixer", ["--status", String(id), "--json"], 20000));
+});
+app.post("/api/site/fix/:id/verify", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id < 1) return res.json({ ok: false, error: "no such fix" });
+  res.json(await pyModule("pipelines.seo_fixer", ["--verify", String(id), "--json"], 180000));
+});
 // How the website is doing on Google, day by day (pipelines/site_progress). Reads only.
 app.get("/api/site/progress", async (_q, res) => res.json(await pyModule("pipelines.site_progress", ["--json"], 20000)));
 // Which file on the server makes each page a visitor sees (pipelines/site_map).

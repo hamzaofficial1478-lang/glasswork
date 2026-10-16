@@ -519,7 +519,9 @@ def _parse(out):
             return None
     if not isinstance(d, dict) or not str(d.get("html") or "").strip():
         return None
-    return d
+    # Characters nobody can see come out before anything else reads it (pipelines/scrub).
+    from .scrub import scrub, scrub_html
+    return {k: (scrub_html(v) if k == "html" else scrub(v)) if isinstance(v, str) else v for k, v in d.items()}
 
 
 def _place_images(body, images):

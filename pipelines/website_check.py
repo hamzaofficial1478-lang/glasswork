@@ -957,6 +957,26 @@ def top_fixes(findings, n=5) -> list:
     return sorted(findings, key=rank, reverse=True)[:n]
 
 
+def rulebook(c) -> dict:
+    """
+    The same SEO rulebook Botix runs on the owner's own site (pipelines/seo_rules),
+    over the pages read here: one score from every check, so a check of any site
+    and the owner's own score are on the same scale. {} when nothing was readable.
+    """
+    from . import seo_rules as R
+    pages = [R.parse(p["html"], p.get("final_url") or p["url"], headers=p.get("headers"), status=p.get("status") or 200,
+                     ms=p.get("elapsed_ms")) for p in c.get("pages") or [] if p.get("html")]
+    if not pages:
+        return {}
+    try:
+        out = R.check_site(pages, {"link_status": c.get("link_status") or {}})
+    except Exception:
+        return {}
+    return {"score": out["score"], "grade": out["grade"], "label": out["label"], "capped_by": out["capped_by"],
+            "checks": len(R.ALL_RULES), "categories": out["categories"],
+            "worst": [i["name"] for i in out["issues"][:5]]}
+
+
 def analyse(c, cert) -> dict:
     findings, good = [], []
     findings += _seo_findings(c["pages"], c["link_status"], c["hosts"])
@@ -971,7 +991,7 @@ def analyse(c, cert) -> dict:
     scores = score(findings, readable)
     overall = int(round(sum(scores.values()) / len(scores)))
     findings.sort(key=lambda f: (-WEIGHT.get(f["severity"], 0), f["sector"]))
-    return {"overall": overall, "scores": scores, "summary": summary(overall),
+    return {"overall": overall, "scores": scores, "summary": summary(overall), "rulebook": rulebook(c),
             "sectors": [list(x) for x in SECTORS],
             "top": [f["code"] + "|" + f["sector"] for f in top_fixes(findings)],
             "findings": findings,
@@ -1274,7 +1294,10 @@ footer{{margin-top:28px;border-top:1px solid #D9E0E0;padding-top:10px;font-size:
 <h1>{_e(rep.get('host') or '')}</h1>
 <div class="muted">{_e(rep.get('url') or '')} · {_e(rep.get('pages_read', 0))} pages read · {'full' if rep.get('depth') == 'full' else 'quick'} check</div>
 <div class="hero"><div><div class="big">{overall}<span style="font-size:20px;color:#5F7074">/100</span></div>
-<div style="max-width:220px;margin-top:6px">{_e(rep.get('summary') or '')}</div></div>
+<div style="max-width:220px;margin-top:6px">{_e(rep.get('summary') or '')}</div>
+{(f'<div class="muted" style="max-width:240px;margin-top:6px">SEO rulebook: {_e((rep.get("rulebook") or {}).get("score"))}/100 '
+  f'({_e((rep.get("rulebook") or {}).get("grade"))}) — {_e((rep.get("rulebook") or {}).get("checks"))} checks on every page read.</div>')
+ if (rep.get("rulebook") or {}).get("score") is not None else ''}</div>
 <div class="scores">{sec_rows}</div></div>
 {prog_html}
 <section class="box"><h2>The fixes that matter most</h2><ol class="tops">{tops or '<li>Nothing important was found.</li>'}</ol></section>

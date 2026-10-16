@@ -150,6 +150,12 @@ def test_striking_distance_is_the_free_win():
         check("so is position 19", "c" in got, True)
         check("position 40 is a new page, not a nudge", "d" in got, False)
         check("three impressions is noise, not a signal", "e" in got, False)
+        wins = seo_intel.striking_distance(con)
+        check("worth the most clicks first (300 shown at 8th beats 120 at 19th)", [w["phrase"] for w in wins], ["b", "c"])
+        check("  roughly: 100 a month x (10.5% - 3.5%) = 7 more clicks", wins[0]["gain"], 7)
+        check("  and the reason says it is an estimate", "an estimate" in seo_intel.evidence_line(
+            {**wins[0], "striking": 1}), True)
+        check("already in the top three gains nothing", seo_intel.clicks_to_gain(900, 2.0), 0)
         con.close()
     finally:
         board.DB = real_db

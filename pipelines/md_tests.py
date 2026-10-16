@@ -746,6 +746,20 @@ def test_a_sector_is_never_starved_by_a_number_nobody_set():
           [c for c in got if c["sector"] == "Content"], [])
 
 
+def test_a_site_google_cannot_use_comes_first():
+    print("\nA home page Google cannot use goes to IT first, citing the SEO score:")
+    base = {"targets": {"jobs": []}, "sector_orders": {}, "site": {}, "proposals": [], "source_map_done": True,
+            "approvals": 0}
+    got = MD.plan({**base, "seo": {"score": 20, "grade": "F", "capped_by": "your home page asks Google not to list it"}})
+    it = [c for c in got if c["title"] == "Make the home page usable by Google"]
+    check("IT is given it, near the top", (len(it), it[0]["sector"] if it else "", it[0]["urgency"] if it else 0),
+          (1, "IT", 2))
+    check("  with the score as its evidence", "capped" in (it[0]["evidence"] if it else ""), True)
+    check("a score that is merely low is not an emergency",
+          [c["title"] for c in MD.plan({**base, "seo": {"score": 55, "grade": "D", "capped_by": ""}})
+           if c["title"] == "Make the home page usable by Google"], [])
+
+
 def main():
     with _store.isolated():
         _main()
@@ -767,6 +781,7 @@ def _main():
     test_the_md_does_not_grade_itself()
     test_the_card_measures_management_not_just_outcome()
     test_the_brain_never_touches_the_hands()
+    test_a_site_google_cannot_use_comes_first()
     test_nothing_ungrounded_reaches_the_board()
     test_amber_work_goes_to_the_owner_not_the_board()
     test_impossible_work_is_not_posted()

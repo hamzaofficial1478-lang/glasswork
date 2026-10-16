@@ -374,6 +374,28 @@ details.more summary{cursor:pointer;color:var(--accent);font-weight:500;font-siz
 .ck-bar b{font-family:'Geist Mono',ui-monospace,monospace;font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
 .ck-bar .meter{height:8px}
 .meter i.good{background:var(--done)} .meter i.mid{background:var(--wait)} .meter i.low{background:var(--stuck)}
+.fixside{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0}
+.fixdoes{font-size:13px;color:var(--faint)}
+.fixsays{display:block;font-size:13.5px;line-height:1.7;margin-top:4px}
+.fixsays .pill{margin-right:8px;vertical-align:1px}
+.fixreport{display:flex;flex-direction:column;gap:8px;margin-top:6px;padding:12px 14px;border-radius:10px;background:var(--meter);font-size:13.5px}
+.fixpage{display:grid;grid-template-columns:minmax(120px,auto) auto 1fr;gap:4px 12px;align-items:baseline}
+.fixpage .fixvals{grid-column:1/-1;display:flex;flex-direction:column;gap:2px;color:var(--ink)}
+.fixvals b{font-weight:600;margin-right:6px}
+.linkbtn{background:none;border:0;padding:0;margin-left:12px;color:var(--ink);font:inherit;font-weight:500;cursor:pointer;
+  text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--faint)}
+.linkbtn:hover{text-decoration-color:currentColor}
+.linkbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.seohead{display:flex;gap:18px;align-items:center;padding:16px 20px}
+.seoscore{display:flex;flex-direction:column;align-items:center;justify-content:center;width:84px;height:84px;border-radius:50%;border:5px solid var(--meter);flex-shrink:0}
+.seoscore b{font-size:26px;font-weight:600;line-height:1}
+.seoscore span{font-size:11px;color:var(--faint)}
+.seoscore.good{border-color:var(--done)} .seoscore.mid{border-color:var(--wait)} .seoscore.low{border-color:var(--stuck)}
+.seocats{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px 24px;padding:4px 20px 16px}
+.seocat{display:grid;grid-template-columns:1fr 90px 30px;gap:10px;align-items:center;font-size:13.5px}
+.seocat b{text-align:right}
+@media (max-width:640px){.fixpage{grid-template-columns:1fr}.seohead{align-items:flex-start}
+  .fixrow{flex-wrap:wrap}.fixside{flex-direction:row;align-items:center;justify-content:space-between;width:100%}}
 details.ck{border-top:1px solid var(--line-soft)}
 details.ck:first-of-type{border-top:0}
 details.ck summary{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:52px;padding:12px 20px;cursor:pointer;
@@ -1503,6 +1525,7 @@ async function website(main) {
       ${link.old_connector && !link.self_updating ? `<div class="note" style="flex-basis:100%">Your website has connector version ${Number(link.connector) || 'an older one'}, which cannot update itself. Upload the new one once, and from then on it updates itself whenever Botix has a newer one — you will not need to do this again.
         <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><a class="btn small" href="/setup#connectBox">Get the new connector</a>
         <span class="muted" style="font-size:13.5px">In Connection settings, press Download your connector, then put the agency-api folder from it on your website in place of the old one. Your secret stays the same.</span></div></div>` : ''}</section>
+    ${seoCard(bp)}
     ${blueprintCard(bp)}
     ${mapCard(mp)}
     ${trafficCard(tr)}
@@ -1528,6 +1551,7 @@ async function website(main) {
     if (!j || !j.ok) { $('#bpSay').textContent = sentence((j && j.error) || 'The check did not finish.'); return; }
     toast(sentence(j.summary || 'Checked.')); website(main);
   };
+  wireFix(main);
   $('#lookNow').onclick = async () => { $('#lookNow').disabled = true; toast('Looking at every page for changes…');
     const j = await api('/api/site/look', {}); $('#lookNow').disabled = false; toast(j.head || j.error || 'Done.'); website(main); };
 }
@@ -1539,9 +1563,10 @@ function blueprintCard(bp) {
   if (!bp || !bp.ok) return '';
   const gaps = bp.gaps || [], have = bp.have || [], total = gaps.length + have.length;
   const row = (g) => { const lk = GAP_LOOK[g.severity] || GAP_LOOK.low;
-    return `<div class="row"><div class="grow"><span style="font-weight:600">${esc(g.title)}</span>
+    return `<div class="row fixrow" data-row="${esc(g.code)}"><div class="grow"><span style="font-weight:600">${esc(g.title)}</span>
       <span class="muted" style="font-size:14px">${esc(g.why || '')}</span>
-      <span style="font-size:13px;color:var(--faint)">${esc(g.sector || '')} · ${esc(g.where || '')}</span></div>${pill(lk[0], lk[1])}</div>`; };
+      <span style="font-size:13px;color:var(--faint)">${esc(g.sector || '')} · ${esc(g.where || '')}</span>${fixLine(g)}</div>
+      <div class="fixside">${pill(lk[0], lk[1])}${fixButton(g)}</div></div>`; };
   const line = bp.checked_at ? `Has ${have.length} of the ${total} things a complete website has · checked ${when(bp.checked_at)}`
     : 'Not checked yet.';
   const sum = 'style="padding:12px 20px;border-top:1px solid var(--line-soft)"';
@@ -1557,11 +1582,127 @@ function blueprintCard(bp) {
   </section>`;
 }
 
+/* THE SEO SCORE AND THE FIX BUTTON (pipelines/seo_rules, pipelines/seo_fixer).
+   One score from every check on every page, each problem once with its pages,
+   worst first. Fix on every one: it either changes the website (through the
+   Releaser, after the tests) and then reads the live pages again, or — when a
+   blind change is not safe — hands it to the desk that owns it. The report
+   says which, in numbers: fixed on how many of how many, and why not the rest. */
+const FIX_LOOK = {fixed: ['done', 'Fixed'], partly: ['wait', 'Partly fixed'], not_fixed: ['stuck', 'Not fixed'],
+  cannot: ['plain', 'Handed on'], waiting: ['wait', 'Waiting'], failed: ['stuck', 'Stopped'], working: ['wait', 'Fixing…']};
+const ISSUE_LOOK = {high: ['stuck', 'Matters a lot'], medium: ['wait', 'Matters'], low: ['plain', 'Worth doing']};
+function fixButton(g) {
+  const f = g.last_fix || {};
+  if (f.state === 'working') return `<button class="btn small" type="button" disabled data-fix="${esc(g.code)}">Fixing…</button>`;
+  return `<button class="btn small${(g.fixable || {}).auto ? '' : ' ghost'}" type="button" data-fix="${esc(g.code)}">Fix</button>`;
+}
+function fixLine(g) {
+  const fx = g.fixable || {}, f = g.last_fix || null;
+  const does = fx.auto ? `<span class="fixdoes">Fix ${esc(fx.does || 'changes it on your website')}, then checks your live pages.</span>`
+    : `<span class="fixdoes">Needs ${esc(fx.needs || 'a person')} — Fix hands it to ${esc(g.sector || 'the desk')}.</span>`;
+  if (!f) return does;
+  const lk = FIX_LOOK[f.state] || FIX_LOOK.failed;
+  const again = ['partly', 'not_fixed', 'waiting'].includes(f.state)
+    ? ` <button class="linkbtn" type="button" data-fixcheck="${Number(f.id)}">Check again</button>` : '';
+  return `${does}<span class="fixsays" data-fixid="${Number(f.id)}">${pill(lk[0], lk[1])}
+    <span>${esc(f.state === 'working' ? (f.step || 'Working') + '…' : f.headline || '')}</span>${again}
+    <button class="linkbtn" type="button" data-fixopen="${Number(f.id)}">${f.state === 'working' ? '' : 'Page by page'}</button></span>
+    <div class="fixreport" id="fixrep${Number(f.id)}" hidden></div>`;
+}
+function seoCard(bp) {
+  const seo = (bp && bp.ok && bp.seo) || {};
+  if (!bp || !bp.ok || (!seo.categories && !(seo.issues || []).length)) return '';
+  const issues = seo.issues || [];
+  const score = Number(seo.score), tone = score >= 80 ? 'good' : score >= 50 ? 'mid' : 'low';
+  const cats = (seo.categories || []).map((c) => `<div class="seocat"><span>${esc(c.name)}</span>
+      <span class="meter"><i class="${c.score >= 80 ? 'good' : c.score >= 50 ? 'mid' : 'low'}" style="width:${Math.max(2, Number(c.score) || 0)}%"></i></span>
+      <b class="mono">${Number(c.score)}</b></div>`).join('');
+  const row = (g) => { const lk = ISSUE_LOOK[g.severity] || ISSUE_LOOK.low;
+    return `<div class="row fixrow" data-row="${esc(g.code)}"><div class="grow"><span style="font-weight:600">${esc(g.title)}</span>
+      <span class="muted" style="font-size:14px">${esc(sentence(g.evidence || ''))}</span>
+      <span style="font-size:13px;color:var(--faint)">${esc(g.why || '')}</span>${fixLine(g)}</div>
+      <div class="fixside">${pill(lk[0], lk[1])}${fixButton(g)}</div></div>`; };
+  const sum = 'style="padding:12px 20px;border-top:1px solid var(--line-soft)"';
+  const fixed = (bp.fixed_lately || []).filter((x) => x.part === 'rules');
+  return `<section class="card" id="seoCard"><div class="card-h"><h2>SEO health</h2>
+      <span class="muted" style="font-size:13.5px">${seo.pages ? `${Number(seo.pages)} page(s) checked · ${esc(when(bp.checked_at))}` : ''}</span></div>
+    <div class="seohead"><div class="seoscore ${tone}"><b class="mono">${Number.isFinite(score) ? score : '–'}</b><span>out of 100</span></div>
+      <div style="display:flex;flex-direction:column;gap:4px"><span style="font-weight:600;font-size:16px">${esc(seo.grade || '')} · ${esc(seo.label || '')}</span>
+        <span class="muted" style="font-size:14px">${issues.length ? `${issues.length} problem(s) found across your pages, the worst first. Fix puts each right and then reads your live pages to see if it worked.` : 'No problems found on the pages read.'}</span>
+        ${seo.capped_by ? `<span class="bad-t" style="font-size:14px">Held at ${score} because ${esc(seo.capped_by)} — fix that first.</span>` : ''}</div></div>
+    ${cats ? `<details class="more"><summary ${sum}>Score by area</summary><div class="seocats">${cats}</div></details>` : ''}
+    ${issues.slice(0, 8).map(row).join('')}
+    ${issues.length > 8 ? `<details class="more"><summary ${sum}>Show the other ${issues.length - 8}</summary>${issues.slice(8).map(row).join('')}</details>` : ''}
+    ${fixed.length ? `<details class="more"><summary ${sum}>Put right lately (${fixed.length})</summary>
+      <p class="muted" style="margin:0;padding:0 20px 16px;font-size:14px">${fixed.map((x) => esc(x.title)).join(' · ')}</p></details>` : ''}
+  </section>`;
+}
+function fixReport(r) {
+  const rep = (r && r.report) || {};
+  const STATE = {fixed: 'Fixed', already: 'Already right', still: 'Still there', skipped: 'Not changed',
+    gone: 'Could not be read', waiting: 'Waiting'};
+  const words = rep.words_by === 'ai' ? 'The words were written by the AI from each page.'
+    : rep.words_by === 'page' ? 'No AI was used: the words come from each page’s own heading and first lines — worth reading.'
+    : rep.words_by === 'mixed' ? 'Some words were written by the AI; the rest come from each page’s own heading and lines.' : '';
+  const rows = (rep.pages || []).map((x) => `<div class="fixpage"><span class="mono">${esc(x.path)}</span>
+      <span>${pill(x.state === 'fixed' || x.state === 'already' ? 'done' : x.state === 'waiting' ? 'wait' : 'stuck', STATE[x.state] || x.state)}</span>
+      <span class="muted">${esc(sentence(x.why || (x.did || []).join('; ')))}</span>
+      ${Object.keys(x.values || {}).length ? `<span class="fixvals">${Object.entries(x.values).slice(0, 4).map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('')}</span>` : ''}</div>`).join('');
+  return `${rep.total ? `<p style="margin:0"><b class="mono">${Number(rep.fixed) || 0}</b> fixed of <b class="mono">${Number(rep.total)}</b> page(s)${rep.already ? ` · <b class="mono">${Number(rep.already)}</b> already right` : ''}.</p>` : ''}
+    ${words ? `<p class="muted" style="margin:0">${esc(words)}</p>` : ''}
+    ${rep.release ? `<p class="muted" style="margin:0">${esc(rep.release)}</p>` : ''}
+    ${(rep.steps || []).length ? `<ul class="plain-list">${rep.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${rep.how ? `<p class="muted" style="margin:0">What to do: ${esc(rep.how)}</p>` : ''}
+    ${rows}${(rep.notes || []).map((n) => `<p class="muted" style="margin:0">${esc(n)}</p>`).join('')}`;
+}
+async function fixStatus(id) {
+  try { const r = await fetch('/api/site/fix/' + Number(id), {headers: {'Accept': 'application/json'}}); return await r.json(); }
+  catch (e) { return {ok: false}; }
+}
+function watchFix(main, id) {
+  const tick = async () => {
+    const r = await fixStatus(id);
+    const say = document.querySelector(`[data-fixid="${Number(id)}"] span:not(.pill)`);
+    if (r && r.ok && r.state === 'working') { if (say) say.textContent = (r.step || 'Working') + '…'; setTimeout(tick, 2500); return; }
+    if (r && r.ok) toast(sentence((r.report || {}).headline || 'Done.'));
+    KEPT.clear(); website(main);
+  };
+  setTimeout(tick, 1500);
+}
+function wireFix(main) {
+  main.querySelectorAll('[data-fix]').forEach((b) => { b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Fixing…';
+    const j = await api('/api/site/fix', {code: b.dataset.fix});
+    if (!j || !j.ok) { b.disabled = false; b.textContent = 'Fix'; toast(sentence((j && j.error) || 'It did not start.')); return; }
+    const line = b.closest('.fixrow').querySelector('.grow');
+    let says = line.querySelector('.fixsays');
+    if (!says) { says = document.createElement('span'); says.className = 'fixsays'; line.appendChild(says); }
+    says.dataset.fixid = j.id; says.innerHTML = `${pill('wait', 'Fixing…')}<span>Starting…</span>`;
+    watchFix(main, j.id);
+  }; });
+  main.querySelectorAll('[data-fixcheck]').forEach((b) => { b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Looking…';
+    const j = await api(`/api/site/fix/${Number(b.dataset.fixcheck)}/verify`, {});
+    toast(sentence(((j && j.report) || {}).headline || (j && j.error) || 'Checked.')); KEPT.clear(); website(main);
+  }; });
+  main.querySelectorAll('[data-fixopen]').forEach((b) => { if (!b.textContent.trim()) { b.hidden = true; return; }
+    b.onclick = async () => {
+      const box = main.querySelector('#fixrep' + Number(b.dataset.fixopen));
+      if (!box) return;
+      if (!box.hidden) { box.hidden = true; return; }
+      box.hidden = false; box.innerHTML = '<p class="muted" style="margin:0">Reading the report…</p>';
+      box.innerHTML = fixReport(await fixStatus(b.dataset.fixopen));
+  }; });
+  main.querySelectorAll('[data-fixid]').forEach((el) => {
+    if (el.querySelector('.pill') && /Fixing/.test(el.querySelector('.pill').textContent)) watchFix(main, el.dataset.fixid);
+  });
+}
+
 /* How his website is built: which file makes each page (pipelines/site_map).
    The agency works only on these files; the rest are listed as left alone. */
 function mapCard(mp) {
   if (!mp || !mp.ok || !mp.known) return '';
-  const SURE = {sure: '', likely: ' (likely)', guess: ' (best guess)', none: ''};
+  const SURE = {server: ' · confirmed by your server', sure: '', likely: ' (likely)', guess: ' (best guess)', none: ''};
   const rows = (mp.pages || []).map((p) => `<div class="row" style="padding:10px 20px"><div class="grow" style="flex-direction:row;flex-wrap:wrap;gap:4px 14px;align-items:baseline">
       <span class="mono" style="font-size:13.5px;min-width:180px">${esc(p.path)}</span>
       <span class="muted" style="font-size:14px">${p.file ? esc(p.file) + esc(SURE[p.sure] || '') : 'made by the front file'}</span></div></div>`).join('');
@@ -1573,6 +1714,7 @@ function mapCard(mp) {
       ${mp.home_file ? `<span>Home page: <b class="mono" style="font-size:13.5px">${esc(mp.home_file)}</b></span>` : ''}
       ${mp.head_file && mp.head_file !== mp.home_file ? `<span>Shared header: <b class="mono" style="font-size:13.5px">${esc(mp.head_file)}</b></span>` : ''}
       <span><b class="mono">${Number(mp.matched) || 0}</b> of ${Number(mp.total) || 0} pages matched to their files</span>
+      ${mp.confirmed ? `<span><b class="mono">${Number(mp.confirmed)}</b> confirmed by asking your server</span>` : ''}
     </div>
     <p class="muted" style="margin:0;padding:0 20px 14px;font-size:14px">The agency works only on the files that make your pages${(mp.shared || []).length ? ' and the parts they share' : ''}.${(mp.unused || []).length ? ` ${(mp.unused || []).length} other file(s) on your server are not used by any page, so they are left alone.` : ''}</p>
     ${rows ? `<details class="more"><summary ${sum}>Every page and its file</summary>${rows}</details>` : ''}
@@ -1641,6 +1783,9 @@ function progressTiles(pg, link) {
   if (t.complete) out.push(kpi('Website complete', t.complete.value + '%',
     t.complete.first != null && t.complete.first !== t.complete.value ? {dir: t.complete.value > t.complete.first ? 'up' : 'down',
       text: `${t.complete.first}% when first checked`} : null, link || '#website'));
+  if (t.seo) out.push(kpi('SEO score', `${t.seo.value}<span style="font-size:16px;font-weight:500;color:var(--muted)"> of 100</span>`,
+    t.seo.first != null && t.seo.first !== t.seo.value ? {dir: t.seo.value > t.seo.first ? 'up' : 'down',
+      text: `${t.seo.first} when first checked`} : null, link || '#website'));
   return out.length ? `<div class="kpis">${out.join('')}</div>` : '';
 }
 let CHART_N = 0;
@@ -1719,6 +1864,7 @@ function progressSection(pg) {
     lineChart('Average position', 'Higher on the chart is higher on Google (1 is the top)', g, 'position', {invert: true, zero: false, skipZero: true, col: 'Position'}),
     lineChart('Pages on Google', 'Of your pages, how many Google lists', s, 'on_google', {col: 'Pages'}),
     lineChart('Website complete', 'Out of everything a complete website for your business has', s2, 'complete', {col: '% complete', max: 100, fmt: (v) => Math.round(v) + '%'}),
+    lineChart('SEO score', 'Every check on every page, weighed into one score out of 100', s, 'seo_score', {col: 'Score', max: 100}),
   ].filter(Boolean).join('');
   const tiles = progressTiles(pg);
   const none = !tiles && !charts;
@@ -1869,7 +2015,8 @@ function resultView(chk) {
           <button class="btn ghost small" type="button" id="ckPdf" data-id="${id}">Download PDF</button>
           <button class="btn small" type="button" id="ckAgain">Check again</button></div></div>
       <div class="ck-hero"><div><div class="ck-score">${Number(r.overall || 0)}<small>/100</small></div>
-        <p style="margin:8px 0 0;max-width:30ch">${esc(r.summary)}</p></div><div class="ck-bars">${bars}</div></div>
+        <p style="margin:8px 0 0;max-width:30ch">${esc(r.summary)}</p>
+        ${r.rulebook && r.rulebook.score != null ? `<p class="muted" style="margin:6px 0 0;max-width:34ch;font-size:13.5px">SEO rulebook: <b class="mono">${Number(r.rulebook.score)}</b>/100 (${esc(r.rulebook.grade)}) — ${Number(r.rulebook.checks)} checks on every page read, the same ones Botix runs on your own website.</p>` : ''}</div><div class="ck-bars">${bars}</div></div>
       ${left.length ? `<div class="row muted" style="font-size:14px">${left.map(esc).join(' ')}</div>` : ''}
     </section>
     ${since}

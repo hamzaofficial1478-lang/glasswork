@@ -191,6 +191,29 @@ def sense() -> dict:
     finally:
         con.close()
 
+    # The website's SEO score (pipelines/seo_rules, run by the blueprint check):
+    # one number, what holds it down, and the worst problem — evidence the plan
+    # can cite rather than an impression of how the site is doing.
+    # Read from the cabinet, as every fact here is: the MD never runs a pipeline.
+    try:
+        con = sqlite3.connect(board.DB)
+        try:
+            row = con.execute("SELECT score FROM site_gaps_runs WHERE score IS NOT NULL AND score != ''"
+                              " ORDER BY at DESC LIMIT 1").fetchone()
+            seo = json.loads(row[0]) if row and row[0] else {}
+            worst = con.execute("SELECT title, evidence, (SELECT count(*) FROM site_gaps WHERE part='rules'"
+                                " AND status='open') FROM site_gaps WHERE part='rules' AND status='open'"
+                                " ORDER BY priority DESC LIMIT 1").fetchone()
+        finally:
+            con.close()
+        if seo.get("score") is not None:
+            facts["seo"] = {"score": seo.get("score"), "grade": seo.get("grade"),
+                            "capped_by": seo.get("capped_by") or "",
+                            "worst": (worst or ("", "", 0))[0] or "", "worst_evidence": (worst or ("", "", 0))[1] or "",
+                            "problems": int((worst or ("", "", 0))[2] or 0)}
+    except Exception:
+        pass
+
     # What the sectors are asking for, and what the owner told each of them.
     # These outrank the MD's own hardcoded rules: the sector knows its domain
     # and the owner outranks everyone.
@@ -665,6 +688,20 @@ def plan(facts: dict) -> list:
                 "desk": "it-fixer",
                 "evidence": (f"the owner set this order for {sector} today and it asks "
                              "for a change on the website")})
+
+    # A SITE GOOGLE CANNOT USE COMES FIRST. The rulebook holds the score down
+    # when the home page is hidden from Google or has no title: nothing else on
+    # the SEO side matters until that is right, so IT hears it at once.
+    seo = facts.get("seo") or {}
+    if seo.get("capped_by"):
+        out.append({
+            "sector": "IT", "risk": "green", "urgency": 2,
+            "title": "Make the home page usable by Google",
+            "detail": (f"The SEO score is held at {seo['score']} because {seo['capped_by']}. Find where that is "
+                       "written (pipelines/site_map), queue the change for the owner's yes, and confirm it on the "
+                       "live page. The owner can also press Fix on the Website screen."),
+            "desk": "it-fixer",
+            "evidence": f"SEO score {seo['score']} ({seo.get('grade')}), capped: {seo['capped_by']}"})
 
     crit = site.get("critical", 0)
     if crit:

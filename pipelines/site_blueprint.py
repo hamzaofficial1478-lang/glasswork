@@ -31,6 +31,17 @@ THE BLUEPRINT, IN FOUR PARTS
                          pages for the main areas he works in; somewhere for news
   Trust                  his address written on the site
 
+AND EVERY PAGE, AGAINST THE SEO RULEBOOK
+
+  Every page read is also run through pipelines/seo_rules — some eighty
+  weighted checks (titles, descriptions, headings, pictures, links, markup,
+  speed, safety, phones, sharing) — and the blueprint's own file checks count
+  in the same score. One score out of 100, a grade, a score per category, and
+  each problem once, naming its pages, worst first. These are the owner's to
+  put right with the Fix button (pipelines/seo_fixer); they are not handed to
+  a desk here, because the SEO audit already files its own tickets for the
+  same pages and two tickets for one problem is how work gets done twice.
+
 Built from his business profile, not a fixed list: the services and areas are
 his, so a plumber in Leeds gets a plumber's blueprint. Page kinds are matched
 in English; on a site in another language only his own service names, the
@@ -82,6 +93,10 @@ OPEN_ASKS = {"SEO": 4, "Content": 3, "Leads": 2}
 MOST_AREAS = 3
 # A proposal the MD turned down is not asked again inside this window.
 RESPECT_NO = 14 * 86400
+# Codes the blueprint used to check itself, now checked page by page by the
+# SEO rulebook. Any still open from before are closed, with their tickets.
+RETIRED = {"titles", "titles_repeat", "descriptions", "headings", "image_alt", "noindex", "canonical",
+           "lang_missing", "og_missing"}
 
 # Changes with exactly one right answer: the Fixer queues these for his yes.
 CALLS = {"robots_missing": "put_robots", "robots_no_sitemap": "put_robots",
@@ -168,6 +183,15 @@ def _table(c):
     c.execute("""CREATE TABLE IF NOT EXISTS site_gaps_runs (
         at INTEGER PRIMARY KEY, home TEXT, pages INTEGER, partial INTEGER DEFAULT 0,
         have TEXT, pages_seen TEXT, note TEXT)""")
+    # Added with the SEO rulebook: the pages a problem is on, how much it
+    # matters, what a person does, pass/warn/fail; and each check's score.
+    for table, col, typ in (("site_gaps", "pages", "TEXT"), ("site_gaps", "priority", "REAL"),
+                            ("site_gaps", "how", "TEXT"), ("site_gaps", "level", "TEXT"),
+                            ("site_gaps", "cat", "TEXT"), ("site_gaps_runs", "score", "TEXT")):
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +206,9 @@ def _getter():
 
     def get(url, head=False):
         r = s.request("HEAD" if head else "GET", url, timeout=20, allow_redirects=True)
-        return r.status_code, ("" if head else (r.text or "")), r.headers.get("Content-Type") or ""
+        meta = {"headers": dict(r.headers), "ms": int(r.elapsed.total_seconds() * 1000),
+                "final": r.url, "hops": len(r.history)}
+        return r.status_code, ("" if head else (r.text or "")), r.headers.get("Content-Type") or "", meta
     return get
 
 
@@ -192,7 +218,7 @@ def _is_html(body, ctype):
 
 def _file(get, url, head=False) -> dict:
     try:
-        st, body, ct = get(url, head=head) if head else get(url)
+        st, body, ct = (get(url, head=head) if head else get(url))[:3]
     except Exception as e:
         return {"status": None, "text": "", "error": type(e).__name__}
     # A missing file that answers with the home page is not the file.
@@ -220,12 +246,14 @@ def read_site(home, get=None, most=MOST_PAGES) -> dict:
     from . import sitemap
     get = get or _getter()
     home = home.rstrip("/")
-    bodies = {}
+    bodies, metas = {}, {}
 
     def page_get(u):
-        st, body, ct = get(u)
+        r = get(u)
+        st, body, ct = r[:3]
         html = body if _is_html(body, ct) else ""
         bodies[u] = html
+        metas[u] = r[3] if len(r) > 3 else {}
         return st, html
     d = sitemap.discover(home, most=most, get=page_get)
     if not d.get("ok"):
@@ -235,14 +263,57 @@ def read_site(home, get=None, most=MOST_PAGES) -> dict:
         html = bodies.get(u, "")
         pages.append({"url": u, "slug": _slug(u), "html": html,
                       "title": _first(r"<title[^>]*>(.*?)</title>", html),
-                      "h1": _first(r"<h1[^>]*>(.*?)</h1>", html)})
+                      "h1": _first(r"<h1[^>]*>(.*?)</h1>", html),
+                      "headers": (metas.get(u) or {}).get("headers") or {}, "ms": (metas.get(u) or {}).get("ms")})
+    left = d.get("left_out") or {}
+    # Pages that ask Google not to list them are not in the walk, but the
+    # rulebook needs to see them: a hidden page is a finding, and a hidden home
+    # page caps the score.
+    hidden = [{"url": u, "html": bodies[u], "headers": (metas.get(u) or {}).get("headers") or {},
+               "ms": (metas.get(u) or {}).get("ms")} for u, why in left.items() if "noindex" in why and bodies.get(u)]
+    # A link a visitor can click that answered an error is a broken link.
+    link_status = {}
+    for u, why in left.items():
+        m = re.match(r"answered (\d{3})", why or "")
+        if m:
+            link_status[u] = int(m.group(1))
     files = {name: _file(get, f"{home}/{name}") for name in ("robots.txt", "llms.txt", "sitemap.xml")}
     files["sitemap.php"] = _file(get, sitemap.live_url(home))
     files["favicon.ico"] = _file(get, f"{home}/favicon.ico", head=True)
     probe = _file(get, f"{home}/botix-no-such-page-{_now() % 100000}")
     return {"ok": True, "home": home + "/", "pages": pages, "files": files,
             "not_found_status": probe.get("status"), "partial": bool(d.get("stopped")),
-            "left_out": d.get("left_out") or {}}
+            "left_out": left, "hidden": hidden, "link_status": link_status,
+            **_addresses(get, home, metas.get(home + "/") or {})}
+
+
+def _addresses(get, home, home_meta) -> dict:
+    """
+    Is the site one address? The twin (with or without www) and the plain-http
+    address, each asked once. Only when the reader can say where a request
+    ended up; otherwise the two rules stay unmeasured rather than guessed.
+    """
+    if not home_meta.get("final"):
+        return {"hosts": {}, "http_redirect": None}
+    p = urllib.parse.urlparse(home)
+    host = p.netloc
+    twin = host[4:] if host.lower().startswith("www.") else "www." + host
+    hosts = {f"{p.scheme}://{host}/": {"status": 200, "final": home_meta.get("final")}}
+    try:
+        r = get(f"{p.scheme}://{twin}/")
+        if len(r) > 3:
+            hosts[f"{p.scheme}://{twin}/"] = {"status": r[0], "final": r[3].get("final") or ""}
+    except Exception:
+        pass                                # no such address at all: one site, nothing to say
+    http_redirect = None
+    if p.scheme == "https":
+        try:
+            r = get(f"http://{host}/")
+            if len(r) > 3 and r[3].get("final"):
+                http_redirect = urllib.parse.urlparse(r[3]["final"]).scheme == "https"
+        except Exception:
+            http_redirect = None
+    return {"hosts": hosts, "http_redirect": http_redirect}
 
 
 # ---------------------------------------------------------------------------
@@ -426,14 +497,6 @@ def assess(site) -> dict:
         else:
             ok("soft_404", "Missing pages answer 'not found'")
 
-    # ---- the basics, on every page a visitor can reach --------------------
-    #
-    # "is basic seo in code is done or not ... the main seo gaps are the main
-    #  points to cover from all over" — not the home page alone: every page
-    # read, counted, and the worst first. One gap per kind of problem, naming
-    # the pages, so a site with twelve untitled pages is one job, not twelve.
-    _basics(site, ok, miss)
-
     # ---- the business, for machines --------------------------------------
     if re.search(r'"@type"\s*:\s*\[?\s*"[^"]*(LocalBusiness|HomeAndConstructionBusiness|GeneralContractor|'
                  r'Contractor|Plumber|Electrician|Locksmith|HVACBusiness|RoofingContractor|Store|'
@@ -444,19 +507,8 @@ def assess(site) -> dict:
              "Name, phone, address, hours and areas written so Google and AI assistants can read "
              "them for certain. It is what local results and answer boxes are built from.",
              "the home page carries no LocalBusiness markup", page=home["url"])
-    if re.search(r"<html\b[^>]*\blang=[\"']?[a-z]", hh, re.I):
-        ok("lang_missing", "The page says its language")
-    else:
-        miss("lang_missing", "markup", "IT", "low", "The page says its language",
-             "Search engines and screen readers use it to serve the page to the right people.",
-             "the <html> tag on the home page has no lang", page=home["url"])
-    if re.search(r"property=[\"']og:title", hh, re.I) and re.search(r"property=[\"']og:image", hh, re.I):
-        ok("og_missing", "A preview card when the site is shared")
-    else:
-        miss("og_missing", "markup", "IT", "low", "A preview card when the site is shared",
-             "When someone sends the site on WhatsApp or posts it, these tags decide the "
-             "picture and words in the preview. Without them it is a bare link.",
-             "the home page has no og:title / og:image tags", page=home["url"])
+    # The page's language and the preview card are checked on every page by
+    # the rulebook below (i18n-lang, social-og), so they are not asked twice.
 
     # ---- pages a visitor looks for ---------------------------------------
     if not site.get("partial"):
@@ -510,8 +562,78 @@ def assess(site) -> dict:
              "is real and local, and it should match the Google Business Profile exactly.",
              "no address found on the home or contact page")
 
-    gaps.sort(key=lambda g: (SEV_ORDER.get(g["severity"], 9), g["part"], g["code"]))
-    return {"gaps": gaps, "have": have, "checked": sorted(checked)}
+    # ---- every page, against the SEO rulebook ------------------------------
+    #
+    # "is basic seo in code is done or not ... the main seo gaps are the main
+    #  points to cover from all over" — not the home page alone: every page
+    # read, every rule, one score, and the worst first. One entry per kind of
+    # problem, naming the pages, so twelve untitled pages are one job.
+    seo = _rules(site, gaps, checked)
+    for g in gaps:
+        g.setdefault("priority", _priority(g))
+    gaps.sort(key=lambda g: (-g["priority"], SEV_ORDER.get(g["severity"], 9), g["part"], g["code"]))
+    return {"gaps": gaps, "have": have, "checked": sorted(checked), "seo": seo}
+
+
+def _priority(g) -> float:
+    """The rulebook's measure for a blueprint gap: its weight there, or by severity."""
+    from . import seo_rules as R
+    r = R.BY_ID.get(g["code"])
+    if r:
+        return float(r["weight"] * R.CAT_WEIGHT[r["cat"]])
+    return float({"high": 200, "medium": 80, "low": 25}.get(g["severity"], 10))
+
+
+def _rules(site, gaps, checked) -> dict:
+    """Run the rulebook over every page read; add its problems to the gaps. Returns the score."""
+    from . import seo_rules as R
+    parsed = [R.parse(p["html"], p["url"], headers=p.get("headers"), ms=p.get("ms"))
+              for p in site.get("pages") or [] if p.get("html")]
+    if not parsed:
+        return {}
+    hidden = [R.parse(h["html"], h["url"], headers=h.get("headers"), ms=h.get("ms"))
+              for h in site.get("hidden") or []]
+    missing = {g["code"]: g for g in gaps}
+    files = {}
+    for code, *_rest in R.EXTERNAL:
+        if code in missing:
+            files[code] = (R.FAIL, missing[code]["evidence"])
+        elif code in checked:
+            files[code] = (R.PASS, "")
+    sitemap_urls = []
+    if not site.get("partial"):
+        for name in ("sitemap.php", "sitemap.xml"):
+            f = (site.get("files") or {}).get(name) or {}
+            if f.get("status") == 200 and "<urlset" in (f.get("text") or ""):
+                sitemap_urls = _sitemap_locs(f["text"])
+                break
+    out = R.check_site(parsed, {"files_checked": files, "hidden_pages": hidden,
+                                "link_status": site.get("link_status") or {}, "sitemap_urls": sitemap_urls,
+                                "hosts": site.get("hosts") or {}, "http_redirect": site.get("http_redirect")})
+    for i in out["issues"]:
+        r = R.BY_ID[i["id"]]
+        if r.get("external"):
+            continue                          # the blueprint's own gap already says it
+        bad = i["status"] == R.FAIL
+        sev = "high" if bad and i["weight"] >= 10 else "medium" if bad or i["weight"] >= 8 else "low"
+        pages = list(i["pages"])
+        if r["site"]:
+            evidence = i["detail"] + (f": {_paths(pages)}" if pages else "")
+        else:
+            seen = (i["examples"][0].get("found") or "") if i["examples"] else ""
+            evidence = (f"{len(pages)} of {i['measured']} page(s): {_paths(pages)}"
+                        + (f" (e.g. {seen})" if seen and len(seen) < 90 else ""))
+        g = _gap(i["id"], "rules", r["owner"], sev, i["name"], i["why"], evidence)
+        g.update({"fix": i["fix"], "pages": pages, "priority": i["priority"], "how": i["how"],
+                  "level": i["status"], "cat": i["cat"]})
+        gaps.append(g)
+        checked.add(i["id"])
+    for x in out["passed"]:
+        if not R.BY_ID[x["id"]].get("external"):
+            checked.add(x["id"])
+    out["passed_n"] = len(out.pop("passed"))
+    out.pop("issues")
+    return out
 
 
 def _markets(site, ok, miss):
@@ -546,79 +668,6 @@ def _markets(site, ok, miss):
 def _paths(urls, n=4):
     shown = [urllib.parse.urlparse(u).path or "/" for u in urls[:n]]
     return ", ".join(shown) + (f" and {len(urls) - n} more" if len(urls) > n else "")
-
-
-def _basics(site, ok, miss):
-    pages = [p for p in site.get("pages") or [] if p.get("html")]
-    n = len(pages)
-    hidden = [u for u, why in (site.get("left_out") or {}).items() if "noindex" in str(why)]
-    if hidden:
-        home_hidden = any((urllib.parse.urlparse(u).path or "/") == "/" for u in hidden)
-        miss("noindex", "basics", "IT", "high", "Pages are not hidden from Google",
-             ("Your home page tells Google not to list it, so the site cannot be found at all."
-              if home_hidden else "These pages tell Google not to list them, so nobody finds them in search."),
-             f"{len(hidden)} page(s) carry 'noindex': {_paths(hidden)}")
-    else:
-        ok("noindex", "Pages are not hidden from Google")
-    if not n:
-        return
-    untitled = [p["url"] for p in pages if not p.get("title")]
-    if untitled:
-        miss("titles", "basics", "SEO", "high", "Every page has a title",
-             "The title is the blue line in Google's results and the most important words on a page. "
-             "A page without one is shown with whatever Google guesses.",
-             f"{len(untitled)} of {n} page(s) have none: {_paths(untitled)}")
-    else:
-        ok("titles", "Every page has a title")
-    seen = {}
-    for p in pages:
-        if p.get("title"):
-            seen.setdefault(p["title"].strip().lower(), []).append(p["url"])
-    repeats = [urls for urls in seen.values() if len(urls) > 1]
-    if repeats:
-        same = sum(len(u) for u in repeats)
-        miss("titles_repeat", "basics", "SEO", "medium", "Each page's title is its own",
-             "Pages with the same title compete with each other, and Google cannot tell which one to show.",
-             f"{same} page(s) share a title with another, e.g. {_paths(repeats[0], 3)}")
-    else:
-        ok("titles_repeat", "Each page's title is its own")
-    nodesc = [p["url"] for p in pages if not re.search(r"<meta\b[^>]*name=[\"']description[\"'][^>]*content=[\"']\s*\S",
-                                                       p["html"], re.I)
-              and not re.search(r"<meta\b[^>]*content=[\"']\s*\S[^>]*name=[\"']description", p["html"], re.I)]
-    if nodesc:
-        miss("descriptions", "basics", "SEO", "medium", "Every page has a description for Google",
-             "The two lines under the title in Google's results. Without one, Google picks a sentence off the "
-             "page, often the wrong one, and fewer people click.",
-             f"{len(nodesc)} of {n} page(s) have none: {_paths(nodesc)}")
-    else:
-        ok("descriptions", "Every page has a description for Google")
-    bad_h1 = [p["url"] for p in pages if len(re.findall(r"<h1\b", p["html"], re.I)) != 1]
-    if bad_h1:
-        miss("headings", "basics", "SEO", "medium", "Every page has one main heading",
-             "One clear main heading (h1) tells people and Google what the page is about. None, or several, "
-             "blurs it.", f"{len(bad_h1)} of {n} page(s) have none or more than one: {_paths(bad_h1)}")
-    else:
-        ok("headings", "Every page has one main heading")
-    no_alt, imgs = 0, 0
-    for p in pages:
-        for tag in re.findall(r"<img\b[^>]*>", p["html"], re.I):
-            imgs += 1
-            if not re.search(r"\balt=[\"']\s*\S", tag, re.I):
-                no_alt += 1
-    if no_alt:
-        miss("image_alt", "basics", "Content", "low", "Pictures are described",
-             "A short description on each picture (its alt text) lets Google Images find your work and screen "
-             "readers describe it.", f"{no_alt} of {imgs} picture(s) have no description")
-    else:
-        ok("image_alt", "Pictures are described")
-    nocanon = [p["url"] for p in pages if not re.search(r"<link\b[^>]*rel=[\"']?canonical", p["html"], re.I)]
-    if nocanon:
-        miss("canonical", "basics", "IT", "low", "Every page names its one address",
-             "A canonical tag tells Google which address is the real one when a page can be reached several ways "
-             "(with and without www, with tracking added).",
-             f"{len(nocanon)} of {n} page(s) have no canonical tag: {_paths(nocanon)}")
-    else:
-        ok("canonical", "Every page names its one address")
 
 
 # ---------------------------------------------------------------------------
@@ -662,33 +711,42 @@ def hand_on(result, now=None, route_only=False) -> dict:
         c.row_factory = sqlite3.Row
         rows = {r["code"]: dict(r) for r in c.execute("SELECT * FROM site_gaps")}
         for code, r in rows.items():
-            if route_only or r["status"] != "open" or code in gaps or code not in checked:
+            retired = code in RETIRED
+            if route_only or r["status"] != "open" or code in gaps or (code not in checked and not retired):
                 continue
             c.execute("UPDATE site_gaps SET status='closed', closed_at=? WHERE code=?", (now, code))
             closed.append(code)
             kind, _, rid = (r["ref"] or "").partition(":")
+            why = ("now checked page by page in the SEO score" if retired
+                   else "the website has this now — the blueprint check found it")
             if kind == "issue":
                 c.execute("UPDATE site_issues SET status='closed' WHERE id=? AND status IN ('open','fixing')", (rid,))
             elif kind == "proposal":
                 c.execute("UPDATE proposals SET status='superseded', why=?, decided_at=? WHERE id=? AND status='open'",
-                          ("the website has this now — the blueprint check found it", now, rid))
+                          (why, now, rid))
         for code, g in gaps.items():
             if route_only:
                 break
             c.execute("INSERT INTO site_gaps(code,part,sector,severity,title,why,evidence,fix,page,status,"
-                      "first_seen,last_seen) VALUES(?,?,?,?,?,?,?,?,?, 'open', ?, ?) ON CONFLICT(code) DO UPDATE SET"
+                      "first_seen,last_seen,pages,priority,how,level,cat)"
+                      " VALUES(?,?,?,?,?,?,?,?,?, 'open', ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO UPDATE SET"
                       " part=excluded.part, sector=excluded.sector, severity=excluded.severity,"
                       " title=excluded.title, why=excluded.why, evidence=excluded.evidence, fix=excluded.fix,"
-                      " page=excluded.page, status='open', last_seen=excluded.last_seen, closed_at=NULL",
+                      " page=excluded.page, status='open', last_seen=excluded.last_seen, closed_at=NULL,"
+                      " pages=excluded.pages, priority=excluded.priority, how=excluded.how, level=excluded.level,"
+                      " cat=excluded.cat",
                       (code, g["part"], g["sector"], g["severity"], g["title"], g["why"], g["evidence"],
-                       g["fix"], g.get("page") or "", now, now))
+                       g["fix"], g.get("page") or "", now, now, json.dumps(g.get("pages") or []),
+                       float(g.get("priority") or 0), g.get("how") or "", g.get("level") or "", g.get("cat") or ""))
         live = {code: _ref_alive(c, (rows.get(code) or {}).get("ref")) for code in gaps}
         busy = {}
         for code, alive in live.items():
             if alive and gaps[code]["sector"] != "IT":
                 busy[gaps[code]["sector"]] = busy.get(gaps[code]["sector"], 0) + 1
         for code, g in sorted(gaps.items(), key=lambda kv: (SEV_ORDER.get(kv[1]["severity"], 9), kv[0])):
-            if live.get(code):
+            # The rulebook's problems are his to fix with the button, and the
+            # SEO audit already tickets the same pages: not routed again here.
+            if live.get(code) or g.get("part") == "rules":
                 continue
             if g["sector"] == "IT":
                 iid, _new = board.file_site_issue("blueprint", g["severity"], _detail(g),
@@ -701,8 +759,6 @@ def hand_on(result, now=None, route_only=False) -> dict:
             needs = ("SEO: is the search worth a page? If yes, brief Content." if code.startswith(("service:", "area:"))
                      else "real photographs and job details from the owner" if code in ("projects", "reviews")
                      else "the owner's details, and someone to read it before it goes up" if code == "privacy"
-                     else "SEO writes the words for each page named; IT puts them in after the owner's yes"
-                     if code in ("titles", "titles_repeat", "descriptions", "headings")
                      else "")
             pending = {"sector": g["sector"], "title": g["title"], "code": code, "needs": needs,
                        "detail": (f"Found by the website blueprint check. {g['why']}"), "evidence": g["evidence"],
@@ -719,7 +775,8 @@ def hand_on(result, now=None, route_only=False) -> dict:
 
 
 def _last_run(c):
-    r = c.execute("SELECT at, home, pages, partial, have, pages_seen FROM site_gaps_runs ORDER BY at DESC LIMIT 1").fetchone()
+    r = c.execute("SELECT at, home, pages, partial, have, pages_seen, score FROM site_gaps_runs"
+                  " ORDER BY at DESC LIMIT 1").fetchone()
     return r
 
 
@@ -747,7 +804,7 @@ def check(home=None, get=None, plan=False, force=False, now=None, map_files=None
         return {"ok": False, "error": site.get("error")}
     got = assess(site)
     out = {"ok": True, "home": site["home"], "pages": len(site["pages"]), "partial": site["partial"],
-           "gaps": got["gaps"], "have": got["have"], "checked": got["checked"]}
+           "gaps": got["gaps"], "have": got["have"], "checked": got["checked"], "seo": got.get("seo") or {}}
     # The same pages, matched to the files that make them (pipelines/site_map),
     # when the connector can read the files — one read of the site, two uses.
     if not plan and map_files:
@@ -764,19 +821,23 @@ def check(home=None, get=None, plan=False, force=False, now=None, map_files=None
     out.update(hand_on(got, now=now))
     with _conn() as c:
         _table(c)
-        c.execute("INSERT OR REPLACE INTO site_gaps_runs(at,home,pages,partial,have,pages_seen,note)"
-                  " VALUES(?,?,?,?,?,?,?)",
+        c.execute("INSERT OR REPLACE INTO site_gaps_runs(at,home,pages,partial,have,pages_seen,note,score)"
+                  " VALUES(?,?,?,?,?,?,?,?)",
                   (now, site["home"], len(site["pages"]), 1 if site["partial"] else 0,
                    json.dumps(got["have"]),
                    json.dumps([{"url": p["url"], "title": p["title"]} for p in site["pages"]]),
-                   _summary(out)))
+                   _summary(out), json.dumps(got.get("seo") or {})))
     out["summary"] = _summary(out)
     return out
 
 
 def _summary(r):
-    g, h = len(r.get("gaps") or []), len(r.get("have") or [])
+    g = len([x for x in r.get("gaps") or [] if x.get("part") != "rules"])
+    h = len(r.get("have") or [])
     s = f"your website has {h} of {g + h} things a complete site has"
+    seo = r.get("seo") or {}
+    if seo.get("score") is not None and seo.get("grade"):
+        s += f"; SEO score {seo['score']} out of 100 ({seo['grade']})"
     if r.get("filed") or r.get("proposed"):
         s += (f"; {len(r.get('filed') or [])} handed to IT, "
               f"{len(r.get('proposed') or [])} put to the MD")
@@ -792,18 +853,52 @@ def stored() -> dict:
         _table(c)
         c.row_factory = sqlite3.Row
         last = _last_run(c)
-        gaps = [dict(r) for r in c.execute("SELECT * FROM site_gaps WHERE status='open'")]
-        gone = [dict(r) for r in c.execute("SELECT code, title, closed_at FROM site_gaps WHERE status='closed'"
+        rows = [dict(r) for r in c.execute("SELECT * FROM site_gaps WHERE status='open'")]
+        gone = [dict(r) for r in c.execute("SELECT code, title, closed_at, part FROM site_gaps WHERE status='closed'"
                                            " AND closed_at > ? ORDER BY closed_at DESC LIMIT 10",
                                            (_now() - 30 * 86400,))]
-        for g in gaps:
-            g["where"] = _where(c, g.get("ref"), g.get("sector"))
-    gaps.sort(key=lambda g: (SEV_ORDER.get(g["severity"], 9), g["part"] or "", g["code"]))
+        for g in rows:
+            g["pages"] = _json_list(g.get("pages"))
+            g["where"] = "" if g.get("part") == "rules" else _where(c, g.get("ref"), g.get("sector"))
+    # What the Fix button does for each, and how its last press went (pipelines/seo_fixer).
+    try:
+        from . import seo_fixer
+        fixes = seo_fixer.last_for()
+        for g in rows:
+            g["fixable"] = seo_fixer.describe(g["code"], g.get("fix") or "", g.get("part") or "")
+            g["last_fix"] = fixes.get(g["code"])
+        for g in gone:
+            g["last_fix"] = fixes.get(g["code"])
+    except Exception:
+        pass
+    gaps = [g for g in rows if g.get("part") != "rules"]
+    issues = [g for g in rows if g.get("part") == "rules"]
+    for g in gaps:
+        if not g.get("priority"):
+            g["priority"] = _priority(g)
+    gaps.sort(key=lambda g: (-(g.get("priority") or 0), SEV_ORDER.get(g["severity"], 9), g["part"] or "", g["code"]))
+    issues.sort(key=lambda g: (-(g.get("priority") or 0), g["code"]))
     have = json.loads(last["have"] or "[]") if last else []
+    seo = {}
+    if last and last["score"]:
+        try:
+            seo = json.loads(last["score"]) or {}
+        except ValueError:
+            seo = {}
+    if seo or issues:
+        seo["issues"] = issues
     return {"ok": True, "checked_at": int(last["at"]) if last else 0, "home": last["home"] if last else "",
             "pages": int(last["pages"]) if last else 0, "partial": bool(last["partial"]) if last else False,
-            "gaps": gaps, "have": have, "fixed_lately": gone,
-            "summary": (_summary({"gaps": gaps, "have": have}) if last else "not checked yet")}
+            "gaps": gaps, "have": have, "fixed_lately": gone, "seo": seo,
+            "summary": (_summary({"gaps": gaps, "have": have, "seo": seo}) if last else "not checked yet")}
+
+
+def _json_list(v):
+    try:
+        out = json.loads(v or "[]")
+        return out if isinstance(out, list) else []
+    except ValueError:
+        return []
 
 
 def _where(c, ref, sector) -> str:
@@ -915,7 +1010,17 @@ def as_text(r) -> str:
     if not r.get("ok"):
         return "Could not check the website: " + str(r.get("error"))
     L = ["WHAT YOUR WEBSITE HAS, AND WHAT IT IS MISSING", "=" * 60, r.get("summary") or "", ""]
-    for g in r.get("gaps") or []:
+    seo = r.get("seo") or {}
+    rules = [g for g in r.get("gaps") or [] if g.get("part") == "rules"] or seo.get("issues") or []
+    if seo.get("score") is not None and seo.get("grade"):
+        L.append(f"SEO score {seo['score']}/100 — {seo['grade']}, {seo.get('label', '')}"
+                 + (f" (held down because {seo['capped_by']})" if seo.get("capped_by") else ""))
+        for cat in seo.get("categories") or []:
+            L.append(f"  {cat['name']:<32} {cat['score']}")
+        for g in rules[:15]:
+            L.append(f"  [{g.get('level') or g['severity']:<4}] {g['title']} — {g.get('evidence') or ''}")
+        L.append("")
+    for g in [x for x in r.get("gaps") or [] if x.get("part") != "rules"]:
         L.append(f"  [{g['severity']:<6}] {g['sector']:<8} {g['title']}")
         L.append(f"           {g.get('evidence') or ''}")
         if g.get("where"):

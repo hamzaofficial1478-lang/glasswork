@@ -22,12 +22,22 @@ HOW A PAGE IS MATCHED TO ITS FILE
 
 For each page a visitor can reach, the files that could serve its address are
 the ones a web server would try: /about → about.php, about.html, about/index.php;
-/ → index.php, index.html and the other usual home-page names. Of those that
-exist, the one whose own text actually appears on the live page is the one —
-for a .html file the page IS the file; for a .php file the words written in
-the file outside its PHP code show up on the page. Where no file could serve
-an address, the site makes its pages through one front file (WordPress and
-most frameworks do), and the map says so rather than guessing.
+/ → index.php, index.html and the other usual home-page names.
+
+THE SERVER IS ASKED, NOT GUESSED. "the webiste home page file was in real
+index.php it was not index.html" — an old index.html beside the real index.php
+carried the same header and footer words, so matching by words alone picked
+the old copy. So wherever more than one file could make a page (and always for
+the home page), each candidate's own address is asked for — /index.php,
+/index.html — and the one the server answers with that same page is the file.
+A file whose address shows something else, or nothing, is not it, whatever its
+extension. Only when the server cannot say (both answer the same, or neither
+answers) do the file's own words decide: for a .php file, the words written
+outside its PHP code are the ones that show on the page.
+
+Where no file could serve an address, the site makes its pages through one
+front file (WordPress and most frameworks do), and the map says so rather than
+guessing.
 
 From that: the home page's file, whether the site is PHP or HTML, the shared
 files every page pulls in (header, footer, menu) and which of them holds the
@@ -39,6 +49,7 @@ time) and reuses the pages the blueprint already read where it can. Never
 writes anything.
 """
 import argparse
+import difflib
 import json
 import posixpath
 import re
@@ -129,10 +140,49 @@ def _includes(name, src, names) -> list:
     return out
 
 
-def build_from(pages, listing, read, partial=False) -> dict:
+SAME_PAGE = 0.9
+
+
+def same_page(a_html, b_html) -> float:
+    """How alike two pages are as a visitor reads them, 0 to 1."""
+    a, b = _text(a_html)[:20000], _text(b_html)[:20000]
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    m = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    return m.quick_ratio() if m.quick_ratio() < SAME_PAGE else m.ratio()
+
+
+def ask_server(page_url, html, cands, fetch) -> list:
+    """
+    The candidates whose own address the server answers with this same page,
+    strongest first: answered there directly beats answered after a redirect.
+    """
+    if not fetch:
+        return []
+    p = urllib.parse.urlparse(page_url)
+    origin = f"{p.scheme}://{p.netloc}"
+    strong, weak = [], []
+    for c in cands:
+        try:
+            got = fetch(f"{origin}/{c}")
+        except Exception:
+            continue
+        if not got:
+            continue
+        status, body, redirected = got[0], got[1], bool(got[2]) if len(got) > 2 else False
+        if status == 200 and same_page(body, html) >= SAME_PAGE:
+            (weak if redirected else strong).append(c)
+    return strong + weak
+
+
+def build_from(pages, listing, read, partial=False, fetch=None) -> dict:
     """
     pages: [{url, html}] as a visitor sees them (the home page first).
     listing: the page files on the server. read(names) -> {name: source}.
+    fetch(url) -> (status, html, redirected): asks the live server, so the
+    file is the one it actually serves (see THE SERVER IS ASKED above).
     """
     names = set(listing)
     want = []
@@ -150,9 +200,17 @@ def build_from(pages, listing, read, partial=False) -> dict:
             scored = sorted(((score(src.get(c, ""), p.get("html") or ""), -i, c) for i, c in enumerate(cands)),
                             reverse=True)
             best, _, name = scored[0]
-            row["file"] = name
             row["match"] = round(best, 2)
             row["sure"] = "sure" if best >= 0.3 else ("likely" if len(cands) == 1 or best > 0 else "guess")
+            if fetch and (len(cands) > 1 or not rows):
+                said = ask_server(p["url"], p.get("html") or "", cands, fetch)
+                row["server"] = said
+                if said:
+                    # Several answering the same page: the words break the tie.
+                    by_words = {c: s for s, _i, c in scored}
+                    name = max(said, key=lambda c: (said.index(c) == 0, by_words.get(c, 0)))
+                    row["sure"] = "server"
+            row["file"] = name
             if name not in chosen:
                 chosen.append(name)
         rows.append(row)
@@ -227,7 +285,19 @@ def _connector_reader(s=None):
     return read
 
 
-def build(pages=None, partial=False, s=None) -> dict:
+def _fetcher():
+    """GET through requests (paced by coordination/sitepace): (status, html, redirected)."""
+    import requests
+    sess = requests.Session()
+    sess.headers["User-Agent"] = "Mozilla/5.0 (compatible; botix-sitemap/1.0; read-only)"
+
+    def fetch(url):
+        r = sess.get(url, timeout=20, allow_redirects=True)
+        return r.status_code, (r.text or "") if "html" in (r.headers.get("Content-Type") or "") else "", bool(r.history)
+    return fetch
+
+
+def build(pages=None, partial=False, s=None, fetch=None) -> dict:
     """The map for his site. `pages` from the blueprint's own read saves reading the site twice."""
     from . import site_api
     if site_api.why_cannot_read(s):
@@ -242,7 +312,7 @@ def build(pages=None, partial=False, s=None) -> dict:
         if not site.get("ok"):
             return {"ok": False, "error": site.get("error")}
         pages, partial = site["pages"], site.get("partial", False)
-    got = build_from(pages, names, _connector_reader(s), partial=partial)
+    got = build_from(pages, names, _connector_reader(s), partial=partial, fetch=fetch or _fetcher())
     if got.get("ok"):
         save(got)
     return got
@@ -292,6 +362,7 @@ def summary() -> dict:
             "kind_words": kinds.get(m.get("kind"), m.get("kind")), "home_file": m.get("home_file"),
             "head_file": m.get("head_file"), "shared": m.get("shared") or [],
             "pages": [{"path": p["path"], "file": p["file"], "sure": p["sure"]} for p in pages[:200]],
+            "confirmed": sum(1 for p in pages if p.get("sure") == "server"),
             "matched": sum(1 for p in pages if p["file"]), "total": len(pages),
             "unused": m.get("unused") or [], "complete": bool(m.get("complete"))}
 

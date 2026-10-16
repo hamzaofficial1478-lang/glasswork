@@ -66,8 +66,8 @@ def test_numbers():
                          "position": 12.0 if new else 18.0})
         sp.keep_google(rows)
         sp.keep_google(rows[-5:])             # fetched again: replaced, not doubled
-        sp.note(day=_day(30, now), on_google=2, pages=10, have=10, total=20)
-        sp.note(day=_day(1, now), on_google=6, pages=10, have=15, total=20, leads=40)
+        sp.note(day=_day(30, now), on_google=2, pages=10, have=10, total=20, seo_score=48)
+        sp.note(day=_day(1, now), on_google=6, pages=10, have=15, total=20, leads=40, seo_score=71)
         sp.note(speed_ms=812)
         s = sp.summary(now=now)
         t = s["tiles"]
@@ -79,6 +79,7 @@ def test_numbers():
         check("pages on Google, against the first day recorded", (t["on_google"]["value"], t["on_google"]["of"],
                                                                   t["on_google"]["first"]), (6, 10, 2))
         check("how complete the site is, against the first check", (t["complete"]["value"], t["complete"]["first"]), (75, 50))
+        check("the SEO score, against the first check", (t["seo"]["value"], t["seo"]["first"]), (71, 48))
         check("today's speed is on today's row", s["site"][-1]["speed_ms"], 812)
         check("and it says Google's numbers are late", "two days late" in s["note"], True)
 

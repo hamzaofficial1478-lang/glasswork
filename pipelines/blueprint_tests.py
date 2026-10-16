@@ -16,7 +16,12 @@ What is protected here (all on stand-in websites; nothing reaches a network):
     for him; everyone else's go to the MD with the evidence, a few per desk at a
     time, and come off the list when the site has them;
   - a check that was cut short never calls pages missing it did not read, and a
-    recent check is not repeated.
+    recent check is not repeated;
+  - every page is run through the SEO rulebook: one score, each problem once
+    with its pages, worst first; a hidden home page holds the score down; the
+    rulebook's problems are kept for the Fix button, not ticketed a second
+    time; the basics the blueprint used to check itself are closed, not left
+    hanging.
 """
 import re
 import sqlite3
@@ -26,7 +31,7 @@ import time
 from pathlib import Path
 
 from coordination import board, profile, uae
-from . import it_fix, it_release, site_api, site_blueprint as bp
+from . import it_fix, it_release, seo_rules as bp_rules, site_api, site_blueprint as bp
 
 ROOT = Path(__file__).resolve().parents[1]
 _fail = []
@@ -138,7 +143,7 @@ def test_bare_and_complete():
     check("  and a page for the first service he sells", f"service:{first[0]}" in codes, True)
     check("  the contact page it has is not called missing", "contact" in codes, False)
     check("  and it is counted as there", "contact" in {h["code"] for h in got["have"]}, True)
-    it = [g for g in got["gaps"] if g["sector"] == "IT"]
+    it = [g for g in got["gaps"] if g["sector"] == "IT" and g["part"] != "rules"]
     check("the files and markup are IT's", {g["code"] for g in it} >= {"robots_missing", "sitemap_missing",
                                                                        "llms_missing", "schema_missing"}, True)
     check("  the ones with one right answer carry the routine that fixes them",
@@ -147,12 +152,15 @@ def test_bare_and_complete():
            "llms_missing": "put_llms", "schema_missing": "apply_schema"})
     check("service pages are SEO's to judge before Content writes",
           {g["sector"] for g in got["gaps"] if g["code"].startswith("service:")}, {"SEO"})
-    check("worst first", got["gaps"][0]["severity"], "high")
+    check("worst first", [g["priority"] for g in got["gaps"]] == sorted((g["priority"] for g in got["gaps"]),
+                                                                     reverse=True), True)
 
     full = bp.read_site(HOME, get=_complete())
     done = bp.assess(full)
-    check("a complete site has nothing missing", [g["code"] for g in done["gaps"]], [])
-    check("  and every check was counted as there", len(done["have"]), len(done["checked"]))
+    check("a complete site has nothing missing", [g["code"] for g in done["gaps"] if g["part"] != "rules"], [])
+    check("  and every check was counted as there", len(done["have"]),
+          len([c for c in done["checked"] if c not in bp_rules.BY_ID or bp_rules.BY_ID[c].get("external")]))
+    check("  and it has an SEO score out of 100", isinstance(done["seo"].get("score"), int), True)
 
 
 def test_basics_on_every_page():
@@ -165,16 +173,46 @@ def test_basics_on_every_page():
              "/thanks.php": '<html><head><meta name="robots" content="noindex"><title>Thanks</title></head><body></body></html>'}
     got = bp.assess(bp.read_site(HOME, get=_site({}, pages)))
     g = {x["code"]: x for x in got["gaps"]}
-    check("a page with no title", ("titles" in g, g.get("titles", {}).get("severity")), (True, "high"))
-    check("  named in the evidence", "/c.php" in g.get("titles", {}).get("evidence", ""), True)
-    check("two pages with one title", "titles_repeat" in g, True)
+    t = g.get("core-title-present", {})
+    check("a page with no title", (t.get("part"), t.get("severity"), t.get("pages")), ("rules", "high", [HOME + "/c.php"]))
+    check("  named in the evidence", "/c.php" in t.get("evidence", ""), True)
+    check("two pages with one title", "core-title-unique" in g, True)
     check("no description, or no single main heading",
-          ("descriptions" in g, "/a.php" in g.get("headings", {}).get("evidence", "")), (True, True))
-    check("a picture with no description", "image_alt" in g, True)
-    check("a page hidden from Google", ("noindex" in g, "/thanks.php" in g.get("noindex", {}).get("evidence", "")),
+          ("core-description-present" in g, "/a.php" in g.get("core-h1-single", {}).get("evidence", "")), (True, True))
+    check("a picture with no description", g.get("images-alt", {}).get("pages"), [HOME + "/"])
+    check("a page hidden from Google", ("core-noindex" in g, "/thanks.php" in g.get("core-noindex", {}).get("evidence", "")),
           (True, True))
-    check("the worst come first", [x["severity"] for x in got["gaps"][:3]], ["high", "high", "high"])
-    check("  and titles go to SEO, who writes the words", g["titles"]["sector"], "SEO")
+    pr = [x["priority"] for x in got["gaps"]]
+    check("the worst come first", pr == sorted(pr, reverse=True), True)
+    check("  and titles go to SEO, who writes the words", t.get("sector"), "SEO")
+    check("  and the ones the Fix button can mend say how", (t.get("fix"), g["images-alt"]["fix"]), ("title", "alt"))
+    check("the score counts every page", got["seo"]["pages"], 4)
+
+
+def test_score_and_hidden_home():
+    print("\nOne score; a home page hidden from Google holds it down; one address or two:")
+    pages = {"/": _page("Home", head='lang="en"', links=[("/a.php", "A")], full=True)
+             .replace("<head>", '<head><meta name="robots" content="noindex">'),
+             "/a.php": _page("A page about shower screens", full=True, path="/a.php")}
+    site = bp.read_site(HOME, get=_site({}, pages))
+    got = bp.assess(site)
+    check("the hidden home page is still seen", [h["url"] for h in site["hidden"]], [HOME + "/"])
+    check("  and the score cannot pass 20", (got["seo"]["score"] <= 20, "not to list" in got["seo"]["capped_by"]),
+          (True, True))
+    # A real reader says where each request ended up: the bare address answering
+    # for itself beside the www one is two sites; http staying on http is unsafe.
+    plain = _site({}, {"/": _page("Home", full=True), "/a.php": _page("A", full=True, path="/a.php")})
+
+    def get(url, head=False):
+        if url.startswith("http://") or url.startswith("https://example-trade.test"):
+            return 200, ("" if head else pages["/a.php"]), "text/html", {"final": url, "headers": {}, "ms": 90}
+        st, body, ct = plain(url, head)
+        return st, body, ct, {"final": url, "headers": {"content-encoding": "gzip"}, "ms": 120}
+    got = bp.assess(bp.read_site(HOME, get=get))
+    g = {x["code"]: x for x in got["gaps"]}
+    check("both www and the bare address answering is found", "technical-www" in g, True)
+    check("http that stays on http is found", "technical-https-redirect" in g, True)
+    check("  and each says what a person does", bool(g["technical-www"]["how"]), True)
 
 
 def test_robots():
@@ -221,7 +259,11 @@ def test_handing_on():
         t0 = int(time.time()) - 3600
         r = bp.hand_on(got, now=t0)
         issues = cab.sql("SELECT kind, severity, detail, status FROM site_issues WHERE kind='blueprint'")
-        check("every IT gap is a ticket", len(issues), len([g for g in got["gaps"] if g["sector"] == "IT"]))
+        check("every IT gap is a ticket", len(issues),
+              len([g for g in got["gaps"] if g["sector"] == "IT" and g["part"] != "rules"]))
+        check("  the rulebook's problems are kept, not ticketed again",
+              (cab.sql("SELECT count(*) n FROM site_gaps WHERE part='rules'")[0]["n"] > 0,
+               cab.sql("SELECT count(*) n FROM site_gaps WHERE part='rules' AND ref IS NOT NULL")[0]["n"]), (True, 0))
         check("  each names its gap for the Fixer", all(re.match(r"\[blueprint:[a-z0-9_]+\]", i["detail"]) for i in issues), True)
         props = cab.sql("SELECT sector, title, evidence, status FROM proposals")
         check("everyone else's are proposals for the MD, with the evidence",
@@ -257,6 +299,18 @@ def test_handing_on():
         s = bp.stored()
         check("the app reads where each gap is", all(g.get("where") for g in s["gaps"]), True)
         check("  and what came off lately", {g["code"] for g in s["fixed_lately"]} >= gone, True)
+        check("  and the rulebook's problems apart, worst first, with their pages",
+              (bool(s["seo"]["issues"]), all(isinstance(i["pages"], list) for i in s["seo"]["issues"]),
+               [i["priority"] for i in s["seo"]["issues"]] == sorted((i["priority"] for i in s["seo"]["issues"]),
+                                                                    reverse=True)), (True, True, True))
+
+        # A basics gap from before the rulebook, with its ticket: both closed.
+        iid, _new = board.file_site_issue("blueprint", "high", "[blueprint:titles] old", "", "it-watcher")
+        cab.sql("INSERT INTO site_gaps(code,part,sector,severity,title,status,ref) VALUES"
+                "('titles','basics','SEO','high','Every page has a title','open',?)", (f"issue:{iid}",))
+        out = bp.hand_on(left, now=t0 + 400)
+        check("a retired basics gap is closed", "titles" in out["closed"], True)
+        check("  and so is its ticket", cab.sql("SELECT status FROM site_issues WHERE id=?", (iid,))[0]["status"], "closed")
 
 
 def test_the_fixer_and_releaser():
@@ -297,6 +351,10 @@ def test_partial_and_recent():
     with _Cabinet():
         r1 = bp.check(home=HOME, get=_bare(), now=2_000_000)
         check("a first check reads and hands on", (r1["ok"], r1.get("skipped", False), bool(r1["filed"])), (True, False, True))
+        s = bp.stored()
+        check("  and keeps the score for the app", (s["seo"]["score"], s["seo"]["grade"]),
+              (r1["seo"]["score"], r1["seo"]["grade"]))
+        check("  and says it", "SEO score" in s["summary"], True)
 
         def no_requests(url, head=False):
             raise AssertionError("read the site again")
@@ -309,6 +367,7 @@ def test_partial_and_recent():
 def main():
     test_bare_and_complete()
     test_basics_on_every_page()
+    test_score_and_hidden_home()
     test_robots()
     test_llms()
     test_handing_on()

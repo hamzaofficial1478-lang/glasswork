@@ -1069,6 +1069,35 @@ def striking_min_impressions():
 
 STRIKING_LOW, STRIKING_HIGH = 4.5, 20.5      # read via striking_band() at call time
 
+# HOW MANY MORE CLICKS, ROUGHLY. The share of searchers who click a result at
+# each position on Google — the industry-average curve seomachine's opportunity
+# scorer uses (github.com/TheCraigHewitt/seomachine). It is an AVERAGE, not his
+# own numbers, so what it gives is shown as an estimate and named as one. Times
+# his own real impressions, it says which page-two search is worth the most
+# clicks if it climbed to the top three — the order to work them in.
+EXPECTED_CTR = {1: 0.316, 2: 0.157, 3: 0.105, 4: 0.075, 5: 0.059, 6: 0.048, 7: 0.041, 8: 0.035, 9: 0.031,
+                10: 0.027, 11: 0.018, 12: 0.015, 13: 0.013, 14: 0.012, 15: 0.011, 16: 0.010, 17: 0.009,
+                18: 0.008, 19: 0.0075, 20: 0.007}
+GSC_DAYS = 90                                 # the window gsc_queries() reads by default
+TARGET_POSITION = 3
+
+
+def expected_ctr(position) -> float:
+    """The average click share at this position (between whole positions, the nearer one)."""
+    try:
+        p = max(1, int(round(float(position or 0))))
+    except (TypeError, ValueError):
+        return 0.0
+    return EXPECTED_CTR.get(p, 0.005 if p <= 30 else 0.002)
+
+
+def clicks_to_gain(impressions, position, target=TARGET_POSITION, days=GSC_DAYS) -> int:
+    """Roughly how many more clicks a month this search would bring at `target`. An estimate."""
+    if not impressions or not position or float(position) <= target:
+        return 0
+    per_month = float(impressions) * 30.0 / max(1, days)
+    return max(0, int(round(per_month * (expected_ctr(target) - expected_ctr(position)))))
+
 
 def score(row):
     """
@@ -1108,6 +1137,10 @@ def evidence_line(row):
     if row.get("striking"):
         bits.append("sitting just below the clicks — position 5 to 20, the cheapest "
                     "traffic you will ever buy")
+        gain = clicks_to_gain(row.get("impressions"), row.get("position"))
+        if gain:
+            bits.append(f"about {gain} more click(s) a month if it reached position {TARGET_POSITION} "
+                        "(an estimate from Google's average click-through by position)")
     if row.get("suggest_breadth"):
         bits.append(f"{row['suggest_breadth']} autocomplete completions "
                     f"(demand breadth, NOT a volume figure)")
@@ -1268,11 +1301,16 @@ def build(con, seeds=None, deep=False, our_paths=(), budget=None,
 
 
 def striking_distance(con, limit=15):
-    """Ranked 5th to 20th with real impressions. Free money, no tool required."""
+    """Ranked 5th to 20th with real impressions. Free money, no tool required. Worth-the-most first:
+    the clicks it would roughly gain at position 3, then the impressions."""
     _table(con)
-    return [dict(r) for r in con.execute(
+    rows = [dict(r) for r in con.execute(
         "SELECT * FROM keyword_intel WHERE striking=1"
-        " ORDER BY impressions DESC LIMIT ?", (limit,))]
+        " ORDER BY impressions DESC LIMIT ?", (max(limit, 60),))]
+    for r in rows:
+        r["gain"] = clicks_to_gain(r.get("impressions"), r.get("position"))
+    rows.sort(key=lambda r: (-r["gain"], -(r.get("impressions") or 0)))
+    return rows[:limit]
 
 
 def ask_for_help(con, built, top) -> list:
@@ -1453,7 +1491,7 @@ def _work(agent, deep, budget=None) -> dict:
                            "why": t["evidence"], "sources": t["sources"]}
                           for t in top[:10]],
                   "wins": [{"phrase": w["phrase"], "position": w["position"],
-                            "impressions": w["impressions"]}
+                            "impressions": w["impressions"], "gain_per_month": w["gain"]}
                            for w in striking_distance(con)]}
         if not ok:
             con.close()
@@ -1657,9 +1695,11 @@ def as_text(wins_only=False) -> str:
             return _why_no_wins(near)
         L = ["ALREADY RANKING, JUST BELOW THE CLICKS", "=" * 60,
              "Google puts you 5th to 20th for these and people are seeing you.",
-             "Improving an existing page is cheaper than writing a new one.", ""]
+             "Improving an existing page is cheaper than writing a new one.",
+             f"'+N/month' is a rough estimate of the extra clicks at position {TARGET_POSITION}, from Google's",
+             "average click-through by position — not a promise.", ""]
         for r in rows:
-            L.append(f"  {r['position']:>5}  {r['impressions']:>6} impressions  {r['phrase']}")
+            L.append(f"  {r['position']:>5}  {r['impressions']:>6} impressions  +{r['gain']:<4}/month  {r['phrase']}")
         return "\n".join(L)
 
     rows = [dict(r) for r in con.execute(
