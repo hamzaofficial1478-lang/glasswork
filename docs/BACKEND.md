@@ -39,6 +39,7 @@ next version before their plan is accepted, so only if the old key leaked.
 | `plans` | `{id: {name, websites, post_words, devices, features: ["own_logo"], limits: {leads, mails, posts, checks: {n, per: "day"\|"period", scope: "site"\|"account"}}}}` — the order is the order of rank (for "upgraded" / "downgraded"). Until saved, the website's Starter, Growth and Pro. |
 | `prices` | `{"price_…": {plan, variant: "own"\|"ai"}}` — which Stripe price is which plan |
 | `stripe_secret` | the webhook signing secret (`whsec_…`); written, never read back (`has_stripe_secret` says whether one is saved) |
+| `stripe_api_key` | optional: a Stripe **restricted** key (`rk_…`) with Subscriptions: write, Refunds: write, Invoices: read — used only to undo a plan bought twice by mistake; written, never read back (`has_stripe_api_key`) |
 | `cancel_effect` | `"now"` (stop when they cancel) or `"period_end"` (carry on to the end of the paid month) |
 | `grace_days`, `moves_per_month`, `offline_days`, `trial_days` | 0–60 |
 | `pricing_url`, `portal_url` | shown to customers on their plan card (the plans page; Stripe's customer portal) |
@@ -75,12 +76,24 @@ computers (a new laptop) and, if asked, the websites counted against the plan.
    `customer.subscription.updated`, `customer.subscription.deleted` and
    `invoice.payment_failed`. Its signing secret goes in `stripe_secret`.
 4. Each price id in `prices`; Stripe's customer portal link in `portal_url`.
+5. Optional, recommended: a restricted key in `stripe_api_key` (see the table above).
 
 Then a purchase makes a customer and a key; an upgrade or downgrade changes the
 plan at once (`plan_since`); a renewal moves `period_end`; a cancellation stops
 the customer's copy at once or at the end of the paid month (`cancel_effect`).
 One trial per email address. Messages without a valid signature, or older than
 five minutes, change nothing.
+
+**Bought twice by mistake.** A double click on a buy button opens the same
+Stripe page, and Stripe's own Pay button takes one press, so nobody is charged
+twice that way. Paying twice — two tabs, or paying again a minute later —
+makes two subscriptions; the backend catches it: the same plan (same amount),
+the same email, within an hour of the first, while the first is active. The
+second gets no key and is marked `duplicate` (`duplicate_of` names the first);
+with `stripe_api_key` set it is cancelled and its payment refunded at once,
+without it the history says to refund it in Stripe. The buyer's thank-you page
+says "You already have this plan" and whether the money is back. A different
+plan, or a second one later, is a second plan on purpose and gets its own key.
 
 ## What a customer's copy sends
 

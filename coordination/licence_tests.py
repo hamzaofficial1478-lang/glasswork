@@ -578,6 +578,108 @@ def test_stripe(w):
     check("  their copy says so plainly", (r.get("working"), "already had a trial" in r.get("error", "")), (False, True))
 
 
+class FakeStripe:
+    """Stripe's API, standing in on this computer: answers as Stripe would, and remembers every call."""
+
+    def __init__(self):
+        import http.server
+        import threading
+        calls = self.calls = []
+        fail = self.fail = set()
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _answer(self, code, data):
+                raw = json.dumps(data).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def _any(self):
+                size = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(size).decode() if size else ""
+                path = self.path.split("?")[0]
+                calls.append({"method": self.command, "path": path, "body": body,
+                              "auth": self.headers.get("Authorization"), "version": self.headers.get("Stripe-Version")})
+                sub = path.rsplit("/", 1)[-1]
+                if sub in fail:
+                    return self._answer(500, {"error": {"message": "down"}})
+                if self.command == "GET" and path.startswith("/v1/subscriptions/"):
+                    return self._answer(200, {"id": sub, "latest_invoice": {"id": "in_" + sub, "payment_intent": "pi_" + sub,
+                                                                             "amount_paid": 3000}})
+                if self.command == "DELETE" and path.startswith("/v1/subscriptions/"):
+                    return self._answer(200, {"id": sub, "status": "canceled"})
+                if self.command == "POST" and path == "/v1/refunds":
+                    return self._answer(200, {"id": "re_1", "status": "succeeded"})
+                return self._answer(404, {"error": {"message": "no such thing"}})
+
+            do_GET = do_POST = do_DELETE = _any
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+
+
+def test_bought_twice(w):
+    print("\nThe same plan bought twice by mistake (a double click, a second tab):")
+    fake = FakeStripe()
+    try:
+        w.as_owner()
+        s = dash.settings({"stripe_api_key": "rk_test_123", "stripe_api_base": fake.url})
+        check("his restricted Stripe key is saved, and never read back", (s.get("has_stripe_api_key"), "stripe_api_key" in s), (True, False))
+        mail = "twice@example.com"
+        checkout = lambda cs, cus, sub, amount: {"type": "checkout.session.completed", "data": {"object": {
+            "id": cs, "customer": cus, "subscription": sub, "amount_total": amount, "currency": "usd",
+            "customer_details": {"email": mail}}}}
+        w.stripe(checkout("cs_d1", "cus_d1", "sub_d1", 3000))
+        w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_d1", "cus_d1", "price_starter")}})
+        # the second purchase, its messages in the other order
+        w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_d2", "cus_d2", "price_starter")}})
+        w.stripe(checkout("cs_d2", "cus_d2", "sub_d2", 3000))
+        mine = sorted((x for x in dash.list()["licences"] if x["email"] == mail), key=lambda x: x["bought_at"])
+        check("one plan, not two: the second is marked as bought by mistake", [x["status"] for x in mine], ["active", "duplicate"])
+        first, second = mine[0], mine[1]
+        check("  and points at the first", second.get("duplicate_of"), first["id"])
+        done = [(c["method"], c["path"]) for c in fake.calls]
+        check("  Stripe is asked to cancel that second subscription, and refund it",
+              done, [("GET", "/v1/subscriptions/sub_d2"), ("DELETE", "/v1/subscriptions/sub_d2"), ("POST", "/v1/refunds")])
+        check("  the refund is for that payment, with his key, on a fixed API version",
+              ("payment_intent=pi_sub_d2" in fake.calls[-1]["body"], fake.calls[-1]["auth"], fake.calls[-1]["version"]),
+              (True, "Bearer rk_test_123", "2024-06-20"))
+        page2 = w.page("/glasswork-home/index.php?do=welcome&session=cs_d2")
+        check("the page after the second payment says so, and shows no second key",
+              ("already have this plan" in page2, "refunded" in page2, "BTX-" in page2), (True, True, False))
+        check("  the first payment's page still shows the key", "BTX-" in w.page("/glasswork-home/index.php?do=welcome&session=cs_d1"), True)
+        check("  his records say what happened, on both",
+              ("duplicate_payment" in [h["what"] for h in second["history"]], "second_payment" in [h["what"] for h in first["history"]]),
+              (True, True))
+        w.stripe({"type": "customer.subscription.deleted", "data": {"object": _sub("sub_d2", "cus_d2", "price_starter", "canceled")}})
+        again = next(x for x in dash.list()["licences"] if x["id"] == second["id"])
+        check("Stripe confirming the cancellation leaves it marked as a mistake", again["status"], "duplicate")
+        w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_d3", "cus_d3", "price_growth")}})
+        w.stripe(checkout("cs_d3", "cus_d3", "sub_d3", 5500))
+        third = next(x for x in dash.list()["licences"] if x["email"] == mail and x["plan"] == "growth")
+        check("a different plan with the same email is a second plan on purpose, with its own key",
+              (third["status"], len(fake.calls), "BTX-" in w.page("/glasswork-home/index.php?do=welcome&session=cs_d3")), ("active", 3, True))
+        fake.fail.add("sub_d4")
+        w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_d4", "cus_d4", "price_growth")}})
+        w.stripe(checkout("cs_d4", "cus_d4", "sub_d4", 5500))
+        fourth = next(x for x in dash.list()["licences"] if x["email"] == mail and x["status"] == "duplicate" and x["id"] != second["id"])
+        check("if Stripe cannot be reached, it is still held back, and he is told to refund it by hand",
+              "refund it in Stripe" in fourth["history"][-1]["note"], True)
+        check("  and the buyer is told the money will be refunded",
+              "will be refunded" in w.page("/glasswork-home/index.php?do=welcome&session=cs_d4"), True)
+    finally:
+        fake.close()
+
+
 def test_nothing_of_the_work_reaches_the_home(w):
     print("\nWhat the Home keeps:")
     folder = w.h.web / "glasswork-home" / "private" / "licences"
@@ -601,7 +703,7 @@ def main() -> int:
         w = World(h)
         try:
             for t in (test_admin_is_in_the_backend, test_switching_plans_on, test_a_key_on_a_computer, test_a_plan_is_a_plan, test_stopping,
-                      test_one_computer, test_offline, test_cannot_be_edited_here, test_gates, test_stripe,
+                      test_one_computer, test_offline, test_cannot_be_edited_here, test_gates, test_stripe, test_bought_twice,
                       test_nothing_of_the_work_reaches_the_home):
                 try:
                     t(w)

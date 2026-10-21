@@ -36,11 +36,20 @@ def _log_path() -> Path:
     return logs / "office.log"
 
 
+def _name() -> str:
+    """What the program is called (config/product.json), for its own messages."""
+    try:
+        import json
+        return json.loads((ROOT / "config" / "product.json").read_text(encoding="utf-8")).get("name") or "Botix"
+    except Exception:
+        return "Botix"
+
+
 def _tell(text: str) -> None:
     """A plain Windows message box — the one way to be seen with no console."""
     try:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(None, text, "Glasswork", 0x10)
+        ctypes.windll.user32.MessageBoxW(None, text, _name(), 0x10)
     except Exception:
         pass
 
@@ -57,11 +66,11 @@ def main() -> int:
         runpy.run_path(str(ROOT / "run.py"), run_name="__main__")
     except SystemExit as e:
         if e.code not in (0, None):
-            _tell(f"Glasswork stopped (code {e.code}). What happened is written in:\n{log_file}")
+            _tell(f"{_name()} stopped (code {e.code}). What happened is written in:\n{log_file}")
             return int(e.code) if isinstance(e.code, int) else 1
     except Exception:
         traceback.print_exc()
-        _tell("Glasswork could not start:\n\n" + traceback.format_exc(limit=2)[-600:]
+        _tell(f"{_name()} could not start:\n\n" + traceback.format_exc(limit=2)[-600:]
               + f"\n\nThe whole story is in:\n{log_file}")
         return 1
     if time.time() - started < 5:
@@ -69,7 +78,7 @@ def main() -> int:
         # was pointed at it), or it could not start. The log says which.
         tail = log_file.read_text(encoding="utf-8", errors="replace")[-1200:]
         if "already running" not in tail and "stopped before it could start" in tail:
-            _tell("Glasswork could not start. What happened is written in:\n" + str(log_file))
+            _tell(f"{_name()} could not start. What happened is written in:\n" + str(log_file))
     return 0
 
 

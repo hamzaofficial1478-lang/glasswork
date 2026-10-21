@@ -3169,6 +3169,7 @@ async function route() {
   const gen = ++VIEW.gen;
   if (r === 'activity' && VIEW.r !== 'activity') { ACT.room = 'all'; ACT.problems = false; }
   VIEW.r = ROUTES[r] ? r : 'today'; VIEW.urls = new Set(); VIEW.view = viewFor(gen); VIEW.dirty = false;
+  try { localStorage.setItem('botix-last-screen', VIEW.r); } catch (e) { /* private window */ }
   clearInterval(polling); clearTimeout(redrawT);
   // Nothing kept for this screen yet: say so within a blink, rather than leaving
   // the last screen up looking as though the click did nothing.
@@ -3187,6 +3188,16 @@ document.addEventListener('input', (e) => {
   const t = e.target;
   if (t && $('#main').contains(t) && t.matches('textarea, [contenteditable], input:not([type]), input[type=text], input[type=email], input[type=url], input[type=search], input[type=number]')) VIEW.dirty = true;
 }, true);
+// A DOUBLE CLICK IS ONE CLICK. A second press on the same button within a
+// moment is ignored, so nothing is sent, approved or started twice by
+// accident. (The office refuses a second send or approval of its own too.)
+document.addEventListener('click', (e) => {
+  const b = e.target && e.target.closest ? e.target.closest('button, a.btn, [role="button"]') : null;
+  if (!b) return;
+  const now = Date.now(), last = Number(b.dataset.pressed || 0);
+  if (now - last < 900) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+  b.dataset.pressed = String(now);
+}, true);
 $('#scrim').addEventListener('click', closePanel);
 window.addEventListener('hashchange', () => { if (FL.open) closePanel(); route(); $('#main').focus({preventScroll: true}); window.scrollTo(0, 0); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite);
@@ -3194,6 +3205,13 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   theme();
   await loadShell();
   await licence();
+  // Opened again from the desktop: back on the screen it was left on. The work
+  // itself is all kept — it lives in the data folder, not in this window.
+  if (!location.hash) {
+    let last = '';
+    try { last = localStorage.getItem('botix-last-screen') || ''; } catch (e) { /* private window */ }
+    if (last && last !== 'today' && /^[a-z]+$/.test(last)) history.replaceState(null, '', '#' + last);
+  }
   state();
   route();
   loadPublisher();

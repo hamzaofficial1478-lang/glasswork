@@ -54,6 +54,7 @@ const LIC_RUN_FRESH = 600;              // a copy that checked in within this lo
 const LIC_KEEP_DAYS = 40;               // daily counts kept this long
 const LIC_SITE_DAYS = 30;               // a website not worked on for this long gives its place back
 const LIC_TRIES_HOUR = 30;              // keys entered from one address in an hour
+const LIC_DUP_WINDOW = 3600;            // the same plan bought again this soon, with the same email, is a mistake
 
 function lic_dir(): string { return private_dir('licences'); }
 
@@ -110,7 +111,7 @@ function lic_settings(): array {
     if (empty($s['plans'])) { unset($s['plans']); }
     return $s + ['plans' => lic_default_plans(), 'cancel_effect' => 'now', 'grace_days' => 3, 'moves_per_month' => 3,
                  'offline_days' => 3, 'trial_days' => 14, 'prices' => [], 'pricing_url' => '', 'portal_url' => '',
-                 'mail_from' => '', 'stripe_secret' => ''];
+                 'mail_from' => '', 'stripe_secret' => '', 'stripe_api_key' => '', 'stripe_api_base' => ''];
 }
 
 /** Keys entered from one address: a few dozen an hour, kept as a one-way fingerprint for an hour. */
@@ -156,7 +157,7 @@ function lic_locked(callable $fn) {
 
 function lic_index(): array {
     return (kept(lic_dir() . '/index.php') ?? []) + ['by_id' => [], 'by_sub' => [], 'by_customer' => [],
-                                                     'by_session' => [], 'trials' => []];
+                                                     'by_session' => [], 'trials' => [], 'by_email' => []];
 }
 function lic_save_index(array $ix): void { keep(lic_dir() . '/index.php', $ix); }
 function lic_load(string $hash): ?array { return preg_match('/^[a-f0-9]{64}$/', $hash) ? kept(lic_dir() . "/$hash.php") : null; }
@@ -186,7 +187,7 @@ function lic_plan(array $lic): array {
 function lic_status(array $lic): string {
     $s = (string)($lic['status'] ?? 'pending');
     $now = time();
-    if (in_array($s, ['cancelled', 'trial_used', 'pending'], true)) { return $s; }
+    if (in_array($s, ['cancelled', 'trial_used', 'pending', 'duplicate'], true)) { return $s; }
     if (!empty($lic['cancel_at']) && $now >= (int)$lic['cancel_at']) { return 'cancelled'; }
     $grace = (int)lic_settings()['grace_days'] * 86400;
     if (!empty($lic['period_end']) && $now > (int)$lic['period_end'] + ($s === 'trial' ? 0 : $grace)) { return 'expired'; }
@@ -201,6 +202,8 @@ function lic_why(string $status, array $lic): string {
         case 'expired': return 'Your Botix plan ended' . ($until ? " on $until" : '') . '. Your work is safe — renew your plan to carry on.';
         case 'trial_used': return 'This address has already had a trial. Choose a plan to carry on.';
         case 'pending': return 'Your payment is still being confirmed. Try again in a minute.';
+        case 'duplicate': return 'This was a second purchase of the plan you already have, so it was cancelled. '
+                               . 'Use the key from your first purchase.';
     }
     return '';
 }
@@ -558,6 +561,63 @@ function lic_trial_once(array &$lic, array &$ix): void {
     }
 }
 
+/**
+ * One call to Stripe's API with the owner's restricted key (Subscriptions:
+ * write, Refunds: write, Invoices: read). A fixed API version, so the answer's
+ * shape does not change under us. Optional: without a key nothing is called.
+ */
+function lic_stripe_api(string $method, string $path, array $params = []): array {
+    $st = lic_settings();
+    $key = (string)$st['stripe_api_key'];
+    if ($key === '') { return ['ok' => false, 'code' => 0, 'data' => []]; }
+    $base = rtrim((string)($st['stripe_api_base'] ?: 'https://api.stripe.com'), '/');
+    $q = http_build_query($params);
+    $url = $base . $path . ($method === 'GET' && $q !== '' ? '?' . $q : '');
+    $ctx = stream_context_create(['http' => ['method' => $method, 'timeout' => 20, 'ignore_errors' => true,
+        'header' => "Authorization: Bearer $key\r\nStripe-Version: 2024-06-20\r\nContent-Type: application/x-www-form-urlencoded\r\n",
+        'content' => $method === 'GET' ? '' : $q]]);
+    $raw = @file_get_contents($url, false, $ctx);
+    $code = 0;
+    if (isset($http_response_header[0]) && preg_match('/\s(\d{3})(\s|$)/', $http_response_header[0], $m)) { $code = (int)$m[1]; }
+    $d = json_decode((string)$raw, true);
+    return ['ok' => $code >= 200 && $code < 300 && is_array($d), 'code' => $code, 'data' => is_array($d) ? $d : []];
+}
+
+/** A second purchase made by mistake: cancel that subscription and give the money back. Says what happened. */
+function lic_undo_duplicate(string $sub): string {
+    if (!preg_match('/^sub_[A-Za-z0-9]+$/', $sub)) { return 'no subscription to cancel'; }
+    if ((string)lic_settings()['stripe_api_key'] === '') {
+        return 'not cancelled automatically (no Stripe key in the settings) — cancel and refund it in Stripe';
+    }
+    $s = lic_stripe_api('GET', "/v1/subscriptions/$sub", ['expand' => ['latest_invoice']]);
+    if (!$s['ok']) { return 'Stripe did not answer — cancel and refund it in Stripe'; }
+    $inv = $s['data']['latest_invoice'] ?? null;
+    $pi = is_array($inv) ? (string)($inv['payment_intent'] ?? '') : '';
+    $paid = is_array($inv) ? (int)($inv['amount_paid'] ?? 0) : 0;
+    $out = lic_stripe_api('DELETE', "/v1/subscriptions/$sub")['ok'] ? 'cancelled' : 'not cancelled — cancel it in Stripe';
+    if ($paid <= 0) { return $out . '; nothing had been charged'; }
+    if ($pi === '') { return $out . '; refund the payment in Stripe'; }
+    return $out . (lic_stripe_api('POST', '/v1/refunds', ['payment_intent' => $pi])['ok']
+                   ? '; the payment was refunded' : '; the refund did not go through — refund it in Stripe');
+}
+
+/**
+ * The same plan bought twice with one email within the hour — a double click,
+ * a second tab — is a mistake, not a second plan: [hash, first licence], or
+ * null. A different plan, or a second one later, is a second plan on purpose
+ * (one person can run two businesses) and is left alone.
+ */
+function lic_duplicate_of(array $ix, string $h, array $lic): ?array {
+    $email = (string)($lic['email'] ?? '');
+    $ph = (string)($ix['by_email'][$email] ?? '');
+    if ($email === '' || $ph === '' || $ph === $h) { return null; }
+    $first = lic_load($ph);
+    if (!$first || !in_array(lic_status($first), LIC_ACTIVE, true)) { return null; }
+    if ((int)($first['bought_at'] ?? 0) < time() - LIC_DUP_WINDOW) { return null; }
+    if (empty($first['paid']) || ($first['paid'] ?? null) != ($lic['paid'] ?? null)) { return null; }
+    return [$ph, $first];
+}
+
 function lic_stripe_ok(string $raw, string $secret): bool {
     $sig = (string)($_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '');
     if ($secret === '' || $sig === '') { return false; }
@@ -614,6 +674,9 @@ if ($do === 'stripe' && $method === 'POST') {
                        'canceled' => 'cancelled', 'incomplete' => 'pending', 'incomplete_expired' => 'cancelled',
                        'paused' => 'cancelled'][(string)($obj['status'] ?? '')] ?? 'pending';
             if ($type === 'customer.subscription.deleted') { $status = 'cancelled'; }
+            if (($lic['status'] ?? '') === 'duplicate') {
+                lic_save($h, $lic);
+            } else {
             if (!empty($obj['cancel_at_period_end']) && $status !== 'cancelled') {
                 if ($st['cancel_effect'] === 'now') {
                     $status = 'cancelled';
@@ -634,6 +697,7 @@ if ($do === 'stripe' && $method === 'POST') {
             if (($lic['status'] ?? '') !== 'trial_used' || $status !== 'trial') { $lic['status'] = $status; }
             lic_trial_once($lic, $ix);
             lic_save($h, $lic);
+            }
         } elseif ($type === 'checkout.session.completed') {
             $cus = (string)($obj['customer'] ?? '');
             $sub = (string)($obj['subscription'] ?? '');
@@ -647,11 +711,25 @@ if ($do === 'stripe' && $method === 'POST') {
                 $lic['stripe'] = ['customer' => $cus, 'subscription' => $sub];
             }
             $lic['email'] = $email;
-            lic_trial_once($lic, $ix);
+            $lic['paid'] = ['amount' => (int)($obj['amount_total'] ?? 0), 'currency' => strtolower((string)($obj['currency'] ?? ''))];
+            $dup = lic_duplicate_of($ix, $h, $lic);
+            if ($dup) {
+                [$fh, $first] = $dup;
+                $done = lic_undo_duplicate($sub);
+                $lic['status'] = 'duplicate';
+                $lic['duplicate_of'] = $first['id'];
+                lic_history($lic, 'duplicate_payment', $done);
+                lic_history($first, 'second_payment', $done);
+                lic_save($fh, $first);
+                @unlink(lic_dir() . '/welcome-' . $lic['id'] . '.php');      // no second key to show
+            } else {
+                if ($email !== '') { $ix['by_email'][$email] = $h; }
+                lic_trial_once($lic, $ix);
+            }
             $ix['by_session'][(string)($obj['id'] ?? '')] = $lic['id'];
             $ix['by_session'] = array_slice($ix['by_session'], -2000, null, true);
             lic_save($h, $lic);
-            lic_mail_key($lic, lic_welcome_key($lic['id']));
+            if (!$dup) { lic_mail_key($lic, lic_welcome_key($lic['id'])); }
         } elseif ($type === 'invoice.payment_failed') {
             $h = $ix['by_sub'][(string)($obj['subscription'] ?? '')] ?? ($ix['by_customer'][(string)($obj['customer'] ?? '')] ?? '');
             $lic = $h ? lic_load($h) : null;
@@ -671,6 +749,18 @@ if ($do === 'welcome' && $method === 'GET') {
     $id = (string)($ix['by_session'][(string)($_GET['session'] ?? '')] ?? '');
     $key = $id ? lic_welcome_key($id) : '';
     $name = htmlspecialchars((string)(config()['product'] ?? 'Botix'), ENT_QUOTES);
+    $twice = '';
+    if ($id && $key === '') {
+        $h = (string)($ix['by_id'][$id] ?? '');
+        $l = $h ? lic_load($h) : null;
+        if ($l && ($l['status'] ?? '') === 'duplicate') {
+            $last = (string)(end($l['history'])['note'] ?? '');
+            $twice = "<p>You bought this plan a moment ago with the same email, so this second purchase has been cancelled"
+                   . (strpos($last, 'refunded') !== false ? ' and your money refunded — it shows on your statement in a few days.'
+                                                         : ' — your money will be refunded.')
+                   . "</p><p>Your plan is the one you bought first. Use the key from that purchase — it was on the page after you paid, and in your email.</p>";
+        }
+    }
     while (ob_get_level() > 0) { ob_end_clean(); }
     header('Content-Type: text/html; charset=utf-8');
     header('Cache-Control: no-store');
@@ -680,12 +770,13 @@ if ($do === 'welcome' && $method === 'GET') {
        . "<title>$name — your key</title><style>body{font:16px/1.55 system-ui,sans-serif;margin:0;background:#f5f6f8;color:#111318}"
        . "main{max-width:560px;margin:10vh auto;padding:28px;background:#fff;border:1px solid #e3e5ea;border-radius:14px}"
        . "code{display:block;font:600 22px/1.4 ui-monospace,monospace;letter-spacing:1px;padding:14px;background:#f5f6f8;border-radius:10px;margin:12px 0;user-select:all}"
-       . "p.m{color:#5e6573;font-size:14px}</style><main><h1 style=\"margin:0 0 6px\">Thank you</h1>"
-       . ($key ? "<p>Your $name key:</p><code>" . htmlspecialchars($key, ENT_QUOTES) . "</code>"
+       . "p.m{color:#5e6573;font-size:14px}</style><main><h1 style=\"margin:0 0 6px\">" . ($twice ? 'You already have this plan' : 'Thank you') . "</h1>"
+       . ($twice ? $twice : '')
+       . ($twice ? '' : ($key ? "<p>Your $name key:</p><code>" . htmlspecialchars($key, ENT_QUOTES) . "</code>"
                  . "<p>Open $name, sign in, and enter this key when it asks. Copy it somewhere safe now.</p>"
                  . "<p class=\"m\">It works on one computer at a time. Entering it on another computer moves it there.</p>"
                : ($id ? "<p>This page has expired. If you did not keep your key, write to us and we will make you a new one.</p>"
-                      : "<p>Your payment went through. Your key is being prepared — this page refreshes by itself in a few seconds.</p>"))
+                      : "<p>Your payment went through. Your key is being prepared — this page refreshes by itself in a few seconds.</p>")))
        . "</main>";
     exit;
 }
@@ -703,7 +794,7 @@ function lic_public(array $lic): array {
             'key_hint' => $lic['key_hint'] ?? '', 'bought_at' => (int)($lic['bought_at'] ?? 0),
             'plan_since' => (int)($lic['plan_since'] ?? 0), 'period_start' => (int)($lic['period_start'] ?? 0),
             'period_end' => (int)($lic['period_end'] ?? 0), 'cancel_at' => (int)($lic['cancel_at'] ?? 0),
-            'cancelled_at' => (int)($lic['cancelled_at'] ?? 0),
+            'cancelled_at' => (int)($lic['cancelled_at'] ?? 0), 'duplicate_of' => (string)($lic['duplicate_of'] ?? ''),
             'computers' => array_map(fn($d) => ['name' => $d['name'] ?? '', 'first' => (int)($d['first'] ?? 0),
                                                 'seen' => (int)($d['seen'] ?? 0)], (array)($lic['devices'] ?? [])),
             'moves' => count(array_filter((array)($lic['moves'] ?? []), fn($t) => (int)$t > time() - 30 * 86400)),
@@ -768,11 +859,17 @@ if ($do === 'licence-settings') {
             if (isset($body[$k])) { $cur[$k] = substr(trim((string)$body[$k]), 0, 300); }
         }
         if (!empty($body['stripe_secret'])) { $cur['stripe_secret'] = substr(trim((string)$body['stripe_secret']), 0, 200); }
+        if (!empty($body['stripe_api_key'])) { $cur['stripe_api_key'] = substr(trim((string)$body['stripe_api_key']), 0, 200); }
+        if (isset($body['stripe_api_base'])) {
+            $b = trim((string)$body['stripe_api_base']);
+            $cur['stripe_api_base'] = preg_match('#^(https://[a-z0-9.-]+|http://127\.0\.0\.1(:\d+)?)$#i', $b) ? $b : '';
+        }
         keep($path, $cur);
     }
     $s = lic_settings();
     $s['has_stripe_secret'] = $s['stripe_secret'] !== '';
-    unset($s['stripe_secret']);
+    $s['has_stripe_api_key'] = $s['stripe_api_key'] !== '';
+    unset($s['stripe_secret'], $s['stripe_api_key']);
     $s['webhook_url'] = here() . '/index.php?do=stripe';
     $s['welcome_url'] = here() . '/index.php?do=welcome&session={CHECKOUT_SESSION_ID}';
     answer(['ok' => true] + $s);
