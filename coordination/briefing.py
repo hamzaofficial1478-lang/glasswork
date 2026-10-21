@@ -25,9 +25,9 @@ import argparse
 import json
 import sqlite3
 import time
-from pathlib import Path
 
-DB = Path(__file__).parent / "agency.db"
+# the open website's cabinet; the test run's own when AGENCY_DB is set
+DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()
 
 # What each sector is for, and the command that makes it do a real cycle. The
 # commands are the honest bit: an agent can read this and know the sector is not
@@ -40,8 +40,10 @@ SECTORS = {
     },
     "SEO": {
         "does": "Finds service+area keyword gaps from real demand data, and hands the "
-                "buying-intent ones to Content.",
-        "runs": ["python -m pipelines.seo_gap"],
+                "buying-intent ones to Content. Watches what the named rivals "
+                "publish, by diffing their own sitemaps run to run.",
+        "runs": ["python -m pipelines.seo_gap",
+                 "python -m pipelines.competitors        (rival sitemap diff)"],
     },
     "Content": {
         "does": "Clusters those keywords into one page per service+area and briefs them. "
@@ -77,25 +79,40 @@ SECTORS = {
 # and what to do about it when it is empty.
 SHELF_MEANING = {
     "maps": ("collect real UAE businesses by area — the Hunter's main source",
-             "add a Google Places key on the 'maps' shelf, or set GOOGLE_PLACES_API_KEY"),
-    "seo_data": ("keyword volumes and rank tracking",
-                 "add a DataForSEO or similar key; without it SEO falls back to Google "
-                 "Suggest, which is real but has no volume figures"),
+             "add a TomTom key on Setup → Integrations (free, no Google account), or a "
+             "Google Places key on the 'maps' shelf"),
+    "seo_data": ("monthly search volumes and automated rank tracking — the two "
+                 "things the free sources genuinely cannot give you",
+                 "entirely optional. SEO works without it: seo_intel.py ranks "
+                 "keywords on Search Console impressions, autocomplete breadth, "
+                 "rival pages and your own enquiries. Add DataForSEO only if you "
+                 "want volume numbers and daily rank checks on top"),
     "trends": ("see which services are rising or falling in search",
                "add a Google Trends source on the 'trends' shelf"),
     "email": ("send outreach and replies", "add SMTP or an email API on the 'email' shelf"),
-    "stock_images": ("decorative graphics for banners (never project photos)",
-                     "add a Pexels/Unsplash key"),
+    "stock_images": ("every picture that is not one of your own job photos — "
+                     "banners, backgrounds, stock shots (never a project shot)",
+                     "add your Pexels key here, and a second stock provider "
+                     "under it as the fallback"),
     "crawler": ("read competitor and prospect pages at scale", "add a crawler key"),
     "llm": ("the text brain every sector reasons and writes with",
             "add a model on the 'llm' shelf — without it agents can plan but not write"),
-    "llm_extra": ("a stronger or spare brain for hard jobs", "optional"),
     "vision": ("read and judge images", "optional"),
-    "image_gen": ("generate decorative graphics", "optional"),
     "embedding": ("similarity and de-duplication", "optional"),
     "speech": ("transcription", "optional"),
 }
 
+
+
+def _trade() -> str:
+    """What the business does and where, for an agent's briefing."""
+    try:
+        from . import profile
+        if profile.is_starter():
+            return "glass & aluminium fabrication and installation, UAE"
+        return f"{profile.business().get('trade') or profile.trade_line()}, {profile.where()}"
+    except Exception:
+        return "glass & aluminium fabrication and installation, UAE"
 
 def _one(c, q, args=(), default=0):
     try:
@@ -175,7 +192,7 @@ def build():
         "generated_at": int(time.time()),
         "todays_orders": orders,
         "business": {
-            "trade": "glass & aluminium fabrication and installation, UAE",
+            "trade": _trade(),
             "services": sells,
             "sells_to": sells_to,
             "areas": areas,

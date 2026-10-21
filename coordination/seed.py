@@ -8,9 +8,10 @@ plan from on day one. Safe to run more than once: it never inserts a duplicate.
     python3 coordination/seed.py
 """
 import sqlite3
-from pathlib import Path
 
-DB = Path(__file__).parent / "agency.db"
+from . import uae
+
+DB = __import__("coordination.workspace", fromlist=["db_path"]).db_path()   # the open website's
 
 # ---- the services this business actually sells -----------------------------
 SERVICES = [
@@ -21,7 +22,7 @@ SERVICES = [
 ]
 
 # service + main emirate  -> local-intent terms
-CITIES = ["Dubai", "Abu Dhabi", "Sharjah"]
+CITIES = uae.served()
 
 # high buying-intent services in the Dubai districts worth chasing
 HOT_SERVICES = ["aluminium pergola", "frameless shower glass",
@@ -46,6 +47,25 @@ COMPETITORS = [
 ]
 
 
+# THE LISTS ABOVE ARE THE OWNER'S. Any other website is seeded from its own
+# profile (coordination/profile.py): its services, its places, no rivals until
+# the watch finds some.
+from . import profile as _profile  # noqa: E402
+
+_WIDE = "UAE"
+if not _profile.is_starter():
+    from . import countries as _countries
+    _labels = [sv.get("label") or k.replace("_", " ")
+               for k, sv in (_profile.services() or {}).items()]
+    SERVICES = _labels
+    HOT_SERVICES = _labels[:4]
+    DISTRICTS = list(uae.DISTRICTS[:6]) or list(uae.served()[:6])
+    _trade = _profile.trade_line()
+    _WIDE = _countries.name(_profile.country()) or _profile.where()
+    GENERIC_BUY = [f"{_trade} company", f"{_trade} {_WIDE}"] if _trade else []
+    COMPETITORS = []
+
+
 def _keywords():
     rows = []
     for svc in SERVICES:
@@ -55,7 +75,7 @@ def _keywords():
         for d in DISTRICTS:
             rows.append((f"{svc} {d}", d, "buy"))
     for term in GENERIC_BUY:
-        rows.append((term, "UAE", "buy"))
+        rows.append((term, _WIDE, "buy"))
     return rows
 
 

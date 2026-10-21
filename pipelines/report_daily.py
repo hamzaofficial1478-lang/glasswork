@@ -40,7 +40,7 @@ import json
 import sqlite3
 import time
 
-from coordination import board, state as _state
+from coordination import board, deskwork, inbox, scorecard as _scorecard, state as _state
 from providers import integrations
 
 GRACE = {
@@ -52,6 +52,8 @@ GRACE = {
 }
 
 GRACE["security-screen"] = 7 * 86400
+GRACE["md-cycle"] = 2 * 86400
+GRACE["competitor-watch"] = 7 * 86400
 
 # Cycles with no honest check yet. Empty now: security-screen used to sit here
 # because proving "no sector acts on unscreened text" needs an outreach trail,
@@ -89,23 +91,68 @@ def _in(col, ids):
     return f"{col} IN ({','.join('?' * len(ids))})"
 
 
+def _page_for(phrase, area=""):
+    """The service page a phrase would be briefed into — the briefs desk's own rule."""
+    from pipelines import content_briefs as cb
+    svc = cb._service_of(phrase or "")
+    if not svc:
+        return None
+    ar = cb._area_of(phrase, area or "")
+    return "/" + cb._slug(f"{svc} {ar}" if ar else svc)
+
+
 def _score_seo_gap(con, created_at, ev):
     """
     Did Content brief a page from THESE phrases? A brief written about something
     else is not evidence that this gap list was any good.
+
+    A phrase counts as briefed when it is written into a brief, OR when the
+    page it belongs to (service + area, the briefs desk's own clustering) was
+    briefed after the list. The desk briefs one page per service and area and
+    keeps ten phrases per brief, so matching the exact words alone scored
+    'failed' on lists whose page had in fact been written.
+
+    And a list whose every phrase falls under a page ALREADY briefed before it
+    was sent is not scored at all: it added supporting phrases to existing
+    pages, there was no new page to write, and calling that a failure blamed
+    SEO — and, on the old floor wording, the MD — for Content not repeating
+    itself.
     """
     phrases = [p for p in (ev.get("phrases") or []) if p]
     if not phrases:
         return None, "no phrases recorded on this decision — cannot tell what it claimed"
-    rows = con.execute("SELECT brief, title FROM content_queue WHERE created_at>?",
-                       (created_at,)).fetchall()
+    areas = {}
+    ids = _ids(ev, "keyword_ids")
+    if ids:
+        areas = {r[0]: r[1] or "" for r in con.execute(
+            f"SELECT phrase, area FROM keywords WHERE {_in('id', ids)}", ids)}
+    before, after, texts_after = set(), set(), []
+    for brief, title, at in con.execute(
+            "SELECT brief, title, created_at FROM content_queue"):
+        try:
+            url = (json.loads(brief) or {}).get("url", "")
+        except Exception:
+            url = ""
+        if (at or 0) > created_at:
+            after.add(url)
+            texts_after.append(((brief or "") + " " + (title or "")).lower())
+        else:
+            before.add(url)
+    page = {p: _page_for(p, areas.get(p, "")) for p in phrases}
     hits = {p for p in phrases
-            for r in rows if p.lower() in ((r[0] or "") + " " + (r[1] or "")).lower()}
+            if any(p.lower() in t for t in texts_after) or (page[p] and page[p] in after)}
     if hits:
         return "worked", (f"{len(hits)} of {len(phrases)} gap phrase(s) were briefed, "
                           f"e.g. {sorted(hits)[0]!r}")
+    in_scope = [p for p in phrases if page[p]]
+    if in_scope and all(page[p] in before for p in in_scope):
+        return None, (f"all {len(in_scope)} in-scope phrase(s) belong to pages already "
+                      "briefed before this list — it added supporting phrases, not new "
+                      "pages, so there was nothing new to write and nothing to score")
     if _expired("seo-gap", created_at):
-        return "failed", f"none of the {len(phrases)} gap phrases was briefed within 5 days"
+        needing = [p for p in in_scope if page[p] not in before] or phrases
+        return "failed", (f"{len(needing)} of the {len(phrases)} gap phrase(s) needed a "
+                          "new page and none was briefed within 5 days")
     return None, "still within the 5-day grace window"
 
 
@@ -147,6 +194,15 @@ def _score_it_health(con, created_at, ev):
     done = [r for r in urgent if r[0] in ("closed", "deployed")]
     if len(done) == len(urgent):
         return "worked", f"all {len(urgent)} urgent ticket(s) from this check are resolved"
+    # WAITING ON HIM IS NOT IT FAILING. "check out why IT stoped working?" —
+    # four red "scored IT's health check: failed" lines for a ticket whose fix
+    # was written days ago and is sitting under Waiting on you. The check found
+    # a real problem and the Fixer wrote the change; the last step is his yes.
+    # Left unscored, with that said, until he answers.
+    waiting = [r for r in urgent if r[0] == "in_review"]
+    if waiting and len(done) + len(waiting) == len(urgent):
+        return None, (f"the fix for {len(waiting)} urgent ticket(s) is written and "
+                      "waiting for your yes under Waiting on you")
     if _expired("it-health", created_at):
         return "failed", (f"{len(urgent) - len(done)} of {len(urgent)} urgent ticket(s) "
                           "from this check still open after 3 days")
@@ -235,7 +291,70 @@ def _score_security_screen(con, created_at, ev):
                       "unanswered at the time")
 
 
+def _score_md_cycle(con, created_at, ev):
+    """
+    Did the day's plan actually turn into work? The MD's claim is that each
+    sector claims its task and the day starts, so the test is what became of
+    the exact tasks it posted - not whether the board looks busy in general.
+    """
+    ids = [i for i in (ev or {}).get("task_ids") or [] if i]
+    if not ids:
+        return None, "no task ids recorded on this decision"
+    rows = con.execute(
+        f"SELECT status FROM tasks WHERE {_in('id', ids)}", ids).fetchall()
+    if not rows:
+        return "failed", f"all {len(ids)} task(s) the MD posted have vanished"
+    done = [r[0] for r in rows if r[0] == "done"]
+    touched = [r[0] for r in rows if r[0] in ("in_progress", "done", "blocked")]
+    if len(done) == len(rows):
+        return "worked", f"all {len(rows)} task(s) the MD posted were completed"
+    if _expired("md-cycle", created_at):
+        if not touched:
+            return "failed", (f"none of the {len(rows)} task(s) was even claimed in 2 days "
+                              "- the MD planned work nobody could do")
+        return "partial", f"{len(done)}/{len(rows)} of the MD's task(s) finished in 2 days"
+    return None, f"{len(done)}/{len(rows)} done, inside the 2-day window"
+
+
+def _score_competitor_watch(con, created_at, ev):
+    """
+    The claim is that Content answers the service pages rivals just published.
+
+    Two of the three outcomes here settle immediately, and that is deliberate
+    rather than lenient. A watch that found no movement, or movement on
+    services we do not sell, has produced its whole deliverable the moment the
+    snapshot is written — there is nothing downstream for it to be right or
+    wrong about, and holding it open for a week would only park an unscorable
+    row on the scorecard. It is the third case, rivals moving on our own
+    services, that makes a claim about somebody else's future behaviour, and
+    only that one waits for evidence.
+    """
+    if ev is None or "new_pages" not in ev:
+        return None, "no snapshot recorded on this decision"
+    if not (ev.get("new_pages") or []):
+        return "worked", "the watch ran and the rivals had published nothing new"
+
+    services = [s for s in (ev.get("services") or []) if s]
+    if not services:
+        return "worked", (f"{len(ev['new_pages'])} new rival page(s) recorded, none about "
+                          "a service we sell — nothing for Content to answer")
+
+    rows = con.execute("SELECT brief, title FROM content_queue WHERE created_at>?",
+                       (created_at,)).fetchall()
+    answered = {s for s in services
+                for r in rows if s.lower() in ((r[0] or "") + " " + (r[1] or "")).lower()}
+    if answered:
+        return "worked", (f"{len(answered)} of {len(services)} service(s) the rivals moved on "
+                          f"were briefed since, e.g. {sorted(answered)[0]!r}")
+    if _expired("competitor-watch", created_at):
+        return "failed", (f"rivals published on {len(services)} service(s) we sell and "
+                          "nothing was briefed in answer within 7 days")
+    return None, f"{len(services)} rival service move(s) waiting on Content, inside 7 days"
+
+
 SCORERS = {
+    "competitor-watch": _score_competitor_watch,
+    "md-cycle": _score_md_cycle,
     "security-screen": _score_security_screen,
     "seo-gap": _score_seo_gap,
     "content-briefs": _score_content_briefs,
@@ -295,14 +414,48 @@ def _site_severity(con):
 
 
 def _competitor_moves(con):
-    """Honest, not invented: no competitor pipeline is built yet, so say so."""
+    """
+    What the rivals have been doing, straight off the last snapshots.
+
+    An empty rival list is not a broken pipeline and no longer reads like one.
+    Who actually bids against this business is the owner's call — the watch
+    refuses to invent names — so with none on file the honest report is that
+    nobody has been named yet, plus the command that fixes it.
+    """
     n = _one(con, "SELECT count(*) FROM competitors")
     if n == 0:
-        return "no competitor tracking pipeline is built yet - 0 competitors on file"
+        return ("no rivals named yet — add one with "
+                "`python -m pipelines.competitors --add \"Their Name\" theirdomain.ae`")
     notes = [r[0] for r in con.execute(
         "SELECT notes FROM competitor_snapshots WHERE notes IS NOT NULL AND notes!=''"
-        " ORDER BY taken_at DESC LIMIT 3")]
-    return "; ".join(notes) if notes else f"{n} competitor(s) on file, no recent snapshot notes"
+        " ORDER BY taken_at DESC, id DESC LIMIT 3")]
+    return "; ".join(notes) if notes else (
+        f"{n} rival(s) on file, never yet checked — run "
+        "`python -m pipelines.competitors`")
+
+
+def quota_warnings():
+    """
+    Third-party allowances that are nearly gone or already gone.
+
+    Only the metered ones. Algolia's search allowance is spent in visitors'
+    browsers and cannot be seen from here, so it is never claimed as safe —
+    see coordination/usage.py.
+    """
+    try:
+        from coordination import usage
+        out = []
+        for m in usage.status():
+            if m["verdict"] == "over":
+                out.append(f"{m['label']} is past the plan allowance "
+                           f"({m['used']:,} of {m['allowance']:,}) - from here it is "
+                           f"{m['then']}.")
+            elif m["verdict"] == "watch":
+                out.append(f"{m['label']} is at {m['pct']}% of the plan allowance "
+                           f"({m['used']:,} of {m['allowance']:,}).")
+        return out
+    except Exception:
+        return []
 
 
 def _prioritised_actions(site_sev, leads_today, approvals_pending):
@@ -318,6 +471,11 @@ def _prioritised_actions(site_sev, leads_today, approvals_pending):
     if leads_today:
         actions.append(f"{leads_today} new lead(s) came in today - check they're "
                         "being verified and cleared before outreach.")
+    # A plan allowance running out is not urgent until the day it is, and then
+    # it is a surprise invoice. It ranks below a broken enquiry form and above
+    # nothing to do.
+    for line in quota_warnings():
+        actions.append(line)
     if not actions:
         actions.append("Nothing urgent today - the board is clear.")
     return actions[:3]
@@ -356,8 +514,18 @@ def critic_check(state, summary=None):
 
 def run(agent="reporter"):
     with board.agent_run(agent) as run_row:
-        out = _report(agent)
-        run_row.note(out.get("summary") or out.get("error") or "produced the daily digest")
+        # Report reads its post first. It is the last step of the day, so a
+        # question filed here is tomorrow's work — which is the honest answer,
+        # and infinitely better than the silence it replaced.
+        post = inbox.read_post("Report", agent)
+        with deskwork.at_the_desk("Report", agent, run_row) as job:
+            out = _report(agent)
+            deskwork.settle(job, out)
+        out["post"] = post
+        note = out.get("summary") or out.get("error") or "produced the daily digest"
+        if post.get("read"):
+            note = post["head"] + "; " + note
+        run_row.note(note)
         return out
 
 
@@ -428,12 +596,49 @@ def _report(agent):
             # well" when nine others could not be checked at all.
             + (f"\nStill unscored: {len(waiting)}" if waiting else "")
         )
+        # How the MD is MANAGING, computed here rather than by the MD, because an
+        # agent that grades its own management is not being graded.
+        try:
+            card = _scorecard.build(con=con)
+        except Exception as e:
+            card = {"verdict": f"could not build the MD's card ({e})"}
+        telegram_text += "\n\nThe MD: " + card.get("verdict", "")
+
+        # A DIGEST OF A DAY THAT HAS NOT RUN IS NOT A DIGEST.
+        #
+        # Report is the only desk that does substantial work without claiming
+        # anything — it adds up rows, so an empty board does not stop it — and
+        # it is the only one whose output leaves the building on its own. Put
+        # together, that meant running this before the day started sent the
+        # owner "Daily digest - <today>" summarising a day that had not
+        # happened yet. Every figure in it would be yesterday's, under today's
+        # date, which is worse than no digest at all.
+        #
+        # Nothing else changes: the numbers are still computed and still
+        # returned, so running it by hand shows him exactly what it would send.
+        # Inside the day this is the last step of the close lane, so the day is
+        # open and the send goes as it always did.
+        day_open = board.day_is_open()
+        if day_open["enforced"] and not day_open["open"]:
+            return {"ok": True, "agent": agent, "critic": "passed", "day": day,
+                    "health_score": state["metrics"]["health"],
+                    "sector_scores": sector_scores, "decisions_scored": scored,
+                    "decisions_waiting": waiting, "md_card": card,
+                    "summary": summary, "actions": actions, "spend_usd": spend,
+                    "telegram_sent": False,
+                    "telegram_detail": (
+                        f"Not sent — {day_open['why']}, so this would be a "
+                        f"digest of a day that has not happened. The figures "
+                        f"are here to read; start the day and Report sends it "
+                        f"as the last step."),
+                    "digest": telegram_text}
+
         tg = integrations.send_message(telegram_text)
 
         return {"ok": True, "agent": agent, "critic": "passed", "day": day,
                 "health_score": state["metrics"]["health"], "sector_scores": sector_scores,
                 "decisions_scored": scored, "decisions_waiting": waiting,
-                "summary": summary, "actions": actions,
+                "md_card": card, "summary": summary, "actions": actions,
                 "spend_usd": spend, "telegram_sent": tg.get("ok"), "telegram_detail": tg.get("detail")}
     finally:
         con.close()

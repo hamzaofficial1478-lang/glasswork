@@ -1,0 +1,293 @@
+"""
+honest_tests.py — run: python -m coordination.honest_tests
+
+Four screens that told the owner something untrue, and the reasons they did.
+
+None of these was a crash. Every one of them was a number or a sentence that
+looked fine, was wrong, and sent him looking in the wrong place — which is
+worse than an error, because an error at least stops you.
+
+  the release gate       red on his machine and green everywhere else, because
+                         the test suite read his own .env
+  the fallback warning   "no fallback" for five sectors that had one, because
+                         SINGLE meant "one model ANSWERED", not "one is set up"
+  the health score       40 on a day nothing at all happened
+  the check              fifteen minutes, because probes retry
+"""
+import os
+import sqlite3
+import tempfile
+import time
+from pathlib import Path
+
+from . import board, state
+from providers import integrations, preflight
+
+_fail = []
+ROOT = Path(__file__).parents[1]
+
+
+def check(name, got, want):
+    if got == want:
+        print(f"  ok  {name}")
+    else:
+        print(f"FAIL  {name}\n        got:  {got!r}\n        want: {want!r}")
+        _fail.append(name)
+
+
+# --- the release gate -------------------------------------------------------
+
+
+def test_the_suite_can_be_isolated_from_his_own_env_file():
+    print("\nHis settings must not decide whether the release gate is green:")
+    d = Path(tempfile.mkdtemp())
+    envfile = d / ".env"
+    envfile.write_text("SMTP_HOST=smtp.hostinger.com\nSITE_URL=https://his-site.ae\n",
+                       encoding="utf-8")
+    real_path, real_flag = integrations.ENV_PATH, os.environ.pop("AGENCY_IGNORE_DOTENV", None)
+    integrations.ENV_PATH = envfile
+    try:
+        got = integrations.read_env()
+        check("without the flag his file is read", got.get("SMTP_HOST"),
+              "smtp.hostinger.com")
+
+        os.environ["AGENCY_IGNORE_DOTENV"] = "1"
+        got = integrations.read_env()
+        check("with it, the file is invisible", got.get("SMTP_HOST"), None)
+        check("and SITE_URL with it", got.get("SITE_URL"), None)
+
+        # The real environment still wins — the flag hides the FILE, it does
+        # not blindfold the process.
+        os.environ["SITE_URL"] = "https://from-the-environment.ae"
+        check("but an exported variable still comes through",
+              integrations.read_env().get("SITE_URL"), "https://from-the-environment.ae")
+        os.environ.pop("SITE_URL")
+
+        # An explicit path is a deliberate act and beats the flag, so the few
+        # tests that exist to prove .env behaviour keep working.
+        check("an explicit path still reads the file",
+              integrations.read_env(path=str(envfile)).get("SMTP_HOST"),
+              "smtp.hostinger.com")
+    finally:
+        integrations.ENV_PATH = real_path
+        os.environ.pop("AGENCY_IGNORE_DOTENV", None)
+        if real_flag is not None:
+            os.environ["AGENCY_IGNORE_DOTENV"] = real_flag
+
+
+def test_the_setting_helper_goes_dark_with_it_too():
+    print("\nAnd the SMTP path, which is what actually turned his gate red:")
+    from pipelines import mail
+    d = Path(tempfile.mkdtemp())
+    envfile = d / ".env"
+    envfile.write_text("SMTP_HOST=smtp.hostinger.com\nSMTP_USER=info@his.ae\n",
+                       encoding="utf-8")
+    real_path = integrations.ENV_PATH
+    integrations.ENV_PATH = envfile
+    keep = {k: os.environ.pop(k, None) for k in ("SMTP_HOST", "SMTP_USER")}
+    # run.py sets the flag for the whole suite, which is the point of it. This
+    # test has to see both sides of it, so it puts it back at the end.
+    real_flag = os.environ.pop("AGENCY_IGNORE_DOTENV", None)
+    try:
+        check("his file supplies it", mail.setting("SMTP_HOST"), "smtp.hostinger.com")
+        os.environ["AGENCY_IGNORE_DOTENV"] = "1"
+        check("the suite sees nothing", mail.setting("SMTP_HOST"), "")
+        r = mail._smtp_send({"id": 1, "email": "a@b.ae"}, "Subject\n\nbody")
+        check("so 'no SMTP configured' is testable again", r["ok"], False)
+        check("and says so", "not configured" in r["error"], True)
+    finally:
+        integrations.ENV_PATH = real_path
+        os.environ.pop("AGENCY_IGNORE_DOTENV", None)
+        if real_flag is not None:
+            os.environ["AGENCY_IGNORE_DOTENV"] = real_flag
+        for k, v in keep.items():
+            if v is not None:
+                os.environ[k] = v
+
+
+# --- what the preflight says about the Claude team --------------------------
+
+
+def _team_status(signed=True, backup=False):
+    from providers import claude_team as T
+    t = T.DEFAULT_TEAM
+    accs = [{"id": "main", "label": "main Claude account", "config_dir": "",
+             "ok": signed, "why": "" if signed else "the main Claude account is not signed in"}]
+    if backup:
+        accs.append({"id": "backup", "label": "backup Claude account",
+                     "config_dir": "/b", "ok": True, "why": ""})
+    return {"ready": True, "why": "", "ceiling": T.CEILING, "models": [],
+            "team": [{"sector": s, "label": T.SECTOR_LABEL[s], "model": t[s],
+                      "model_label": T.LABEL[t[s]], "main": s in T.MAIN,
+                      "default": t[s]} for s in T.SECTORS],
+            "accounts": accs, "backup_setting": T.BACKUP_ENV,
+            "struggling": [], "usage_today": {"sectors": {}}}
+
+
+def _sweep(status, answers=None, quick=False):
+    """preflight.sweep with the Claude team stood in for; returns (result, models tested)."""
+    from providers import claude_team as T
+    tested = []
+
+    def fake_test(models=None, account="main"):
+        out = []
+        for m in (models or sorted(set(T.team().values()), key=T.rank)):
+            tested.append((account, m))
+            why = (answers or {}).get(m, "")
+            out.append({"account": account, "model": m, "label": T.LABEL[m],
+                        "ok": not why, "why": why, "seconds": 2.0, "ran": m})
+        return out
+    real = (preflight.claude_team.status, preflight.claude_team.test)
+    preflight.claude_team.status = lambda: status
+    preflight.claude_team.test = fake_test
+    try:
+        return preflight.sweep(quick=quick), tested
+    finally:
+        preflight.claude_team.status, preflight.claude_team.test = real
+
+
+def test_a_model_that_does_not_answer_is_a_warning_not_a_stop():
+    print("\nOpus 5 does not answer — the MD steps down, and the check says exactly that:")
+    r, _ = _sweep(_team_status(), {"claude-opus-5": "the model is overloaded right now"})
+    check("it does not stop the day over it",
+          any("Claude" in b for b in r["blocking"]), False)
+    said = " ".join(r["warnings"])
+    check("it names the sector and the model",
+          "Managing Director: Opus 5 did not answer" in said, True)
+    check("with Claude's own reason", "overloaded" in said, True)
+    check("and where the sector goes instead", "step down to Opus 4.8" in said, True)
+
+
+def test_phone_alerts_failing_does_not_stop_the_day():
+    """
+    "Not resumed. ... failed — you cannot be asked to approve anything" — he
+    approves in the app; a dead Telegram copy is a warning, never a stop.
+    """
+    print("\nAn extra alert route failing is a warning, not a stop:")
+    real = preflight.integrations.test_all
+    preflight.integrations.test_all = lambda notify=False: [{"integration": "telegram", "ok": False}]
+    try:
+        r, _ = _sweep(_team_status())
+    finally:
+        preflight.integrations.test_all = real
+    check("the day is not stopped over it", any("telegram" in b for b in r["blocking"]), False)
+    check("and he is told alerts still wait in the app",
+          any("Waiting on you" in w for w in r["warnings"]), True)
+
+
+def test_no_account_signed_in_stops_the_day():
+    print("\nNobody signed in is the one thing that stops every sector:")
+    r, tested = _sweep(_team_status(signed=False))
+    check("it blocks", any("no Claude account is signed in" in b for b in r["blocking"]), True)
+    check("and nothing was called on an account that cannot answer", tested, [])
+
+
+def test_each_model_is_tested_once_and_quick_spends_nothing():
+    print("\nSonnet serves four sectors and is asked once:")
+    r, tested = _sweep(_team_status())
+    check("one call per model on the team",
+          sorted(m for _, m in tested), sorted(set(preflight.claude_team.DEFAULT_TEAM.values())))
+    print("\n--quick checks the sign-in and calls nothing:")
+    r, tested = _sweep(_team_status(), quick=True)
+    check("no model was asked", tested, [])
+    check("and it says nothing was proven",
+          any("nothing was actually called" in w for w in r["warnings"]), True)
+    print("\nNo backup account is said once, plainly:")
+    r, _ = _sweep(_team_status())
+    check("the warning is there", sum("no backup Claude account" in w for w in r["warnings"]), 1)
+    r, _ = _sweep(_team_status(backup=True))
+    check("and gone when there is one",
+          any("no backup Claude account" in w for w in r["warnings"]), False)
+
+
+# --- the health score -------------------------------------------------------
+
+
+def _cabinet():
+    d = Path(tempfile.mkdtemp())
+    db = d / "agency.db"
+    con = sqlite3.connect(db)
+    con.executescript((ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8"))
+    con.commit()
+    con.close()
+    return str(db)
+
+
+def test_a_day_where_nothing_happened_does_not_score_forty():
+    print("\n'no any sector did any work but agency health is still 40 why?':")
+    real = board.DB
+    board.DB = _cabinet()
+    try:
+        now = int(time.time())
+        day0 = now - 3600
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        con.execute("INSERT INTO agent_runs(agent,status,started_at,ended_at)"
+                    " VALUES('seo-strategist','ok',?,?)", (day0 + 10, day0 + 20))
+        con.commit()
+
+        idle, why = state._health(con, "SEO", "seo", day0, now)
+        labels = {w["label"]: w["points"] for w in why}
+        check("turning up is worth 10, not 30",
+              labels.get("Turned up, but nothing came of it"), 10)
+        check("and the old label is not used",
+              "Ran and finished cleanly" in labels, False)
+        check("the total is not 40", idle == 40, False)
+        check("it is well under half", idle <= 25, True)
+
+        # Now it actually does something.
+        con.execute("INSERT INTO keyword_intel(phrase,seen_at) VALUES('glass dubai',?)",
+                    (day0 + 30,))
+        con.execute("INSERT INTO tasks(id,sector,title,detail,status,owner,"
+                    "created_at,finished_at) VALUES('t1','SEO','a job','d','done',"
+                    "'seo-strategist',?,?)", (day0, day0 + 40))
+        con.commit()
+        did, why2 = state._health(con, "SEO", "seo", day0, now)
+        labels2 = {w["label"]: w["points"] for w in why2}
+        check("a run that produced scores the full 30",
+              labels2.get("Ran and finished cleanly"), 30)
+        check("and beats the idle day", did > idle, True)
+        con.close()
+    finally:
+        board.DB = real
+
+
+def test_a_deep_unscored_pile_stops_paying_a_dividend():
+    print("\n45 unscored calls is not a reason for free marks:")
+    real = board.DB
+    board.DB = _cabinet()
+    try:
+        now = int(time.time())
+        day0 = now - 3600
+        con = sqlite3.connect(board.DB)
+        con.row_factory = sqlite3.Row
+        con.execute("INSERT INTO agent_runs(agent,status,started_at,ended_at)"
+                    " VALUES('seo-strategist','ok',?,?)", (day0 + 10, day0 + 20))
+        for i in range(6):
+            con.execute("INSERT INTO decisions(cycle,reasoning,expectation,"
+                        "confidence,created_at) VALUES('seo-gap','r','e',0.7,?)",
+                        (day0 + i,))
+        con.commit()
+        _sc, why = state._health(con, "SEO", "seo", day0, now)
+        row = next(w for w in why if w["label"] == "Not yet judged")
+        check("no free points", row["points"], 0)
+        check("and it says what to do about it",
+              "still" in row["detail"] and "unscored" in row["detail"], True)
+        con.close()
+    finally:
+        board.DB = real
+
+
+def main():
+    for fn in list(globals().values()):
+        if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):
+            fn()
+    print()
+    if _fail:
+        print(f"{len(_fail)} FAILED: " + ", ".join(_fail))
+        raise SystemExit(1)
+    print("honest: all good — the screens say what is actually true.")
+
+
+if __name__ == "__main__":
+    main()

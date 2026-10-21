@@ -28,7 +28,6 @@ Read-only: GETs the owner's own pages and nothing else.
 """
 import argparse
 import json
-import os
 import re
 import time
 import urllib.parse
@@ -54,6 +53,19 @@ TRADE_WORDS = ("glass", "alumin", "door", "window", "partition", "railing",
                "installation", "repair", "maintenance", "glazing", "wooden",
                "timber", "steel", "stainless", "acp", "upvc")
 
+# ...those are the owner's trade. Any other website's are the words in its own
+# service catalogue and trade (coordination/profile.py).
+try:
+    from coordination import profile as _pf
+    if not _pf.is_starter():
+        TRADE_WORDS = tuple(sorted({w for sv in services.SERVICES.values()
+                                    for n in [sv["label"]] + list(sv["names"])
+                                    for w in re.findall(r"[a-z]{4,}", n.lower())}
+                                   | {w for w in re.findall(r"[a-z]{4,}",
+                                                            (_pf.business().get("trade") or "").lower())}))
+except Exception:
+    pass
+
 # Headings, nav links and list items. NOT <title> — "Glassworks Dubai | Glass &
 # Aluminium" contains the trade words and is the company name, not a service,
 # and letting it in puts the business's own name on the list of things it sells.
@@ -63,15 +75,29 @@ _WS = re.compile(r"\s+")
 
 
 def _get(url, timeout=15):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    """
+    One page, through the shared reader.
+
+    This used to open its own urllib connection. Three things came free by
+    routing it through fetcher instead, and the third is why it changed:
+
+      - the address gets checked (no private or loopback hosts), which this
+        had no protection against at all;
+      - a JavaScript shell is reported as a shell rather than filed as a page
+        with no services on it;
+      - and it joins fetcher.cache(), so a full site_check reads each page ONCE
+        instead of once per pipeline. That mattered: a single test made forty-
+        odd requests in a burst, the owner's server started returning a
+        73-character page for about one in ten of them, and the run reported
+        "0 services found" on a site that lists nine.
+
+    Still returns "" on failure — every caller expects a string.
+    """
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            ctype = (r.headers.get("Content-Type") or "").lower()
-            if "html" not in ctype and "text" not in ctype:
-                return ""
-            return r.read(800_000).decode("utf-8", "replace")
-    except Exception:
-        return ""
+        from . import fetcher
+    except ImportError:  # pragma: no cover
+        import fetcher
+    return fetcher.fetch(url, timeout=timeout, allow_paid=False)["html"] or ""
 
 
 def phrases_from(html):
@@ -95,10 +121,50 @@ def phrases_from(html):
     seen, uniq = set(), []
     for p in out:
         k = p.lower()
-        if k not in seen:
+        if k not in seen and is_a_service_name(p):
             seen.add(k)
             uniq.append(p)
     return uniq
+
+
+# Words that mean this heading is SELLING, not naming a job. A heading is a
+# candidate service name only if it could plausibly appear on a quotation.
+_NOT_A_SERVICE = (
+    "best", "top ", "leading", "trusted", "no.1", "no 1", "#1", "number one",
+    "welcome", "why choose", "about us", "our story", "our team", "contact",
+    "get in touch", "testimonial", "review", "guarantee", "years of",
+    "ideas for", "guide to", "how to", "tips", "everything you need",
+    "company in", "partner in", "supplier in", "specialist in",
+)
+
+
+def is_a_service_name(txt) -> bool:
+    """
+    Could this phrase be a line on a quotation?
+
+    THE REPORT WAS COUNTING SLOGANS AS SERVICES. On the owner's own site it
+    announced "25 things you sell the agency does not know about" and the list
+    led with 'BEST ALUMINUM GLASS COMPANY IN UAE' and 'Your Trusted Partner in
+    Glass & Aluminium Industry' — a strapline and a tagline, neither of which
+    is a thing anybody buys. He read that as the agency not understanding his
+    business, and he was right to: mixing four real gaps in with a page of
+    marketing copy makes the four invisible.
+
+    A service name is a short noun phrase. A headline sells, an article title
+    explains, and both are longer and carry giveaway words.
+    """
+    t = " ".join(str(txt or "").split())
+    if not (2 < len(t) <= 48):
+        return False
+    if len(t.split()) > 5:
+        return False                      # an article title, not a product
+    low = t.lower()
+    if any(w in low for w in _NOT_A_SERVICE):
+        return False
+    letters = [c for c in t if c.isalpha()]
+    if letters and sum(c.isupper() for c in letters) / len(letters) > 0.7:
+        return False                      # SHOUTED HEADLINE
+    return True
 
 
 def _internal_links(html, base):
@@ -151,6 +217,18 @@ def discover(url, timeout=15, max_pages=10):
     # using them here fails on "Frameless Shower Enclosures", which is the name
     # of the job and mentions no buyer at all. match_by_name returns nothing
     # rather than guessing, which is what makes 'uncatalogued' meaningful.
+    # ACROSS pages, not per page. phrases_from de-duplicates within one page,
+    # so a nav item that appears on all four came back four times and the
+    # report said "25 uncatalogued" when there were nineteen distinct — the
+    # same phrase counted twice makes the number meaningless.
+    seen, deduped = set(), []
+    for p in phrases:
+        k = " ".join(p.lower().split())
+        if k not in seen:
+            seen.add(k)
+            deduped.append(p)
+    phrases = deduped
+
     confirmed, unmatched = {}, []
     for p in phrases:
         key, _matched = services.match_by_name(p)

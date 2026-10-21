@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="TechDuo">
+  <defs>
+    <linearGradient id="td-ink" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3A3F4A"/><stop offset="1" stop-color="#15171D"/></linearGradient>
+    <linearGradient id="td-orange" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EE9563"/><stop offset="1" stop-color="#DD7440"/></linearGradient>
+  </defs>
+  <path d="M25 7h10L21 57H11z" fill="url(#td-ink)" stroke="url(#td-ink)" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M43 7h10L39 57H29z" fill="url(#td-orange)" stroke="url(#td-orange)" stroke-width="3" stroke-linejoin="round"/>
+</svg>

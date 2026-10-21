@@ -126,6 +126,12 @@ reputation — treat a duplicate as a mistake to avoid, not a lead to chase.
 7. **Approve** — amber items queue to the owner's Telegram.
 8. **Score** — Report marks outcomes; MD logs decisions against them; tomorrow is sharper.
 
+## WHEN THE PROGRAM ITSELF IS CHANGED
+Every change that reads, checks or changes a website is built for both kinds of
+connection: the connector file (PHP/HTML sites) and WordPress (REST API + the
+Botix helper plugin). Neither is ever left behind; see docs/RELEASING.md,
+"Every change works on both kinds of website".
+
 ## TONE
 Write in British English. Sound like a person, not a robot. The owner values
 authenticity — no filler, no corporate mush. Say what's true and what you'd do.

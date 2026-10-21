@@ -1,0 +1,7 @@
+# Line endings each script needs, whatever the computer that checks it out.
+# A Mac or Linux shell refuses a script with Windows line endings, and a release
+# made on Windows would otherwise carry them (coordination/updates.py).
+*.sh       text eol=lf
+*.command  text eol=lf
+*.bat      text eol=crlf
+*.ps1      text eol=crlf

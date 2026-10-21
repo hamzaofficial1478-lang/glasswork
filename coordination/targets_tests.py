@@ -38,7 +38,7 @@ def _fresh_db():
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
     con = sqlite3.connect(db)
-    con.executescript((ROOT / "coordination" / "schema.sql").read_text())
+    con.executescript((ROOT / "coordination" / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     return db
@@ -80,18 +80,25 @@ def test_progress_is_measured_not_claimed():
         now = int(time.time())
         con = sqlite3.connect(tg.DB)
         for n in ("A Co", "B Co"):
-            con.execute("INSERT INTO leads(company,found_at) VALUES(?,?)", (n, now))
+            con.execute("INSERT INTO leads(company,email,found_at) VALUES(?,?,?)",
+                        (n, "info@" + n.replace(" ", "").lower() + ".ae", now))
+        # A phone number only: he cannot see it in the Leads room, and nobody
+        # can write to it, so it is not one of the leads he asked for.
+        con.execute("INSERT INTO leads(company,phone,found_at) VALUES('P Co','+971500000009',?)",
+                    (now,))
         con.commit()
         con.close()
 
         s = tg.status()
-        check("two real leads counted", _job(s, "leads")["done_today"], 2)
+        check("two real leads counted — a phone-only one is not",
+              _job(s, "leads")["done_today"], 2)
         check("one to go", _job(s, "leads")["remaining"], 1)
         check("not hit yet", _job(s, "leads")["hit"], False)
         check("percentage is honest", _job(s, "leads")["pct"], 67)
 
         con = sqlite3.connect(tg.DB)
-        con.execute("INSERT INTO leads(company,found_at) VALUES('C Co',?)", (now,))
+        con.execute("INSERT INTO leads(company,email,found_at) VALUES('C Co','info@cco.ae',?)",
+                    (now,))
         con.commit()
         con.close()
         check("target hit", _job(tg.status(), "leads")["hit"], True)
@@ -107,7 +114,8 @@ def test_yesterdays_work_is_not_todays():
         tg.set_target("leads", 5)
         yesterday = tg._day_start() - 3600
         con = sqlite3.connect(tg.DB)
-        con.execute("INSERT INTO leads(company,found_at) VALUES('Old Co',?)", (yesterday,))
+        con.execute("INSERT INTO leads(company,email,found_at) VALUES('Old Co','info@old.ae',?)",
+                    (yesterday,))
         con.commit()
         con.close()
         check("a lead from before midnight is not counted",
@@ -125,7 +133,7 @@ def test_each_job_counts_the_right_thing():
             tg.set_target(k, 1)
         now = int(time.time())
         con = sqlite3.connect(tg.DB)
-        con.execute("INSERT INTO leads(company,found_at) VALUES('L',?)", (now,))
+        con.execute("INSERT INTO leads(company,email,found_at) VALUES('L','info@l.ae',?)", (now,))
         con.execute("INSERT INTO outreach_log(direction,at) VALUES('sent',?)", (now,))
         # a reply is not something we did — it must not count towards mails
         con.execute("INSERT INTO outreach_log(direction,at) VALUES('reply',?)", (now,))
