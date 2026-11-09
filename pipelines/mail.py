@@ -32,7 +32,9 @@ enforces it). This composer only ever drafts on that basis.
 """
 
 import html as _html
+import re
 
+from coordination import uae
 from . import services
 
 # --- email type by lead stage ----------------------------------------------
@@ -50,16 +52,111 @@ _TYPES = {
 # not by tricks. Each maps to something the business actually has.
 _LEVERS = [
     "open with the reader's own context (their area + the exact service)",
-    "one concrete proof point — a real nearby completed job or a real review",
-    "specifics over adjectives (materials, timeline, a real number)",
+    "one concrete, true detail — the material, how the job is done, how soon "
+    "he can come and measure — never an invented job, client or review",
+    "specifics over adjectives (the glass, the frame, the fixing), not claims",
     "a single, low-friction ask (WhatsApp beats a form in the UAE)",
     "short: aim 90–130 words, one idea, one call to action",
     "the owner's plain British-English voice — no corporate filler",
 ]
 
 
+def setting(name: str, default: str = "") -> str:
+    """
+    One setting, from the environment first and then from .env.
+
+    THE SENDER COULD NEVER SEE HIS SMTP DETAILS.
+
+    Every SMTP lookup in this file read os.environ and nothing else, and
+    nothing in the whole program loads .env into the process. The settings he
+    saved on /setup → Delivery mail live in that file. So from a terminal —
+    which is how he runs everything — the mail sender was looking somewhere
+    the details had never been, and reported "SMTP not configured" to a man
+    who had configured it. Outreach could not have sent a single mail.
+
+    read_env's own docstring records the mirror image of this bug: it used to
+    ignore the environment while the program told him to set variables there.
+    Same lesson, other direction. Precedence matches it exactly — an exported
+    variable is a deliberate act for one run; the saved file is the standing
+    default.
+    """
+    import os
+    v = (os.environ.get(name) or "").strip()
+    if v:
+        return v
+    try:
+        from providers import integrations
+        return (integrations.read_env().get(name) or "").strip() or default
+    except Exception:
+        return default
+
+
+def _years() -> int:
+    try:
+        from coordination import auditor
+        return auditor.verified_years()
+    except Exception:
+        return 10
+
+
+def revise_copy(brief, draft, problems, agent="") -> dict:
+    """
+    One second go at a draft the Auditor refused, told exactly why. Cheaper
+    than throwing the lead away, and the reasons are specific enough ("no
+    opt-out line", "claims '15 years'") that one pass usually fixes them.
+    """
+    try:
+        from providers import think
+    except Exception:                                        # pragma: no cover
+        return {"ok": False, "error": "no provider layer available"}
+    prompt = ("You wrote this outreach email and a checker refused it. Rewrite it "
+              "so every problem below is fixed, keep what was good, and return "
+              "only the subject line then the body.\n\nPROBLEMS:\n"
+              + "\n".join(f"- {p}" for p in problems)
+              + "\n\nYOUR DRAFT:\n" + str(draft)
+              + "\n\nTHE BRIEF AGAIN:\n" + _brief_to_text(brief))
+    r = think("leads", [{"role": "user", "content": prompt}],
+              agent=agent or "leads-outreach", max_tokens=400,
+              reason="fixing an outreach draft the Auditor refused")
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error", "brain unavailable")}
+    return {"ok": True, "draft": r["output"], "used": r.get("used")}
+
+
 def email_type(stage: str) -> dict:
     return dict(_TYPES.get((stage or "new").strip().lower(), _TYPES["new"]))
+
+
+def _defaults() -> dict:
+    """
+    What a mail says when the company record leaves something out: the owner's
+    glass-and-aluminium words for his website, the profile's for anyone else's.
+    """
+    try:
+        from coordination import profile
+        if not profile.is_starter():
+            b = profile.business()
+            return {"name": b.get("name") or "",
+                    "tagline": b.get("tagline") or profile.trade_line(),
+                    "services": [sv.get("label") for sv in services.SERVICES.values()][:4]}
+    except Exception:
+        pass
+    return {"name": "Glassworks", "tagline": "Glass & aluminium, done properly",
+            "services": ["glass work", "aluminium", "doors", "pergolas"]}
+
+
+def _levers() -> list:
+    """The attention levers, in the open website's own trade and spelling."""
+    try:
+        from coordination import profile
+        if profile.is_starter():
+            return _LEVERS
+        return [l.replace("(the glass, the frame, the fixing)", "(the materials, the method)")
+                 .replace(" (WhatsApp beats a form in the UAE)", "")
+                 .replace("British-English", profile.spelling().replace(" English", "-English"))
+                for l in _LEVERS]
+    except Exception:
+        return _LEVERS
 
 
 def banner_spec(company: dict) -> dict:
@@ -69,12 +166,12 @@ def banner_spec(company: dict) -> dict:
     """
     return {
         "brand_block": {
-            "name": company.get("name", "Glassworks"),
-            "tagline": company.get("tagline", "Glass & aluminium, done properly"),
-            "services": company.get("services", ["glass work", "aluminium", "doors", "pergolas"]),
+            "name": company.get("name", _defaults()["name"]),
+            "tagline": company.get("tagline", _defaults()["tagline"]),
+            "services": company.get("services", _defaults()["services"]),
             "phone": company.get("phone", ""),
             "whatsapp": company.get("whatsapp", ""),
-            "areas": company.get("areas", ["Dubai", "Abu Dhabi", "Sharjah"]),
+            "areas": company.get("areas", uae.served()),
             "logo_slot": "logo",
         },
         "hero_image": {
@@ -122,13 +219,23 @@ def writing_brief(lead: dict, company: dict, owner_voice: str = "") -> dict:
         "also_offer": related,
         "language": "British English",
         "length_words": [90, 130],
-        "voice": owner_voice or "plain, human, confident, no filler — a tradesman with 10+ years, writing like a person",
-        "attention_levers": _LEVERS,
+        "voice": owner_voice or (f"plain, human, confident, no filler — a tradesman "
+                                 f"with {_years()}+ years in the trade, writing like a person"),
+        "attention_levers": _levers(),
+        # Every line here is one the Auditor checks afterwards. The brief used
+        # to ask for "one real proof point" and no opt-out, and the Auditor
+        # refused every draft for exactly those — so the two now say the same.
         "must_include": [f"{label} — this is what the email is ABOUT, lead with it",
                          "the reader's area, by name",
-                         "one real proof point",
-                         "one clear ask"],
+                         "one concrete, true detail about how the job is done",
+                         "one clear ask",
+                         "a last line that lets them opt out, e.g. \"If this is not "
+                         "useful, reply stop and I will not write again.\""],
         "must_avoid": ["fake project photos", "invented reviews or numbers",
+                       "any number of projects or clients, any client's name, any "
+                       "certificate or award — there are none to cite",
+                       "'we have worked with…', 'our clients include…', 'leading', 'best'",
+                       f"any number of years other than {_years()}",
                        "any price or special deal (owner sign-off only)", "walls of text",
                        "listing every service in the body — the related ones belong "
                        "in the footer block, not the paragraph"],
@@ -137,7 +244,7 @@ def writing_brief(lead: dict, company: dict, owner_voice: str = "") -> dict:
             "website": company.get("website", ""),
             "phone": company.get("phone", ""),
             "whatsapp": company.get("whatsapp", ""),
-            "areas": company.get("areas", ["Dubai", "Abu Dhabi", "Sharjah"]),
+            "areas": company.get("areas", uae.served()),
         },
         "banner": banner_spec(company),
     }
@@ -155,7 +262,14 @@ def plan(lead: dict, company: dict, owner_voice: str = "") -> dict:
         "brief": brief,
         "shelves_needed": ["stock_images", "email"],  # image asset, then delivery
         "md_scan": {
-            "gate": "MD",
+            # "Director", not "MD". The Managing Director's sector is called
+            # Director everywhere in the cabinet, and this line said "MD" —
+            # so every outreach mail posted its approval request to an inbox
+            # no code has ever read, blocked the full two minutes waiting, and
+            # was then held unsent under "MD did not approve (or did not
+            # answer)". Which read like a refusal. The MD was never asked.
+            # board.post_request now rejects an unknown sector outright.
+            "gate": "Director",
             "question": "Does this copy, the chosen proof point and the banner image actually "
                         "make an impact for this lead — or is it filler? Approve, or send back.",
             "checks": ["copy earns a reply", "proof point is real and relevant",
@@ -229,9 +343,9 @@ def render(plan_or_brief: dict, draft: str, company: dict, lead: dict) -> dict:
     site = (fb.get("website") or company.get("website") or "").strip()
     phone = (fb.get("phone") or company.get("phone") or "").strip()
     wa = (fb.get("whatsapp") or company.get("whatsapp") or "").strip()
-    areas = fb.get("areas") or company.get("areas") or ["Dubai", "Abu Dhabi", "Sharjah"]
-    name = company.get("name", "Glassworks")
-    tagline = company.get("tagline", "Glass & aluminium, done properly")
+    areas = fb.get("areas") or company.get("areas") or uae.served()
+    name = company.get("name", _defaults()["name"])
+    tagline = company.get("tagline", _defaults()["tagline"])
 
     subject, body = _split_subject(draft)
     if not subject:
@@ -358,16 +472,36 @@ def _brief_to_text(brief: dict) -> str:
     return "\n".join(lines)
 
 
-def _write_copy(call_task, brief):
-    """Ask the sector brain (an LLM) to write the copy from the brief."""
+def _write_copy(call_task, brief, agent=""):
+    """
+    Ask the sector brain (an LLM) to write the copy from the brief.
+
+    Like Content's page, the mail IS the model's output — there is no template
+    that would do — so no answer here means the lead is simply never written
+    to. Leads' Claude call steps down the models and over to the backup account
+    before it gives up (providers/claude_team.py).
+
+    `call_task` is still the injected argument so the existing tests can hand
+    in a stub; when it is the real one, think() is used instead.
+    """
     if call_task is None:
         return {"ok": False, "error": "no provider layer available"}
     prompt = ("Write a short outreach email from this brief. Return only the "
               "subject line then the body.\n\n" + _brief_to_text(brief))
-    r = call_task("leads", [{"role": "user", "content": prompt}], max_tokens=400)
+    try:
+        from providers import call_task as _real, think
+    except Exception:                                        # pragma: no cover
+        _real, think = None, None
+    if think is not None and call_task is _real:
+        r = think("leads", [{"role": "user", "content": prompt}],
+                  agent=agent or "leads-hunter", max_tokens=400,
+                  reason="writing outreach copy for a cleared lead")
+    else:
+        r = call_task("leads", [{"role": "user", "content": prompt}], max_tokens=400)
     if not r.get("ok"):
         return {"ok": False, "error": r.get("error", "brain unavailable"), "failovers": r.get("failovers")}
-    return {"ok": True, "draft": r["output"], "used": r.get("used")}
+    return {"ok": True, "draft": r["output"], "used": r.get("used"),
+            "rung": r.get("rung")}
 
 
 def compose(lead: dict, company: dict, *, agent: str, sector: str = "Leads",
@@ -394,7 +528,7 @@ def compose(lead: dict, company: dict, *, agent: str, sector: str = "Leads",
     try:
         # (asset selection from the real-project library happens here when wired)
         # 2) write the copy with the sector brain
-        drafted = _write_copy(call_task, p["brief"])
+        drafted = _write_copy(call_task, p["brief"], agent=agent)
         trace["steps"].append({"write": drafted.get("ok"),
                                "error": drafted.get("error"), "used": drafted.get("used")})
     finally:
@@ -408,7 +542,7 @@ def compose(lead: dict, company: dict, *, agent: str, sector: str = "Leads",
     verdict = None
     if board is not None:
         verdict = board.request_verification(
-            sector, "MD", subject=f"Scan {p['email_type']} mail before send",
+            sector, "Director", subject=f"Scan {p['email_type']} mail before send",
             body=p["md_scan"]["question"] + "\n\n--- draft ---\n" + drafted["draft"],
             blocking=True, timeout=md_timeout)
     trace["steps"].append({"md_scan": "answered" if verdict else "no answer",
@@ -463,14 +597,24 @@ def daily_cap() -> int:
     Read here rather than passed in: a cap the caller supplies is a cap the
     caller can forget.
     """
+    cap = DEFAULT_DAILY_CAP
     try:
         from coordination import targets as _targets
         for j in (_targets.status().get("jobs") or []):
             if j["name"] == "mails" and j.get("per_day"):
-                return int(j["per_day"])
+                cap = int(j["per_day"])
+                break
     except Exception:
         pass
-    return DEFAULT_DAILY_CAP
+    # Never above the plan's emails a day for this website (coordination/licence).
+    try:
+        from coordination import licence
+        plan = licence.cap("mails")
+        if plan is not None:
+            cap = min(cap, plan)
+    except Exception:
+        pass
+    return cap
 
 
 def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=None):
@@ -491,15 +635,469 @@ def log_outreach(lead_id, body, channel="email", direction="sent", reply_class=N
                 "needs_owner,at) VALUES(?,?,?,?,?,0,?)",
                 (lead_id, channel, direction, (body or "")[:4000], reply_class,
                  int(__import__("time").time())))
-            return cur.lastrowid
+            row = cur.lastrowid
     except Exception:
         return None
+    if direction == "sent" and lead_id:
+        # On the lead itself, for good — the log is cleared after thirty days.
+        try:
+            _board.mark_mailed(lead_id)
+        except Exception:
+            pass
+    return row
 
 
-def _smtp_send(lead: dict, draft: str) -> dict:
+# ---------------------------------------------------------------------------
+# ONE CONNECTION, A PAUSE BETWEEN MAILS, AND A COPY IN HIS SENT FOLDER
+# ---------------------------------------------------------------------------
+#
+# "it sent the mails but how can i confirm if the mails are sent or not i
+#  checked into my mail sent there is nothing and also again it get failed as i
+#  think it should sent the mails with delay like ... 5 to 8 seconds"
+#
+# Both halves were right.
+#
+#   the failures     every mail opened its own connection and logged in again,
+#                    back to back. His mail server (Hostinger, relaying through
+#                    MailChannels) answered a burst of logins by timing out the
+#                    handshake and resetting connections — "The handshake
+#                    operation timed out", "WinError 10054", "Connection
+#                    unexpectedly closed". Now a batch logs in once, waits five
+#                    to eight seconds between mails, and a dropped connection
+#                    is opened again and the mail tried again, twice, a little
+#                    later each time.
+#
+#   the Sent folder  sending through SMTP never puts a copy in Sent — a mail
+#                    program does that itself, separately. So the mail went
+#                    and nothing showed it. Each mail now also goes into the
+#                    Sent folder of his own mailbox (IMAP), where he looks.
+
+PACE = (5.0, 8.0)          # seconds between two mails in one batch
+TRIES = 3                  # a dropped connection: this many goes in all
+RETRY_AFTER = 10           # seconds before the first retry; doubled for the next
+SENT_FOLDERS = ("Sent", "INBOX.Sent", "Sent Items", "Sent Messages", "INBOX/Sent",
+                "Sent Mail")
+
+_BATCH = None              # the Mailer every send inside `with batch():` shares
+
+
+def _transient(e) -> bool:
+    """A connection that fell over, or a 4xx "try later" — worth another go."""
+    import smtplib
+    import socket
+    import ssl
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        return all(400 <= int(code) < 500 for code, _m in e.recipients.values())
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        return False
+    if isinstance(e, smtplib.SMTPResponseException):
+        return 400 <= e.smtp_code < 500
+    return isinstance(e, (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,
+                          TimeoutError, ConnectionError, socket.timeout, ssl.SSLError,
+                          OSError))
+
+
+def _refused_address(e) -> bool:
+    """The receiving server said this address is no good (5xx on the recipient)."""
+    import smtplib
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        return any(int(code) >= 500 for code, _m in e.recipients.values())
+    return False
+
+
+def _imap_host() -> str:
+    h = setting("IMAP_HOST").strip()
+    if h:
+        return h
+    s = setting("SMTP_HOST").strip().lower()
+    return ("imap." + s[5:]) if s.startswith("smtp.") else s
+
+
+def imap_open(timeout=20):
+    """His own mailbox, over IMAP, with the same login as sending."""
+    import imaplib
+    try:
+        port = int((setting("IMAP_PORT") or "993").strip() or 993)
+    except ValueError:
+        port = 993
+    im = imaplib.IMAP4_SSL(_imap_host(), port, timeout=timeout)
+    im.login(setting("SMTP_USER").strip(), setting("SMTP_PASS"))
+    return im
+
+
+def sent_folder(im) -> str:
+    """The folder his mail program calls Sent — by its flag first, then its name."""
+    typ, data = im.list()
+    names = []
+    for raw in data or []:
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw or "")
+        m = re.match(r'\((?P<flags>[^)]*)\)\s+(?:"[^"]*"|NIL)\s+(?P<name>.+)$', line.strip())
+        if not m:
+            continue
+        name = m.group("name").strip()
+        if len(name) > 1 and name[0] == '"' and name[-1] == '"':
+            name = name[1:-1]
+        if "\\sent" in m.group("flags").lower():
+            return name
+        names.append(name)
+    for want in SENT_FOLDERS:
+        for n in names:
+            if n.lower() == want.lower():
+                return n
+    return ""
+
+
+class Mailer:
+    """
+    One SMTP login for a whole batch, a pause between mails, a fresh
+    connection when the server drops one, and a copy of each mail in his Sent
+    folder. Use as `with Mailer() as m: m.deliver(msg)`, or let _smtp_send
+    use the batch opened by `with batch():`.
+    """
+
+    def __init__(self, pace=PACE, sleep=None, copies=True):
+        import time as _t
+        self.pace, self.copies = pace, copies
+        self.sleep = sleep or _t.sleep
+        self.srv, self.imap, self.folder = None, None, None
+        self.last, self.gap = 0.0, 0.0
+        self.copy_error = ""
+        self.sent = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.close()
+
+    def _open(self):
+        import smtplib
+        host = setting("SMTP_HOST").strip()
+        user = setting("SMTP_USER").strip()
+        pw = setting("SMTP_PASS")
+        try:
+            port = int((setting("SMTP_PORT") or "587").strip() or 587)
+        except ValueError:
+            port = 587
+        if port == 465:
+            srv = smtplib.SMTP_SSL(host, port, timeout=30)
+        else:
+            srv = smtplib.SMTP(host, port, timeout=30)
+            srv.ehlo()
+            if srv.has_extn("starttls"):
+                srv.starttls()
+                srv.ehlo()
+        if pw:
+            srv.login(user, pw)
+        return srv
+
+    def _drop(self):
+        if self.srv is not None:
+            try:
+                self.srv.quit()
+            except Exception:
+                pass
+        self.srv = None
+
+    def close(self):
+        self._drop()
+        if self.imap is not None:
+            try:
+                self.imap.logout()
+            except Exception:
+                pass
+        self.imap = None
+
+    def _copy(self, msg) -> bool:
+        """A copy in his Sent folder. Never stops a send if it cannot."""
+        if not self.copies or self.copy_error:
+            return False
+        try:
+            import imaplib
+            import time as _t
+            if self.imap is None:
+                self.imap = imap_open()
+                self.folder = sent_folder(self.imap)
+                if not self.folder:
+                    self.copy_error = "your mailbox has no Sent folder that could be found"
+                    return False
+            box = f'"{self.folder}"' if " " in self.folder else self.folder
+            typ, _d = self.imap.append(box, "\\Seen", imaplib.Time2Internaldate(_t.time()),
+                                       msg.as_bytes())
+            if typ != "OK":
+                self.copy_error = f"your mailbox would not take the copy ({typ})"
+                return False
+            return True
+        except Exception as e:
+            self.copy_error = f"could not save a copy to your Sent folder ({type(e).__name__}: {e})"
+            self.imap = None
+            return False
+
+    def deliver(self, msg) -> dict:
+        """Send one message. {ok, error, transient, refused, copied}."""
+        import random
+        import time as _t
+        if self.last:
+            wait = self.gap - (_t.monotonic() - self.last)
+            if wait > 0:
+                self.sleep(wait)
+        err = None
+        for attempt in range(TRIES):
+            try:
+                if self.srv is None:
+                    self.srv = self._open()
+                self.srv.send_message(msg)
+                self.last, self.gap = _t.monotonic(), random.uniform(*self.pace)
+                self.sent += 1
+                return {"ok": True, "copied": self._copy(msg)}
+            except Exception as e:
+                err = e
+                self._drop()
+                if not _transient(e) or attempt == TRIES - 1:
+                    break
+                self.sleep(RETRY_AFTER * (2 ** attempt))
+        self.last, self.gap = _t.monotonic(), random.uniform(*self.pace)
+        said = smtp_said(err)
+        if _transient(err):
+            said = (f"your mail server kept dropping the connection ({said}) — tried "
+                    f"{TRIES} times. It is tried again on the next run, or press Try again.")
+        return {"ok": False, "error": said, "transient": _transient(err),
+                "refused": _refused_address(err)}
+
+
+class batch:
+    """`with batch():` — every _smtp_send inside shares one Mailer (one login,
+    paced, with Sent copies). Nested batches share the outer one."""
+
+    def __init__(self, **kw):
+        self.kw, self.mine = kw, False
+
+    def __enter__(self):
+        global _BATCH
+        if _BATCH is None:
+            _BATCH, self.mine = Mailer(**self.kw), True
+        return _BATCH
+
+    def __exit__(self, *a):
+        global _BATCH
+        if self.mine and _BATCH is not None:
+            _BATCH.close()
+            _BATCH = None
+
+
+def _message(sender, to, subject, body, html="", from_name="", headers=None):
+    """The message itself: text, the designed version beside it, and the
+    headers a receiving server looks for before it trusts a mail."""
+    from email.message import EmailMessage
+    from email.utils import formataddr, formatdate, make_msgid
+    msg = EmailMessage()
+    msg["From"] = formataddr((from_name, sender)) if from_name else sender
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=(sender.rsplit("@", 1)[-1] or None))
+    for k, v in (headers or {}).items():
+        if k and v and k.lower() not in ("from", "to", "subject", "date", "message-id"):
+            msg[k] = v
+    msg.set_content(body or "")
+    if html:
+        # add_alternative, not set_content: set_content would throw the plain
+        # text away and leave a message with no text part at all.
+        msg.add_alternative(html, subtype="html")
+    return msg
+
+
+def send_plain(to: str, subject: str, body: str, html: str = "",
+               from_name: str = "", headers=None, rehearse: bool = False) -> dict:
+    """
+    One mail to an address the OWNER typed. Not outreach, and never treated as
+    outreach.
+
+    `html`, when given, rides along as an ALTERNATIVE to the plain body rather
+    than replacing it. Both halves go in one message and the client picks: a
+    phone shows the pictures, a text-only reader shows the words, and a spam
+    filter — which scores a message with no text part badly on sight — finds
+    one. Which is why the body is still required even when there is html.
+
+    Kept apart from _smtp_send on purpose, and the difference is the point.
+    _smtp_send is the outreach boundary: it checks the daily cap, enforces the
+    sending domain, and writes an outreach_log row, because everything going
+    through it is a stranger being contacted.
+
+    A preview to his own inbox is none of those things. Counting it against
+    the cap would mean reading his own agency's work costs him a real lead;
+    logging it as outreach would put a row in the cabinet saying he was
+    contacted as a prospect. So this does neither — and in exchange it may
+    only send to an address passed in by hand, never to anything read out of
+    the leads table.
+
+    `rehearse=True` — the campaign's "Send me a test": the same sending-domain
+    rule, sender name and headers as the real thing, so a test that arrives
+    means the real mail would leave too. His first test arrived through a path
+    that skipped the domain rule, and the campaign then did not go at all.
+    """
+    to = (to or "").strip()
+    if "@" not in to or " " in to:
+        return {"ok": False, "error": f"not an email address: {to!r}"}
+    host = setting("SMTP_HOST").strip()
+    user = setting("SMTP_USER").strip()
+    if not host or not user:
+        return {"ok": False, "error": "SMTP not configured (set it on /setup "
+                                      "→ Delivery mail)"}
+    sender = sender_address() or user
+    if rehearse:
+        wrong = domain_problem(sender)
+        if wrong:
+            return {"ok": False, "wrong_domain": True,
+                    "error": "your leads would not get this either: " + wrong}
+    msg = _message(sender, to, subject or "(no subject)", body, html, from_name, headers)
+    with Mailer(copies=False) as m:
+        r = m.deliver(msg)
+    if not r["ok"]:
+        return {"ok": False, "error": r["error"]}
+    return {"ok": True, "to": to, "from": sender}
+
+
+# ---------------------------------------------------------------------------
+# THE SENDING DOMAIN, AND SAYING PLAINLY WHY A MAIL DID NOT GO
+# ---------------------------------------------------------------------------
+#
+# "i approved the compaign and click on sent and it did no sent the mails while
+#  when i tested on my own mail it sent me the mail"
+#
+# The test went to his own inbox through send_plain, which never looks at the
+# outreach rules. The campaign went through _smtp_send, which refuses anything
+# not sent from the "Outreach domain" saved on Setup — compared letter for
+# letter, "@" + the setting. Setup told him to use "a subdomain, not your main
+# domain", his mailbox is on his main domain, and a website address typed with
+# https:// or www. never matched anything. Seven refusals, each one filed as
+# "approved — goes with the next allowance", and the reason on no screen.
+#
+# The rule stands — cold mail only from the domain he approved. What changed:
+# the setting is read the way a person types it, a subdomain of the approved
+# domain counts as on it, and when it really does not match, the refusal says
+# which address, which domain, and exactly what to change.
+
+def _bare_domain(value) -> str:
+    """'https://www.Example.com/contact' → 'example.com'; '@example.com' → 'example.com'."""
+    s = (value or "").strip().lower()
+    s = re.sub(r"^[a-z][a-z0-9+.-]*://", "", s)
+    s = s.split("/", 1)[0].split("?", 1)[0].strip()
+    if "@" in s:
+        s = s.rsplit("@", 1)[1]
+    s = s.strip(" .")
+    return s[4:] if s.startswith("www.") else s
+
+
+def sender_address() -> str:
+    """The address mail goes out from — the bare address, even if Setup holds
+    'Name <address>'."""
+    from email.utils import parseaddr
+    raw = (setting("SMTP_FROM") or setting("SMTP_USER") or "").strip()
+    return (parseaddr(raw)[1] or raw).strip()
+
+
+def domain_problem(sender=None) -> str:
+    """'' when the sender is on the approved outreach domain; otherwise what is
+    wrong and how to put it right, in his words."""
+    approved = _bare_domain(setting("OUTREACH_DOMAIN"))
+    if not approved:
+        return ""
+    addr = (sender or sender_address()).strip()
+    own = addr.rsplit("@", 1)[1].lower().strip() if "@" in addr else ""
+    if own and (own == approved or own.endswith("." + approved)):
+        return ""
+    return (f"your email sends from {addr or 'another address'}, which is not on the "
+            f"approved outreach domain ({approved}) saved on Setup. Change 'Outreach "
+            f"domain' on Setup to {own or 'the part after the @ in your address'}, or "
+            f"send from an address at {approved}.")
+
+
+def preflight() -> dict:
+    """
+    Could outreach be sent right now, and if not, why — checked before a single
+    mail is queued, so a refusal is a sentence on the screen instead of seven
+    mails parked as "approved".
+    """
+    problems = []
+    if not setting("SMTP_HOST").strip() or not setting("SMTP_USER").strip():
+        problems.append("Your email is not set up — add it on Setup → Integrations → "
+                        "Email (SMTP).")
+    wrong = domain_problem()
+    if wrong:
+        problems.append(wrong[:1].upper() + wrong[1:])
+    addr = sender_address()
+    own = addr.rsplit("@", 1)[1].lower() if "@" in addr else ""
+    room = max(0, daily_cap() - sent_today())
+    return {"ok": not problems, "problems": problems, "sender": addr,
+            "fix_domain": own if wrong and own else "", "room": room,
+            "cap": daily_cap()}
+
+
+def smtp_said(e) -> str:
+    """What the mail server actually answered, as a sentence he can act on."""
+    import smtplib
+
+    def text(v):
+        return v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        return (f"your mail server refused the login ({e.smtp_code} "
+                f"{text(e.smtp_error)[:160]}) — check the email password on Setup")
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        bits = [f"{to}: {code} {text(msg)[:120]}" for to, (code, msg) in e.recipients.items()]
+        return "the mail server would not deliver to " + "; ".join(bits)
+    if isinstance(e, smtplib.SMTPSenderRefused):
+        return (f"the mail server would not send from {text(e.sender)} "
+                f"({e.smtp_code} {text(e.smtp_error)[:160]})")
+    if isinstance(e, smtplib.SMTPResponseException):
+        return f"the mail server said {e.smtp_code} {text(e.smtp_error)[:200]}"
+    return f"could not reach the mail server: {type(e).__name__}: {e}"
+
+
+def _default_subject() -> str:
+    """What a mail with no subject line of its own is about: the business's trade."""
+    try:
+        from coordination import profile
+        if profile.is_starter():
+            return "Glass & aluminium work"
+        t = profile.business().get("trade_short") or profile.business().get("trade") or ""
+        return (t[:1].upper() + t[1:] + " work") if t else "A note from us"
+    except Exception:
+        return "Glass & aluminium work"
+
+
+def country_rule(lead=None) -> dict:
+    """
+    {may_send, rule, why} — may this website write to a business first? A lead
+    found in another of his markets is written to under THAT country's rule.
+    """
+    try:
+        from coordination import profile
+        cc = str((lead or {}).get("country") or "").upper()
+        r = profile.outreach_for(cc) if cc else profile.outreach()
+    except Exception:
+        return {"may_send": True, "rule": "allowed", "why": ""}
+    if r["may_send"]:
+        return {"may_send": True, "rule": r["rule"], "why": r.get("law", "")}
+    if r["rule"] == "consent":
+        why = (r["law"] + " So the agency writes these as drafts for you to send to "
+               "people who have agreed to hear from you, and sends nothing itself.")
+    else:
+        why = r["law"]
+    return {"may_send": False, "rule": r["rule"], "why": why}
+
+
+def _smtp_send(lead: dict, draft: str, html: str = "", from_name: str = "",
+               headers=None) -> dict:
     """
     Deliver via SMTP using the credentials saved on /setup (env: SMTP_*). Kept as
     the single send boundary: no other code emails directly.
+
+    `html` rides along as an alternative to the text, as in send_plain — the
+    campaign is a designed mail, and it used to leave as bare text because this
+    boundary could not carry anything else. `from_name` is who the inbox shows
+    it is from (the company, not an address). `headers` adds lines such as
+    List-Unsubscribe.
 
     Three things happen here and nowhere else, because this is the only place
     that can be sure of them:
@@ -513,18 +1111,23 @@ def _smtp_send(lead: dict, draft: str) -> dict:
       the send is LOGGED, before we return. An unlogged send is invisible to the
       cap, to the dedup promise, and to every counter the owner reads.
     """
-    import os
-    import smtplib
-    from email.message import EmailMessage
-
-    host = os.environ.get("SMTP_HOST", "").strip()
-    user = os.environ.get("SMTP_USER", "").strip()
-    pw = os.environ.get("SMTP_PASS", "")
+    host = setting("SMTP_HOST").strip()
+    user = setting("SMTP_USER").strip()
     to = (lead.get("email") or "").strip()
     if not host or not user:
         return {"ok": False, "error": "SMTP not configured (set it on /setup → Integrations)"}
     if not to:
         return {"ok": False, "error": "this lead has no email address"}
+
+    # --- the country's rule on writing to a business first -------------------
+    # Not ours to decide, and not the same everywhere (coordination/countries):
+    # where it is settled that a business may be written to with an opt-out
+    # (the UAE, the UK, the US) this passes; where consent is needed first
+    # (Germany, Austria) nothing goes; anywhere else nothing goes until the
+    # owner has read his country's rule and confirmed it on Setup.
+    rule = country_rule(lead)
+    if not rule["may_send"]:
+        return {"ok": False, "law": True, "error": "not sent: " + rule["why"]}
 
     # --- the cap, before anything leaves ------------------------------------
     cap = daily_cap()
@@ -534,50 +1137,40 @@ def _smtp_send(lead: dict, draft: str) -> dict:
                 "error": f"daily outreach cap reached ({already}/{cap}). Nothing sent. "
                          "Raise it on /setup → Daily orders if you really want more."}
 
+    # --- the plan: emails a day for this website, counted by the Home ---------
+    # A look first, counted once it has really gone — a mail the server
+    # refused is not one of the day's emails.
+    from coordination import licence
+    allowed = licence.take("mails", dry=True)
+    if not allowed.get("ok"):
+        return {"ok": False, "capped": True, "plan": True, "error": "not sent: " + str(allowed.get("error"))}
+
     # --- the sending domain, as the handbook requires ------------------------
-    sender = (os.environ.get("SMTP_FROM") or user).strip()
-    domain = os.environ.get("OUTREACH_DOMAIN", "").strip().lower()
-    if domain and not sender.lower().endswith("@" + domain):
-        return {"ok": False,
-                "error": f"refusing to send: {sender} is not on the approved outreach "
-                         f"domain ({domain})"}
+    sender = sender_address()
+    wrong = domain_problem(sender)
+    if wrong:
+        return {"ok": False, "wrong_domain": True, "error": "refusing to send: " + wrong}
 
     subject, body = _split_subject(draft)
-    msg = EmailMessage()
-    msg["From"] = sender
-    msg["To"] = to
-    msg["Subject"] = subject or "Glass & aluminium work"
-    msg.set_content(body or draft)
-
-    try:
-        port = int((os.environ.get("SMTP_PORT") or "587").strip() or 587)
-    except ValueError:
-        port = 587
-    try:
-        if port == 465:
-            srv = smtplib.SMTP_SSL(host, port, timeout=30)
-        else:
-            srv = smtplib.SMTP(host, port, timeout=30)
-            srv.ehlo()
-            if srv.has_extn("starttls"):
-                srv.starttls()
-                srv.ehlo()
-        try:
-            srv.login(user, pw)
-            srv.send_message(msg)
-        finally:
-            try:
-                srv.quit()
-            except Exception:
-                pass
-    except Exception as e:
-        return {"ok": False, "error": f"SMTP refused the message: {e}"}
+    msg = _message(sender, to, subject or _default_subject(), body or draft,
+                   html, from_name, headers)
+    # Inside `with batch():` the batch's connection, pace and Sent copies are
+    # shared; on its own, one mail gets a Mailer of its own.
+    if _BATCH is not None:
+        r = _BATCH.deliver(msg)
+    else:
+        with Mailer() as m:
+            r = m.deliver(msg)
+    if not r["ok"]:
+        return {"ok": False, "error": r["error"], "transient": r.get("transient"),
+                "refused": r.get("refused")}
 
     # It has gone. Record it before returning — a send we did not write down is
     # a send the cap cannot see and the Scanner cannot dedup against.
     row = log_outreach(lead.get("id"), draft)
+    licence.take("mails")
     return {"ok": True, "to": to, "outreach_log_id": row,
-            "sent_today": already + 1, "cap": cap}
+            "sent_today": already + 1, "cap": cap, "copied": bool(r.get("copied"))}
 
 
 def preview(lead: dict, company: dict, draft: str = "", write_html_to: str = "") -> dict:
@@ -605,6 +1198,170 @@ def preview(lead: dict, company: dict, draft: str = "", write_html_to: str = "")
         out["written_to"] = write_html_to
     return out
 
+# ---------------------------------------------------------------------------
+# BOUNCES — the mails that came back, read out of his own inbox
+# ---------------------------------------------------------------------------
+#
+# "Undelivered Mail Returned to Sender ... <mqasim@uniquerealestate.ae>: host
+#  smtp.google.com said: 550-5.1.1 The email account that you tried to reach
+#  does not exist."
+#
+# His mail server accepted the mail and passed it on; the receiving side sent
+# it back. That report lands in HIS inbox, not the agency's, so the Mail room
+# kept calling the lead "written to" while the address did not exist. The
+# reports are read from his inbox — read-only, nothing marked, moved or
+# deleted — and the mail and the lead are marked as bounced, with the reason in
+# plain words.
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+           "Nov", "Dec")
+BOUNCE_FROM = ("MAILER-DAEMON", "postmaster", "Mail Delivery")
+_ADDR = r"[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+
+
+def bounce_words(status="", said="") -> str:
+    """What a bounce means, in his words."""
+    t = f"{status} {said}".lower()
+    if re.search(r"5\.1\.[0-3]|does not exist|no such user|user unknown|unknown user|"
+                 r"not found|invalid recipient|address rejected|nosuchuser|"
+                 r"mailbox unavailable|recipient.*(?:unknown|rejected)", t):
+        return "the address does not exist"
+    if re.search(r"5\.2\.2|mailbox full|quota|over quota|insufficient storage", t):
+        return "their mailbox is full"
+    if re.search(r"5\.1\.2|domain.*(?:not found|does not exist)|host not found|"
+                 r"no mx|name service error", t):
+        return "that domain does not take mail"
+    if re.search(r"5\.7\.|spam|blocked|blacklist|blocklist|policy|rejected due|"
+                 r"not authori[sz]ed|dmarc|spf", t):
+        return "their server refused it as unwanted mail"
+    s = " ".join(str(said or "").split())
+    return "it came back: " + (s[:140] if s else (status or "no reason given"))
+
+
+def parse_bounce(raw) -> list:
+    """
+    The failed recipients in one bounce report: [{address, status, said, words}].
+    Reads the standard delivery-status part when there is one, and the
+    "<address>: host ... said: 550 ..." text Postfix writes when there is not.
+    Delayed-delivery warnings (4.x.x) are not bounces and are left out.
+    """
+    import email
+    from email import policy
+    msg = email.message_from_bytes(raw if isinstance(raw, bytes) else str(raw).encode(),
+                                   policy=policy.default)
+    found = {}
+    for part in msg.walk():
+        if part.get_content_type() != "message/delivery-status":
+            continue
+        blocks = part.get_payload() if part.is_multipart() else []
+        if not isinstance(blocks, list):
+            blocks = []
+        for b in blocks:
+            rcpt = str(b.get("Final-Recipient") or b.get("Original-Recipient") or "")
+            m = re.search(_ADDR, rcpt)
+            if not m:
+                continue
+            status = str(b.get("Status") or "").strip()
+            action = str(b.get("Action") or "").strip().lower()
+            if action and action not in ("failed",):
+                continue
+            if status and not status.startswith("5"):
+                continue
+            said = " ".join(str(b.get("Diagnostic-Code") or "").split())
+            said = re.sub(r"^smtp;\s*", "", said, flags=re.I)
+            found[m.group(0).lower()] = {"address": m.group(0).lower(), "status": status,
+                                         "said": said[:300]}
+    if not found:
+        text = ""
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                try:
+                    text += part.get_content() + "\n"
+                except Exception:
+                    pass
+        for m in re.finditer(r"<(" + _ADDR + r")>:\s*(.+?)(?=\n\s*\n|\n<|\Z)", text, re.S):
+            said = " ".join(m.group(2).split())
+            code = re.search(r"\b([45]\d\d)[ -]([45]\.\d{1,3}\.\d{1,3})?", said)
+            if code and code.group(1).startswith("4"):
+                continue
+            found[m.group(1).lower()] = {
+                "address": m.group(1).lower(),
+                "status": (code.group(2) or code.group(1)) if code else "",
+                "said": said[:300]}
+    out = []
+    for f in found.values():
+        f["words"] = bounce_words(f["status"], f["said"])
+        out.append(f)
+    return out
+
+
+def read_bounces(days=10, im=None) -> dict:
+    """Bounce reports in his inbox from the last `days` days. Read-only."""
+    import time as _t
+    own = im is None
+    try:
+        im = im or imap_open()
+    except Exception as e:
+        return {"ok": False, "error": f"could not open your mailbox to look for bounces "
+                                      f"({type(e).__name__}: {e})", "bounces": []}
+    try:
+        im.select("INBOX", readonly=True)
+        d = _t.localtime(_t.time() - days * 86400)
+        since = f"{d.tm_mday:02d}-{_MONTHS[d.tm_mon - 1]}-{d.tm_year}"
+        ids = []
+        for who in BOUNCE_FROM:
+            typ, data = im.search(None, f'(SINCE {since} FROM "{who}")')
+            for i in ((data or [b""])[0] or b"").split():
+                if i not in ids:
+                    ids.append(i)
+        out = []
+        for i in ids[-200:]:
+            typ, parts = im.fetch(i, "(BODY.PEEK[])")
+            raw = next((p[1] for p in parts or [] if isinstance(p, tuple)), b"")
+            for b in parse_bounce(raw):
+                b["message"] = i.decode() if isinstance(i, bytes) else str(i)
+                out.append(b)
+        return {"ok": True, "bounces": out, "looked_at": len(ids)}
+    except Exception as e:
+        return {"ok": False, "error": f"could not read the bounce reports "
+                                      f"({type(e).__name__}: {e})", "bounces": []}
+    finally:
+        if own:
+            try:
+                im.logout()
+            except Exception:
+                pass
+
+
+def mark_bounces(bounces) -> int:
+    """Mark the mails (and their leads) that came back. Returns how many are new."""
+    import sqlite3
+    import time as _t
+    from coordination import board as _board
+    new = 0
+    with sqlite3.connect(_board.DB, timeout=30) as c:
+        _board._migrate(c)
+        for b in bounces or []:
+            addr = (b.get("address") or "").strip().lower()
+            if not addr:
+                continue
+            cur = c.execute(
+                "UPDATE outreach_queue SET bounced_at=?, bounce_reason=?"
+                " WHERE lower(to_email)=? AND status='sent' AND bounced_at IS NULL",
+                (int(_t.time()), (b.get("words") or "it came back")[:200], addr))
+            new += cur.rowcount or 0
+            c.execute("UPDATE leads SET stage='bounced' WHERE lower(email)=?", (addr,))
+    return new
+
+
+def check_bounces(days=10) -> dict:
+    """Read his inbox for bounces and mark them. {ok, new, bounces, error}."""
+    r = read_bounces(days)
+    if not r.get("ok"):
+        return {"ok": False, "new": 0, "bounces": [], "error": r.get("error")}
+    n = mark_bounces(r["bounces"])
+    return {"ok": True, "new": n, "bounces": r["bounces"], "looked_at": r.get("looked_at", 0)}
+
 
 if __name__ == "__main__":  # show the EMAIL, not the plan (pure, no side effects)
     import argparse
@@ -620,7 +1377,7 @@ if __name__ == "__main__":  # show the EMAIL, not the plan (pure, no side effect
                     "tagline": "Glass & aluminium, done properly since 2014",
                     "phone": "+971 4 000 0000", "whatsapp": "+971 50 000 0000",
                     "website": "https://glassworks.ae",
-                    "areas": ["Dubai", "Abu Dhabi", "Sharjah"]}
+                    "areas": uae.served()}
 
     if a.plan:
         import json

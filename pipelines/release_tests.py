@@ -1,0 +1,743 @@
+"""
+release_tests.py — run: python -m pipelines.release_tests
+
+The IT Releaser: the one desk allowed to write to the owner's website.
+
+"if it cannot make changes to site then what was full acess of website and the
+ files uploaded into the website?"
+
+His approval used to go into a table nothing read. This is the desk that reads
+it — which makes it the single most dangerous piece of code in the agency, so
+the tests are mostly about what it REFUSES to do:
+
+  * it never touches a change he has not approved
+  * it never writes on a red test suite
+  * it never runs a routine that is not on the allow-list, however the row asks
+  * it never leaves a change half-applied — if the page will not confirm it, it
+    goes straight back
+  * and every outcome, including every failure, ends up somewhere he can see
+
+Everything runs against a throwaway cabinet with the site stubbed out. No real
+website is contacted.
+"""
+import json
+import sqlite3
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+from coordination import board, changelog
+from . import it_release as R, site_api
+
+_fail = []
+
+
+def check(name, got, want):
+    if got == want:
+        print(f"  ok  {name}")
+    else:
+        print(f"FAIL  {name}\n        got:  {got!r}\n        want: {want!r}")
+        _fail.append(name)
+
+
+def _fresh_db():
+    d = Path(tempfile.mkdtemp())
+    db = d / "agency.db"
+    con = sqlite3.connect(db)
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql")
+                      .read_text(encoding="utf-8"))
+    con.commit()
+    con.close()
+    board.DB = db
+    board.ensure_schema()
+    return db
+
+
+def _sql(q, args=()):
+    c = sqlite3.connect(board.DB)
+    c.row_factory = sqlite3.Row
+    try:
+        return [dict(r) for r in c.execute(q, args)]
+    finally:
+        c.close()
+
+
+VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+
+
+def _queue(detail, status="approved"):
+    """One row in his approval queue, in the shape the Fixer writes."""
+    cid = board.queue_site_change("it-fixer", "fix_bug", detail)
+    if status != "pending":
+        board.decide_site_change(cid, status)
+    return cid
+
+
+def _ticket(detail="No viewport meta tag"):
+    with sqlite3.connect(board.DB) as c:
+        return c.execute(
+            "INSERT INTO site_issues(kind,severity,detail,url,status,found_by,found_at)"
+            " VALUES('bug','high',?,'https://x/','in_review','it-watcher',?)",
+            (detail, int(time.time()))).lastrowid
+
+
+FULL = {"mode": "full", "base": "https://x.test/agency-api/index.php",
+        "token": "t" * 40, "site": "https://x.test"}
+
+
+class _Stub:
+    """
+    His website, as a dict, stubbed at site_api.call and NOT any higher.
+
+    THE FIRST VERSION REPLACED put_head_block ITSELF, and that quietly stopped
+    testing the thing that matters most about a release: put_head_block is
+    where the change log is written. With it stubbed out, the happy-path test
+    asserted a log line that the real code writes and the test could never have
+    produced — it failed for the right reason and for entirely the wrong cause.
+
+    Stubbing one level down means everything above the HTTP call is the real
+    code: the write, the log line, the undo command, the fingerprint refresh.
+    """
+
+    def __init__(self, pages=None, accept=True, echo=True):
+        self.pages = dict(pages or {"includes/header.php": "<head></head>"})
+        self.writes, self.undos = [], []
+        self.accept, self.echo = accept, echo
+
+    def __enter__(self):
+        self.real = (site_api.call, site_api.settings, site_api.why_not_ready,
+                     R.tests_pass)
+        site_api.call = self._call
+        site_api.settings = lambda env=None: dict(FULL)
+        site_api.why_not_ready = lambda s=None: ""
+        R.tests_pass = lambda timeout=None: {"ok": True, "took_s": 1,
+                                             "why": "all suites green"}
+        return self
+
+    def __exit__(self, *a):
+        (site_api.call, site_api.settings, site_api.why_not_ready,
+         R.tests_pass) = self.real
+
+    def _call(self, path, method="GET", body=None, timeout=25, s=None):
+        body = body or {}
+        if path == "/pages" and method == "GET":
+            return {"ok": True, "pages": [{"page": p, "bytes": len(h),
+                                           "changed": "t"}
+                                          for p, h in self.pages.items()]}
+        if path.startswith("/pages/") and method == "GET":
+            name = path.split("/", 2)[2]
+            if name not in self.pages:
+                return {"ok": False, "error": "no such page", "status": 404}
+            return {"ok": True, "page": name, "html": self.pages[name]}
+        if path == "/head" and method == "POST":
+            self.writes.append((body["page"], body["id"], "it-releaser"))
+            if not self.accept:
+                return {"ok": False, "error": "the server said no", "status": 400}
+            if self.echo:
+                self.pages[body["page"]] = (
+                    f"<!-- agency:{body['id']} -->{body['html']}"
+                    f"<!-- /agency:{body['id']} -->")
+            return {"ok": True, "page": body["page"], "backup": "header.bak"}
+        if path == "/pages" and method == "POST":
+            self.pages[body["page"]] = body["html"]
+            return {"ok": True, "page": body["page"], "backup": "page.bak"}
+        if path == "/rollback" and method == "POST":
+            self.undos.append(body.get("page", ""))
+            self.pages[body.get("page", "")] = "<head></head>"
+            return {"ok": True, "page": body.get("page", "")}
+        return {"ok": False, "error": f"the stub has no {method} {path}"}
+
+
+# ---------------------------------------------------------------------------
+
+def test_nothing_he_has_not_approved_is_ever_touched():
+    """
+    The first guard, and the one the handbook is loudest about. The Fixer
+    queues, HE decides, this applies. No desk does two of those jobs.
+    """
+    print("\nA change he has not answered is not a change:")
+    _fresh_db()
+    _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                      "block": "viewport", "html": VIEWPORT}},
+           status="pending")
+    with _Stub() as site:
+        r = R.run()
+    check("it refuses to run", r["ok"], False)
+    check("nothing was written", site.writes, [])
+    check("and it tells him it is waiting on HIM", r["waiting_on_you"], 1)
+    check("in words, not a code",
+          "waiting for your yes or no" in r["error"], True)
+    check("the row is untouched",
+          _sql("SELECT status FROM site_queue")[0]["status"], "pending")
+
+    print("\n...and a change he turned down stays turned down:")
+    _fresh_db()
+    _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                      "block": "viewport", "html": VIEWPORT}},
+           status="rejected")
+    with _Stub() as site:
+        r = R.run()
+    check("still nothing written", site.writes, [])
+    check("and it is not counted as waiting on him", r["waiting_on_you"], 0)
+
+
+def test_nothing_to_release_is_grey_not_red():
+    """
+    WHY A SUCCESSFUL RUN HAD NEVER HAPPENED.
+
+    A full day run on a fresh cabinet, against his real site:
+
+        failed   IT carries out what you approved
+                 IT RELEASER — Nothing to put on the site — nobody has
+                 approved anything since the last pass.
+
+    ok:false with no idle flag, so exit_code() gave the shell a 1 and the run
+    painted it red. On a day with nothing approved — most days — every run
+    therefore ended with a failed step however well the rest of the agency did.
+    The Releaser looked, found nothing to put on the site, and put nothing on
+    the site. That is the job done, not failed.
+
+    The runner already has the grey state for exactly this. The Releaser just
+    never asked for it.
+    """
+    from coordination import deskwork
+    print("\nNothing approved, nothing waiting — grey, and exits clean:")
+    _fresh_db()
+    with _Stub() as site:
+        r = R.run()
+    check("still reports it did not release", r["ok"], False)
+    check("but says it was idle, not broken", r.get("idle"), True)
+    check("so the shell sees success", deskwork.exit_code(r), 0)
+    check("and nothing was written", site.writes, [])
+
+    print("\nChanges waiting on HIM — still grey, still counted for him:")
+    _fresh_db()
+    _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                      "block": "viewport", "html": VIEWPORT}},
+           status="pending")
+    with _Stub() as site:
+        r = R.run()
+    check("idle — the Releaser is not the thing holding it up",
+          deskwork.exit_code(r), 0)
+    check("and the count he can act on is still there", r["waiting_on_you"], 1)
+
+    print("\nThe site watcher follows the same rule — not set up is grey:")
+    from pipelines import site_watch
+    s = site_api.settings({"SITE_MODE": "readonly"})
+    r = site_watch.look(s)
+    check("read-only is idle, not a failure", r.get("idle"), True)
+    check("so the day run does not paint it red", deskwork.exit_code(r), 0)
+    check("and it still says why it could not look",
+          "cannot see your files" in r.get("why", ""), True)
+    s = site_api.settings({"SITE_MODE": "full"})
+    check("a box not filled in is idle too",
+          site_watch.look(s).get("idle"), True)
+
+    print("\nA site it cannot reach is STILL red — that one is broken:")
+    from pipelines import day_run
+    check("the runner's verdict for a crash is unchanged",
+          day_run._verdict("", 1), "failed")
+    check("and an idle step is grey",
+          day_run._verdict(json.dumps({"ok": False, "idle": True}), 0), "idle")
+
+
+def test_a_red_suite_stops_everything():
+    """
+    Handbook: a change goes out after the tests pass, not before. Asserted here
+    rather than trusted, because this is the one desk where trusting it means
+    writing untested code onto the website that brings him work.
+    """
+    print("\nNothing goes on the website while the tests are red:")
+    _fresh_db()
+    cid = _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                            "block": "viewport", "html": VIEWPORT}})
+    with _Stub() as site:
+        R.tests_pass = lambda timeout=None: {
+            "ok": False, "took_s": 12, "failing": ["FAIL  pipelines.leads_tests"],
+            "why": "the test suite is red — nothing goes on the website until "
+                   "it is green again: FAIL  pipelines.leads_tests"}
+        r = R.run()
+    check("it refuses", r["ok"], False)
+    check("nothing was written", site.writes, [])
+    check("it names the suite that failed", "leads_tests" in r["error"], True)
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    # HIS YES STANDS. Marking it failed threw his decision away over a fault
+    # in this program — "i asked to change the mail it did not change" — and
+    # he would have had to find it and approve it all over again.
+    check("his approval is kept, not thrown away", row["status"], "approved")
+    check("with the reason he can read", "test suite is red" in row["note"], True)
+    check("and when it will go", "once the tests pass" in row["note"], True)
+    # AND IT HAS TO BE SOMEWHERE HE LOOKS.
+    log = changelog.recent()["changes"]
+    check("the wait is in the change log, not just the row", len(log), 1)
+    check("marked as not having happened", log[0]["ok"], 0)
+    check("in words he can act on",
+          "waiting" in log[0]["summary"] and "tests must pass" in log[0]["summary"], True)
+
+    print("\n...and it goes by itself once the tests are green:")
+    with _Stub() as site:
+        r = R.run()
+    check("it went on this time", r["applied"], 1)
+    check("the change is on", _sql("SELECT status FROM site_queue WHERE id=?",
+                                   (cid,))[0]["status"], "applied")
+
+    print("\n...but he is the tie-breaker, and using that is on the record:")
+    _fresh_db()
+    cid = _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                            "block": "viewport", "html": VIEWPORT}})
+    with _Stub() as site:
+        R.tests_pass = lambda timeout=None: (_ for _ in ()).throw(
+            AssertionError("the suite must not run when it is skipped"))
+        r = R.run(skip_tests=True)
+    check("it goes", r["applied"], 1)
+    check("and the record says the tests were skipped",
+          "tests were skipped at your request"
+          in _sql("SELECT note FROM site_queue WHERE id=?", (cid,))[0]["note"], True)
+
+
+def test_only_the_named_routines_may_be_run():
+    """
+    A queue row can ask for a routine by name. getattr on whatever string is in
+    the row would happily run undo_schema — which strips the agency's markup
+    off every page — because a row said so. The allow-list is the difference
+    between a feature and a hole.
+    """
+    print("\nA row cannot name any routine it likes:")
+    _fresh_db()
+    cid = _queue({"issue_id": 1, "change": {"run": "undo_schema"}})
+    called = []
+    real = site_api.undo_schema
+    site_api.undo_schema = lambda *a, **k: called.append(1) or {"ok": True}
+    try:
+        with _Stub():
+            r = R.run()
+    finally:
+        site_api.undo_schema = real
+    check("it was not run", called, [])
+    check("it is counted as refused", r["refused"], 1)
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("and marked failed rather than quietly dropped", row["status"], "failed")
+    check("and he can see it happened", changelog.recent()["total"], 1)
+    check("naming what it would not do", "undo_schema" in row["note"], True)
+
+    print("\n...and one that IS on the list runs:")
+    _fresh_db()
+    _queue({"issue_id": 1, "change": {"run": "fix_canonical", "pages": ["index.php"]}})
+    ran = []
+    real = site_api.fix_canonical
+    site_api.fix_canonical = lambda agent=None, s=None, dry_run=False: (
+        ran.append(agent) or {"ok": True, "head": "pointed 8 canonical tag(s) home"})
+    try:
+        with _Stub():
+            r = R.run()
+    finally:
+        site_api.fix_canonical = real
+    check("it ran", len(ran), 1)
+    check("as the Releaser and nobody else", ran[0], "it-releaser")
+    check("and reported as applied", r["applied"], 1)
+
+
+def test_the_happy_path_end_to_end():
+    print("\nHe approved it, so it goes on — and everything says so:")
+    _fresh_db()
+    iid = _ticket()
+    cid = _queue({"issue_id": iid, "why": "phones render it desktop-sized",
+                  "change": {"page": "includes/header.php", "block": "viewport",
+                             "html": VIEWPORT}})
+    with _Stub() as site:
+        r = R.run()
+    check("one change written", r["applied"], 1)
+    check("to the right page and block",
+          site.writes, [("includes/header.php", "viewport", "it-releaser")])
+    check("and it is really on the page", VIEWPORT in site.pages["includes/header.php"], True)
+
+    row = _sql("SELECT status, note, applied_at FROM site_queue WHERE id=?", (cid,))[0]
+    check("the queue row is applied", row["status"], "applied")
+    check("with when", bool(row["applied_at"]), True)
+    check("and confirmation, not just 'ok'", "confirmed on the page" in row["note"], True)
+    check("the ticket that started it is closed off",
+          _sql("SELECT status FROM site_issues WHERE id=?", (iid,))[0]["status"],
+          "deployed")
+
+    log = changelog.recent()["changes"]
+    check("it is in the change log", len(log), 1)
+    check("attributed to the Releaser", log[0]["agent"], "it-releaser")
+    check("with the way back", "--remove-block viewport" in log[0]["undo_cmd"], True)
+
+    print("\n...and there is nothing left to do on the next pass:")
+    with _Stub() as site:
+        r2 = R.run()
+    check("it says so", r2["ok"], False)
+    check("and writes nothing again", site.writes, [])
+
+
+def test_a_blocked_write_carries_its_change_to_him():
+    """
+    His change log: five red "REFUSED — this approval carries no change and no
+    instruction". A desk other than the Releaser tried to write, was stopped,
+    and the note put to him held only the page name and a size. He approved
+    empty notes.
+    """
+    print("\nA desk that is stopped from writing puts the change itself to him:")
+    _fresh_db()
+    with _Stub() as site:
+        r = site_api.put_head_block("includes/header.php", "viewport", VIEWPORT,
+                                    agent="seo-lead")
+        check("the desk did not write", site.writes, [])
+        cid = r.get("queued")
+        row = _sql("SELECT kind, detail FROM site_queue WHERE id=?", (cid,))[0]
+        check("the note carries the markup",
+              json.loads(row["detail"])["change"]["html"], VIEWPORT)
+        ok, _why = R.carryable(row)
+        check("and it is something the Releaser can carry out", ok, True)
+        board.decide_site_change(cid, "approved")
+        got = R.run()
+        check("his yes puts it on", got["applied"], 1)
+        check("written by the Releaser, not the desk",
+              site.writes, [("includes/header.php", "viewport", "it-releaser")])
+
+    print("\n...and a whole page the same way:")
+    _fresh_db()
+    with _Stub(pages={"Home.html": "<html><body>old</body></html>"}) as site:
+        new_html = "<html><body>" + "A new home page for the business. " * 4 + "</body></html>"
+        r = site_api.put_page("Home.html", new_html, agent="it-fixer")
+        cid = r.get("queued")
+        board.decide_site_change(cid, "approved")
+        got = R.run()
+        check("the rewrite is carried out", got["applied"], 1)
+        check("and the page is the new one", site.pages["Home.html"], new_html)
+
+    print("\nAn empty note from an older build is never put to him:")
+    _fresh_db()
+    old = board.queue_site_change("seo-lead", "head_block",
+                                  {"page": "includes/header.php", "id": "schema",
+                                   "bytes": 812})
+    ok, why = R.carryable(_sql("SELECT * FROM site_queue WHERE id=?", (old,))[0])
+    check("seen as nothing to carry out", ok, False)
+    check("and the reason says what it was", "only a note" in why, True)
+    from coordination import state
+    check("it is not on his list",
+          [a for a in state.build().get("approvals") or []
+           if a.get("kind") == "site_change" and a.get("id") == old], [])
+    from coordination import leftovers
+    leftovers.tidy()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (old,))[0]
+    check("the clear-up takes it off, saying why",
+          (row["status"], "without asking you" in (row["note"] or "")), ("withdrawn", True))
+
+
+def test_the_change_log_says_what_changed_and_why():
+    """
+    "i want to know what the program had changed" — his panel said "rewrote
+    includes/footer.php", "rewrote includes/header.php", "rewrote Home.html"
+    and nothing else.
+    """
+    print("\nEvery change says what went, what came, and which approval asked for it:")
+    _fresh_db()
+    footer = "<footer>\n<p>Mail us: info@worlddeal.ae</p>\n<p>Dubai</p>\n</footer>"
+    header = "<header>\n<a href='mailto:info@worlddeal.ae'>info@worlddeal.ae</a>\n</header>"
+    with _Stub(pages={"includes/footer.php": footer, "includes/header.php": header}) as site:
+        cid = _queue({"why": "the .ae address has no mail server, so enquiries bounce",
+                      "change": {"replace": "info@worlddeal.ae", "with": "info@worlddeal.com",
+                                 "pages": ["includes/footer.php", "includes/header.php"]}})
+        R.run()
+    log = [c for c in changelog.recent()["changes"] if c["source"] == "agency"]
+    foot = next(c for c in log if c["page"] == "includes/footer.php")
+    check("the summary says what, not 'rewrote'",
+          foot["summary"].startswith("changed \u201cinfo@worlddeal.ae\u201d to \u201cinfo@worlddeal.com\u201d"),
+          True)
+    check("the exact line that went", any("removed:" in d and "worlddeal.ae" in d
+                                          for d in foot["detail"]), True)
+    check("and what replaced it", any("put in its place:" in d and "worlddeal.com" in d
+                                      for d in foot["detail"]), True)
+    check("and the approval behind it, with his reason",
+          any("the .ae address has no mail server" in b for b in foot["because"]), True)
+
+    print("\n...and a change made before lines were recorded still says why:")
+    with sqlite3.connect(board.DB) as c:
+        c.execute("UPDATE site_changes SET detail=NULL, summary='rewrote includes/header.php'"
+                  " WHERE page='includes/header.php'")
+    head = next(c for c in changelog.recent()["changes"] if c["page"] == "includes/header.php")
+    check("the approval explains the old 'rewrote' line",
+          any(b.startswith("what you approved: change") for b in head["because"]), True)
+    check("and the command-line view shows it too",
+          "what you approved" in changelog.explain(), True)
+
+
+def test_a_change_the_page_will_not_confirm_goes_straight_back():
+    """
+    'The server said ok' and 'the change is on the page' are different claims.
+    A write that cannot be confirmed is undone at once: a half-applied change
+    nobody knows the shape of is worse than no change at all.
+    """
+    print("\nWritten, not there, put back:")
+    _fresh_db()
+    iid = _ticket()
+    cid = _queue({"issue_id": iid, "change": {"page": "includes/header.php",
+                                              "block": "viewport", "html": VIEWPORT}})
+    # accepts the write and does not actually change the page
+    with _Stub(echo=False) as site:
+        r = R.run()
+    check("not counted as applied", r["applied"], 0)
+    check("it was undone immediately", site.undos, ["includes/header.php"])
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("marked failed", row["status"], "failed")
+    check("saying nothing was left half-done",
+          "Nothing has been left half-done" in row["note"], True)
+    check("the ticket is NOT closed off",
+          _sql("SELECT status FROM site_issues WHERE id=?", (iid,))[0]["status"],
+          "in_review")
+    check("and the log records the attempt rather than hiding it",
+          changelog.recent()["changes"][0]["ok"], 0)
+
+    print("\n...and a write the server simply refuses is recorded too:")
+    _fresh_db()
+    cid = _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                            "block": "viewport", "html": VIEWPORT}})
+    with _Stub(accept=False) as site:
+        r = R.run()
+    check("not applied", r["applied"], 0)
+    check("nothing to undo, because nothing was written", site.undos, [])
+    check("marked failed with what the server said",
+          "the server said no" in
+          _sql("SELECT note FROM site_queue WHERE id=?", (cid,))[0]["note"], True)
+
+
+def test_advice_he_approved_is_not_pretended_at():
+    """
+    Some queued items are advice — hosting changes, wording he has to decide.
+    Approving one means 'noted', not 'do it'. There is nothing to write and the
+    Releaser must not invent something adjacent that looks similar.
+    """
+    print("\nApproving advice does not make it a change:")
+    _fresh_db()
+    cid = _queue({"issue_id": 1, "verdict": "This one needs you",
+                  "why": "not on HTTPS",
+                  "what_to_do": ["Turn on the certificate in your hosting panel"],
+                  "needs": "a change in your hosting panel"})
+    with _Stub() as site:
+        r = R.run()
+    check("nothing was written", site.writes, [])
+    check("it is counted as noted, not applied to the site", r["noted"], 1)
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("it leaves his queue", row["status"], "applied")
+    check("saying plainly that it was for him",
+          "always something for you to do" in row["note"], True)
+
+
+def test_a_site_it_cannot_reach_fails_loudly():
+    print("\nNo way to reach the site is a failure he is told about:")
+    _fresh_db()
+    cid = _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                            "block": "viewport", "html": VIEWPORT}})
+    real = site_api.why_not_ready
+    site_api.why_not_ready = lambda s=None: "there is no Admin API token"
+    try:
+        r = R.run()
+    finally:
+        site_api.why_not_ready = real
+    check("it refuses", r["ok"], False)
+    check("and says which of the two things is missing",
+          "no Admin API token" in r["error"], True)
+    check("the change is marked failed, not silently left approved",
+          _sql("SELECT status FROM site_queue WHERE id=?", (cid,))[0]["status"],
+          "failed")
+    check("and it shows up in the change log rather than vanishing",
+          changelog.recent()["changes"][0]["error"], "could not reach your "
+          "website: there is no Admin API token")
+
+
+def test_two_releases_do_not_overlap():
+    print("\nOne desk at a time, even if two are started:")
+    _fresh_db()
+    _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                      "block": "viewport", "html": VIEWPORT}})
+    board.acquire_lock(R.LOCK, "another-releaser", wait=False, ttl=300)
+    try:
+        with _Stub() as site:
+            r = R.run()
+        check("the second one stands down", r["ok"], False)
+        check("without writing anything", site.writes, [])
+        check("and says why", "already going" in r["error"], True)
+    finally:
+        board.release_lock(R.LOCK, "another-releaser")
+
+    print("\n...and once the first finishes, the second goes:")
+    with _Stub() as site:
+        r = R.run()
+    check("written", r["applied"], 1)
+
+
+def test_the_dry_run_writes_nothing():
+    print("\n--dry-run works it all out and touches nothing:")
+    _fresh_db()
+    cid = _queue({"issue_id": 1, "change": {"page": "includes/header.php",
+                                            "block": "viewport", "html": VIEWPORT}})
+    with _Stub() as site:
+        r = R.run(dry_run=True)
+    check("it reports what it would do", len(r["changes"]), 1)
+    check("naming the page", r["changes"][0]["page"], "includes/header.php")
+    check("but wrote nothing", site.writes, [])
+    check("and left the row approved, ready for the real pass",
+          _sql("SELECT status FROM site_queue WHERE id=?", (cid,))[0]["status"],
+          "approved")
+
+
+# ---------------------------------------------------------------------------
+# HIS SITE NOT ANSWERING IS A WAIT, NOT A REFUSAL
+# ---------------------------------------------------------------------------
+#
+# "approved a blog and passed it to publish to wesbite but this issue happenes
+#  ... why the changes are still not happening?"
+
+DROPPED = {"ok": False, "unreachable": True,
+           "error": "could not reach your site: ConnectionResetError: forcibly closed"}
+HIS_ERROR = ("could not reach your site: SiteResting: your website stopped answering "
+             "this computer (it closed the connection at 14:24) — the agency is "
+             "leaving it alone until 14:54 so a firewall block is not made worse. "
+             "Nothing is wrong with the code.")
+BLOG = "blog-glass-railing-uae-cost-fixing-types-fitting-guide.html"
+BLOG_HTML = ("<h1>Glass railing in the UAE</h1><p>" + "A real sentence about fixing "
+             "glass balustrades on site, measured and fitted by our own team. " * 4 + "</p>")
+
+
+def _blog():
+    return board.queue_site_change("content-writer", "new_page", {
+        "change": {"page": BLOG, "html": BLOG_HTML}, "title": "Glass railing guide",
+        "why": "a new page"})
+
+
+class _Down(_Stub):
+    """His site not answering: every call, or only the reads after a write."""
+    def __init__(self, after_write=False, **kw):
+        super().__init__(**kw)
+        self.after_write, self.wrote = after_write, False
+
+    def _call(self, path, method="GET", body=None, timeout=25, s=None):
+        if self.after_write and not self.wrote:
+            r = super()._call(path, method, body, timeout, s)
+            self.wrote = self.wrote or method == "POST"
+            return r
+        return dict(DROPPED)
+
+
+def test_his_site_not_answering_keeps_his_approval():
+    from coordination import sitepace
+    print("\nThe agency has paused contact with his site: the change waits:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    c = sitepace._db()
+    c.execute("INSERT INTO site_pace(id,next_at,resting_until,why) VALUES(1,0,?,?)",
+              (time.time() + 600, "it closed the connection at 14:24"))
+    c.close()
+    ran_tests = []
+    with _Stub() as site:
+        R.tests_pass = lambda timeout=None: ran_tests.append(1) or {"ok": True, "took_s": 1}
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("his approval is kept", row["status"], "approved")
+    check("with a note saying it waits and when it goes",
+          "waiting for your website" in row["note"] and "goes by itself" in row["note"], True)
+    check("nothing is tried on the site, and no test suite run in the pause",
+          (site.writes, ran_tests), ([], []))
+    check("and it is not logged as refused",
+          [x for x in changelog.recent()["changes"] if not x.get("ok")], [])
+    check("the run says it waits, and is not painted red", (r.get("idle"), r.get("waiting")), (True, 1))
+
+    print("\n...a connection that drops during the publish waits too:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    with _Down() as site:
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("still approved, not failed", row["status"], "approved")
+    check("and the summary says it waits", "waiting for your website" in r["summary"], True)
+    check("no 'tried and could not' line in the change log",
+          [x for x in changelog.recent()["changes"] if not x.get("ok")], [])
+
+    print("\n...and the blog refused the way his was comes back and goes live:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    board.mark_site_change(cid, "failed", HIS_ERROR)
+    with _Stub(pages={}) as site:
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("put back in the queue and published", (row["status"], r["applied"]), ("applied", 1))
+    check("it is on his site", BLOG_HTML in site.pages.get(BLOG, ""), True)
+
+    print("\n...but a missing setting still fails loudly, and stays failed:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    board.mark_site_change(cid, "failed", "could not reach your website: there is no Admin API token")
+    with _Stub(pages={}):
+        R.run()
+    check("not put back", _sql("SELECT status FROM site_queue WHERE id=?", (cid,))[0]["status"],
+          "failed")
+
+
+def test_a_write_that_cannot_be_read_back_is_not_undone():
+    print("\nWritten, then the site stops answering before it can be read back:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    with _Down(after_write=True, pages={}) as site:
+        r = R.run()
+    row = _sql("SELECT status, note FROM site_queue WHERE id=?", (cid,))[0]
+    check("the write stands — nothing is undone", (site.undos, BLOG in site.pages), ([], True))
+    check("recorded as done, with a note to check it",
+          (row["status"], "open the page to check it" in row["note"]), ("applied", True))
+
+
+def test_the_waiter_goes_when_the_pause_is_over():
+    from coordination import sitepace
+    print("\nThe waiter sits out the pause, then publishes:")
+    _fresh_db()
+    cid = _blog(); board.decide_site_change(cid, "approved")
+    c = sitepace._db()
+    c.execute("INSERT INTO site_pace(id,next_at,resting_until,why) VALUES(1,0,?,?)",
+              (time.time() + 300, "it closed the connection"))
+    c.close()
+    slept = []
+
+    def sleep(sec):
+        slept.append(round(sec))
+        sitepace.clear()                         # the pause ends while it waits
+    with _Stub(pages={}) as site:
+        r = R.when_site_answers(sleep=sleep)
+    check("it waited first", bool(slept), True)
+    check("then published the blog", (r.get("applied"), BLOG in site.pages), (1, True))
+    check("and only one waiter can wait at a time",
+          board.acquire_lock(R.RETRY_LOCK, "test", wait=False), True)
+
+
+def main():
+    real = board.DB
+    _fresh_db()
+    try:
+        test_nothing_he_has_not_approved_is_ever_touched()
+        test_nothing_to_release_is_grey_not_red()
+        test_a_red_suite_stops_everything()
+        test_only_the_named_routines_may_be_run()
+        test_the_happy_path_end_to_end()
+        test_a_blocked_write_carries_its_change_to_him()
+        test_the_change_log_says_what_changed_and_why()
+        test_a_change_the_page_will_not_confirm_goes_straight_back()
+        test_advice_he_approved_is_not_pretended_at()
+        test_a_site_it_cannot_reach_fails_loudly()
+        test_two_releases_do_not_overlap()
+        test_the_dry_run_writes_nothing()
+        test_his_site_not_answering_keeps_his_approval()
+        test_a_write_that_cannot_be_read_back_is_not_undone()
+        test_the_waiter_goes_when_the_pause_is_over()
+    finally:
+        board.DB = real
+
+    print()
+    if _fail:
+        print(f"{len(_fail)} FAILED: {_fail}")
+        sys.exit(1)
+    print("all releaser tests passed")
+
+
+if __name__ == "__main__":
+    main()

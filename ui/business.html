@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your business</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/botix.css">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:'Geist',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:28px 16px 120px}
+main{max-width:760px;margin:0 auto;display:grid;gap:16px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.top a{color:var(--link);text-decoration:none;font-size:14px}
+h1{font-size:26px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+.lead{color:var(--muted);font-size:14.5px;line-height:1.6;margin:0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 22px 24px}
+h2{font-size:16px;font-weight:600;margin:0 0 4px}
+.hint{color:var(--muted);font-size:13px;line-height:1.55;margin:0 0 6px}
+label{display:block;font-size:12.5px;color:var(--etch);margin:14px 0 6px}
+input[type=text],input[type=number],select,textarea{width:100%;padding:11px 12px;border-radius:10px;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--text);font:inherit;font-size:15px}
+textarea{min-height:84px;resize:vertical;line-height:1.5}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--glass);outline-offset:2px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+@media (max-width:620px){.two{grid-template-columns:1fr}}
+.btn{padding:11px 16px;border-radius:10px;border:1px solid var(--glass);background:var(--glass);color:var(--accent-ink);
+  font:inherit;font-weight:600;font-size:15px;cursor:pointer}
+.btn.quiet{background:transparent;color:var(--glass)}
+.btn.small{padding:7px 11px;font-size:13px}
+.btn[disabled]{opacity:.55;cursor:progress}
+.note{padding:12px 14px;border-radius:10px;font-size:13.5px;line-height:1.6;
+  background:var(--note-bg);border:1px solid var(--note-line);color:var(--note-ink)}
+.note.ok{background:var(--ok-dim);border-color:var(--ok-line);color:var(--done)}
+.note.bad{background:var(--danger-dim);border-color:var(--bad-line);color:var(--stuck)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border-radius:999px;
+  border:1px solid var(--line2);background:var(--panel2);font-size:13px;cursor:pointer;user-select:none}
+.chip input{accent-color:var(--glass);margin:0}
+.chip.on{border-color:var(--glass);background:var(--glass-dim)}
+.chip .x{background:none;border:0;color:var(--muted);font-size:17px;line-height:1;cursor:pointer;padding:0 0 0 2px}
+.chip .x:hover{color:var(--ink)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.svc{border:1px solid var(--line2);border-radius:12px;padding:14px;margin-top:12px;background:var(--panel2)}
+.svc .row{display:flex;gap:10px;align-items:center}
+.svc .row input{flex:1}
+.svc .x{background:none;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px}
+.svc .chips .chip{background:var(--panel)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--bar-bg);border-top:1px solid var(--line);
+  padding:12px 16px;backdrop-filter:blur(6px)}
+.bar .in{max-width:760px;margin:0 auto;display:flex;gap:12px;align-items:center;justify-content:space-between}
+.bar .msg{font-size:13.5px;color:var(--muted)}
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:14px;line-height:1.5}
+.check input{margin-top:3px;accent-color:var(--glass);width:16px;height:16px;flex:none}
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <h1>Your business</h1>
+      <p class="lead">What you do, where, what you sell and who buys it. Every desk reads this.</p>
+    </div>
+    <a href="/">← Back to the office</a>
+  </div>
+
+  <div class="note" id="missing" style="display:none"></div>
+
+  <section>
+    <h2>Draft it from your website</h2>
+    <p class="hint">The agency reads your own pages and fills in the boxes below. Nothing is saved
+      until you check it and press Save.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+      <input type="text" id="draftUrl" placeholder="https://www.your-site.com" style="flex:1;min-width:220px">
+      <button class="btn quiet" id="draftBtn" onclick="drafting()">Draft it</button>
+    </div>
+    <div class="note" id="draftMsg" style="display:none;margin-top:12px"></div>
+  </section>
+
+  <section>
+    <h2>What you do</h2>
+    <div class="two">
+      <div><label for="bName">Business name</label><input type="text" id="bName" maxlength="80"></div>
+      <div><label for="bYears">Years in the trade</label><input type="number" id="bYears" min="0" max="99"></div>
+    </div>
+    <label for="bTrade">What the business does, in plain words</label>
+    <input type="text" id="bTrade" maxlength="120" placeholder="e.g. plumbing and heating repairs and installation">
+    <div class="two">
+      <div><label for="bShort">The same in two or three words</label>
+        <input type="text" id="bShort" maxlength="40" placeholder="e.g. plumbing & heating"></div>
+      <div><label for="bTag">Tagline</label><input type="text" id="bTag" maxlength="80"></div>
+    </div>
+    <label for="bDesc">One sentence a customer would understand</label>
+    <textarea id="bDesc" maxlength="240"></textarea>
+  </section>
+
+  <section>
+    <h2>Where</h2>
+    <div class="two">
+      <div><label for="pCountry">Country</label><select id="pCountry"></select></div>
+      <div><label for="pLang">Write in</label><select id="pLang"></select></div>
+    </div>
+    <div class="two">
+      <div><label for="pHome">Based in (town or city)</label><input type="text" id="pHome" maxlength="80"></div>
+      <div><label for="pCur">Currency (for the rule that no price is ever quoted)</label>
+        <input type="text" id="pCur" maxlength="8" placeholder="e.g. GBP"></div>
+    </div>
+    <label>Where you want customers</label>
+    <div class="chips" id="mktMode" role="radiogroup" aria-label="Where you want customers">
+      <label class="chip"><input type="radio" name="mkt" value="home"> Only in my country</label>
+      <label class="chip"><input type="radio" name="mkt" value="list"> In these countries</label>
+      <label class="chip"><input type="radio" name="mkt" value="world"> Worldwide</label>
+    </div>
+    <div id="mktBox" style="display:none">
+      <div class="chips" id="mktChips"></div>
+      <div style="margin-top:10px;max-width:320px"><label for="mktAdd" class="sr-only">Add a country</label>
+        <select id="mktAdd"><option value="">Add a country…</option></select></div>
+    </div>
+    <p class="hint" id="mktHint"></p>
+    <label for="pAreas">Areas you serve — one per line, nearest first</label>
+    <textarea id="pAreas" placeholder="Manchester&#10;Salford&#10;Stockport"></textarea>
+    <p class="hint" id="pAreasHint"></p>
+  </section>
+
+  <section>
+    <h2>Who buys from you</h2>
+    <p class="hint">The kinds of business the agency goes and finds for you. Private homes are left
+      out: writing to people at home is a different set of rules.</p>
+    <div class="chips" id="custChips"></div>
+  </section>
+
+  <section>
+    <h2>What you sell</h2>
+    <p class="hint">Each service, the other names people use for it, and who buys it.</p>
+    <div id="svcList"></div>
+    <button class="btn quiet small" style="margin-top:12px" onclick="addSvc()">Add a service</button>
+  </section>
+
+  <section>
+    <h2>Writing to businesses</h2>
+    <div class="note" id="ruleNote"></div>
+    <label class="check" id="ruleConfirmBox" style="display:none">
+      <input type="checkbox" id="ruleConfirm">
+      <span id="ruleConfirmText">I have checked my country's rules on marketing email to businesses, and they allow it.</span>
+    </label>
+    <div id="mktRules"></div>
+  </section>
+</main>
+
+<div class="bar"><div class="in">
+  <span class="msg" id="saveMsg">Nothing saved yet.</span>
+  <button class="btn" id="saveBtn" onclick="save()">Save</button>
+</div></div>
+
+<script>
+const $ = (q) => document.querySelector(q);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let P = null, OPT = null, CUST = new Set(), SVCS = [];
+
+async function get(url) { try { const r = await fetch(url); return await r.json(); } catch (e) { return {}; } }
+async function post(url, body) {
+  try { const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify(body)}); return await r.json(); }
+  catch (e) { return {ok: false, error: 'The office did not answer. Is the program still running?'}; }
+}
+function slug(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'service'; }
+function catLabel(k) { const c = (OPT.catalogue || []).find((x) => x.key === k); return c ? c.label : k.replace(/_/g, ' '); }
+
+// WHERE HE WANTS CUSTOMERS. Home stays where the business is based; these are
+// the countries the agency finds leads in, researches searches for and writes
+// to (coordination/profile.markets). They take turns, one per pass.
+let MKT = {mode: 'home', list: [], confirmed: []};
+function cname(cc) { return ((OPT.countries || []).find((c) => c.code === cc) || {}).name || cc; }
+function renderMkt() {
+  document.querySelectorAll('input[name=mkt]').forEach((r) => { r.checked = r.value === MKT.mode; r.parentElement.classList.toggle('on', r.checked); });
+  const home = $('#pCountry').value;
+  $('#mktBox').style.display = MKT.mode === 'home' ? 'none' : 'block';
+  $('#mktChips').innerHTML = MKT.list.map((cc) => `<span class="chip on">${esc(cname(cc))}${cc === home ? ' (home)' : ''}`
+    + `<button class="x" type="button" title="Remove ${esc(cname(cc))}" aria-label="Remove ${esc(cname(cc))}" onclick="dropMkt('${esc(cc)}')">×</button></span>`).join('')
+    || `<span class="hint">${MKT.mode === 'world' ? 'Optional: the countries to look for leads in first.' : 'Add the countries you want customers in.'}</span>`;
+  $('#mktHint').textContent = MKT.mode === 'home'
+    ? 'Leads, searches and posts are all for your own country.'
+    : MKT.mode === 'list'
+      ? 'Leads are found in each country in turn, SEO looks at what people there search for, and posts speak to all of them.'
+      : 'Posts and SEO speak to customers anywhere. Leads are still found country by country — the ones listed here, or your own country if none.';
+  renderRule();
+}
+function dropMkt(cc) { MKT.list = MKT.list.filter((x) => x !== cc); renderMkt(); }
+
+function fill(p) {
+  const b = p.business || {}, pl = p.place || {};
+  $('#bName').value = b.name || ''; $('#bYears').value = b.years || '';
+  $('#bTrade').value = b.trade || ''; $('#bShort').value = b.trade_short || '';
+  $('#bTag').value = b.tagline || ''; $('#bDesc').value = b.description || '';
+  $('#pCountry').value = p.country || '';
+  $('#pLang').value = p.language || 'en-GB';
+  $('#pHome').value = pl.home || ''; $('#pCur').value = p.currency || '';
+  $('#pAreas').value = (pl.served && pl.served.length ? pl.served : (pl.cities || [])).join('\n');
+  $('#pAreasHint').textContent = (pl.districts || []).length
+    ? `The lead finders also search ${pl.districts.length} districts inside these areas.` : '';
+  const ms = (p.markets || []).filter((cc) => cc);
+  MKT = {mode: p.worldwide ? 'world' : (ms.length > 1 || (ms.length === 1 && ms[0] !== p.country)) ? 'list' : 'home',
+         list: ms.length > 1 || p.worldwide || (ms[0] && ms[0] !== p.country) ? ms : [], confirmed: p.outreach_confirmed_for || []};
+  CUST = new Set(Object.keys(p.customers || {}));
+  const order = (p.service_order && p.service_order.length) ? p.service_order : Object.keys(p.services || {});
+  SVCS = order.filter((k) => (p.services || {})[k]).map((k) => ({key: k, ...p.services[k]}));
+  renderCust(); renderSvcs(); renderMkt();
+  const miss = p.missing || [];
+  $('#missing').style.display = miss.length ? 'block' : 'none';
+  $('#missing').textContent = miss.length ? 'Still needed before every desk can work for you: ' + miss.join(', ') + '.' : '';
+}
+
+function renderCust() {
+  const cat = OPT.catalogue || [];
+  const keys = [...new Set([...cat.map((c) => c.key), ...CUST])];
+  $('#custChips').innerHTML = keys.map((k) => `<label class="chip ${CUST.has(k) ? 'on' : ''}">`
+    + `<input type="checkbox" ${CUST.has(k) ? 'checked' : ''} onchange="togCust('${esc(k)}', this.checked)">`
+    + `${esc(catLabel(k))}</label>`).join('');
+}
+function togCust(k, on) { on ? CUST.add(k) : CUST.delete(k); renderCust(); renderSvcs(); }
+
+function renderSvcs() {
+  $('#svcList').innerHTML = SVCS.map((s, i) => `<div class="svc">`
+    + `<div class="row"><input type="text" value="${esc(s.label)}" placeholder="Service name" oninput="SVCS[${i}].label=this.value">`
+    + `<button class="x" title="Remove" onclick="SVCS.splice(${i},1);renderSvcs()">×</button></div>`
+    + `<label>Also called (comma between)</label><input type="text" value="${esc((s.names || []).join(', '))}" `
+    + `oninput="SVCS[${i}].names=this.value.split(',').map(x=>x.trim()).filter(Boolean)">`
+    + `<label>One line about it</label><input type="text" value="${esc(s.line || '')}" oninput="SVCS[${i}].line=this.value">`
+    + `<label>Who buys it</label><div class="chips">`
+    + [...CUST].map((k) => { const on = (s.buyers || []).includes(k);
+        return `<label class="chip ${on ? 'on' : ''}"><input type="checkbox" ${on ? 'checked' : ''} `
+          + `onchange="togBuyer(${i},'${esc(k)}',this.checked)">${esc(catLabel(k))}</label>`; }).join('')
+    + (CUST.size ? '' : `<span class="hint">Pick who buys from you first, above.</span>`)
+    + `</div></div>`).join('') || `<p class="hint">No services yet.</p>`;
+}
+function togBuyer(i, k, on) {
+  const b = new Set(SVCS[i].buyers || []); on ? b.add(k) : b.delete(k);
+  SVCS[i].buyers = [...b]; renderSvcs();
+}
+function addSvc() { SVCS.push({key: '', label: '', names: [], buyers: [], line: ''}); renderSvcs();
+  const ins = document.querySelectorAll('.svc input[type=text]'); if (ins.length) ins[ins.length - 4].focus(); }
+
+function renderRule() {
+  const cc = $('#pCountry').value, rules = (OPT.outreach || {});
+  const name = ((OPT.countries || []).find((c) => c.code === cc) || {}).name || 'your country';
+  const r = rules[cc] || {rule: 'confirm', law: ''};
+  const note = $('#ruleNote');
+  note.className = 'note' + (r.rule === 'allowed' ? ' ok' : r.rule === 'consent' ? ' bad' : '');
+  note.textContent = r.rule === 'allowed' ? 'The agency may write to businesses here, with an opt-out in every message. ' + r.law
+    : r.rule === 'consent' ? 'Businesses here must agree before they are emailed. The agency will write drafts for you and send nothing itself. ' + r.law
+    : `Email marketing rules in ${name} are not something the agency decides for you. Check what is allowed when writing to businesses, then tick the box. Until you do, the agency writes drafts and sends nothing.`;
+  $('#ruleConfirmBox').style.display = r.rule === 'confirm' ? 'flex' : 'none';
+  $('#ruleConfirmText').textContent = `I have checked ${name}'s rules on marketing email to businesses, and they allow it.`;
+  $('#ruleConfirm').checked = !!(P && P.outreach_confirmed);
+  // Each other market under its own country's rule, confirmed on its own.
+  const others = MKT.mode === 'home' ? [] : MKT.list.filter((x) => x && x !== cc);
+  $('#mktRules').innerHTML = others.map((m) => {
+    const rr = (OPT.outreach || {})[m] || {rule: 'confirm', law: ''};
+    const nm = cname(m);
+    const words = rr.rule === 'allowed' ? `${nm}: the agency may write to businesses, with an opt-out in every message. ${rr.law}`
+      : rr.rule === 'consent' ? `${nm}: businesses must agree before they are emailed, so for leads there the agency writes drafts and sends nothing. ${rr.law}`
+      : `${nm}: check what is allowed when writing to businesses there, then tick the box. Until you do, leads there get drafts only.`;
+    return `<div class="note${rr.rule === 'allowed' ? ' ok' : rr.rule === 'consent' ? ' bad' : ''}" style="margin-top:10px">${esc(words)}</div>`
+      + (rr.rule === 'confirm' ? `<label class="check"><input type="checkbox" data-mconfirm="${esc(m)}" ${MKT.confirmed.includes(m) ? 'checked' : ''}>
+        <span>I have checked ${esc(nm)}'s rules on marketing email to businesses, and they allow it.</span></label>` : '');
+  }).join('');
+  document.querySelectorAll('[data-mconfirm]').forEach((b) => b.onchange = () => {
+    const m = b.dataset.mconfirm; MKT.confirmed = MKT.confirmed.filter((x) => x !== m); if (b.checked) MKT.confirmed.push(m); });
+}
+
+async function drafting() {
+  const url = $('#draftUrl').value.trim(); const msg = $('#draftMsg');
+  $('#draftBtn').disabled = true; $('#draftBtn').textContent = 'Reading your website…';
+  const j = await post('/api/business/draft', {url});
+  $('#draftBtn').disabled = false; $('#draftBtn').textContent = 'Draft it';
+  msg.style.display = 'block';
+  if (!j.ok) { msg.className = 'note bad'; msg.textContent = j.error || 'Nothing could be drafted.'; return; }
+  msg.className = 'note ok'; msg.textContent = j.head + '.';
+  const d = j.draft || {};
+  fill({...P, ...d, business: {...(P.business || {}), ...Object.fromEntries(Object.entries(d.business || {}).filter(([k, v]) => v))},
+        place: {...(P.place || {}), ...(d.place || {})}, country: d.country || P.country,
+        missing: P.missing, outreach_confirmed: P.outreach_confirmed});
+}
+
+async function save() {
+  const services = {}, order = [];
+  for (const s of SVCS) {
+    if (!String(s.label || '').trim()) continue;
+    let key = s.key || slug(s.label); while (!s.key && services[key]) key += '_2';
+    const old = (P.services || {})[s.key] || {};
+    services[key] = {...old, label: s.label.trim(), names: s.names && s.names.length ? s.names : [s.label.trim().toLowerCase()],
+                     buyers: (s.buyers || []).filter((b) => CUST.has(b)), line: s.line || '',
+                     related: old.related || []};
+    order.push(key);
+  }
+  const customers = {};
+  for (const k of CUST) {
+    const old = (P.customers || {})[k];
+    const c = (OPT.catalogue || []).find((x) => x.key === k) || {};
+    customers[k] = old || {why: c.label || k, queries: c.queries || [k.replace(/_/g, ' ')]};
+  }
+  const areas = $('#pAreas').value.split(/\n|,/).map((x) => x.trim()).filter(Boolean);
+  const pl = P.place || {};
+  const body = {
+    business: {...(P.business || {}), name: $('#bName').value.trim(), years: $('#bYears').value.trim(),
+               trade: $('#bTrade').value.trim(), trade_short: $('#bShort').value.trim(),
+               tagline: $('#bTag').value.trim(), description: $('#bDesc').value.trim()},
+    country: $('#pCountry').value, language: $('#pLang').value, currency: $('#pCur').value.trim().toUpperCase(),
+    place: {...pl, home: $('#pHome').value.trim(), served: areas,
+            cities: (pl.regions || []).length ? (pl.cities || []) : areas},
+    services, service_order: order, customers,
+    local_customers: [...CUST].filter((k) => ((OPT.catalogue || []).find((x) => x.key === k) || {}).local),
+    outreach_confirmed: $('#ruleConfirm').checked,
+    worldwide: MKT.mode === 'world',
+    markets: MKT.mode === 'home' ? [] : MKT.list,
+    outreach_confirmed_for: MKT.confirmed.filter((m) => MKT.list.includes(m)),
+  };
+  $('#saveBtn').disabled = true; $('#saveMsg').textContent = 'Saving…';
+  const j = await post('/api/business', body);
+  $('#saveBtn').disabled = false;
+  if (!j.ok) { $('#saveMsg').textContent = j.error || 'Could not save.'; return; }
+  P = await get('/api/business'); fill(P);
+  $('#saveMsg').textContent = 'Saved. ' + ((j.missing || []).length ? 'Still needed: ' + j.missing.join(', ') + '.'
+    : 'Every desk works from this from the next run.');
+}
+
+(async function boot() {
+  [OPT, P] = await Promise.all([get('/api/business/options'), get('/api/business')]);
+  $('#pCountry').innerHTML = '<option value="">Choose…</option>'
+    + (OPT.countries || []).map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
+  $('#pLang').innerHTML = (OPT.languages || []).map((l) => `<option value="${esc(l.code)}">${esc(l.name)}</option>`).join('');
+  $('#pCountry').addEventListener('change', renderMkt);
+  $('#mktAdd').innerHTML = '<option value="">Add a country…</option>'
+    + (OPT.countries || []).map((c) => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
+  $('#mktAdd').addEventListener('change', (e) => { const cc = e.target.value; e.target.value = '';
+    if (!cc) return; if (!MKT.list.length && $('#pCountry').value && cc !== $('#pCountry').value) MKT.list.push($('#pCountry').value);
+    if (!MKT.list.includes(cc)) MKT.list.push(cc); renderMkt(); });
+  document.querySelectorAll('input[name=mkt]').forEach((r) => r.addEventListener('change', () => {
+    MKT.mode = r.value;
+    if (MKT.mode !== 'home' && !MKT.list.length && $('#pCountry').value) MKT.list = [$('#pCountry').value];
+    renderMkt(); }));
+  fill(P || {});
+  // The address they gave when they added the website, so drafting is one press.
+  if (!$('#draftUrl').value.trim()) {
+    const me = await get('/api/account/me');
+    const open = ((me && me.sites) || []).find((x) => x.id === me.open);
+    if (open && open.url) $('#draftUrl').value = open.url;
+  }
+})();
+</script>
+</body>
+</html>

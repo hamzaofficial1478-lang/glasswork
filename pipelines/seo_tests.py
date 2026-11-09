@@ -34,10 +34,118 @@ def _fresh_db():
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
     con = sqlite3.connect(db)
-    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text())
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     return db
+
+
+def test_a_rival_learned_mid_pass_does_not_throw_the_batch_away():
+    """
+    WHY CONTENT HAD NEVER WRITTEN A PAGE.
+
+    A full day run on a fresh cabinet: the gap desk found 137 phrases and
+    stored none. Reproduced by hand:
+
+        gaps_found 137 · critic rejected · "2 out-of-scope phrases"
+        keywords table: 0 rows
+
+    _in_scope() reads the competitors table. The filter ran against it as it
+    stood, then the SAME pass suggested new rivals into it, and the Critic —
+    calling the same function — judged against a different rule than the
+    filter had used. It found the two phrases naming a now-known rival and
+    rejected all 137. The keywords table stayed empty, the briefs desk read
+    that empty table, and Content had nothing to write, every single run.
+
+    The Critic was right about the two. The fix drops them against the rule as
+    it now stands and keeps the other 135; the Critic stays as strict as it was.
+    """
+    real_db, real_suggest = board.DB, seo._suggest
+    board.DB = _fresh_db()
+    try:
+        print("\nA pass that discovers rivals as it goes still stores its gaps:")
+        # Every seed answers with the same handful — ordinary demand, plus a
+        # branded lookup the pass will learn a rival from ("photos" gives it
+        # away), plus the SAME firm searched without the tell, which passes the
+        # filter because febtech is not known yet when the filter runs.
+        answers = ["glass partition price dubai",
+                   "glass partition installation sharjah",
+                   "febtech glass works dubai photos",
+                   "febtech glass works dubai"]
+        seo._suggest = lambda q: list(answers)
+        out = seo.run(max_seeds=18)
+        check("the Critic passed", out.get("critic"), "passed")
+        check("the good phrases were stored", out.get("stored", 0) >= 2, True)
+        check("the rival was put forward to him", "febtech" in out["rivals_put_forward"], True)
+        check("the rival's search was dropped, not stored as a gap",
+              "febtech glass works dubai" in out.get("dropped_as_rival_lookups", []), True)
+        with sqlite3.connect(board.DB) as con:
+            stored = {r[0] for r in con.execute("SELECT phrase FROM keywords")}
+        check("the table holds real demand", "glass partition price dubai" in stored, True)
+        check("and not the rival lookup", "febtech glass works dubai" in stored, False)
+
+        print("\nThe day's summary leads with what happened, not five numbers:")
+        check("a stored pass says so in words", out.get("note", "").startswith("Stored"), True)
+    finally:
+        board.DB, seo._suggest = real_db, real_suggest
+
+
+def test_backlinks_and_guest_posts():
+    """
+    The owner asked for backlink building and guest posting. Both are worth
+    doing badly, so what this sector refuses is as pinned as what it does.
+    """
+    import sqlite3
+    from . import seo_backlinks as bl
+
+    print("\nThe link list refuses the tactics that cost you the domain:")
+    for tactic in ("paid links", "pbn", "link exchange", "comment spam",
+                   "article spinning"):
+        check(f"'{tactic}' is refused in writing", tactic in bl.REFUSED_TACTICS, True)
+    check("and nothing on the seed list is paid",
+          {e[3] for e in bl.SEEDS} & {"paid"}, set())
+
+    print("\nEvery stream moves, none is starved:")
+    con = sqlite3.connect(board.DB)
+    con.row_factory = sqlite3.Row
+    bl.build(con)
+    short = bl.shortlist(con)
+    kinds = {}
+    for r in short:
+        kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
+    # The first ranking sorted everything into one list and took the top eight.
+    # Citations won every tiebreak, so a guest post never surfaced and the
+    # sector would have filed them for ever without handing one over.
+    check("citations lead, because they are what moves the map pack",
+          kinds.get("citation"), 4)
+    check("but a guest post always reaches the list", kinds.get("guest_post"), 2)
+    check("and so do suppliers and trade bodies",
+          (kinds.get("supplier"), kinds.get("association")), (2, 2))
+    check("the easiest wins come first inside a kind",
+          short[0]["effort"], "free")
+
+    print("\nThe critic catches a starved stream:")
+    only_citations = [r for r in short if r["kind"] == "citation"]
+    ok, reasons = bl.critic_check({"added": 1, "already_known": 0}, only_citations,
+                                  {"possible": False},
+                                  waiting={"citation", "guest_post"})
+    check("a list with no guest post is rejected", ok, False)
+    check("and it says which stream would never move",
+          any("guest_post" in r for r in reasons), True)
+
+    print("\nRunning twice does not duplicate a single row:")
+    first = bl.build(con)
+    again = bl.build(con)
+    check("the second pass adds nothing", again["added"], 0)
+    check("and recognises them all", again["already_known"], len(bl.SEEDS))
+    n = con.execute("SELECT count(*) FROM backlinks").fetchone()[0]
+    check("one row per opportunity, not per run", n, len(bl.SEEDS))
+
+    print("\nA rival-gap claim needs an index behind it:")
+    gaps = bl.rival_gaps(con)
+    check("with no backlink API it does not pretend", gaps["possible"], False)
+    check("and names what would turn it on", "Ahrefs" in gaps["why_not"], True)
+    con.close()
 
 
 def main():
@@ -45,6 +153,10 @@ def main():
     _scope_tests()
     _critic_tests()
     _full_cycle_tests()
+    test_a_rival_learned_mid_pass_does_not_throw_the_batch_away()
+    test_backlinks_and_guest_posts()
+    test_seo_answers_content_s_clearance_from_its_own_table()
+    test_cleared_from_reads_our_own_titles_not_seo_s_wording()
 
     if _fail:
         print(f"\n{len(_fail)} FAILED: {_fail}")
@@ -78,6 +190,52 @@ def _scope_tests():
     check("UK modifier dropped", seo._in_scope("glass balustrade uk"), False)
     check("a real UAE phrase with no such modifier survives",
           seo._in_scope("glass balustrade dubai marina"), True)
+
+    # HIS REAL GAP LIST. Forty phrases came back and these were in it.
+    print("\nOther Pakistani cities, not just the two that were listed:")
+    check("Islamabad — this one reached his live gap list",
+          seo._in_scope("aluminium work in islamabad"), False)
+    for city in ("rawalpindi", "faisalabad", "chennai", "colombo", "jeddah"):
+        check(f"{city} dropped", seo._in_scope(f"glass work {city}"), False)
+
+    print("\nSomebody hunting a named rival is not a customer:")
+    check("a reviews search is navigational",
+          seo._in_scope("febtech glass works dubai reviews"), False)
+    check("so is a photos search",
+          seo._in_scope("febtech glass works dubai photos"), False)
+    check("and a contact-number search",
+          seo._in_scope("al noor glass contact number"), False)
+    print("  ...but the suffix alone must not kill an honest phrase:")
+    check("'glass door photos' is somebody browsing designs",
+          seo._in_scope("frameless glass door dubai"), True)
+
+    print("\nA rival's NAME is learned from the competitors table, not a list:")
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+    from coordination import board
+    real_db = board.DB
+    db = Path(tempfile.mkdtemp()) / "a.db"
+    con = sqlite3.connect(db)
+    con.executescript(Path("coordination/schema.sql").read_text(encoding="utf-8"))
+    con.execute("INSERT INTO competitors(name,domain) VALUES"
+                "('Fairoozi Aluminium & Glass Works','fairoozi.ae')")
+    con.commit()
+    con.close()
+    board.DB = str(db)
+    try:
+        check("only the distinctive word is learned",
+              sorted(seo._rival_names()), ["fairoozi"])
+        check("so the rival's own phrase is dropped",
+              seo._in_scope("fairoozi aluminium & glass works abu dhabi"), False)
+        print("  ...and the trade's common words are NOT learned, or the whole")
+        print("     gap list would empty itself:")
+        for w in ("glass", "aluminium", "works", "dubai"):
+            check(f"'{w}' is not a rival name", w in seo._rival_names(), False)
+        check("an ordinary phrase still passes",
+              seo._in_scope("glass partition abu dhabi"), True)
+    finally:
+        board.DB = real_db
 
 
 def _critic_tests():
@@ -152,6 +310,76 @@ def _full_cycle_tests():
     finally:
         seo._suggest = real_suggest
         board.DB = real_db
+
+
+def test_seo_answers_content_s_clearance_from_its_own_table():
+    print("The question that sat unanswered for ever:")
+    import sqlite3 as _s, tempfile as _t
+    from pathlib import Path as _P
+    from coordination import board as _b
+    from . import seo_gap
+    real = _b.DB
+    d = _P(_t.mkdtemp()); db = d / "agency.db"
+    c = _s.connect(db)
+    c.executescript((_P(__file__).parents[1] / "coordination" / "schema.sql")
+                    .read_text(encoding="utf-8"))
+    c.executemany("INSERT INTO keywords(phrase,area,intent) VALUES(?,?,?)",
+                  [("glass partition dubai", "Dubai", "buy"),
+                   ("glass partition price dubai", "Dubai", "buy"),
+                   ("frameless shower glass sharjah", "Sharjah", "info"),
+                   ("shower glass sharjah", "Sharjah", "info")])
+    c.commit()
+    c.row_factory = _s.Row
+    _b.DB = str(db)
+    try:
+        body = ("Clustered your gap list into 3 page candidates:\n"
+                "- Glass Partition in Dubai  (glass partition dubai, 2 phrases, 2 buying-intent)\n"
+                "- Shower Glass in Sharjah  (shower glass sharjah, 2 phrases, 0 buying-intent)\n"
+                "- Curtain Walling in Fujairah  (curtain walling fujairah, 1 phrases, 0 buying-intent)\n"
+                "\nOne is briefed as the template. The rest are held until you clear "
+                "volume and difficulty — please rank or reject them.")
+        req = {"subject": "Clear these page targets for volume/difficulty"}
+        reply = seo_gap.answer_as_seo(req, body, c)
+
+        check("it answered rather than filing a ticket", reply is not None, True)
+        cleared = seo_gap.cleared_from(reply, [
+            "Glass Partition in Dubai", "Shower Glass in Sharjah",
+            "Curtain Walling in Fujairah"])
+        check("buying intent clears", "Glass Partition in Dubai" in cleared, True)
+        check("two informational phrases clear too, as an info page",
+              "Shower Glass in Sharjah" in cleared, True)
+        check("a phrase SEO never found is held",
+              "Curtain Walling in Fujairah" in cleared, False)
+        check("the prose line is not mistaken for a page",
+              "briefed as the template" in reply, False)
+        check("and it does not pretend to volume figures it has not got",
+              "DataForSEO" in reply, True)
+
+        # A question that is not a clearance goes back as None, so the inbox
+        # files it as work rather than this handler guessing at it.
+        check("an unrelated question is not answered here",
+              seo_gap.answer_as_seo({"subject": "The site is down"}, "help", c), None)
+
+        # An empty table must refuse rather than wave everything through.
+        c.execute("DELETE FROM keywords"); c.commit()
+        empty = seo_gap.answer_as_seo(req, body, c)
+        check("with no keywords it clears nothing",
+              "keyword table is empty" in (empty or ""), True)
+    finally:
+        _b.DB = real
+        c.close()
+
+
+def test_cleared_from_reads_our_own_titles_not_seo_s_wording():
+    print("Content never parses SEO's format:")
+    from . import seo_gap
+    reply = ("  CLEAR   Glass Partition in Dubai  — 2 tracked phrases.\n"
+             "  HOLD    Pergola in Al Ain  — one phrase.")
+    got = seo_gap.cleared_from(reply, ["Glass Partition in Dubai", "Pergola in Al Ain"])
+    check("only the cleared one comes back", got, ["Glass Partition in Dubai"])
+    check("an empty reply clears nothing", seo_gap.cleared_from("", ["x"]), [])
+    check("a title nobody mentioned is not invented",
+          seo_gap.cleared_from(reply, ["Something Else"]), [])
 
 
 if __name__ == "__main__":

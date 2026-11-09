@@ -1,0 +1,48 @@
+# The TechDuo website
+
+The `website/` folder is the TechDuo company site: plain files, no server
+code, nothing to install. It stays on your computer and is never part of a
+copy of Botix.
+
+| Page | What it is |
+|---|---|
+| `index.html` | TechDuo: who we are, our first product, how we work, contact |
+| `botix.html` | Botix: what it does, the opening animation, how a day works, screens, privacy, setup, using it, pricing, questions |
+| `privacy.html` | Privacy notice for the website and a summary of Botix's (draft) |
+| `terms.html` | Terms for the website and the Botix subscription (draft) |
+
+## Before it goes up
+
+1. **The prices** are yours, in US dollars: Starter $10 with your own AI key
+   or $30 with Botix AI, Growth $35 or $60, Pro $95 or $120. (You said
+   Growth "30 to 35"; it is set at $35. To change any number, edit
+   `data-usd-own` / `data-usd-ai` in the `<article class="plan">` blocks of
+   `botix.html`, or tell Claude.) Visitors see them in their own currency at
+   today's rate (worked out from their device's time zone, nothing sent), and
+   can pick another currency from the list. Billing is in US dollars, and the
+   page says so.
+2. **Fill in two lines** at the top of `assets/site.js`:
+   - `botix:` the address where Botix runs online, e.g. `'https://app.yourdomain.com'`.
+     Every "Start your 14-day trial" button then opens its sign-up page.
+     While it is empty, those buttons lead to the Contact section.
+   - `email:` the address people write to. While it is empty, Contact says
+     the address is coming soon.
+3. **Have the drafts read.** `privacy.html` and `terms.html` say "Draft for
+   review" at the top. Add your registered company details and remove that
+   line once a lawyer has read them.
+4. **Botix AI and subscriptions.** The pricing section offers Botix AI and
+   a 14-day trial. Both still have to be built in the program (with a payment
+   provider) before the site can promise them.
+
+## Putting it on your hosting
+
+Upload everything inside `website/` (the four `.html` files and the `assets`
+folder) to the folder your domain shows, keeping the folder structure. Open
+the address in a browser and click through every page.
+
+The site loads its fonts from Google Fonts, its 3D drawing code from cdnjs,
+and on the Botix page today's exchange rates from jsDelivr (a public file of
+numbers; no cookies, no page address sent); nothing else leaves the visitor's
+browser. There are no cookies,
+analytics or trackers, and the test `python -m coordination.website_tests`
+checks that this stays true.

@@ -1,0 +1,55 @@
+BOTIX BY TECH DUO — TERMS OF USE (draft for review)
+
+These terms say plainly how the program works and what it expects of you. They
+have not yet been checked by a lawyer. The full version is in the program, under
+Settings -> Terms of use.
+
+WHAT THIS IS
+A program you install and run on your own computer. It runs the online growth of
+your business with a team of AI agents - finding leads, writing pages and posts,
+looking after your website and your place on Google - and asks you before
+anything leaves your computer.
+
+YOUR DATA STAYS WITH YOU
+Your account, your websites and everything the agency records are kept on your
+computer, encrypted with your password. The people who make the program do not
+track you: no account on a server, no counting of copies, no number for your
+copy. They receive only a problem report you choose to send, sealed so that
+only they can open it. Each person on the computer has their own account, and
+no account can open another's. Keep your recovery key safe: without your password and your
+recovery key, your data cannot be opened again by anyone.
+
+SERVICES YOU CONNECT
+The AI company, Google, maps, email and your website are reached with your own
+keys. Their terms and prices apply, and you pay them directly. The daily
+spending limit is a safeguard, not a promise about any company's bill.
+
+YOU AGREE NOT TO
+- send messages that break the law where you or the people you write to are;
+- collect information from places that do not allow it, or keep contacting
+  someone who has asked you to stop;
+- use the program to probe websites you do not own for weaknesses;
+- publish content that is false, copied, or pretends to be another business;
+- use the program for anything illegal.
+
+YOU APPROVE WHAT GOES OUT
+An email to a lead, a published page, a change to your website, an offer or a
+price waits for your yes. Once you approve something, it is yours.
+
+AI MAKES MISTAKES
+The agents' work is written with AI. It can be wrong. Check it before it
+reaches anyone else.
+
+NEW VERSIONS
+When a new version is out, the program offers it. It is installed only when
+you press Update, and only if it is signed by the publisher. Your work is kept,
+and you can go back to the version before.
+
+THE LICENCE
+The program belongs to its publisher; all rights are reserved. You may install
+and use the copy you were given, for your own business. You may not copy,
+share, sell or change it, or try to recover its source code, without the
+publisher's written permission. The full notice is in the file LICENSE.
+It is provided as it is, without any warranty, to the extent the law allows.
+To the extent the law allows, its authors are not responsible for indirect
+losses, lost profits or lost data arising from using the program.

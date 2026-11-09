@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Glassworks Agency — Control Room</title>
+<title>Botix — Control Room</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -93,7 +93,13 @@
   .agent:hover{background:rgba(255,255,255,.025)}
   .agent .sd{width:9px;height:9px;border-radius:50%}
   .sd.working{background:var(--glass);box-shadow:0 0 0 3px var(--glass-dim);animation:pulse 1.8s infinite}
+  /* Amber is reserved for "this one needs the owner's yes or no". Work that is
+     merely sitting on the board unclaimed is 'queued' and is not an alarm —
+     see coordination/state.py. */
   .sd.waiting{background:var(--amber);box-shadow:0 0 0 3px var(--amber-dim)}
+  .sd.queued{background:var(--glass);opacity:.55}
+  .sd.off{background:#3c4a51}
+  .sd.done{background:var(--ok);opacity:.7}
   .sd.idle{background:var(--faint)}
   .sd.blocked{background:var(--danger);box-shadow:0 0 0 3px var(--danger-dim)}
   .agent .who{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -103,6 +109,24 @@
   .room-foot{padding:11px 17px;border-top:1px solid var(--line);display:flex;justify-content:space-between;
     font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)}
   .room-foot b{color:var(--text)}
+
+  /* ---- the owner's per-sector on/off switch ---- */
+  .swx{width:38px;height:21px;border-radius:999px;border:1px solid var(--line2);
+    background:var(--panel);padding:0;position:relative;cursor:pointer;flex:none;
+    transition:background .16s ease,border-color .16s ease}
+  .swx i{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+    background:var(--faint);transition:transform .16s ease,background .16s ease}
+  .swx.on{background:var(--glass-dim);border-color:var(--glass)}
+  .swx.on i{transform:translateX(17px);background:var(--glass)}
+  .swx:disabled{opacity:.5;cursor:default}
+  /* No switch at all for the four the agency runs on — a padlock that explains
+     itself on hover, rather than a control that refuses when you press it. */
+  .swlock{font-size:13px;opacity:.42;cursor:help;user-select:none;
+    filter:grayscale(1)}
+  /* A stopped room is visibly stopped — dimmed, not hidden. Hiding it would
+     make a sector he switched off look like a sector that had disappeared. */
+  .room.off{opacity:.62;border-style:dashed}
+  .room.off .agents{filter:grayscale(1)}
 
   /* security room accent */
   .room.sec{border-color:rgba(229,86,91,.3)}
@@ -169,13 +193,55 @@
   @keyframes scan{0%{top:-24px}100%{top:100%}}
   @media(prefers-reduced-motion:reduce){*{animation:none!important}}
   footer{padding:26px;text-align:center;color:var(--faint);font-size:11.5px}
+  .navbits{display:flex;align-items:center;gap:8px;margin-left:18px}
+  .navbtn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:9px;
+    border:1px solid var(--line2);background:var(--panel2);color:var(--text);
+    font-size:12.5px;cursor:pointer;text-decoration:none;font-family:inherit}
+  .navbtn:hover{border-color:var(--glass);color:var(--glass)}
+  .navbtn.lock{border-color:rgba(234,165,67,.45);color:var(--amber)}
+  .badge-n{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--danger);
+    color:#fff;font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;
+    justify-content:center;font-family:'IBM Plex Mono',monospace}
+  .sheet{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;flex-direction:column}
+  /* [hidden] is display:none in the UA stylesheet, and ANY author display rule
+     beats it. Without this line the closed sheet stays laid out at z-index 60
+     across the whole viewport — invisible, and swallowing every click on the
+     floor behind it. The rooms looked dead and nothing explained why. */
+  .sheet[hidden]{display:none}
+  .sheet-head{display:flex;align-items:center;gap:12px;padding:16px 22px;
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  .sheet-body{flex:1;overflow:auto;padding:20px 22px 60px}
+  .ev{display:grid;grid-template-columns:58px 92px 1fr;gap:12px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:10px;margin-bottom:7px;background:var(--panel)}
+  .ev.bad{border-color:rgba(229,86,91,.5)} .ev.live{border-color:var(--glass)}
+  .ev .vb{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--etch);
+    text-transform:uppercase;letter-spacing:.06em;align-self:center}
+  .ev .tx b{display:block;font-size:13px} .ev .tx span{font-size:12px;color:var(--muted)}
+  .why{display:grid;grid-template-columns:56px 1fr;gap:10px;padding:9px 12px;
+    border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--panel)}
+  .why .pts{font-family:'IBM Plex Mono',monospace;font-weight:700;text-align:right}
+  .why .pts.up{color:var(--ok)} .why .pts.down{color:var(--danger)}
+  .made{width:100%;border-collapse:collapse;font-size:12.5px}
+  .made th{text-align:left;padding:7px 10px;color:var(--etch);font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line)}
+  .made td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .made tr:hover td{background:var(--panel2)}
+  .gh2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--etch);
+    margin:20px 0 8px}
+  .band{padding:6px 14px 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--etch);text-align:right;cursor:help}
+  .pwbox{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel)}
+  .pwbox label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--etch);margin:10px 0 4px}
+  .pwbox input{width:100%;box-sizing:border-box;padding:9px 11px;border-radius:8px;
+    border:1px solid var(--line2);background:var(--panel2);color:var(--text);font-size:13px}
 </style>
 </head>
 <body>
 
 <header>
   <div class="brand">
-    <b>GLASSWORKS AGENCY</b>
+    <b id="brandName">GLASSWORK</b>
     <span class="etch">Control Room · UAE</span>
   </div>
   <div class="md-pill">
@@ -188,8 +254,31 @@
     <div class="metric"><span class="etch">Awaiting you</span><span class="v amber" id="mPend">—</span></div>
     <div class="metric"><span class="etch">Spend today</span><span class="v mono" id="mSpend">—</span></div>
   </div>
+  <div class="navbits">
+    <!-- There was no way back. The control room is a dead end you reach from
+         the office and then have to edit the address bar to leave. -->
+    <a class="navbtn" href="/" title="Back to the office floor">&larr; Office</a>
+    <button class="navbtn" id="actBtn" title="Everything the agency has done">
+      Activity <span class="badge-n" id="actBadge" hidden>0</span>
+    </button>
+    <!-- Setup holds every API key in the agency. It is not a nav link. -->
+    <button class="navbtn lock" id="setupBtn" title="Keys, models, caps — protected">
+      &#128274; Setup
+    </button>
+  </div>
   <div class="clock mono" id="clock">--:--</div>
 </header>
+
+<!-- FULL-WINDOW panels. The activity list used to open in a half-height strip
+     that showed six lines of a sixty-line day. -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-head">
+    <b id="sheetTitle">—</b>
+    <span class="etch" id="sheetSub"></span>
+    <button class="navbtn" id="sheetClose" style="margin-left:auto">Close &times;</button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
 
 <div class="wrap">
   <main>
@@ -201,7 +290,7 @@
 
   <aside class="desk">
     <div class="card">
-      <div class="ch"><b>Your desk · Telegram bridge</b><span class="badge amber" id="pendBadge">0</span></div>
+      <div class="ch"><b>Your desk · waiting on you</b><span class="badge amber" id="pendBadge">0</span></div>
       <div id="approvals"></div>
     </div>
 
@@ -224,89 +313,70 @@
 
 <footer>The brain plans, it never touches the hands · reading from the filing cabinet · claim, don't grab · append, don't overwrite</footer>
 
+<script src="/stale.js"></script>
 <script>
+/* Say so, on screen, when the running server is older than this page. */
+try{ Stale.check(['password','sectors','activity-seen','faults']); }catch(e){}
+
 /* ---------------------------------------------------------------------------
    STATE. fetchState() reads /api/state (the filing cabinet, through the server).
-   MOCK below is only a fallback if that call fails; everything renders from
-   whatever fetchState() returns.
+   If that call fails the screen goes EMPTY and says so — it never falls back to
+   plausible-looking numbers. See OFFLINE below.
 --------------------------------------------------------------------------- */
-const MOCK = {
-  md:{state:"planning today"},
-  metrics:{health:82, leads:6, spend:"$4.12"},
-  rooms:[
-    {key:"IT", name:"IT & Site Health", score:88, foot:["12 checks passed","1 ticket open"], agents:[
-      {n:"Watcher", t:"Contact-form test passed 07:02", s:"working"},
-      {n:"Fixer", t:"Patching slow gallery on /pergolas", s:"working"},
-      {n:"Releaser", t:"Holding — waiting on tests", s:"idle"},
-    ]},
-    {key:"Content", name:"Content & Social", score:74, foot:["2 drafts in review","4 posts queued"], agents:[
-      {n:"Scout", t:"Trend: frameless glass balustrades", s:"working"},
-      {n:"Writer", t:"Case study — Marina villa railing", s:"working"},
-      {n:"Illustrator", t:"Rendering 3 images", s:"working"},
-      {n:"Publisher", t:"Waiting Auditor sign-off", s:"waiting"},
-    ]},
-    {key:"SEO", name:"SEO & Rankings", score:69, foot:["312 keywords tracked","+3 positions wk"], agents:[
-      {n:"Auditor", t:"Schema check on 8 pages", s:"working"},
-      {n:"Rank & Rival", t:"Competitor sitemap: 2 new pages", s:"working"},
-      {n:"Strategist", t:"Gap: 'aluminium doors Al Barsha'", s:"working"},
-    ]},
-    {key:"Leads", name:"Leads & Outreach", score:79, foot:["6 valid today","3 replies"], agents:[
-      {n:"Hunter", t:"41 fit-out firms, Business Bay", s:"working"},
-      {n:"Verifier", t:"38 valid · 3 bounced", s:"working"},
-      {n:"Outreach", t:"18/25 sent · under cap", s:"working"},
-      {n:"Responder", t:"Reply from Aster Interiors", s:"waiting"},
-      {n:"Nurture", t:"Idle — no notes pending", s:"idle"},
-    ]},
-    {key:"Report", name:"Reports & Scorecard", score:91, foot:["MD hit-rate 71%","digest 07:15"], agents:[
-      {n:"Reporter", t:"Scored 9 decisions overnight", s:"working"},
-    ]},
-    {key:"Security", name:"Security", score:95, foot:["0 intrusions","2 leads flagged"], sec:true, agents:[
-      {n:"Screener", t:"Flagged 2 scam leads", s:"working"},
-      {n:"Injection guard", t:"Scraped text quarantined ×1", s:"working"},
-      {n:"Site watch", t:"SSL ok · logins normal", s:"idle"},
-    ]},
-  ],
-  approvals:[
-    {lvl:"amber · IT", text:"Ship the gallery speed fix to the pergolas page?",
-     why:"Tests pass. Touches a core template, so the Releaser is holding for your nod."},
-    {lvl:"amber · Content", text:"Publish the Marina villa case study to site + Instagram?",
-     why:"Passed the Auditor. Real job, real photos — strong piece."},
-  ],
-  security:[
-    {sev:"hi", title:"Scam lead blocked", sub:"Advance-fee pattern · 'buildcorp-uae@gmail'", time:"08:41"},
-    {sev:"mid",title:"Prompt injection caught", sub:"Hidden instruction in scraped competitor page", time:"08:12"},
-    {sev:"lo", title:"Login attempts normal", sub:"No spikes overnight", time:"07:00"},
-  ],
-  connections:[
-    {ic:"◧", name:"Website", sub:"yoursite.ae · custom", on:true},
-    {ic:"⌕", name:"DataForSEO", sub:"rank tracking", on:true},
-    {ic:"✈", name:"Telegram bridge", sub:"@owner", on:true},
-    {ic:"♾", name:"Instagram", sub:"not connected", on:false},
-    {ic:"♪", name:"TikTok", sub:"not connected", on:false},
-    {ic:"✉", name:"Outreach domain", sub:"mail.yoursite.ae", on:true},
-  ],
+/* WHEN THE SERVER IS DOWN, SAY SO.
+
+   There used to be a MOCK here: six rooms of agents "working", two approvals
+   waiting, scam leads blocked, 82 health, $4.12 spent — rendered whenever
+   /api/state could not be reached. So the one moment the owner most needs to
+   know something is wrong was the exact moment this screen showed him a
+   thriving agency. The office floor had already been fixed for this; the
+   control room had not.
+
+   Empty now, and the header says why. Nothing invents a number it was not
+   given. */
+const OFFLINE = {
+  ok:false, offline:true,
+  md:{state:"can't reach the server"},
+  metrics:{health:"—", leads:"—", spend:"—"},
+  rooms:[], approvals:[], security:[], shelf:[], connections:[],
 };
 
 function normalise(j){
+  j.offline = !!j.offline;
   j.md=j.md||{state:'—'}; j.metrics=j.metrics||{health:0,leads:0,spend:'$0.00'};
   j.rooms=j.rooms||[]; j.approvals=j.approvals||[]; j.security=j.security||[];
   j.connections=j.connections||[]; j.shelf=j.shelf||[];
   return j;
 }
 async function fetchState(){
-  // reads the filing cabinet through the server; MOCK is only a fallback if that's down
+  // reads the filing cabinet through the server; if it's down we show nothing
   try{
     const r=await fetch('/api/state',{cache:'no-store'});
     const j=await r.json();
     if(j && j.ok) return normalise(j);
   }catch(_){}
-  return MOCK;
+  return normalise({...OFFLINE});
 }
 
 /* ---- render ---- */
 const $=(s)=>document.querySelector(s);
+const escA=(s)=>esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const esc=(s)=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* A value that becomes a CSS CLASS is not text — escaping does nothing useful
+   for it, so it is checked against the list of states that actually exist. An
+   unknown state renders as idle rather than as a class nobody styled. */
+const oneOf=(v,allowed)=>allowed.includes(String(v))?String(v):allowed[0];
 
+/* A score of null means "no evidence yet" and MUST NOT render as 0. Untested
+   is not unhealthy, and a red ring on a sector that simply has not run is the
+   dashboard lying in the other direction. */
 function ring(score){
+  if(score===null||score===undefined){
+    return `<div class="ring" title="No evidence yet — this sector has not run">
+      <svg width="44" height="44"><circle cx="22" cy="22" r="18" fill="none"
+        stroke="var(--line)" stroke-width="4" stroke-dasharray="4 5"/></svg>
+      <div class="num" style="color:var(--muted);font-size:15px">—</div></div>`;
+  }
   const r=18, c=2*Math.PI*r, off=c*(1-score/100);
   const col = score>=85?'var(--ok)':score>=70?'var(--glass)':'var(--amber)';
   return `<div class="ring"><svg width="44" height="44">
@@ -317,28 +387,124 @@ function ring(score){
 }
 
 function renderRooms(st){
+  if(st.offline){
+    $('#rooms').innerHTML = `<div class="empty" style="padding:26px;line-height:1.7">`
+      + `<b style="color:var(--danger)">Can't reach the server.</b><br>`
+      + `Nothing on this page is live, so nothing is being shown. Start it with `
+      + `<span class="mono">python run.py</span> and this fills in by itself.</div>`;
+    return;
+  }
+  if(!st.rooms.length){
+    $('#rooms').innerHTML = `<div class="empty" style="padding:26px">`
+      + `The cabinet is empty — no sector has run yet.</div>`;
+    return;
+  }
   $('#rooms').innerHTML = st.rooms.map(rm=>`
-    <div class="room ${rm.sec?'sec':''}">
+    <div class="room ${rm.sec?'sec':''} ${rm.enabled===false?'off':''}" data-key="${rm.key}"
+         style="cursor:pointer"
+         title="Open ${escA(rm.name)} — what it made, why it scores what it does">
       ${rm.sec?'<div class="scanline"></div>':''}
       <div class="room-head">
-        <div class="room-title"><b>${rm.name}</b><span class="etch">${rm.key} room</span></div>
-        ${ring(rm.score)}
+        <div class="room-title"><b>${esc(rm.name)}</b>
+          <span class="etch">${rm.enabled===false?'switched off':esc(rm.key)+' room'}</span></div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <!-- The owner's off switch. Stops the sector doing work: the MD cannot
+               post to it, nothing on the board can be claimed by it, and its
+               step in the day is skipped. It keeps its agents and its history.
+               stopPropagation, or flipping the switch also opens the room.
+
+               Four sectors have no switch at all. Director, IT, Report and
+               Security are not services the agency offers, they are how it runs
+               — the MD fills the board, IT holds the only door to production
+               and the only agents that can fix code, Report is how it learns,
+               and Security screens everything arriving from outside. A padlock
+               that says why beats a switch that refuses when pressed. -->
+          ${rm.essential
+            ? `<span class="swlock" title="${escA(rm.why_essential||'')}">&#128274;</span>`
+            : `<button class="swx ${rm.enabled===false?'':'on'}" data-sw="${escA(rm.key)}"
+                  onclick="event.stopPropagation();toggleSector('${escA(rm.key)}',${rm.enabled===false})"
+                  title="${rm.enabled===false?'Switched off — turn '+escA(rm.name)+' back on'
+                                             :'Working — switch '+escA(rm.name)+' off'}"
+                  aria-label="${rm.enabled===false?'Turn on':'Turn off'} ${escA(rm.name)}"><i></i></button>`}
+          ${ring(rm.score)}
+        </div>
       </div>
       <div class="agents">
         ${rm.agents.length ? rm.agents.map(a=>`
           <div class="agent">
-            <span class="sd ${a.s}"></span>
+            <span class="sd ${oneOf(a.s,['idle','queued','waiting','working','done','blocked','off'])}"></span>
             <div class="who"><b>${a.n}</b><span>${a.t}</span></div>
             <span class="st">${a.s}</span>
           </div>`).join('') : '<div class="empty">No tasks on the board for this room.</div>'}
       </div>
       <div class="room-foot"><span>${rm.foot[0]}</span><b>${rm.foot[1]}</b></div>
+      <!-- The number alone told nobody anything. 30 out of 100 reads like a
+           failing grade and usually means "ran fine, had nothing to produce". -->
+      <div class="band" title="${escA(rm.band_means||'')}">${
+        rm.enabled===false
+          ? 'switched off'+(rm.off_note?' — '+esc(rm.off_note):'')
+          : esc(rm.band||'')}</div>
     </div>`).join('');
+  // Clicking a room opens what it actually made. The owner asked to be able to
+  // read the results, not just count them.
+  document.querySelectorAll('.room[data-key]').forEach(el=>{
+    el.onclick = ()=>openSector(el.dataset.key);
+  });
+}
+
+/* TURN A SECTOR OFF, OR BACK ON.
+   The switch is the whole feature; everything that enforces it lives in
+   coordination/board.py, so flipping it here means exactly what flipping it
+   from a terminal means. Switching OFF asks for a reason — not to be
+   bureaucratic, but because in three weeks "why is Leads doing nothing?" is a
+   question he will ask, and the answer should be on the screen rather than in
+   his memory. Switching back on needs no explanation. */
+async function toggleSector(key, wasOff){
+  // Refuse before asking him anything. Putting up a prompt, taking his reason
+  // and THEN discovering the route does not exist is how he ended up believing
+  // Content was switched off when nothing had been saved at all.
+  if(Stale.blocked('sectors')){
+    alert('The program running on this machine is older than this screen and has '
+        + 'no sector switches yet.\n\nRestart it (pm2 restart all, or close the '
+        + 'window it is running in and start it again), then try again. Nothing '
+        + 'has been changed.');
+    return;
+  }
+  const turningOn = !!wasOff;
+  let note='';
+  if(!turningOn){
+    note = prompt(
+      `Switch ${key} off?\n\n`
+      + `It keeps its agents, its history and its score. It simply does no work: `
+      + `the MD stops giving it jobs, nothing on the board gets picked up by it, `
+      + `and its step is skipped when you run the day.\n\n`
+      + `Why, in a few words? (optional)`, '');
+    if(note===null) return;          // he changed his mind
+  }
+  document.querySelectorAll(`.swx[data-sw="${key}"]`).forEach(b=>b.disabled=true);
+  try{
+    const r=await fetch('/api/sectors',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sector:key, enabled:turningOn, note})});
+    const j=await r.json().catch(()=>null);
+    if(!j||!j.ok){
+      alert((j&&j.error) || (r.status===404
+        ? 'The running server does not have the sector switches yet — restart it and try again.'
+        : 'Could not change that sector (HTTP '+r.status+').'));
+    }
+  }catch(e){
+    alert('Could not reach the server — it looks like it has stopped.');
+  }
+  await refresh();
 }
 
 function renderApprovals(st){
   const box=$('#approvals');
-  if(!st.approvals.length){ box.innerHTML='<div class="empty">Nothing waiting on you. The agency&rsquo;s running clean.</div>'; }
+  // "Nothing waiting on you" is a CLAIM about the cabinet. With the server down
+  // we have not read the cabinet, so we are not entitled to make it — an owner
+  // who reads "running clean" off a dead page stops checking.
+  if(st.offline){ box.innerHTML='<div class="empty">Unknown — the server is not answering.</div>'; }
+  else if(!st.approvals.length){ box.innerHTML='<div class="empty">Nothing waiting on you. The agency&rsquo;s running clean.</div>'; }
   else box.innerHTML = st.approvals.map((a,i)=>`
     <div class="approval" data-i="${i}">
       <span class="lvl">${a.lvl}</span>
@@ -349,12 +515,13 @@ function renderApprovals(st){
         <button class="btn no" onclick="resolve(${i},false)">Not now</button>
       </div>
     </div>`).join('');
-  $('#pendBadge').textContent = st.approvals.length;
-  $('#mPend').textContent = st.approvals.length;
+  $('#pendBadge').textContent = st.offline ? '—' : st.approvals.length;
+  $('#mPend').textContent = st.offline ? '—' : st.approvals.length;
 }
 
 function renderSecurity(st){
   const box=$('#secfeed');
+  if(st.offline){ box.innerHTML='<div class="empty">Unknown — the server is not answering.</div>'; $('#secBadge').textContent='—'; return; }
   if(!st.security.length){ box.innerHTML='<div class="empty">Nothing flagged.</div>'; $('#secBadge').textContent=0; return; }
   box.innerHTML = st.security.map(e=>`
     <div class="sec-event">
@@ -366,18 +533,28 @@ function renderSecurity(st){
 }
 
 function renderConns(st){
-  $('#conns').innerHTML = st.connections.map((c,i)=>`
+  // Controls that do nothing are worse than no controls. The toggle flipped a
+  // CSS class and told the server nothing, so switching a connection "off"
+  // changed exactly one thing: what this page claimed. The Add box pushed a
+  // row into a local array that the next poll threw away. Both are gone —
+  // connections are set on /setup, which is where the keys actually live.
+  $('#conns').innerHTML = (st.connections.length
+    ? st.connections.map(c=>`
     <div class="conn">
       <div class="ic">${c.ic}</div>
-      <div class="nm"><b>${c.name}</b><span>${c.sub}</span></div>
-      <div class="toggle ${c.on?'on':''}" onclick="this.classList.toggle('on')"></div>
-    </div>`).join('') + `
-    <div class="add-row">
-      <input id="connIn" placeholder="paste a social link or API key…">
-      <button onclick="addConn()">Add</button>
+      <div class="nm"><b>${c.name}</b><span>${c.on?(c.sub||''):(c.sub==='not set'?'':c.sub||'')}</span></div>
+      <div class="mono" style="font-size:10px;color:${c.on?'var(--ok)':'var(--faint)'}">${c.on?'ON':'not set'}</div>
+    </div>`).join('')
+    : `<div class="empty">${st.offline ? 'Unknown — the server is not answering.'
+                                       : 'Nothing connected yet.'}</div>`) + `
+    <!-- The link to /setup used to live here, which meant every route into the
+         keys was an ordinary blue link in a list. There is one door now, in the
+         header, and it explains what is behind it before it opens. -->
+    <div class="add-row" style="justify-content:center">
+      <span class="etch" style="font-size:11px">Connections are changed in Setup &mdash; the locked button, top right</span>
     </div>`;
   const on=st.connections.filter(c=>c.on).length;
-  $('#connCount').textContent = on+'/'+st.connections.length+' on';
+  $('#connCount').textContent = st.offline ? '—' : on+'/'+st.connections.length+' on';
 }
 
 function renderShelf(st){
@@ -408,22 +585,48 @@ function renderShelf(st){
 
 /* ---- interactions (in-memory) ---- */
 let STATE;
-function resolve(i,ok){
-  const el=document.querySelector(`.approval[data-i="${i}"]`);
-  el.style.opacity=.35; el.querySelector('.btns').innerHTML =
-    `<span class="mono" style="font-size:12px;color:${ok?'var(--ok)':'var(--muted)'}">${ok?'✓ approved — sent to the agent':'✗ held'}</span>`;
-  STATE.approvals[i]._done=true;
-  const left=STATE.approvals.filter(a=>!a._done).length;
-  $('#pendBadge').textContent=left; $('#mPend').textContent=left;
-}
-function addConn(){
-  const v=$('#connIn').value.trim(); if(!v) return;
-  STATE.connections.push({ic:"＋",name:v.slice(0,22),sub:"pending verify",on:false});
-  renderConns(STATE);
-}
+/* The owner's decision goes to the cabinet, and the button only claims what
+   actually happened. It used to dim the row and print "sent to the agent" with
+   nothing behind it — the row was untouched and the next poll brought the item
+   straight back. On the one control the handbook makes him the tie-breaker for,
+   that is the worst failure there is: he thinks he has decided, the agency
+   never hears it, and both sides sit waiting on the other. */
+async function resolve(i, ok){
+  const a = STATE.approvals[i];
+  const el = document.querySelector(`.approval[data-i="${i}"]`);
+  const btns = el.querySelector('.btns');
+  btns.innerHTML = '<span class="mono" style="font-size:12px;color:var(--muted)">saving…</span>';
+  let j=null;
+  try{
+    const r = await fetch('/api/approve',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind:a.kind, id:a.id, decision: ok?'approved':'rejected'})});
+    j = await r.json();
+  }catch(e){ j={ok:false,error:String(e)}; }
 
+  if(!j || !j.ok){
+    btns.innerHTML = `<span class="mono" style="font-size:12px;color:var(--danger)">`
+      + `✕ not saved — ${(j&&(j.error||j.why))||'unknown error'}</span>`;
+    return;   // the row stays; nothing was decided
+  }
+  el.style.opacity=.35;
+  btns.innerHTML = `<span class="mono" style="font-size:12px;color:${ok?'var(--ok)':'var(--muted)'}">`
+    + `${ok?'✓ approved — written to the cabinet':'✗ held — written to the cabinet'}</span>`;
+  refresh();   // read it back rather than guessing what the cabinet now says
+}
 /* ---- boot ---- */
+/* Do not rebuild the floor while he is reading it.
+   refresh() replaces the whole room list every 15 seconds. Harmless when you
+   are glancing at it; not harmless when you are half-way through clicking a
+   room, or have a sector open behind the sheet — the element you aimed at is
+   destroyed and rebuilt under the cursor. It showed up as a click that would
+   not land. */
 async function refresh(){
+  // getElementById, not the `sheet` const: refresh() is called before that
+  // const is declared, and a const read from its temporal dead zone THROWS —
+  // which meant refresh() died on its first call and the floor never rendered
+  // at all. A guard that breaks the thing it guards is worse than no guard.
+  const sh = document.getElementById('sheet');
+  if(sh && !sh.hidden) return;   // he is reading something; leave the page alone
   STATE=await fetchState();
   $('#mHealth').textContent=STATE.metrics.health;
   $('#mLeads').textContent=STATE.metrics.leads;
@@ -434,10 +637,347 @@ async function refresh(){
 refresh();
 setInterval(refresh, 15000);   // keep the room live without a page reload
 
+// The badge has to climb while he is on another tab, so it polls on its own
+// rather than waiting for him to open the panel.
+pollActivity();
+setInterval(pollActivity, 20000);
+
 setInterval(()=>{
   const d=new Date();
   $('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
 },1000);
+
+/* The agency name comes from .env (AGENCY_NAME) via /api/settings, so renaming
+   the firm is one field on the setup screen rather than an edit in every file.
+   The name in the markup is the default, so the page is right before this
+   lands and simply corrects itself if he has chosen another. */
+(async function brand(){
+  try{
+    const r = await fetch('/api/settings'); if(!r.ok) return;
+    const j = await r.json();
+    const n = (j && j.optional && j.optional.agencyName || '').trim();
+    if(!n) return;
+    const el = document.getElementById('brandName');
+    if(el){ const wasUpper = el.textContent === el.textContent.toUpperCase();
+            el.textContent = wasUpper ? n.toUpperCase() : n; }
+    document.title = n + document.title.replace(/^[^\u2014]*/, '');
+  }catch(e){}
+})();
+
+/* ---------------------------------------------------------------------------
+   THE SHEET — a full window, not a strip
+--------------------------------------------------------------------------- */
+const sheet=$('#sheet');
+function openSheet(title, sub, html){
+  $('#sheetTitle').textContent=title; $('#sheetSub').textContent=sub||'';
+  $('#sheetBody').innerHTML=html; sheet.hidden=false;
+  document.body.style.overflow='hidden';
+}
+function closeSheet(){ sheet.hidden=true; document.body.style.overflow=''; }
+$('#sheetClose').onclick=closeSheet;
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && !sheet.hidden) closeSheet(); });
+
+/* ---- ACTIVITY -------------------------------------------------------------
+   An unread count that behaves like an unread count: it climbs while you are
+   away and clears when you read it.
+
+   The mark used to live in this browser's localStorage, which is per-ORIGIN.
+   Open the office on localhost and the control room on 127.0.0.1 and those are
+   two separate memories: clear the count in one and the other still shows it,
+   which is exactly what the owner kept reporting. It is kept in the cabinet
+   now, so both screens and both addresses agree, and it survives clearing the
+   browser. The server decides what counts as unread; this file only paints it. */
+let ACT_BADGE_N=null;   // what the badge is showing, so a slow poll cannot undo a read
+let ACT_LAST=null;      // the last full read, so the buttons know what they saw
+
+function paintBadge(n){
+  ACT_BADGE_N=n;
+  const b=$('#actBadge'); if(!b) return;
+  if(n>0){ b.hidden=false; b.textContent=n>99?'99+':n; } else b.hidden=true;
+}
+
+/* A LOCAL FLOOR UNDER THE SERVER'S COUNT.
+   The mark belongs in the cabinet — that is what makes it agree between this
+   screen and the office, and between localhost and 127.0.0.1. But a running
+   server older than this page has no /api/activity/seen route at all: the POST
+   404s and the badge returns on the next poll however many times he presses
+   the button. The browser therefore also remembers the newest line it has
+   shown him. It can only ever SUPPRESS a count he has already acknowledged
+   here — never invent one — and the cabinet wins as soon as it can answer. */
+const ACT_FLOOR='wdta_activity_floor';
+function actFloor(){ try{ return parseInt(localStorage.getItem(ACT_FLOOR)||'0',10)||0; }catch(e){ return 0; } }
+function setActFloor(ts){ try{ if(ts>actFloor()) localStorage.setItem(ACT_FLOOR,String(ts)); }catch(e){} }
+
+async function pollActivity(){
+  try{
+    const r=await fetch('/api/activity');
+    const j=await r.json(); if(!j||!j.ok) return null;
+    if(j.newest_at && actFloor()>=j.newest_at) j.unread=0;
+    ACT_LAST=j;
+    paintBadge(j.unread||0);
+    return j;
+  }catch(e){ return null; }
+}
+
+function postSeen(body){
+  return fetch('/api/activity/seen',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body||{})}).then(r=>r.json()).catch(()=>null);
+}
+
+// Tell the agency he has read up to the newest line it just showed him. The
+// badge clears here and now, because a read that only takes effect if a POST
+// succeeds is a read that sometimes silently does not happen.
+function markSeen(ts){
+  paintBadge(0);
+  if(ACT_LAST) ACT_LAST.unread=0;
+  if(ts) setActFloor(ts);
+  return postSeen({seen_to: ts||0});
+}
+
+function evRow(e){
+  const cls=e.level==='bad'?'bad':e.level==='live'?'live':'';
+  return `<div class="ev ${cls}"><div class="mono" style="color:var(--muted);font-size:11.5px">${esc(e.hhmm||'')}</div>`
+    +`<div class="vb">${esc(e.verb||'')}</div>`
+    +`<div class="tx"><b>${esc(e.who||'—')}${e.room?' · '+esc(e.room):''}</b>`
+    +`<span>${esc(e.what||'')}</span>`
+    +(e.detail?`<span style="display:block;margin-top:4px;color:var(--etch)">${esc(e.detail)}</span>`:'')
+    +`</div></div>`;
+}
+
+function drawActivity(j){
+  const unread=j.unread||0, hidden=j.hidden||0;
+  $('#sheetSub').textContent=j.head+(unread?` · ${unread} new`:'');
+  /* Two buttons the owner can press and watch work. Opening the sheet already
+     marks it read, but after being told twice that the count was fixed, an
+     invisible mechanism is worth less than a button. Clear HIDES — every line
+     here is derived from a row the work itself wrote, so deleting one would
+     mean deleting the record of a real run. */
+  const bar = `<div style="display:flex;gap:8px;margin:0 0 14px">`
+    + `<button class="navbtn" onclick="actAll()">Mark all read</button>`
+    + `<button class="navbtn" onclick="actClear()">Clear</button>`
+    + (hidden?`<button class="navbtn" onclick="actShowAll()">Show the ${hidden} cleared</button>`:'')
+    + `</div>`;
+  const body = !j.events.length
+    ? `<p class="empty">${hidden?'Cleared. Anything the agency does from now on appears here.'
+                               :'Nothing has run in the last 24 hours.'}</p>`
+    : (unread?`<div class="gh2">New since you last looked (${unread})</div>`
+            +j.events.filter(e=>e.at>j.seen_to).map(evRow).join(''):'')
+      +`<div class="gh2">${unread?'Earlier today':'Today'}</div>`
+      +(j.events.filter(e=>!unread||e.at<=j.seen_to).map(evRow).join('')
+        || '<p class="empty">Nothing else today.</p>');
+  $('#sheetBody').innerHTML = bar + body;
+}
+
+$('#actBtn').onclick=async()=>{
+  openSheet('Activity','reading…','<p class="empty">Loading…</p>');
+  const j=await pollActivity();
+  if(!j){ $('#sheetBody').innerHTML='<p class="empty">Could not read the activity log.</p>'; return; }
+  drawActivity(j);
+  // Opening it IS reading it. Mark to the newest line actually on screen.
+  markSeen(j.newest_at||j.at);
+};
+
+async function actAll(){
+  await markSeen((ACT_LAST && (ACT_LAST.newest_at||ACT_LAST.at))||0);
+  const j=await pollActivity(); if(j) drawActivity(j);
+}
+async function actClear(){
+  const ts=(ACT_LAST && (ACT_LAST.newest_at||ACT_LAST.at))||0;
+  const j=await postSeen({seen_to:ts, clear:true});
+  paintBadge(0);
+  if(j&&j.ok){ ACT_LAST=j; drawActivity(j); } else { const k=await pollActivity(); if(k) drawActivity(k); }
+}
+async function actShowAll(){
+  const j=await postSeen({showAll:true});
+  if(j&&j.ok){ ACT_LAST=j; drawActivity(j); } else { const k=await pollActivity(); if(k) drawActivity(k); }
+}
+
+/* ---- ONE SECTOR, IN FULL -------------------------------------------------- */
+async function openSector(key){
+  openSheet(key,'reading…','<p class="empty">Loading…</p>');
+  let j=null;
+  try{ j=await (await fetch('/api/sector/'+encodeURIComponent(key))).json(); }catch(e){}
+  if(!j||!j.ok){ $('#sheetBody').innerHTML='<p class="empty">Could not read this sector.</p>'; return; }
+  $('#sheetTitle').textContent=j.name;
+  $('#sheetSub').textContent = (j.score===null?'no evidence yet':'health '+j.score+'/100');
+
+  const why = `<div class="gh2">What ${j.score===null?'&mdash;':j.score+'/100'} means</div>`
+    + `<p style="line-height:1.7;margin:0 0 14px"><b>${esc(j.band||'')}</b> &mdash; ${esc(j.band_means||'')}</p>`
+    + `<div class="gh2">Why it scores what it does</div>`
+    + j.why.map(w=>`<div class="why"><div class="pts ${w.points>0?'up':w.points<0?'down':''}">`
+        +`${w.points>0?'+':''}${w.points}</div>`
+        +`<div><b style="font-size:13px">${esc(w.label)}</b>`
+        +`<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(w.detail)}</div></div></div>`).join('');
+
+  const made = j.made.length
+    ? `<table class="made"><thead><tr>${j.columns.map(c=>`<th>${esc(c)}</th>`).join('')}<th>at</th></tr></thead><tbody>`
+      + j.made.map(m=>`<tr>${m.cols.map(v=>`<td>${esc(String(v==null?'':v)).slice(0,300)}</td>`).join('')}`
+      + `<td class="mono" style="color:var(--muted)">${esc(m.at)}</td></tr>`).join('')
+      + `</tbody></table>`
+    : `<p class="empty">Nothing yet. This is the real table — when this sector produces something it appears here.</p>`;
+
+  const list=(rows,f)=> rows.length? rows.map(f).join('') : '<p class="empty">None.</p>';
+  const raise_ = (j.how_to_raise||[]).length
+    ? `<div class="gh2">How this number goes up</div><ol style="line-height:1.75;`
+      + `padding-left:20px;margin:0;color:var(--muted);font-size:12.5px">`
+      + j.how_to_raise.map(t=>`<li style="margin-bottom:6px">${esc(t)}</li>`).join('')
+      + `</ol>` : '';
+  /* WHAT IS BROKEN, AND WHO WAS TOLD. This block is the answer to the owner
+     watching seo-strategist sit dead for forty-one minutes: the floor drew it
+     red and that was the end of it. Now the fault says where it went — the
+     sector's own thread, the ticket with IT, whether the MD was escalated to —
+     so "who fixes this?" has a visible answer rather than an assumption. */
+  const F = j.faults||[];
+  const faults = !F.length ? '' :
+      `<div class="gh2" style="color:var(--danger)">Broken here, and where it went (${F.length})</div>`
+    + F.map(f=>{
+        // No <b> in here: .ev .tx b is display:block, so a bold word would
+        // snap "given to IT" onto three lines.
+        const bits=[];
+        if(f.routed_to) bits.push('given to <i style="font-style:normal;'
+          +'color:var(--ink)">'+esc(f.routed_to)+'</i>');
+        else bits.push('<i style="font-style:normal;color:var(--amber)">not routed yet</i>');
+        if(f.escalated_at) bits.push('MD told');
+        if(f.seen_count>1) bits.push('still true after '+f.seen_count+' checks');
+        return `<div class="ev ${f.severity==='blocking'?'bad':''}">`
+          +`<div class="vb">${esc(f.severity)}</div><div class="vb">${esc(f.kind)}</div>`
+          +`<div class="tx"><b>${esc(f.what)}</b><span>${bits.join(' · ')}</span></div></div>`;
+      }).join('');
+
+  $('#sheetBody').innerHTML = why + faults + raise_
+    + `<div class="gh2">What it made · ${esc(j.output_label)} (${j.made.length})</div>` + made
+    + `<div class="gh2">Its board (${j.tasks.length})</div>`
+    + list(j.tasks, t=>`<div class="ev"><div class="vb">${esc(t.status)}</div>`
+        +`<div class="vb">${esc(t.risk||'')}</div><div class="tx"><b>${esc(t.title)}</b>`
+        +`<span>${esc(t.detail||'')}</span></div></div>`)
+    + `<div class="gh2">Recent runs (${j.runs.length})</div>`
+    + list(j.runs, r=>`<div class="ev ${r.status==='error'?'bad':''}"><div class="vb">${esc(r.status)}</div>`
+        +`<div class="vb">${esc((r.agent||'').split('-').pop())}</div>`
+        +`<div class="tx"><b>${esc(r.agent)}</b><span>${esc(r.note||'no note')}</span></div></div>`)
+    + `<div class="gh2">Asked of it (${j.inbox.length})</div>`
+    + list(j.inbox, r=>`<div class="ev"><div class="vb">${esc(r.status)}</div>`
+        +`<div class="vb">${esc(r.from_sector)}</div><div class="tx"><b>${esc(r.subject)}</b></div></div>`)
+    + `<div class="gh2">Asked of others (${j.outbox.length})</div>`
+    + list(j.outbox, r=>`<div class="ev"><div class="vb">${esc(r.status)}</div>`
+        +`<div class="vb">&rarr; ${esc(r.to_sector)}</div><div class="tx"><b>${esc(r.subject)}</b></div></div>`);
+}
+
+/* ---- SETUP, BEHIND A DOOR --------------------------------------------------
+   Setup holds every API key, the spend cap and the model routing. It used to be
+   an ordinary link in the Connections card: anyone who reached this screen was
+   one click from the keys. It is a deliberate step now, and when an admin
+   password is set the server itself refuses without it — this is the prompt,
+   not the lock. */
+$('#setupBtn').onclick=async()=>{
+  let locked=false, who='', canSet=false, reached=false;
+  try{
+    const j=await (await fetch('/api/status')).json();
+    reached=true; locked=!!(j&&j.locked); who=(j&&j.adminName)||'';
+    // Does the RUNNING server know this route? The screen you are reading is
+    // re-read from disk on every refresh; the server is read once, when it
+    // started. Update the code, refresh the page, and you can be looking at a
+    // form the process behind it has never heard of. Offering the form anyway
+    // is what produced "could not reach the server" about a server that was up.
+    canSet=Array.isArray(j&&j.api) && j.api.indexOf('password')>=0;
+  }catch(e){}
+  const stale = reached && !canSet;
+  openSheet('Setup','keys, models, caps',
+    `<div style="max-width:640px">
+      <p style="line-height:1.7">This screen holds <b>every API key in the agency</b>, your
+      model routing and your daily spend cap. Anyone who opens it can read what is
+      configured and change what the agency is allowed to spend.</p>
+
+      <div class="gh2">Who may open it</div>
+      <p style="line-height:1.7;color:var(--muted);margin-top:0">
+        ${locked
+          ? `Locked${who?' for <b>'+esc(who)+'</b>':''}. You are asked for the password `
+            +`<b>every time you open Setup</b>, not once per sign-in &mdash; being `
+            +`signed into the agency gets you into the building, not into the room `
+            +`with the keys in it.`
+          : '<b style="color:var(--amber)">Nobody is stopping them.</b> On a machine only you '
+            +'use that is a fair trade. The moment this box is shared &mdash; or reachable over '
+            +'the network &mdash; a password is the only thing between a passer-by and your keys.'}
+      </p>
+
+      <div class="pwbox">
+        ${stale?`
+        <p style="line-height:1.7;margin:0">
+          <b style="color:var(--amber)">The server needs restarting first.</b><br>
+          This screen is read fresh every time you open it. The program behind it
+          is only read when it starts, and the copy running right now is older
+          than this screen &mdash; it does not have the password control yet.
+          Stop it and start it again (<code>pm2 restart all</code>, or close the
+          window you started it in and run it again), then come back here.</p>`
+        :`
+        ${locked?`<label>Current password</label><input id="pwCur" type="password" autocomplete="current-password">`:''}
+        <label>Your name</label>
+        <input id="pwName" type="text" placeholder="e.g. Hamza" value="${escA(who)}">
+        <label>${locked?'New password':'Password'}</label>
+        <input id="pwNew" type="password" autocomplete="new-password" placeholder="at least 8 characters">
+        <label>Again</label>
+        <input id="pwAgain" type="password" autocomplete="new-password">
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <button class="navbtn" id="pwSave" style="border-color:var(--ok);color:var(--ok)">
+            ${locked?'Change it':'Lock this screen'}</button>
+          ${locked?`<button class="navbtn" id="pwClear">Remove the password</button>`:''}
+          <span id="pwMsg" style="font-size:12.5px"></span>
+        </div>
+        <p style="font-size:11.5px;color:var(--etch);line-height:1.6;margin:12px 0 0">
+          Only a salted hash is kept &mdash; PBKDF2-SHA256, 240,000 rounds. The password
+          itself is never stored and never leaves this machine. Setting or changing
+          it signs every open session out, including this one, so you will be asked
+          to sign in straight away.</p>`}
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:22px">
+        <a class="navbtn" href="/setup" style="border-color:var(--glass);color:var(--glass)">
+          Open Setup</a>
+        <button class="navbtn" onclick="closeSheet()">Cancel</button>
+      </div>
+    </div>`);
+
+  const msg=(t,c)=>{ const m=$('#pwMsg'); if(m){ m.textContent=t; m.style.color=c; } };
+
+  /* Three different failures used to share one sentence, and it was the wrong
+     sentence for two of them:
+       - the fetch itself threw          → the server really is unreachable
+       - the server answered, not in JSON → it IS up; say what it actually said
+       - the server answered in JSON      → show its own words
+     "Could not reach the server" on a 404 sent the owner looking at his network
+     when the answer was that the process needed restarting. */
+  const post=async(body,okText)=>{
+    msg('Saving…','var(--muted)');
+    let r;
+    try{
+      r=await fetch('/api/password',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }catch(e){
+      return msg('Could not reach the server — it looks like it has stopped.','var(--danger)');
+    }
+    let j=null, raw='';
+    try{ raw=await r.text(); j=JSON.parse(raw); }catch(_){}
+    if(!j){
+      if(r.status===404) return msg(
+        'The running server does not have this control yet — restart it and try again.',
+        'var(--danger)');
+      return msg('The server answered '+r.status+' but not with an answer this '
+        +'screen understands. Check the window it is running in.','var(--danger)');
+    }
+    if(!j.ok) return msg(j.error||('Could not save (HTTP '+r.status+').'),'var(--danger)');
+    msg(j.note||okText,'var(--ok)');
+    // Setting or changing the password kills every session, this one included.
+    // Saying "saved" and leaving the page polling endpoints that now all 401 is
+    // how a working save looks broken. Send him to the door he now needs.
+    if(j.signedOut) setTimeout(()=>{ location.href='/login'; }, 1400);
+  };
+  if($('#pwSave')) $('#pwSave').onclick=()=>post({
+    current: ($('#pwCur')||{}).value||'', name: $('#pwName').value,
+    password: $('#pwNew').value, confirm: $('#pwAgain').value }, 'Set.');
+  if($('#pwClear')) $('#pwClear').onclick=()=>post({
+    current: ($('#pwCur')||{}).value||'', clear:true }, 'Removed.');
+};
+
 </script>
 </body>
 </html>

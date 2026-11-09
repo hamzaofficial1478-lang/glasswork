@@ -1,5 +1,7 @@
 {
-  "name": "glassworks-agency",
+  "name": "glasswork",
+  "private": true,
+  "license": "UNLICENSED",
   "version": "0.1.0",
   "description": "Autonomous growth agency — office + control room on one Node app",
   "main": "server.js",

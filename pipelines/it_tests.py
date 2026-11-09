@@ -13,6 +13,7 @@ the Watcher files tickets and queues changes without ever applying one.
 Everything runs against a throwaway cabinet and local fixture HTML; no real
 site is touched.
 """
+import os
 import sqlite3
 import sys
 import tempfile
@@ -37,7 +38,7 @@ def _fresh_db():
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
     con = sqlite3.connect(db)
-    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text())
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     return db
@@ -157,8 +158,19 @@ def test_claim_is_atomic():
 
 def test_run_files_but_never_fixes():
     """
-    The red line: the Watcher observes. It may file tickets and queue changes
-    for the owner, but nothing it does may reach the site.
+    The red line: the Watcher observes. It files tickets and nothing else.
+
+    IT USED TO QUEUE CHANGES TOO, and this test used to assert that. It was a
+    workaround for a desk that did not exist — the routing table had an
+    it-fixer and no pipeline ever ran under that name, so the Watcher stood in
+    by putting its findings straight to the owner with a note saying somebody
+    should fix them.
+
+    pipelines/it_fix.py is that desk now, and it queues a decision he can
+    actually answer. Leaving the Watcher queueing as well meant the same four
+    problems reached him as seven items, half of them saying no more than
+    "something is wrong". So the assertion is inverted on purpose: the Watcher
+    filing a ticket AND queueing a change is now the bug.
     """
     print("Files tickets, applies nothing:")
     real = board.DB
@@ -175,7 +187,10 @@ def test_run_files_but_never_fixes():
         check("critic passed", r["critic"], "passed")
         check("the dead enquiry path is the worst finding", r["worst_severity"], "critical")
         check("nothing was applied to the site", r["changes_applied"], 0)
-        check("but changes were queued for the owner", r["changes_queued_for_owner"] > 0, True)
+        check("and nothing was put to the owner either — that is the Fixer's job",
+              r["changes_queued_for_owner"], 0)
+        check("but it says how much is waiting for the Fixer",
+              r["for_the_fixer"] > 0, True)
 
         con = sqlite3.connect(board.DB)
         con.row_factory = sqlite3.Row
@@ -185,8 +200,7 @@ def test_run_files_but_never_fixes():
               con.execute("SELECT count(*) FROM site_issues WHERE status='open'"
                           " AND found_by='it-watcher'").fetchone()[0], r["issues_filed"])
         q = con.execute("SELECT count(*) FROM site_queue WHERE status='pending'").fetchone()[0]
-        check("queued changes are pending the owner, not applied", q,
-              r["changes_queued_for_owner"])
+        check("the owner's queue is untouched by the Watcher", q, 0)
         t = dict(con.execute("SELECT status,owner FROM tasks").fetchone())
         check("the task was finished", (t["status"], t["owner"]), ("done", "it-watcher"))
         con.close()
@@ -196,9 +210,24 @@ def test_run_files_but_never_fixes():
 
 
 def test_no_site_configured():
-    print("No site configured:")
+    """
+    'No site configured' has to be SIMULATED, not assumed.
+
+    This test used to just pass url="" and trust the machine had no website
+    saved anywhere. That is true on a fresh checkout and false on every machine
+    the agency is actually running on — site_url() falls back to the process
+    environment, then .env, then config/site.json, so as soon as the owner saved
+    his website this test started failing on his copy for no reason connected to
+    the code. Every source is silenced here instead.
+    """
+    from coordination import site as _site
     real = board.DB
     board.DB = _fresh_db()
+    saved_env = os.environ.pop("SITE_URL", None)
+    saved_from_env, saved_load = _site.from_env_file, _site.load
+    _site.from_env_file = lambda: ""
+    _site.load = lambda: {}
+    print("No site configured:")
     try:
         board.post_task("IT", "health baseline", "detail")
         r = it.run(agent="it-watcher", url="")
@@ -209,6 +238,9 @@ def test_no_site_configured():
               con.execute("SELECT count(*) FROM site_issues").fetchone()[0], 0)
         con.close()
     finally:
+        _site.from_env_file, _site.load = saved_from_env, saved_load
+        if saved_env is not None:
+            os.environ["SITE_URL"] = saved_env
         board.DB = real
 
 

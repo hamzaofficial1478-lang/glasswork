@@ -13,3 +13,25 @@ node_modules/
 logs/*.log
 __pycache__/
 *.pyc
+
+# The owner's own website address, written by /setup. This used to be TRACKED,
+# on the reasoning that a public URL is not a secret and ought to travel to a
+# fresh clone. True, but it meant the repo shipped {"url": ""} and every pull
+# wiped whatever he had saved — he set his site, updated, and was told to set
+# his site. config/site.example.json travels instead; .env is what actually
+# survives an update.
+config/site.json
+
+# Accounts: each person's settings, keys and cabinets (coordination/workspace.py).
+data/
+
+# Made on each computer by install/: the program's own Python folder and the
+# start shortcuts. And the copies coordination/updates.py keeps of every file
+# an update replaced, so an update can be undone.
+.venv/
+Start *.bat
+Start *.command
+updates/
+
+# Pictures added in the post editor, waiting for the IT Releaser (coordination/posts.py).
+pictures-pending/

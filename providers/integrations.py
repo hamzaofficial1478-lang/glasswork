@@ -1,25 +1,28 @@
 """
-integrations.py — test the channels the agency talks through: Telegram (how the
-owner is asked to approve) and SMTP.
+integrations.py — the channels the agency talks through: the app itself (and
+Telegram, if it was set up) for reaching the owner, SMTP for reaching customers.
 
 These live in .env rather than the provider store, so they were the one part of
-the setup with no test at all. You could have a dead Telegram token and not find
-out until the night an agent needed a decision from you.
+the setup with no test at all. You could have a dead token and not find out
+until the night an agent needed a decision from you.
 
-Telegram is NOT a customer channel — it is the owner's approval line, the way an
-agent stops and asks before doing anything amber. Five agents depend on it (MD,
-Overseer, Reporter, Security, Leads-Responder), and every red line in the
-handbook ends in "owner approval", which arrives here.
+NONE OF THESE IS A CUSTOMER CHANNEL EXCEPT SMTP. The owner's alerts — the way
+an agent stops and asks before doing anything amber — live in the app now: the
+app is on his computer and on his Android phone, so what needs him is waiting
+there with the approval button next to it. The old phone-topic channel was
+removed ("not needed any more as now we have program for android too").
+Telegram is still used if a bot was already set up, as an extra. Everything
+routes through one function, send_message(), so the route is a config change
+and not a code change.
 
 THE RULE HERE: prove the credential, send nothing. Every check below is a
 read-only or auth-only call:
-  Telegram  getMe + getChat   — reads the bot and the chat, posts no message
-  SMTP      connect + login   — authenticates and hangs up, no mail leaves
+  Telegram  getMe + getChat    — reads the bot and the chat, posts no message
+  SMTP      connect + login    — authenticates and hangs up, no mail leaves
 
 A test that spams the owner (or worse, a customer) to prove it works is a test
-you stop running. The one exception is Telegram, where you can explicitly ask
-for a real message — you have to pass notify=True, and it only ever goes to the
-owner's own chat id.
+you stop running. You can ask for a real notification with notify=True, and it
+only ever goes to the owner's own chat.
 
 (The WhatsApp Cloud API used to live here. It was removed because the owner
 takes WhatsApp enquiries through the widget on the site and answers them
@@ -34,28 +37,224 @@ import smtplib
 import socket
 from pathlib import Path
 
-import requests
-
 from . import auth
 
+
+class _OnFirstUse:
+    """`requests`, loaded the first time this file actually sends something.
+    Almost every program that reads a setting from here never does, and
+    loading it was half the start-up time of the screens' programs."""
+
+    def __getattr__(self, name):
+        import requests as real
+        globals()["requests"] = real
+        return getattr(real, name)
+
+
+requests = _OnFirstUse()
+
+# The original single settings file. Still the only one until an account is
+# open; after that, the person's settings and the open website's are two files
+# (coordination/workspace.py) and _files() reads both.
 ENV_PATH = Path(__file__).parents[1] / ".env"
+_ORIGINAL_ENV = ENV_PATH
 _TELEGRAM = "https://api.telegram.org"
 
 
+def _files(path=None) -> list:
+    """The settings files to read, the person's first and then the website's."""
+    if path:
+        return [Path(path)]
+    from coordination import workspace
+    # a test that points ENV_PATH at a file of its own means that file only
+    if ENV_PATH != _ORIGINAL_ENV or workspace.legacy():
+        return [ENV_PATH]
+    return list(workspace.env_paths())
+
+
+# The settings the agency reads by name. Used to decide which environment
+# variables may override the file — copying the whole environment in would put
+# PATH, HOME and every CI variable into a dict the office renders as the
+# owner's settings.
+ENV_KEYS = {
+    "SITE_URL", "SITE_MODE", "SITE_NAME", "AGENCY_NAME",
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+    "OUTREACH_DOMAIN", "OUTREACH_DAILY_CAP", "WHATSAPP_DAILY_CAP",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+    "ALGOLIA_APP_ID", "ALGOLIA_SEARCH_KEY", "ALGOLIA_WRITE_KEY", "ALGOLIA_INDEX",
+    "GOOGLE_PLACES_API_KEY", "TOMTOM_API_KEY", "GSC_PROPERTY", "GOOGLE_CSE_ID", "GOOGLE_CSE_KEY",
+    "DAILY_SPEND_CAP_USD", "ZYTE_COST_PER_FETCH", "ZYTE_COST_PER_RENDER",
+    "CRAWLER_ON_OWN_SITE", "LEADS_ALLOW_INDIVIDUALS",
+    "SEO_SEEDS", "SEO_AREAS", "SEO_STRIKING_TO", "SEO_W_AREA", "SEO_W_ENQUIRIES",
+    # The workshop address. Never scraped — it is nowhere on the site — and a
+    # wrong one costs the map-pack ranking, because Google cross-checks it
+    # against the Google Business Profile. Saved once, read every time the
+    # LocalBusiness markup is rebuilt, so it survives a regeneration.
+    "BUSINESS_ADDRESS", "BUSINESS_CITY", "BUSINESS_EMIRATE",
+    "PORT",
+}
+
+
 def read_env(path=None) -> dict:
-    """Parse .env into a dict. Mirrors the reader in server.js so both agree."""
+    """
+    The agency's settings: .env, with the real environment on top.
+
+    THE ENVIRONMENT USED TO BE IGNORED, AND THE PROGRAM ADVERTISED OTHERWISE.
+
+    `run.py --check` tells the owner, in as many words, "set
+    SITE_URL=https://yoursite.ae for one run". coordination/site.py honours
+    that and reports the source as 'environment'. This function did not read
+    the environment at all — so the same setting was set and not set at the
+    same time, depending on who asked, and the preflight that decides whether
+    the day may start was the one saying not set. Doing exactly what the
+    program told you to do left IT and Leads blocked with no way to see why.
+
+    Precedence is the environment, because exporting a variable for one run is
+    a deliberate act and the saved file is the standing default. Everything
+    that reads a setting directly — mail.py, whatsapp.py, fetcher.py — already
+    used os.environ, so this brings the odd one out into line rather than
+    inventing a new rule.
+
+    Mirrored in server.js's readEnv() so the two never disagree again.
+    """
     env = {}
-    p = Path(path) if path else ENV_PATH
-    if not p.exists():
-        return env
-    try:
-        for line in p.read_text().splitlines():
-            m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
-            if m:
-                env[m.group(1)] = m.group(2).strip()
-    except Exception:
-        return {}
+    # THE TEST SUITE IS THE RELEASE GATE, AND HIS OWN SETTINGS WERE TURNING IT
+    # RED.
+    #
+    # "the test suite is red — nothing goes on the website until it is green
+    #  again: FAIL coordination.hook_tests; FAIL pipelines.leads_tests;
+    #  FAIL pipelines.site_tests"
+    #
+    # Those suites pass on a clean checkout and fail on his machine, and the
+    # reason is this file. A test that wants to prove "with no SMTP configured
+    # it refuses to send" pops SMTP_HOST out of os.environ — which is correct
+    # and which does nothing, because .env still has it and precedence falls
+    # through to the file. So the assertion fails, the suite goes red, and
+    # it_release refuses every change to the website. For ever. The better his
+    # configuration, the more of the gate it breaks.
+    #
+    # AGENCY_IGNORE_DOTENV makes the file invisible for the process that sets
+    # it, leaving the real environment as the only source. run.py sets it for
+    # the whole suite. An explicit `path=` still wins, so the handful of tests
+    # that exist to prove .env behaviour point this at a temp file of their own
+    # and are unaffected.
+    if path is None and str(os.environ.get("AGENCY_IGNORE_DOTENV", "")).strip().lower() \
+            in ("1", "true", "yes", "on"):
+        return {k: str(v).strip() for k in ENV_KEYS
+                if (v := os.environ.get(k)) is not None and str(v).strip()}
+
+    from coordination import workspace
+    for p in _files(path):
+        try:
+            if p.exists():
+                # sealed when the account is encrypted; a locked one reads as empty
+                for line in (workspace.read_secret(p, "") or "").splitlines():
+                    m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
+                    if m:
+                        env[m.group(1)] = m.group(2).strip()
+        except Exception:
+            pass
+    # Only keys the file already knows about, plus the ones the agency reads by
+    # name. Copying the WHOLE environment in would drag PATH, HOME and every
+    # CI variable into a dict the office renders as the owner's settings.
+    for k in set(env) | ENV_KEYS:
+        v = os.environ.get(k)
+        if v is not None and str(v).strip():
+            env[k] = str(v).strip()
     return env
+
+
+def write_env(values: dict, path=None) -> dict:
+    """
+    Save settings into .env, leaving every other line exactly as it was.
+
+    Writing .env from Python at all is new: until now only server.js could,
+    which meant a command-line fix for a setting had to be done through the
+    browser or by hand-editing the file. Keys already present are updated in
+    place — order, comments and blank lines are preserved, because a settings
+    file the program reshuffles is one the owner stops recognising.
+
+    Mirrors server.js's updateEnv. Same file, same format, same key rule.
+    """
+    values = {k: str(v) for k, v in (values or {}).items()
+              if k and str(v).strip()}
+    if not values:
+        return {"ok": False, "error": "nothing to save"}
+    bad = [k for k in values if not re.fullmatch(r"[A-Z0-9_]+", k)]
+    if bad:
+        return {"ok": False, "error": "not a setting name: " + ", ".join(bad)}
+    # A newline in a value would write a second, bogus setting on the next
+    # line — and a value that fakes a key is how a settings file gets a key
+    # nobody put there.
+    for k, v in values.items():
+        if "\n" in v or "\r" in v:
+            return {"ok": False, "error": f"{k} cannot contain a line break"}
+    files = _files(path)
+    if len(files) == 1:
+        return _write_one(files[0], values)
+    # An account is open: each setting goes to the file it belongs in — the
+    # person's (notifications, map and AI keys, spending cap) or the website's.
+    from coordination import workspace
+    saved, where = [], []
+    for p in dict.fromkeys(files):
+        part = {k: v for k, v in values.items() if workspace.env_path_for(k) == p}
+        if not part:
+            continue
+        r = _write_one(p, part)
+        if not r.get("ok"):
+            return r
+        saved += r["saved"]
+        where.append(r["path"])
+    return {"ok": True, "saved": sorted(saved), "path": ", ".join(where)}
+
+
+def forget_env(keys, path=None) -> dict:
+    """Remove settings (an API key the person no longer wants kept), every other line untouched."""
+    from coordination import workspace
+    keys = {k for k in (keys or []) if re.fullmatch(r"[A-Z0-9_]+", str(k))}
+    if not keys:
+        return {"ok": False, "error": "nothing to forget"}
+    files = _files(path)
+    if len(files) > 1:
+        files = [workspace.env_path_for(k) for k in keys]
+    for p in dict.fromkeys(Path(f) for f in files):
+        try:
+            lines = (workspace.read_secret(p, "") or "").splitlines()
+        except Exception as e:
+            return {"ok": False, "error": f"could not read {p}: {e}"}
+        kept = [ln for ln in lines
+                if not ((m := re.match(r"^([A-Z0-9_]+)=", ln.strip())) and m.group(1) in keys)]
+        if kept != lines:
+            try:
+                workspace.write_secret(p, "\n".join(kept).rstrip("\n") + "\n")
+            except Exception as e:
+                return {"ok": False, "error": f"could not write {p}: {e}"}
+    return {"ok": True, "forgot": sorted(keys)}
+
+
+def _write_one(p, values) -> dict:
+    """One settings file, with every other line exactly as it was."""
+    from coordination import workspace
+    p = Path(p)
+    try:
+        lines = (workspace.read_secret(p, "") or "").splitlines()
+    except Exception as e:
+        return {"ok": False, "error": f"could not read {p}: {e}"}
+    left = dict(values)
+    out = []
+    for line in lines:
+        m = re.match(r"^([A-Z0-9_]+)=", line.strip())
+        if m and m.group(1) in left:
+            out.append(f"{m.group(1)}={left.pop(m.group(1))}")
+        else:
+            out.append(line)
+    for k, v in left.items():
+        out.append(f"{k}={v}")
+    try:
+        workspace.write_secret(p, "\n".join(out).rstrip("\n") + "\n")
+    except Exception as e:
+        return {"ok": False, "error": f"could not write {p}: {e}"}
+    return {"ok": True, "saved": sorted(values), "path": str(p)}
 
 
 def _missing(env, keys):
@@ -135,14 +334,12 @@ def test_telegram(env=None, notify=False, timeout=20) -> dict:
     return _result("telegram", True, detail, bot=bot, chat=chat)
 
 
-def send_message(text, env=None, timeout=20) -> dict:
+def send_telegram(text, env=None, timeout=20) -> dict:
     """
-    Send REAL, agency-generated text to the owner's Telegram chat — the one
-    place that is allowed to, since this is the owner's own approval line, not
-    a customer channel. Used by the Report sector for the daily digest.
+    Post agency-generated text to the owner's Telegram chat.
 
     Deliberately separate from test_telegram(): that one proves the credential
-    and only ever sends a fixed, clearly-labelled test string. This one sends
+    and only ever posts a fixed, clearly-labelled test string. This one posts
     whatever the caller built, so it stays a one-line function with no test-vs-
     real ambiguity baked into it.
     """
@@ -152,7 +349,7 @@ def send_message(text, env=None, timeout=20) -> dict:
     if not token or not chat:
         return _result("telegram", False,
                        "Not configured — no TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in .env. "
-                       "Nothing was sent.")
+                       "Nothing went out.")
     token = re.sub(r"^bot", "", token)
     try:
         r = requests.post(f"{_TELEGRAM}/bot{token}/sendMessage", timeout=timeout,
@@ -162,7 +359,27 @@ def send_message(text, env=None, timeout=20) -> dict:
     if not (200 <= r.status_code < 300):
         return _result("telegram", False, f"Telegram rejected the message ({r.status_code}).",
                        status=r.status_code)
-    return _result("telegram", True, "Sent.")
+    return _result("telegram", True, "Delivered.")
+
+
+def send_message(text, env=None, timeout=20, **kw) -> dict:
+    """
+    The agency's one way of reaching the owner. Everything that notifies him
+    goes through here — the daily digest, approval requests, the Overseer.
+
+    The app is the route: the alert is kept in the cabinet (coordination/notify
+    records it) and shown in the app, on his computer and on his phone, next to
+    the button that answers it. Telegram, if a bot was set up before, also gets
+    a copy. Nothing is lost when Telegram is not set up — the app has it.
+    """
+    env = env if env is not None else read_env()
+    if (env.get("TELEGRAM_BOT_TOKEN") or "").strip():
+        r = send_telegram(text, env=env, timeout=timeout)
+        if r.get("ok"):
+            return r
+        return _result("app", True, "Kept in the app (Telegram did not take it: "
+                       + str(r.get("detail") or "")[:120] + ").")
+    return _result("app", True, "Kept in the app.")
 
 
 # ---- SMTP -------------------------------------------------------------------
@@ -224,7 +441,74 @@ def test_email(env=None, timeout=20) -> dict:
                        host=host, port=port)
 
 
-ALL = {"telegram": test_telegram, "email": test_email}
+# ---- Algolia (search on the owner's own website) ----------------------------
+
+def test_algolia(env=None, timeout=15) -> dict:
+    """
+    Prove the account and the index answer, WITHOUT writing anything.
+
+    The read is a query with the search key, which is the same call the widget
+    makes from a visitor's browser — so a pass here means the search box will
+    work, not merely that a key exists.
+
+    The write key is deliberately NOT exercised. The only way to test it is to
+    write to the index, and a connector test that quietly mutates the owner's
+    data is not a test. It is reported as saved or not saved, and the first real
+    index run is what proves it.
+    """
+    env = env if env is not None else read_env()
+    app = (env.get("ALGOLIA_APP_ID") or "").strip()
+    search = (env.get("ALGOLIA_SEARCH_KEY") or "").strip()
+    write = (env.get("ALGOLIA_WRITE_KEY") or "").strip()
+    index = (env.get("ALGOLIA_INDEX") or "glasswork_site").strip()
+
+    if not app and not search:
+        return _result("algolia", None, "Not configured — no ALGOLIA_APP_ID in .env.")
+    if not app or not search:
+        return _result("algolia", False,
+                       "Half configured — both the application ID and the search "
+                       "key are needed before the search box can query anything.")
+    if search == write and write:
+        return _result("algolia", False,
+                       "The search key and the write key are set to the same value. "
+                       "The search key goes into the page where anyone can read it, "
+                       "so that would publish write access to your whole index. "
+                       "Copy the SEARCH-ONLY key into ALGOLIA_SEARCH_KEY.")
+    try:
+        r = requests.post(
+            f"https://{app}-dsn.algolia.net/1/indexes/{index}/query",
+            headers={"X-Algolia-API-Key": search, "X-Algolia-Application-Id": app,
+                     "Content-Type": "application/json"},
+            json={"query": "", "hitsPerPage": 0}, timeout=timeout)
+    except Exception as e:
+        return _result("algolia", False, f"Could not reach Algolia: {e}", app=app, index=index)
+
+    if r.status_code == 403:
+        return _result("algolia", False,
+                       "403 — Algolia rejected the search key for this index. Check it "
+                       "is the Search-Only key and that the index name matches.",
+                       app=app, index=index)
+    if r.status_code == 404:
+        return _result("algolia", None,
+                       f"Reachable, but the index '{index}' does not exist yet. It is "
+                       "created the first time the site is indexed — run "
+                       "`python -m pipelines.site_search`.", app=app, index=index)
+    if r.status_code >= 400:
+        return _result("algolia", False, f"Algolia returned {r.status_code}.",
+                       app=app, index=index)
+
+    try:
+        n = int((r.json() or {}).get("nbHits", 0))
+    except Exception:
+        n = 0
+    detail = (f"Index '{index}' answers — {n} page(s) searchable. Nothing was written. "
+              + ("The write key is saved, and is only used server-side."
+                 if write else
+                 "No write key saved yet, so the site cannot be indexed."))
+    return _result("algolia", True, detail, app=app, index=index, pages=n)
+
+
+ALL = {"telegram": test_telegram, "email": test_email, "algolia": test_algolia}
 
 
 def test_all(env=None, notify=False) -> list:
@@ -233,7 +517,8 @@ def test_all(env=None, notify=False) -> list:
     out = []
     for name, fn in ALL.items():
         try:
-            out.append(fn(env=env, notify=notify) if name == "telegram" else fn(env=env))
+            out.append(fn(env=env, notify=notify)
+                       if name == "telegram" else fn(env=env))
         except Exception as e:  # a broken check must never take the sweep down
             out.append(_result(name, False, f"The check itself errored: {e}"))
     return out

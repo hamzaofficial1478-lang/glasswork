@@ -25,6 +25,7 @@ flagged 'escalated' so the caller stops and asks the MD (and Security, for
 outside data) via board.request_verification. The cabinet does not itself block
 on approval — it enforces turn-taking and flags what must be escalated.
 """
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -80,6 +81,89 @@ def classify(data_class: str = "internal", est_cost: float = 0.0,
 
 
 # ---------------------------------------------------------------------------
+# THE DAILY SPEND CAP — a red line that had nothing behind it
+# ---------------------------------------------------------------------------
+#
+# The handbook says: "No money is spent above the daily cost cap without owner
+# approval." DAILY_SPEND_CAP_USD was written into .env by the setup screen and
+# read by absolutely nothing. classify()'s cost_ceiling is a PER-BORROW limit,
+# it defaults to 0.0, and `if cost_ceiling and ...` means the default disables
+# it — so a thousand small borrows could run all day and never trip anything.
+#
+# The cap is enforced HERE, in borrow(), for the same reason the outreach cap
+# lives inside _smtp_send: a limit checked by whoever remembers to check it is
+# a limit the next caller written will skip. Every paid capability comes
+# through this door.
+
+DEFAULT_DAILY_SPEND_CAP = 5.0     # dollars. A cap that defaults to infinity is not a cap.
+
+
+def daily_spend_cap() -> float:
+    """The owner's cap from .env, else the built-in one. Never unlimited."""
+    raw = os.environ.get("DAILY_SPEND_CAP_USD", "").strip()
+    if not raw:
+        try:
+            from providers import integrations
+            raw = (integrations.read_env().get("DAILY_SPEND_CAP_USD") or "").strip()
+        except Exception:
+            raw = ""
+    try:
+        cap = float(raw)
+        return cap if cap > 0 else DEFAULT_DAILY_SPEND_CAP
+    except ValueError:
+        return DEFAULT_DAILY_SPEND_CAP
+
+
+def spent_today() -> float:
+    """
+    What the agency has spent today: the borrow trail PLUS the API usage meter.
+
+    Two sources because there are genuinely two kinds of paid work. A borrow is
+    a shelf held for a while and released with a cost attached. A crawler fetch
+    is a single request that borrows nothing — it happens inside fetcher.fetch()
+    and used to be invisible here, which meant the one paid call the agency
+    makes most often was the one the cap could not see.
+
+    Nothing is counted twice: crawler spend goes to the meter and is never also
+    passed to release(usd_cost=). If you add a paid capability, pick one door.
+
+    AND THE AI, WHEN IT IS PAID BY API KEY. An account that thinks with Claude,
+    OpenAI or Gemini by its own key pays per call, so those calls count too —
+    on both of the account's websites, because the cap is the person's, not one
+    website's (providers/engines.py). Claude Code on his own plan is not money
+    spent and is not counted.
+    """
+    lt = time.localtime()
+    day0 = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+    total = 0.0
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT COALESCE(SUM(usd_cost),0) FROM borrows"
+                          " WHERE granted_at>=?", (day0,)).fetchone()
+            total += float(r[0] or 0)
+    except sqlite3.Error:
+        pass
+    try:
+        from . import usage
+    except ImportError:  # pragma: no cover - script/path fallback
+        try:
+            import usage
+        except ImportError:
+            usage = None
+    if usage is not None:
+        try:
+            total += usage.spent_today()
+        except Exception:
+            pass
+    try:
+        from providers import engines
+        total += engines.ai_spent_today()
+    except Exception:
+        pass
+    return round(total, 4)
+
+
+# ---------------------------------------------------------------------------
 # BORROW / RELEASE — take a shelf, do the work, give it back
 # ---------------------------------------------------------------------------
 
@@ -107,6 +191,19 @@ def borrow(shelf, agent, sector=None, reason="", data_class="internal",
 
     resource = _resource(shelf)
     approval = classify(data_class, est_cost, cost_ceiling)
+
+    # The daily cap, before the lock is even taken. Spending it is the one thing
+    # that cannot be undone by releasing the shelf afterwards.
+    cap, so_far = daily_spend_cap(), spent_today()
+    if so_far >= cap:
+        return {"ok": False, "capped": True, "shelf": shelf,
+                "spent_today": round(so_far, 2), "cap": cap,
+                "error": (f"daily spend cap reached (${so_far:.2f} of ${cap:.2f}). "
+                          "Nothing was borrowed. Raise DAILY_SPEND_CAP_USD on /setup "
+                          "if you want the agency to keep going today.")}
+    if est_cost and so_far + float(est_cost) > cap:
+        # it would cross the line mid-job, so the owner decides before it starts
+        approval = "escalate"
 
     with _conn() as c:
         cur = c.execute(
@@ -199,6 +296,46 @@ def _day_start():
     return int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
 
 
+# A queue row is set to 'cancelled' by the waiter itself when it times out —
+# which only happens if that process is still alive to do it. Kill a day-run
+# step, close the terminal, lose power, and the row stays 'waiting' for ever.
+# The shelf board then shows somebody queued for four days for a shelf nobody
+# is holding, which reads as a deadlock in the coordination layer and is really
+# just a corpse. The longest legitimate wait is a borrow timeout (120s default)
+# inside a run step (420s), so anything past this is not waiting, it is dead.
+ABANDONED_AFTER = 1800
+
+
+def reap_abandoned(now=None, wait=30):
+    """
+    Close queue rows whose waiter is long gone. Returns how many.
+
+    Looks before it writes. The office calls this on every refresh, and a
+    write has to queue behind whatever a day run is writing — so a refresh
+    that only needed to read sat on "Loading…" until the run let go. Nothing
+    to reap is now a pure read. With something to reap, `wait` caps how long
+    it will queue for the pen; the office passes a fraction of a second and
+    simply leaves the corpse for the next refresh if the cabinet is busy.
+    """
+    now = now or _now()
+    try:
+        with _conn() as c:
+            n = c.execute(
+                "SELECT COUNT(*) FROM shelf_queue"
+                " WHERE status='waiting' AND enqueued_at < ?",
+                (now - ABANDONED_AFTER,)).fetchone()[0]
+            if not n:
+                return 0
+            c.execute(f"PRAGMA busy_timeout={int(max(0, wait) * 1000)};")
+            cur = c.execute(
+                "UPDATE shelf_queue SET status='abandoned'"
+                " WHERE status='waiting' AND enqueued_at < ?",
+                (now - ABANDONED_AFTER,))
+            return cur.rowcount or 0
+    except sqlite3.Error:
+        return 0
+
+
 def shelf_state(shelf_names=None, recent=5):
     """
     A live snapshot per shelf for the dashboard:
@@ -231,6 +368,7 @@ def shelf_state(shelf_names=None, recent=5):
             names.add(r["resource"].split("shelf:", 1)[1])
 
         out = {}
+        reap_abandoned(now, wait=0.3)
         for shelf in sorted(names):
             _lk = _rows("SELECT holder,acquired_at,expires_at FROM locks WHERE resource=?",
                         (_resource(shelf),))
@@ -245,7 +383,8 @@ def shelf_state(shelf_names=None, recent=5):
                  "data_class": q["data_class"], "waited_s": now - (q["enqueued_at"] or now)}
                 for q in _rows(
                     "SELECT * FROM shelf_queue WHERE shelf=? AND status='waiting'"
-                    " ORDER BY enqueued_at", (shelf,))
+                    " AND enqueued_at >= ? ORDER BY enqueued_at",
+                    (shelf, now - ABANDONED_AFTER))
             ]
             _sp = _rows("SELECT COALESCE(SUM(usd_cost),0) AS s FROM borrows"
                         " WHERE shelf=? AND granted_at>=?", (shelf, day0))

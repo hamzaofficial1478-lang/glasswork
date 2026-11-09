@@ -45,7 +45,7 @@ def _fresh_db():
     d = Path(tempfile.mkdtemp())
     db = d / "agency.db"
     con = sqlite3.connect(db)
-    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text())
+    con.executescript((Path(__file__).parents[1] / "coordination" / "schema.sql").read_text(encoding="utf-8"))
     con.commit()
     con.close()
     return db
@@ -182,8 +182,18 @@ def test_scope_screens():
                                 "segment": seg, "email": "a@b.ae"})
         check(f"{company} is in scope now", ok, True)
 
-    ok, why = ls.screen_lead({**BIZ, "email": "", "phone": ""})
-    check("no contact route refused", (ok, "contact route" in why), (False, True))
+    # A STREET ADDRESS IS A CONTACT ROUTE FOR THIS TRADE, and this used to say
+    # otherwise. Demanding an email or a phone is right for an agency that only
+    # writes; a glass workshop wins a shopfront job by walking in. Most small
+    # UAE businesses on OpenStreetMap carry a name and an address and no phone,
+    # so the old rule would have thrown away the majority of exactly the local
+    # leads the owner asked for.
+    ok, _ = ls.screen_lead({**BIZ, "email": "", "phone": "",
+                            "address": "Al Quoz 3, Dubai"})
+    check("an address with no phone is still a lead you can walk into", ok, True)
+    ok, why = ls.screen_lead({**BIZ, "email": "", "phone": "", "address": ""})
+    check("but nothing at all is refused",
+          (ok, "not even a street address" in why), (False, True))
     ok, _ = ls.screen_lead({**BIZ, "company": ""})
     check("no company name refused", ok, False)
     ok, _ = ls.screen_lead(BIZ)
@@ -279,6 +289,71 @@ def test_hunt_without_a_key_explains_itself():
         check("nothing was stored",
               con.execute("SELECT count(*) FROM leads").fetchone()[0], 0)
         con.close()
+    finally:
+        board.DB = real
+
+
+def test_the_collection_task_reaches_the_collector_that_can_do_it():
+    """
+    WHY LEADS NEVER COLLECTED, ON ANY RUN HE HAS EVER DONE.
+
+    Read off the cabinet of real day runs, three traps in a row:
+
+      1. The map step ran as "leads-hunter", first in the Leads lane, so the
+         dispatcher gave it the Hunter's job. It closed "Collect today's leads"
+         with a source map as the result. Zero leads, task marked done.
+      2. Had it not, the Places desk would have claimed it, found no Places
+         key and closed it BLOCKED — with a message saying OpenStreetMap runs
+         right after — while closing the task OpenStreetMap needed.
+      3. One task per sector per run, so OpenStreetMap, the collector that
+         works with no key at all, never got a turn.
+
+    With the fixes, on a fresh cabinet: run 1 maps, run 2 collected 40 leads.
+    """
+    from coordination import desks
+    from . import md_cycle
+    print("\nThe map step and the collectors are different desks:")
+    map_t = {"title": "Map the lead sources across every buying segment",
+             "detail": "Collect nothing yet.", "sector": "Leads", "desk": ""}
+    col_t = {"title": "Collect today's leads across the mapped segments",
+             "detail": "Work the source map.", "sector": "Leads", "desk": ""}
+    check("the mapper can never take collection, even unaddressed",
+          desks.verdict("leads-mapper", col_t)["allowed"], False)
+    check("and the map step runs as the mapper, not the Hunter",
+          ls.run.__defaults__[0], "leads-mapper")
+
+    print("\n...and the MD addresses each task to the desk that does it:")
+    facts = {"targets": {"jobs": [{"name": "leads", "unit": "leads", "per_day": 20,
+                                   "set_by_owner": True, "done_today": 0,
+                                   "done_yesterday": 0, "on_file": 0, "remaining": 20}]},
+             "sector_orders": {}, "site": {}, "proposals": [],
+             "source_map_done": False, "approvals": 0}
+    plan = {c["title"]: c for c in md_cycle.plan(facts) if c["sector"] == "Leads"}
+    check("the map is for the mapper",
+          plan["Map the lead sources across every buying segment"].get("desk"),
+          "leads-mapper")
+    check("collection is for a collector",
+          plan["Collect today's leads across the mapped segments"].get("desk"),
+          "leads-hunter")
+    check("so a collector cannot take the map",
+          desks.verdict("leads-hunter", dict(map_t, desk="leads-mapper"))["allowed"],
+          False)
+
+    print("\nNo Places key: the Places desk does not claim a job it cannot do:")
+    for var in ("GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_API_KEY"):
+        os.environ.pop(var, None)
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        tid = board.post_task("Leads", col_t["title"], col_t["detail"],
+                              created_by="MD", desk="leads-hunter")
+        r = lh.run(agent="leads-hunter")
+        check("it stood aside, idle", r.get("idle"), True)
+        check("and says who it left it for", "OpenStreetMap" in r.get("left_for", ""), True)
+        task = board.get_task(tid)
+        check("the task is still open for OpenStreetMap", task["status"], "open")
+        check("and was never claimed, so the run's one job is still free",
+              task["claimed_at"], None)
     finally:
         board.DB = real
 
@@ -632,7 +707,463 @@ def test_outreach_is_capped_and_recorded():
         board.DB = real_db
 
 
+from providers import store as _store
+
+
+def test_hunting_for_one_service():
+    """
+    The owner's ask: "the agent must know which service related leads it's
+    collecting and target the accurate audience related to that service".
+
+    Aiming by SEGMENT answers "find me hotels". Aiming by SERVICE answers "get me
+    shower-glass work this week", which is the question that actually fills a
+    diary — and it must go to the businesses that BUY shower glass, not sweep the
+    market and sort it out afterwards.
+    """
+    print("Hunting for one service targets only its buyers:")
+    from . import leads_hunt as lh
+    from . import services as sv
+
+    targets = lh.plan_targets(service="shower glass", per_segment=1)
+    segs = {t["segment"] for t in targets}
+    check("it found some targets", bool(targets), True)
+    check("every segment targeted actually buys shower glass",
+          segs - set(sv.buyers_of("shower_glass")), set())
+    check("and a segment that does not buy it is left out",
+          "warehouse" in segs, False)
+    check("every target is stamped with the service it was collected for",
+          {t.get("for_service") for t in targets}, {"shower_glass"})
+
+    print("\nThe owner does not have to learn our spelling:")
+    for typed in ("shower glass", "Shower Glass", "shower_glass", "frameless shower"):
+        check(f"'{typed}' finds the job", sv.resolve_service(typed), "shower_glass")
+    # "swimming pools" USED TO BE THE EXAMPLE HERE, and the owner caught it:
+    # "the swimming pool is in our service that swimming pool safety glass".
+    # Pool fencing and infinity-edge walls are laminated safety glass and among
+    # the better-paying jobs in this country. The catalogue was wrong, not the
+    # keyword — so the example moves to something he genuinely does not do.
+    check("pool glass IS ours, and is found",
+          sv.resolve_service("swimming pool safety glass"), "pool_glass")
+    check("a service we do not sell resolves to nothing",
+          sv.resolve_service("carpet cleaning"), "")
+
+    print("\nAsking for work we do not sell finds nobody, loudly:")
+    check("no targets are planned", lh.plan_targets(service="carpet cleaning"), [])
+    # On a throwaway cabinet: this refusal once landed in his real Activity.
+    real = board.DB
+    board.DB = _fresh_db()
+    try:
+        out = lh.run(service="carpet cleaning", dry_run=True)
+    finally:
+        board.DB = real
+    check("the hunt refuses", out["ok"], False)
+    check("and says what we DO sell", "aluminium_doors" in out["error"], True)
+
+    print("\nThe two directions of the table cannot drift apart:")
+    # buyers_of and services_for_segment are the same fact read both ways
+    for svc in sv.SERVICES:
+        for seg in sv.buyers_of(svc):
+            if svc not in sv.services_for_segment(seg):
+                check(f"{seg} buys {svc} both ways", False, True)
+                break
+    check("every buyer link agrees in both directions", True, True)
+
+
+def test_locals_come_first():
+    """
+    "Main target is locals." Not a preference — a Business Bay enquiry is
+    surveyed tomorrow, a Ras Al Khaimah one is two hours each way. The search
+    budget always runs out, and it should run out at the far end.
+    """
+    print("\nNearest areas are searched first:")
+    from unittest import mock
+    from . import leads_hunt as lh
+    areas = ["Abu Dhabi", "Sharjah", "Business Bay", "Ras Al Khaimah", "Al Quoz"]
+
+    with mock.patch("coordination.site.status", return_value={"url": "https://glassworks-dubai.ae"}):
+        order = lh.local_first(areas)
+    check("a Dubai firm searches Dubai districts first",
+          order[:2], ["Business Bay", "Al Quoz"])
+    check("and the far emirates last", order[-1], "Ras Al Khaimah")
+
+    with mock.patch("coordination.site.status", return_value={"url": "https://sharjahglass.ae"}):
+        check("a Sharjah firm starts in Sharjah",
+              lh.local_first(areas)[0], "Sharjah")
+
+    with mock.patch("coordination.site.status", return_value={"url": ""}):
+        check("with no site saved nothing is invented — the list is untouched",
+              lh.local_first(areas), areas)
+
+    # and the plan itself must honour it
+    with mock.patch("coordination.site.status", return_value={"url": "https://glassworks-dubai.ae"}):
+        t = lh.plan_targets(segment="hotel", per_segment=1)
+    check("the search plan starts local", t[0]["area"], "Business Bay")
+
+
+def test_asking_for_more_does_not_get_you_less():
+    """
+    "find 20 leads" ran six searches. "find 30 leads" ran two.
+
+    The floor was applied only while the target fitted inside one page of
+    results, and dropped to ONE above it — so raising the ask shrank the hunt
+    to a third of its size. Nothing in the output could show it: a hunt given
+    two searches finds what two searches find and reports that honestly.
+
+    Two properties, and the first is the one that bit:
+      - more asked for is never fewer searches, at any target;
+      - the target is divided by what a page actually YIELDS, not by the page
+        size, because most of a page is already in the cabinet by the second
+        sweep of a segment.
+    """
+    from . import leads_hunt as lh
+    print("\nMore asked for is never fewer searches:")
+    asks = [1, 5, 10, 20, 21, 25, 30, 40, 60, 80, 100, 200, 500]
+    sizes = [lh._sized(n, 20, 6)[1] for n in asks]
+    drops = [(a, b) for a, b, sa, sb in zip(asks, asks[1:], sizes, sizes[1:])
+             if sb < sa]
+    check("no ask is punished for being bigger", drops, [])
+    check("the old cliff at 21 is gone — 30 gets at least what 20 got",
+          lh._sized(30, 20, 6)[1] >= lh._sized(20, 20, 6)[1], True)
+
+    print("\nThe floor holds and the ceiling holds:")
+    check("a small ask still gets the standing budget", lh._sized(5, 20, 6)[1], 6)
+    check("nothing asked for keeps the caller's own numbers",
+          lh._sized(None, 20, 6), (20, 6))
+    check("a typo does not spend the month's budget",
+          lh._sized(5000, 20, 6)[1], lh.MOST_SEARCHES)
+
+    print("\nA bigger ask really does buy a bigger hunt:")
+    check("60 needs more searching than 20",
+          lh._sized(60, 20, 6)[1] > lh._sized(20, 20, 6)[1], True)
+    check("...and the page never exceeds what one search returns",
+          max(lh._sized(n, 20, 6)[0] for n in asks), lh.PLACES_PAGE)
+
+
 def main():
+    with _store.isolated():
+        _main()
+
+
+def test_the_address_that_reaches_a_buyer_comes_first():
+    """
+    The leads repo measured it: 288 emails, 82 opens, 3 clicks, and 350 of 511
+    addresses were info@. It moved to named people; the PDPL rule here keeps
+    roles ahead of people, so the fix is WHICH role — someone who buys first.
+    """
+    print("\nRole inboxes are ranked by who they reach:")
+    for addr, tier in (("projects@x.ae", 0), ("procurement@x.ae", 0),
+                       ("owner@x.ae", 0), ("estimation.dxb@x.ae", 0),
+                       ("info@x.ae", 1), ("info.dxb@x.ae", 1), ("infouae@x.ae", 1),
+                       ("contact@x.ae", 1), ("sales@x.ae", 2), ("sales2@x.ae", 2),
+                       ("careers@x.ae", 2), ("reservations@x.ae", 2),
+                       ("ahmed.khan@x.ae", 3), ("mdahmed@x.ae", 3),
+                       ("information@x.ae", 3)):
+        check(f"{addr} is tier {tier}", ls.address_tier(addr), tier)
+
+    order = lh.rank_emails(["ahmed.khan@x.ae", "sales@x.ae", "x@gmail.com",
+                            "info@x.ae", "projects@x.ae"], "x.ae")
+    check("buyer, switchboard, not-a-buyer, a person, then a free mailbox",
+          order, ["projects@x.ae", "info@x.ae", "sales@x.ae", "ahmed.khan@x.ae",
+                  "x@gmail.com"])
+    from . import harvest as H
+    rows = [{"value": a, "how": "printed on the page"} for a in order[::-1]]
+    rows[-1]["how"] = "mailto link"
+    check("harvest ranks them the same way",
+          [r["value"] for r in H.rank_emails(rows, "x.ae")], order)
+    check("a named person is still flagged as personal data",
+          ls.contact_kind({"email": "ahmed.khan@x.ae"}), "personal")
+
+
+# ---------------------------------------------------------------------------
+# TOMTOM — the other map
+# ---------------------------------------------------------------------------
+#
+# "the google places api says its unavailable so what is the alternate that we
+#  can use? ... add tom tom as alternate"
+
+TT_RESULT = {
+    "type": "POI", "id": "tt1",
+    "poi": {"name": "Marina View Hotel", "phone": "+971 4 555 1234",
+            "url": "www.marinaviewhotel.ae", "categories": ["hotel"],
+            "classifications": [{"code": "HOTEL_MOTEL",
+                                 "names": [{"nameLocale": "en-US", "name": "hotel"}]}]},
+    "address": {"freeformAddress": "Al Marsa Street, Dubai Marina, Dubai"},
+    "position": {"lat": 25.08, "lon": 55.14},
+}
+
+
+def test_a_tomtom_listing_becomes_a_usable_lead():
+    print("\nA TomTom listing becomes the same lead a Google one does:")
+    c = lh._tomtom_to_candidate(TT_RESULT, "hotel", "Dubai Marina")
+    check("the business name", c["company"], "Marina View Hotel")
+    check("the phone", c["phone"], "+971 4 555 1234")
+    check("a website without http gets it, so it can be read for an email",
+          c["website"], "http://www.marinaviewhotel.ae")
+    check("the address", c["address"], "Al Marsa Street, Dubai Marina, Dubai")
+    check("it says where it came from", c["source"], "tomtom (search api)")
+    check("and what to sell it, same as a Google listing",
+          c["service"], lh._place_to_candidate(PLACE, "hotel", "Dubai Marina")["service"])
+    check("no email is invented — that comes off their own site", c["email"], "")
+
+
+def test_which_map_is_used():
+    print("\nWhich map the Hunter reads:")
+    real = (lh._places_key, lh._tomtom_key)
+    try:
+        lh._places_key = lambda: ("g-key", "GOOGLE_PLACES_API_KEY")
+        lh._tomtom_key = lambda: ("t-key", "TOMTOM_API_KEY")
+        check("both keys: Google first, TomTom behind it",
+              [m["kind"] for m in lh._map_sources()], ["google", "tomtom"])
+        lh._places_key = lambda: (None, None)
+        check("TomTom alone is enough", [m["kind"] for m in lh._map_sources()], ["tomtom"])
+        lh._tomtom_key = lambda: (None, None)
+        check("neither: no map, and OpenStreetMap carries on", lh._map_sources(), [])
+    finally:
+        lh._places_key, lh._tomtom_key = real
+    print("\n...and a TomTom key on the maps shelf is never mistaken for Google's:")
+    with _store.isolated():
+        _store.upsert_tool({"shelf": "maps", "name": "TomTom", "api_key": "tt-shelf",
+                            "base_url": "https://api.tomtom.com", "priority": 10})
+        check("it is TomTom's", lh._tomtom_key()[0], "tt-shelf")
+        check("and not Google's", lh._places_key()[0], None)
+        _store.upsert_tool({"shelf": "maps", "name": "Google Places", "api_key": "g-shelf",
+                            "priority": 20})
+        check("a Google tool beside it is Google's", lh._places_key()[0], "g-shelf")
+
+
+def _hunt_with(google=None, tomtom=None, g_err=None, results=None):
+    """A full hunt with the maps faked. Returns the run's result."""
+    real = (lh.search_places, lh.search_tomtom, lh._places_key, lh._tomtom_key, lh._get,
+            board.DB)
+    board.DB = _fresh_db()
+    calls = []
+    try:
+        lh._places_key = lambda: (google, "test") if google else (None, None)
+        lh._tomtom_key = lambda: (tomtom, "test") if tomtom else (None, None)
+        lh._get = lambda url, timeout=12: ""
+        lh.search_places = lambda q, a, k, limit=20, timeout=25: (
+            calls.append("google") or ([], g_err) if g_err else ([PLACE], None))
+        lh.search_tomtom = lambda q, a, k, limit=50, timeout=25: (
+            calls.append("tomtom") or (results if results is not None else [TT_RESULT], None))
+        r = lh.run(agent="leads-hunter", segment="hotel", area="Dubai Marina",
+                   max_searches=2, enrich_sites=False)
+        r["_calls"] = calls
+        return r
+    finally:
+        (lh.search_places, lh.search_tomtom, lh._places_key, lh._tomtom_key, lh._get,
+         board.DB) = real
+
+
+def test_the_hunter_collects_with_tomtom():
+    print("\nNo Google key, a TomTom key: the Hunter collects with TomTom:")
+    r = _hunt_with(tomtom="t-key")
+    check("it ran", (r["ok"], r.get("critic")), (True, "passed"))
+    check("on TomTom", r["map"], "TomTom")
+    check("Google was never asked", "google" in r["_calls"], False)
+    check("the lead was stored", r["stored"], 1)
+    check("and the summary says which map", "TomTom" in r["summary"], True)
+
+    print("\n...Google refusing its key hands the pass to TomTom, this search included:")
+    r = _hunt_with(google="g-key", tomtom="t-key",
+                   g_err=lh.places_refusal(403, "SERVICE_DISABLED Places API (New) has not "
+                                                "been used"))
+    check("TomTom took over", r["map"], "TomTom")
+    check("Google was asked once, not on every search", r["_calls"].count("google"), 1)
+    check("the hand-over is written down", bool(r["switched"]), True)
+    check("  saying why", "Places API (New)" in r["switched"][0], True)
+    check("and the leads still came in", r["stored"], 1)
+
+    print("\n...a listing nobody can reach is left out, not the whole batch:")
+    silent = {**TT_RESULT, "id": "tt2",
+              "poi": {**TT_RESULT["poi"], "name": "No Phone Trading", "phone": "", "url": ""}}
+    r = _hunt_with(tomtom="t-key", results=[TT_RESULT, silent])
+    check("the reachable one is stored", r["stored"], 1)
+    check("the other is counted as left out", r["unreachable_left_out"], 1)
+
+
+def _tt_firm(i):
+    """A distinct TomTom hotel with a website and a phone."""
+    return {**TT_RESULT, "id": f"tt{i}",
+            "poi": {**TT_RESULT["poi"], "name": f"Firm {i} Hotel",
+                    "phone": f"+971 4 555 {i:04d}", "url": f"www.firm{i}hotel.ae"}}
+
+
+class _Clock:
+    """The Hunter's clock, moved on by hand: every site read costs `per_read`."""
+
+    def __init__(self):
+        self.now = 1_000_000.0
+
+    def time(self):
+        return self.now
+
+    def sleep(self, s):
+        pass
+
+
+def _timed_hunt(firms, budget=300, per_read=30, wanted=None, before=None):
+    """
+    A TomTom hunt where reading a site takes `per_read` seconds of a
+    `budget`-second pass. Returns (result, companies read, rows in the cabinet).
+    """
+    real = (lh.search_tomtom, lh._places_key, lh._tomtom_key, lh.enrich,
+            lh.pass_budget, lh.time, board.DB)
+    board.DB = _fresh_db()
+    clock, read = _Clock(), []
+    try:
+        if before:
+            ls.intake(before)
+        lh._places_key = lambda: (None, None)
+        lh._tomtom_key = lambda: ("t-key", "test")
+        lh.search_tomtom = lambda q, a, k, limit=50, timeout=25: (firms, None)
+        lh.pass_budget = lambda: budget
+        lh.time = clock
+
+        def fake_enrich(c, timeout=12, deadline=None):
+            read.append(c["company"])
+            clock.now += per_read
+            c["email"] = "info@" + c["website"].split("www.", 1)[1]
+            return c
+        lh.enrich = fake_enrich
+        r = lh._hunt("leads-hunter", "hotel", "Dubai Marina", 20, 1, 1, False,
+                     True, None, wanted=wanted)
+        con = sqlite3.connect(board.DB)
+        rows = con.execute("SELECT count(*) FROM leads").fetchone()[0]
+        con.close()
+        return r, read, rows
+    finally:
+        (lh.search_tomtom, lh._places_key, lh._tomtom_key, lh.enrich,
+         lh.pass_budget, lh.time, board.DB) = real
+
+
+def test_the_hunter_saves_as_it_goes():
+    print("\n\"Leads collects — timed out after 420s\": the Hunter saves as it goes:")
+    firms = [_tt_firm(i) for i in range(20)]
+    # 300s pass, 45s kept to save: reading stops once 255s are spent, which
+    # is after the ninth site at 30s apiece.
+    r, read, rows = _timed_hunt(firms)
+    check("it read sites until its own stopping point, not all twenty", len(read), 9)
+    check("everything it read is in the cabinet", rows, 9)
+    check("and reported as stored", r["stored"], 9)
+    check("each with the email off its own site", r["with_email"], 9)
+    check("it says it stopped for time", r["stopped"], "clock")
+    check("  and the summary tells him so", "time limit" in r["summary"], True)
+    check("the eleven it never reached are counted, not thrown away",
+          r["not_reached_this_pass"], 11)
+
+    print("\n...a firm already in the cabinet costs no site read at all:")
+    known = lh._tomtom_to_candidate(firms[0], "hotel", "Dubai Marina")
+    r, read, rows = _timed_hunt(firms[:3], before=[{**known, "email": "info@firm0hotel.ae"}])
+    check("its site was not read again", "Firm 0 Hotel" in read, False)
+    check("the other two were", len(read), 2)
+    check("it is counted as already held", r["already_in_cabinet"], 1)
+    check("  and among the duplicates", r["duplicates"], 1)
+    check("the cabinet holds three, not four", rows, 3)
+
+    print("\n...and it stops at the number he asked for:")
+    r, read, rows = _timed_hunt(firms, budget=3000, wanted=5)
+    check("five he can write to", r["with_email"] >= 5, True)
+    check("without reading all twenty sites", len(read) < 20, True)
+    check("  one batch at most", len(read) <= lh.BANK_EVERY, True)
+    check("and it says the number was met", r["stopped"], "target")
+
+    print("\n...its budget comes from the runner, with room kept back to save:")
+    from . import day_run
+    ceiling = day_run.step_timeout_for("pipelines.leads_hunt")
+    check("the Hunter has its own, longer slot", ceiling > day_run.STEP_TIMEOUT, True)
+    check("the pass fits inside it", lh.pass_budget() < ceiling, True)
+    check("and leaves time to save after reading",
+          lh.pass_budget() - lh.WRITE_RESERVE > 0, True)
+
+
+class _TomTomStandIn:
+    """TomTom's two endpoints on this machine, recording what was asked."""
+
+    def __init__(self, status=200):
+        import http.server
+        import json as _json
+        import urllib.parse as _up
+        self.asked, outer = [], self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                u = _up.urlparse(self.path)
+                outer.asked.append((_up.unquote(u.path), dict(_up.parse_qsl(u.query))))
+                if status != 200:
+                    body = b'{"errorText": "Forbidden"}'
+                    self.send_response(status)
+                elif "/geocode/" in u.path:
+                    body = _json.dumps({"results": [{
+                        "position": {"lat": 25.08, "lon": 55.14},
+                        "viewport": {"topLeftPoint": {"lat": 25.10, "lon": 55.12},
+                                     "btmRightPoint": {"lat": 25.06, "lon": 55.16}}}]}).encode()
+                    self.send_response(200)
+                else:
+                    body = _json.dumps({"results": [TT_RESULT, {"type": "Street"}]}).encode()
+                    self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.srv.server_address[1]}/search/2"
+
+    def __enter__(self):
+        self.real = (lh.TOMTOM_BASE, dict(lh._TT_WHERE))
+        lh.TOMTOM_BASE = self.url
+        lh._TT_WHERE.clear()
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *a):
+        self.srv.shutdown()
+        self.srv.server_close()
+        lh.TOMTOM_BASE = self.real[0]
+        lh._TT_WHERE.clear()
+        lh._TT_WHERE.update(self.real[1])
+
+
+def test_the_tomtom_calls_are_the_right_ones():
+    print("\nThe real TomTom calls, against a stand-in on this machine:")
+    with _TomTomStandIn() as tt:
+        found, err = lh.search_tomtom("hotel", "Dubai Marina", "t-key")
+        again, _e = lh.search_tomtom("gym", "Dubai Marina", "t-key")
+    check("no error", err, None)
+    check("businesses only — a street is not a lead", len(found), 1)
+    geo = [a for a in tt.asked if "/geocode/" in a[0]]
+    poi = [a for a in tt.asked if "/poiSearch/" in a[0]]
+    check("the area is placed once, not once per search", len(geo), 1)
+    check("  as a UAE place", geo[0][0].endswith("Dubai Marina, United Arab Emirates.json"), True)
+    check("two business searches", len(poi), 2)
+    check("  for the trade asked for", poi[0][0].endswith("/poiSearch/hotel.json"), True)
+    check("  inside the UAE", poi[0][1].get("countrySet"), "AE")
+    check("  around the area, not the whole country",
+          all(k in poi[0][1] for k in ("lat", "lon", "radius")), True)
+    check("  a district-sized circle", 3000 <= int(poi[0][1]["radius"]) <= 6000, True)
+    check("  with his key", poi[0][1].get("key"), "t-key")
+
+    print("\n...and a refusal says what to do about it:")
+    with _TomTomStandIn(status=403):
+        found, err = lh.search_tomtom("hotel", "Dubai", "bad-key")
+    check("nothing found", found, [])
+    check("it names where to check the key", "developer.tomtom.com" in (err or ""), True)
+    check("an allowance used up says it carries on tomorrow",
+          "tomorrow" in lh.tomtom_refusal(429, "Over the limit"), True)
+    real = lh._tomtom_key
+    lh._tomtom_key = lambda: (None, None)
+    try:
+        check("Test with no key says to save one first",
+              "Save" in lh.tomtom_check()["why"], True)
+    finally:
+        lh._tomtom_key = real
+
+
+def _main():
+    test_the_address_that_reaches_a_buyer_comes_first()
     test_the_target_list_is_the_whole_market()
     test_every_segment_knows_what_to_sell_it()
     test_service_matching()
@@ -642,8 +1173,17 @@ def main():
     test_a_place_becomes_a_usable_lead()
     test_emails_are_read_not_guessed()
     test_the_hunt_spreads_across_the_market()
+    test_hunting_for_one_service()
+    test_locals_come_first()
+    test_asking_for_more_does_not_get_you_less()
     test_hunt_without_a_key_explains_itself()
+    test_the_collection_task_reaches_the_collector_that_can_do_it()
     test_hunt_stores_screens_and_dedupes()
+    test_a_tomtom_listing_becomes_a_usable_lead()
+    test_which_map_is_used()
+    test_the_hunter_collects_with_tomtom()
+    test_the_hunter_saves_as_it_goes()
+    test_the_tomtom_calls_are_the_right_ones()
     test_never_collected_twice()
     test_the_mail_is_about_one_service()
     test_the_rendered_mail_is_readable()
