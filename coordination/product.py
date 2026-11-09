@@ -34,7 +34,7 @@ def publisher_file() -> Path:
 # None of them can be used to sign or to open anything.
 PUBLIC_KEYS = ("home_url", "update_url", "update_key", "postbox_key", "support_email", "licence_key")
 DEFAULTS = {"name": "Botix", "company": "TECH DUO", "version": "0.0.0", "tagline": "", "support_email": "",
-            "update_url": "", "update_key": "", "postbox_key": "", "home_url": "", "licence_key": ""}
+            "update_url": "", "update_key": "", "postbox_key": "", "home_url": "", "licence_key": "", "github": ""}
 
 # HIS SIDE OF THE PROGRAM — his Reports room, putting versions out, the
 # Home's own code and his guides — and his client's own files (the business
@@ -74,6 +74,11 @@ def info() -> dict:
     out = {**DEFAULTS, **{k: v for k, v in (d if isinstance(d, dict) else {}).items() if v is not None}}
     mine = publisher().get("public") or {}
     out.update({k: mine[k] for k in PUBLIC_KEYS if mine.get(k)})
+    # The program's public GitHub repository is where its versions go out
+    # (coordination/publisher.py, "GitHub"), so a copy with no other address
+    # looks there. It still installs only what the publisher's key signed.
+    if not out["update_url"] and out.get("github"):
+        out["update_url"] = f"https://github.com/{out['github']}/releases/latest/download/manifest.json"
     return out
 
 
@@ -101,7 +106,8 @@ def main(argv=None) -> int:
     d = info()
     if "--json" in (argv if argv is not None else sys.argv[1:]):
         print(json.dumps({"ok": True, "name": d["name"], "version": d["version"], "tagline": d["tagline"],
-                          "support_email": d["support_email"], "updates": bool(d["update_url"])}))
+                          "support_email": d["support_email"], "updates": bool(d["update_url"]),
+                          "company": d["company"]}))
     else:
         print(f"{d['name']} {d['version']}")
     return 0

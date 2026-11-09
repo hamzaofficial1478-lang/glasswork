@@ -84,11 +84,26 @@ def is_git_copy() -> bool:
 LOCAL = ("http://127.0.0.1", "http://localhost")         # a Home tried out on this computer
 
 
+class _StayOnHttps(urllib.request.HTTPRedirectHandler):
+    """GitHub answers a download with a redirect to its file store. Followed only
+    to another https:// address (or, for a Home on this computer, to this computer)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = str(newurl).lower()
+        local = req.full_url.lower().startswith(LOCAL) and new.startswith(LOCAL)
+        if not (new.startswith("https://") or local):
+            raise ValueError("an update address sent the download somewhere that is not https://")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_StayOnHttps)
+
+
 def _fetch(url: str, limit: int, timeout=TIMEOUT) -> bytes:
     if not str(url).lower().startswith(("https://",) + LOCAL):
         raise ValueError("updates are only fetched over https://")
     req = urllib.request.Request(url, headers={"User-Agent": f"{product.name()}/{product.version()} updater"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with _OPENER.open(req, timeout=timeout) as r:
         data = r.read(limit + 1)
     if len(data) > limit:
         raise ValueError("the download is larger than an update can be")

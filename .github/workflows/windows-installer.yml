@@ -4,9 +4,15 @@
 #
 # The installer it builds is kept for two weeks under this run's "Artifacts".
 # Putting a version out to the people using the program is done from the
-# developer's own copy (Settings → Publisher), not from here.
+# developer's own copy (Settings → Publisher), which signs it there and makes
+# the GitHub release. When that release is published, this builds the
+# installer FROM THAT RELEASE (its product.json says where updates come from
+# and carries his public keys), tests it the same way, and adds it to the
+# release page, so new people download one file: <name>-<version>-setup.exe.
 name: windows-installer
 on:
+  release:
+    types: [published]
   push:
     paths:
       - "installer/**"
@@ -39,12 +45,27 @@ jobs:
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
 
+      - name: The release's own settings
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release download "$env:TAG" --repo "$env:REPO" --pattern "*.zip" --dir rel
+          if ($LASTEXITCODE -ne 0) { throw "the release has no update zip" }
+          python -I -c "import glob, zipfile; z = zipfile.ZipFile(glob.glob('rel/*.zip')[0]); n = [x for x in z.namelist() if x.endswith('/config/product.json')][0]; open('release-product.json', 'wb').write(z.read(n))"
+          if ($LASTEXITCODE -ne 0) { throw "the release zip has no product.json" }
+          Get-Content release-product.json
+
       - name: Build Setup.exe
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python installer/build_windows.py --out build
+          if (Test-Path release-product.json) { python installer/build_windows.py --out build --product-json release-product.json }
+          else { python installer/build_windows.py --out build }
           if ($LASTEXITCODE -ne 0) { throw "the build failed" }
           Get-ChildItem build\*-setup.exe | Format-Table Name, Length
 
@@ -116,3 +137,27 @@ jobs:
           name: glasswork-setup
           path: build/*-setup.exe
           retention-days: 14
+
+  # Only for a published release, and only after the installer passed every
+  # check above. The one job that may write: it adds a file to the release.
+  attach:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Add the installer to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | grep -q -- '-setup\.exe$'; then
+            echo "The release already has its installer."; exit 0
+          fi
+          gh run download "$RUN" --repo "$REPO" --name glasswork-setup --dir build
+          gh release upload "$TAG" build/*-setup.exe --repo "$REPO"

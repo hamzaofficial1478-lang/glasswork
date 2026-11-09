@@ -243,25 +243,46 @@ async function publisherCard() {
   const p = await api('/api/publisher');
   if (!(p && p.ok && p.can_publish)) return;
   box.hidden = false;
+  const canOut = p.ready || p.github;
   box.innerHTML = `<h2 class="label" style="margin:0">Publisher — for whoever makes this program</h2>
     <div class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:12px">
-      ${p.ready ? `<div><b style="font-weight:600">Your Botix Home</b> <span class="muted mono" style="font-size:13px">${esc(p.home_url)}</span></div>
-        <p class="muted" style="margin:0;font-size:14px">A postbox and a download page on your program's own website. The reports are kept on this computer, not there. Every version you put out goes there for people to update to.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div><b style="font-weight:600">Updates on GitHub</b> ${p.github ? `<a class="mono" style="font-size:13px" href="${esc(p.releases_url)}" target="_blank" rel="noopener">${esc(p.github_repo)}</a>` : ''}</div>
+        <p class="muted" style="margin:0;font-size:14px">${p.github
+          ? 'Every version you put out becomes a release there. People download the installer from it, and every copy finds its updates there and shows them an Update button.'
+          : 'Put versions out as releases on the program\'s GitHub repository: people download the installer there, and every copy is told when there is a new one. Needs a fine-grained token for that one repository with <b style="font-weight:600">Contents: read and write</b>. The token can make releases and nothing else; the signing key stays on this computer.'}</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="ghRepo" style="flex:1 1 220px" placeholder="owner/repository" value="${esc(p.github_repo || '')}" autocomplete="off">
+          <input id="ghToken" type="password" style="flex:1 1 220px" placeholder="${p.github ? 'Token saved — paste a new one to change it' : 'GitHub token'}" autocomplete="off">
+          <button class="btn ${p.github ? 'ghost' : ''} small" type="button" id="ghSave">${p.github ? 'Save' : 'Use GitHub'}</button>
+        </div>
+        <span class="muted" id="ghSay" style="font-size:14px"></span>
+      </div>
+      ${p.ready ? `<div style="border-top:1px solid var(--line-soft);padding-top:12px"><b style="font-weight:600">Your Botix Home</b> <span class="muted mono" style="font-size:13px">${esc(p.home_url)}</span></div>
+        <p class="muted" style="margin:0;font-size:14px">A postbox and a download page on your program's own website. The reports are kept on this computer, not there.${p.github ? ' Versions go out there too.' : ' Every version you put out goes there for people to update to.'}</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn ghost small" type="button" id="pubCheck">Check it</button>
           <button class="btn quiet small" type="button" id="pubAgain">Download it again</button><a class="btn quiet small" href="#reports">Open Reports</a>
-          <span class="muted" id="pubSay" style="font-size:14px"></span></div>
+          <span class="muted" id="pubSay" style="font-size:14px"></span></div>` : ''}
+      ${canOut ? `
         <div style="border-top:1px solid var(--line-soft);padding-top:12px;display:flex;flex-direction:column;gap:10px">
           <b style="font-weight:600">Put out version ${esc(p.version)}</b>
           <label for="pubNotes" class="muted" style="font-size:14px">What is new, in a line or two — people read this in the update message</label>
           <textarea id="pubNotes" maxlength="2000" style="min-height:70px" placeholder="Faster screens, and a stronger connection to your website."></textarea>
-          <label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" id="pubExe"> Build the Windows installer too (on a Windows computer, a few minutes)</label>
+          <label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" id="pubExe"> Build the Windows installer here too (on a Windows computer, a few minutes)${p.github ? ' — not needed for GitHub, which builds it itself' : ''}</label>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn small" type="button" id="pubGo">Put it out</button><span class="muted" id="pubJob" style="font-size:14px"></span></div>
-        </div>`
-      : `<p style="margin:0">Problem reports kept on this computer; your updates and a download page on your program's own website — never a client's. One folder, uploaded once.</p>
-        <a class="btn small" href="#reports" style="align-self:flex-start">Set it up in Reports</a>`}
+        </div>` : ''}
+      ${p.ready ? '' : `<p style="margin:0;border-top:1px solid var(--line-soft);padding-top:12px">Problem reports, and the plans people buy, need your Botix Home: a folder on your program's own website — never a client's. Uploaded once.</p>
+        <a class="btn ghost small" href="#reports" style="align-self:flex-start">Set it up in Reports</a>`}
       <div id="pubUnlock"></div>
     </div>`;
   const say = (t) => { const x = $('#pubSay'); if (x) x.textContent = t; };
+  $('#ghSave').onclick = async () => {
+    const b = $('#ghSave'); b.disabled = true; $('#ghSay').textContent = 'Asking GitHub…';
+    const j = await unlocked(() => api('/api/publisher/github', {repo: $('#ghRepo').value.trim(), token: $('#ghToken').value.trim()}), $('#pubUnlock'));
+    b.disabled = false; $('#ghToken').value = '';
+    $('#ghSay').textContent = j.ok ? j.head : (j.error || 'Not saved.');
+    if (j.ok) { toast(j.head); setTimeout(publisherCard, 1200); }
+  };
   const again = $('#pubAgain'); if (again) again.onclick = () => downloadHome($('#pubUnlock'));
   const ck = $('#pubCheck'); if (ck) ck.onclick = async () => { ck.disabled = true; say('Knocking…'); const j = await api('/api/publisher/check', {}); ck.disabled = false; say(j.ok ? j.head : (j.error || 'It did not answer.')); };
   const go = $('#pubGo'); if (go) go.onclick = async () => {

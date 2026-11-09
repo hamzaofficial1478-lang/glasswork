@@ -91,6 +91,17 @@ def test_the_keys():
           "correct horse" in json.dumps(keys), False)
     check("a short password is refused", vault.password_problem("short") != "", True)
 
+    print("\n...and every account gets its own keys, never a shared one:")
+    made = [vault.create("correct horse", f"same-{i}") for i in range(4)]
+    check("four accounts with the same password get four different recovery keys",
+          len({r for _, _, r in made}), 4)
+    check("  and four different master keys", len({m for _, m, _ in made}), 4)
+    check("  and four different locks, salts and all",
+          len({json.dumps(k, sort_keys=True) for k, _, _ in made}), 4)
+    check("a thousand recovery keys, no two alike", len({vault.new_recovery_key() for _ in range(1000)}), 1000)
+    from . import totp
+    check("a thousand authenticator secrets, no two alike", len({totp.new_secret() for _ in range(1000)}), 1000)
+
     print("\n...changing the password keeps everything, and the recovery key still works:")
     keys2 = vault.relock(keys, master, "password", "battery staple", "ammar-1")
     check("the new password opens the same account",
@@ -305,6 +316,7 @@ def test_the_real_server():
                               {"name": "Ammar", "password": "correct horse", "confirm": "correct horse"})
         check("signing up works", (st, j.get("ok")), (200, True))
         check("  and shows the recovery key once", len(j.get("recovery_key") or ""), 29)
+        first_key = j.get("recovery_key")
         check("  but never the account's key", "key" in j, False)
         st, j, _ = s.req("GET", "/api/state")
         check("now the office is shut to anyone not signed in", st, 401)
@@ -345,6 +357,10 @@ def test_the_real_server():
         st, j, cookie = s.req("POST", "/api/account/sign-in", {"account": "ammar", "password": "correct horse"})
         check("the right one signs in, whatever the case of the name", (st, j.get("ok")), (200, True))
         check("  back on the website open last time", j.get("site"), second)
+        st, j, _ = s.req("POST", "/api/account/sign-up",
+                         {"name": "Basma", "password": "correct horse", "confirm": "correct horse"})
+        check("a second person signing up with the same password gets a different recovery key",
+              (st, bool(j.get("recovery_key")), j.get("recovery_key") != first_key), (200, True, True))
 
 
 def main():

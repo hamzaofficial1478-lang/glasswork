@@ -554,8 +554,11 @@ def test_the_real_anthropic_library():
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
+            # The key goes in x-api-key (the library until 2.x) or as a Bearer
+            # token (2.6 on): either way, the person's key and nothing else.
+            bearer = (self.headers.get("authorization") or "").removeprefix("Bearer ")
             seen.append({"path": self.path, "beta": self.headers.get("anthropic-beta") or "",
-                         "key": self.headers.get("x-api-key") or "", "body": body})
+                         "key": self.headers.get("x-api-key") or bearer, "body": body})
             reply = json.dumps({"id": "msg_1", "type": "message", "role": "assistant",
                                 "model": body.get("model"), "stop_reason": "end_turn",
                                 "content": [{"type": "text", "text": "OK"}],

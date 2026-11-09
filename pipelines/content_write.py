@@ -64,7 +64,7 @@ import sys
 import time
 
 from coordination import auditor, board, deskwork, uae
-from . import post_quality, site_api
+from . import humanize, post_quality, site_api
 
 AGENT = "content-writer"
 
@@ -227,7 +227,7 @@ that breaks one is thrown away:
   - No code: no <script>, <style>, <form>, <iframe> or event attributes.
   - No placeholder of any kind.
 
-PICTURES
+__HUMAN__PICTURES
 You are given numbered pictures. Put the marker <!--image 1-->, <!--image 2--> \
 and so on, on its own line, where each picture helps — after the paragraph it \
 illustrates. Do not write <img> yourself. If no pictures are listed, use none.
@@ -237,9 +237,9 @@ WHAT IT MUST HAVE
   - Subheadings a reader can scan: an <h2> every few paragraphs, and <h3> under \
     them where natural. Never more than three paragraphs in a row without one.
   - The words that matter in <strong>: the main keyword the first time it \
-    appears, and two or three key terms in each section — a material, a \
-    thickness, a step, the thing to check. Words and short phrases, never \
-    whole sentences.
+    appears, and one or two terms in each section — a material, a thickness, \
+    a step, the thing to check. Single words or short names only: never a \
+    whole sentence, and never a label with a colon at the start of a list item.
   - Short paragraphs — two to four sentences.
   - The enquiry route high up and again at the end: the phone number and the \
     WhatsApp link you are given, as real links.
@@ -254,6 +254,9 @@ Reply with JSON and nothing else:
  "html": "<the body: h1, h2, h3, p, ul, ol, li, table, thead, tbody, tr, th, \
 td, strong, em, a, blockquote, and the image markers>",
  "note": "<one line on what you led with and why>"}"""
+# The humanizer's method (pipelines/humanize.py), in both the owner's rules and
+# every other business's, which share everything from WHAT YOU MUST NOT CLAIM on.
+SYSTEM = SYSTEM.replace("__HUMAN__", humanize.WRITER_RULES)
 
 # For any website that is not the owner's: the same rules, written for its own
 # trade and country (coordination/profile.py). His keeps SYSTEM, word for word.
@@ -507,8 +510,30 @@ def _ask_the_writer(brief, facts, tokens=None, kind="service_page", images=(),
         return {"ok": False,
                 "error": "the brain's reply was not in the shape asked for, so it "
                          "was not trusted to be a page"}
+    page = safe_page(page)
     return {"ok": True, "page": page, "brain": r.get("used"),
             "rung": r.get("rung"), "borrowed": r.get("why") if r.get("rung") != "own" else ""}
+
+
+def safe_page(page) -> dict:
+    """
+    What the AI wrote, cut down to content: only the tags and attributes a post
+    may hold, no attribute that runs anything (coordination/posts.clean_html).
+    The model reads pages from the open web while it works; whatever one of
+    them persuaded it to write, no behaviour reaches his website or the office.
+
+    What was taken out is noted in "_had_code": code in a writer's answer is a
+    sign something it read tried to steer it, so the draft is also HELD for him
+    to read, never quietly published clean (_write).
+    """
+    from coordination.posts import clean_html
+    page = dict(page or {})
+    if isinstance(page.get("html"), str):
+        found = auditor._hits(page["html"], auditor.CODE_IN_A_PAGE)
+        if found:
+            page["_had_code"] = sorted(set(list(page.get("_had_code") or []) + found))[:6]
+        page["html"] = clean_html(page["html"], keep_h1=True, markers=True)
+    return page
 
 
 def _years() -> int:
@@ -549,9 +574,10 @@ def voice_problems(page, kind="service_page") -> list:
     if n >= 300 and len(re.findall(r"<strong\b", body, re.I)) < 3:
         out.append("put the words that matter in <strong> — the main keyword the first time, "
                    "and two or three key terms in each section")
-    if text.count("—") > max(6, n // 120):
-        out.append("too many dashes — use full stops and commas the way a person "
-                   "writing quickly would")
+    # Everything else that gives machine writing away, by the humanizer's
+    # method (pipelines/humanize.py): staged contrasts, one-line closers, threes,
+    # dashes, inflated words, bold labels, chat leftovers.
+    out += humanize.problems(body)
     return out
 
 
@@ -1038,6 +1064,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
                 continue
 
             page = trim_to_plan(got["page"])
+            steered = list(got["page"].get("_had_code") or [])
             # ONE SECOND GO, TOLD WHY: too short, phrases that read as
             # machine-written, or something the Critic needs. Kept only if it
             # is better than the first.
@@ -1051,6 +1078,7 @@ def _write(agent, dry_run, only_id, limit, job=None):
                 again = _ask_the_writer(brief, facts, kind=kind, images=images,
                                         fix=first, previous=page, pack=pack)
                 if again.get("ok"):
+                    steered += list(again["page"].get("_had_code") or [])
                     second = (voice_problems(again["page"], kind)
                               + critic_check(again["page"], brief, facts)[1]
                               + seo_check(again["page"])["problems"]
@@ -1059,7 +1087,28 @@ def _write(agent, dry_run, only_id, limit, job=None):
                             len(second) == len(first)
                             and words_in(again["page"]) > words_in(page)):
                         page, got = trim_to_plan(again["page"]), again
+            # THE LAST EDIT: whatever still reads as machine-made is rewritten
+            # once by the humanizer's method, keeping every fact and adding
+            # none. Kept only if it reads better and passes the same checks.
+            if humanize.counted(humanize.find(page.get("html"))):
+                try:
+                    from coordination import profile
+                    spelling = profile.spelling()
+                except Exception:
+                    spelling = "British English"
+                pol = humanize.polish(page, spelling=spelling, agent=agent, brain=BRAIN)
+                if pol.get("ok") and pol.get("page") is not page and pol["page"].get("html") != page.get("html"):
+                    if critic_check(pol["page"], brief, facts)[0] or not critic_check(page, brief, facts)[0]:
+                        page = trim_to_plan(safe_page(pol["page"]))
+                        steered += list(page.get("_had_code") or [])
             ok, reasons = critic_check(page, brief, facts)
+            if steered:
+                # The words the Auditor uses for code in a page, so his Waiting
+                # screen reads the same whichever caught it.
+                ok, reasons = False, reasons + [
+                    "it contains code, not content (" + ", ".join(sorted(set(steered))[:4]) + "). A writing desk "
+                    "does not put behaviour on his website: it was taken out, and the draft is held for him to "
+                    "read, because something the writer read may have tried to steer it"]
             short = [v for v in voice_problems(page, kind) if v.startswith("it is ")]
             if short and kind == "blog":
                 ok, reasons = False, reasons + short

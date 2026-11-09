@@ -187,7 +187,7 @@ const ACCOUNT_OPEN = new Set(["/account", "/api/account/list", "/api/account/sig
   // Read before an account exists: the terms are agreed at sign-up.
   "/terms", "/privacy", "/api/product",
   // What a browser needs to install it as an app, before anyone signs in.
-  "/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png", "/logo.svg", "/opening.js", "/botix.css",
+  "/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png", "/logo.svg", "/opening.js", "/botix.css", "/madeby.js",
   // The developer's own count of how many use it (its own key, below).
   "/api/owner/stats"]);
 
@@ -472,6 +472,8 @@ const SETUP_API = [
   "/api/connect",
   // The developer's Home: making it and its download carry his key.
   "/api/publisher/setup", "/api/publisher/home.zip", "/api/publisher/publish",
+  // Where versions go out: the token can make releases on his repository.
+  "/api/publisher/github",
 ];
 // Reading the count needs no second password; setting the address, and seeing the owner key, does.
 const SETUP_POSTS = ["/api/publisher/online"];
@@ -533,7 +535,8 @@ function unlockPage(err, next) {
   <button>Open Setup</button>
   ${err ? `<div class="err">${err}</div>` : ""}
   <a href="/">&larr; Back to the office</a>
-</form>`;
+</form>
+<script src="/madeby.js"></script>`;
 }
 
 app.use((req, res, next) => {
@@ -947,6 +950,12 @@ app.post("/api/publisher/setup", async (req, res) => {
   const b = req.body || {};
   res.json(await pyStdin("coordination.publisher", ["--setup"], { site: textField(b.site, 300), email: textField(b.email, 200) }, 60000));
 });
+// Versions go out on GitHub: the repository and a token that can make releases
+// there. The token is kept in his publisher file and never sent back.
+app.post("/api/publisher/github", async (req, res) => {
+  const b = req.body || {};
+  res.json(await pyStdin("coordination.publisher", ["--github"], { repo: textField(b.repo, 200), token: textField(b.token, 400) }, 60000));
+});
 app.get("/api/publisher/home.zip", async (_q, res) => {
   const r = await pub(["--home-zip"]);
   if (!r.ok || !r.zip) return res.status(400).json({ ok: false, error: r.error || "could not make it" });
@@ -1056,13 +1065,15 @@ app.get("/api/content/post/:id", async (req, res) => {
   if (!id) return res.status(404).json({ ok: false, error: "which post?" });
   res.json(await pyModule("coordination.posts", ["--get", id], 60000));
 });
-for (const what of ["save", "score"]) {
+// polish: the humanizer's pass over what is in the editor (coordination/posts.py
+// polish) — it asks the AI, so it may take a minute, and it saves nothing.
+for (const what of ["save", "score", "polish"]) {
   app.post(`/api/content/post/:id/${what}`, async (req, res) => {
     const id = numId(req.params.id);
     if (!id) return res.status(404).json({ ok: false, error: "which post?" });
     const b = req.body || {};
     res.json(await pyStdin("coordination.posts", [`--${what}`, id],
-      { title: String(b.title || ""), meta: String(b.meta || ""), html: String(b.html || "") }, 120000));
+      { title: String(b.title || ""), meta: String(b.meta || ""), html: String(b.html || "") }, what === "polish" ? 420000 : 120000));
   });
 }
 app.post("/api/content/post/:id/delete", async (req, res) => {

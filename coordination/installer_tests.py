@@ -68,9 +68,21 @@ def test_the_icon():
     bw.write_icon(f)
     raw = f.read_bytes()
     reserved, kind, count = struct.unpack("<HHH", raw[:6])
-    check("an icon file with four sizes", (reserved, kind, count), (0, 1, 4))
-    first = struct.unpack("<BBBBHHII", raw[6:22])
-    check("  each picture inside is a PNG", raw[first[7]:first[7] + 8], b"\x89PNG\r\n\x1a\n")
+    check("an icon file with seven sizes, 16 to 256 pixels", (reserved, kind, count), (0, 1, 7))
+    entries = [struct.unpack("<BBBBHHII", raw[6 + 16 * i:22 + 16 * i]) for i in range(count)]
+    check("  each picture inside is a PNG",
+          all(raw[e[7]:e[7] + 8] == b"\x89PNG\r\n\x1a\n" for e in entries), True)
+    from coordination import mark
+    small, big = mark.pixels(48, word=False), mark.pixels(48, word=True)
+    check("from 48 pixels up it says BOTIX, not BT (a different picture)", small != big, True)
+    check("  and the 48-pixel picture in the icon is the BOTIX one",
+          next(raw[e[7]:e[7] + e[6]] for e in entries if e[0] == 48) == mark.png(48, word=True), True)
+    names = sorted(x.name for x in f.parent.glob("wizard-*.bmp"))
+    check("the Setup wizard gets Botix's own pictures, not Inno Setup's stock ones",
+          names, ["wizard-large-2x.bmp", "wizard-large.bmp", "wizard-small-2x.bmp", "wizard-small.bmp"])
+    head = (f.parent / "wizard-large.bmp").read_bytes()[:30]
+    check("  real 24-bit bitmaps of the size Inno Setup asks for",
+          (head[:2], struct.unpack("<ii", head[18:26]), struct.unpack("<H", head[28:30])[0]), (b"BM", (164, 314), 24))
 
 
 def test_the_setup_script():
@@ -82,6 +94,9 @@ def test_the_setup_script():
     check("  and tells the program, in install.json", "install.json" in iss and '"data": "' in iss, True)
     check("  which can be given on the command line for a silent install", "{param:DATADIR|}" in iss, True)
     check("the shortcuts open it with no console window", iss.count("pythonw.exe") >= 2 and "launch.pyw" in iss, True)
+    check("Setup.exe, the shortcuts and the uninstall list all carry the Botix icon",
+          ("SetupIconFile=" in iss, "UninstallDisplayIcon=" in iss, iss.count("IconFilename:") >= 2), (True, True, True))
+    check("  and the wizard shows Botix's pictures", ("WizardImageFile=" in iss and "WizardSmallImageFile=" in iss), True)
     check("a new Setup.exe updates the one installed", "AppId={{" in iss and "UsePreviousAppDir=yes" in iss, True)
     check("removing it asks before deleting the work, with No first",
           "Also delete your work" in iss and "MB_DEFBUTTON2" in iss, True)

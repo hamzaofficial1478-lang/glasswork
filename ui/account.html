@@ -301,7 +301,7 @@ footer a{color:var(--faint)}
     </div>
   </section>
 </main>
-<footer><span id="footName">Botix</span> by <span id="footCompany">TECH DUO</span> · <a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></footer>
+<footer><span id="footName">Botix</span> <span id="footVer"></span> · Built by <b id="footCompany" style="font-weight:600;letter-spacing:.06em">TECH DUO</b> · <a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></footer>
 
 <script>
 const $ = (q) => document.querySelector(q);
@@ -337,7 +337,7 @@ function initials(s) {
 async function names() {
   const p = await call('/api/product');
   if (!p || !p.ok) return;
-  for (const [id, v] of [['product', p.name], ['footName', p.name], ['company', p.company && 'by ' + p.company], ['footCompany', p.company]])
+  for (const [id, v] of [['product', p.name], ['footName', p.name], ['footVer', p.version], ['company', p.company && 'by ' + p.company], ['footCompany', p.company]])
     if (v && $('#' + id)) $('#' + id).textContent = v;
 }
 
@@ -378,6 +378,8 @@ async function signUp(e) {
   if (!j.ok) return fail('suErr', j.error || 'That did not work.');
   $('#suPw').value = $('#suPw2').value = '';
   RECOVERY = j.recovery_key; ACCOUNT_NAME = j.account.name; THEN_TWOSTEP = true;
+  // A new account: the office shows the guided tour the first time it opens (ui/tour.js).
+  try { localStorage.setItem('botix-tour', 'start'); } catch (e) { /* private window: no tour, nothing else lost */ }
   $('#rkKey').textContent = RECOVERY;
   show('recovery');
 }

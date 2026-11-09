@@ -265,9 +265,16 @@ def _safe_style(v) -> str:
 
 
 class _Clean(HTMLParser):
-    def __init__(self):
+    def __init__(self, keep_h1=False, markers=False):
         super().__init__(convert_charrefs=True)
         self.out, self.stack, self.drop = [], [], 0
+        self.keep_h1, self.markers = keep_h1, markers
+
+    def handle_comment(self, data):
+        # Only the writer's own markers survive: where a picture goes, and the
+        # gap left for his own photographs. Any other comment is dropped.
+        if self.markers and not self.drop and re.fullmatch(r"\s*(?:image\s*\d{1,2}|agency:photos[^<>]{0,120})\s*", data or ""):
+            self.out.append(f"<!--{data}-->")
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
@@ -277,9 +284,9 @@ class _Clean(HTMLParser):
             return
         if self.drop:
             return
-        if tag == "h1":
+        if tag == "h1" and not self.keep_h1:
             tag = "h2"            # the title is the post's one heading at the top
-        if tag not in _TAGS:
+        if tag not in _TAGS and not (tag == "h1" and self.keep_h1):
             return
         keep = []
         for k, v in attrs:
@@ -322,7 +329,7 @@ class _Clean(HTMLParser):
             return
         if self.drop:
             return
-        tag = "h2" if tag == "h1" else tag
+        tag = "h2" if tag == "h1" and not self.keep_h1 else tag
         if tag in self.stack:
             while self.stack:
                 t = self.stack.pop()
@@ -340,9 +347,21 @@ class _Clean(HTMLParser):
         return "".join(self.out).strip()
 
 
-def clean_html(html) -> str:
-    """The editor's HTML, cut down to what a post may hold."""
-    p = _Clean()
+def clean_html(html, keep_h1=False, markers=False) -> str:
+    """
+    The HTML, cut down to what a post may hold: the tags in _TAGS, links and
+    pictures to http(s), mail and phone only, a few safe styles, and no
+    attribute that runs anything (every on…= is dropped).
+
+    The editor's own use: the title is the post's heading, so <h1> becomes <h2>.
+    The writer's (pipelines/content_write): keep_h1 and the picture markers.
+
+    SECURITY AUDIT (docs/SECURITY-AUDIT.md, finding 1): everything the AI
+    writes goes through this, not only what he saves by hand. A draft steered by
+    something it read could otherwise carry ontoggle= or onfocus= — words the
+    Auditor's old list did not know — onto his website and into this office.
+    """
+    p = _Clean(keep_h1=keep_h1, markers=markers)
     p.feed(str(html or ""))
     p.close()
     return p.result()
@@ -432,7 +451,7 @@ def get(cid) -> dict:
     status = got["row"]["status"]
     live = status == "published" and bool((blog.get("backend") or {}).get("id"))
     return {"ok": True, "id": int(cid), "title": page["title"], "meta": page["meta"],
-            "html": _for_editor(page["html"]), "status": status, "url": blog.get("posted_url") or "",
+            "html": _for_editor(clean_html(page["html"])), "status": status, "url": blog.get("posted_url") or "",
             "on_website": live, "can_edit": status in ("for_blog", "published", "in_review", "drafted"),
             "keyword": got["brief"].get("primary_keyword") or "", "report": _report(page, got)}
 
@@ -445,6 +464,42 @@ def score(cid, title, meta, html) -> dict:
     body = clean_html(body)
     page = {"title": str(title or "").strip()[:120], "meta": str(meta or "").strip()[:160], "html": body}
     return {"ok": True, "report": _report(page, got)}
+
+
+def polish(cid, title, meta, html) -> dict:
+    """
+    "add that skill into program that will write and polish the content so it
+     will not looks like the ai generated"
+
+    The humanizer's pass (pipelines/humanize.py) over what is in the editor
+    now. Nothing is saved: the polished words go back into the editor, where
+    he reads them and presses Save, or does not. Every fact is kept and none is
+    added — a rewrite that changes a number, a link or a picture is not used.
+    """
+    got = _load(cid)
+    if not got:
+        return {"ok": False, "error": "no such post"}
+    from pipelines import humanize
+    try:
+        from coordination import profile
+        spelling = profile.spelling()
+    except Exception:
+        spelling = "British English"
+    body, _p = _keep_pictures(html)
+    body = clean_html(body)
+    page = {"title": str(title or "").strip()[:120], "meta": str(meta or "").strip()[:160], "html": body}
+    r = humanize.polish(page, spelling=spelling)
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error") or "it could not be polished", "before": r.get("before")}
+    if r["page"] is page or r["page"].get("html") == body:
+        return {"ok": True, "same": True, "before": r.get("before"), "after": r.get("after"),
+                "head": ("It already reads like a person wrote it." if r.get("before") == 100
+                         else r.get("why") or "Nothing better was found, so it is as it was.")}
+    new = clean_html(r["page"]["html"])
+    newpage = {**page, "html": new}
+    return {"ok": True, "html": _for_editor(new), "before": r.get("before"), "after": r.get("after"),
+            "changed": r.get("changed") or [], "report": _report(newpage, got),
+            "head": f"Polished: it reads {r.get('before')} → {r.get('after')} out of 100. Read it, then Save."}
 
 
 def save(cid, title, meta, html) -> dict:
@@ -505,6 +560,7 @@ def main(argv=None) -> int:
     ap.add_argument("--get", type=int, metavar="ID")
     ap.add_argument("--save", type=int, metavar="ID", help="read {title, meta, html} on stdin")
     ap.add_argument("--score", type=int, metavar="ID", help="read {title, meta, html} on stdin")
+    ap.add_argument("--polish", type=int, metavar="ID", help="read {title, meta, html} on stdin; nothing is saved")
     ap.add_argument("--delete", type=int, metavar="ID")
     ap.add_argument("--pending-path", metavar="NAME", help="where a picture added in the editor is kept")
     a = ap.parse_args(argv)
@@ -518,10 +574,10 @@ def main(argv=None) -> int:
             out = write(a.write)
         elif a.get:
             out = get(a.get)
-        elif a.save or a.score:
+        elif a.save or a.score or a.polish:
             d = json.loads(sys.stdin.read() or "{}")
-            fn = save if a.save else score
-            out = fn(a.save or a.score, d.get("title"), d.get("meta"), d.get("html"))
+            fn = save if a.save else score if a.score else polish
+            out = fn(a.save or a.score or a.polish, d.get("title"), d.get("meta"), d.get("html"))
         elif a.delete:
             out = delete(a.delete)
         elif a.pending_path:

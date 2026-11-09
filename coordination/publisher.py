@@ -40,6 +40,7 @@ it to a copy, or to any other report.
     python -m coordination.publisher --remove ID
     python -m coordination.publisher --online         how many use your online office (JSON on stdin {url, key} saves it first)
     python -m coordination.publisher --publish [--installer] [--notes TEXT] [--job FILE]
+    python -m coordination.publisher --github         JSON on stdin: {repo, token} — versions go out on GitHub
     python -m coordination.publisher --new-key KEYFILE
     python -m coordination.publisher --make-release DIR --key KEYFILE [--base-url URL]
 """
@@ -56,6 +57,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -88,6 +91,10 @@ def _save_pub(d: dict) -> None:
     f = product.publisher_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(d, indent=1), encoding="utf-8")
+    try:
+        os.chmod(f, 0o600)            # his Home key and GitHub token: his user only
+    except OSError:
+        pass
 
 
 def _key() -> str:
@@ -131,7 +138,10 @@ def publisher_view() -> dict:
             "signing_key": bool(p.get("signing_key") and Path(p["signing_key"]).exists()),
             "postbox_key": bool(_postbox_private()), "version": product.version(),
             "home_ok_at": st.get("home_ok_at") or 0, "last_collect": st.get("last_collect") or 0,
-            "latest": st.get("latest") or ""}
+            "latest": st.get("latest") or "",
+            # GitHub: where versions go out; the token is written, never read back.
+            "github_repo": _github(p)["repo"], "github": _github(p)["on"],
+            "releases_url": ("https://github.com/" + _github(p)["repo"] + "/releases") if _github(p)["repo"] else ""}
 
 
 def managed_hosts() -> set:
@@ -175,7 +185,9 @@ def setup(site, email="") -> dict:
         _private_file(_postbox_key_path(), (sealed.keypair()[0] + "\n").encode("utf-8"))
     home = site + "/glasswork-home"
     p["signing_key"] = str(keyfile)
-    p["public"] = {"home_url": home, "update_url": home + "/index.php?do=latest", "update_key": _public_key(keyfile),
+    gh = _github(p)
+    p["public"] = {"home_url": home, "update_url": gh_manifest_url(gh["repo"]) if gh["on"] else home + "/index.php?do=latest",
+                   "update_key": _public_key(keyfile),
                    "postbox_key": sealed.public_of(_postbox_private()),
                    "support_email": p["email"] or (p.get("public") or {}).get("support_email", "")}
     _save_pub(p)
@@ -574,25 +586,36 @@ def upload(path, name=None, chunk=4 * 1024 * 1024, progress=None) -> dict:
 def publish(notes="", installer=False, say=None) -> dict:
     say = say or (lambda stage, **kw: None)
     pub = _pub()
-    if not is_publisher():
-        return {"ok": False, "error": "This copy is not set up to publish. Reports → Make it, first."}
+    gh = _github(pub)
+    if not (is_publisher() or gh["on"]):
+        return {"ok": False, "error": "This copy is not set up to publish. Settings → Publisher: GitHub, or Reports → Make your Home."}
     if not (pub.get("signing_key") and Path(pub["signing_key"]).exists()):
-        return {"ok": False, "error": "The signing key is missing, so nothing can be signed. Set up the Home again."}
-    if not (pub.get("public") or {}).get("postbox_key"):
+        return {"ok": False, "error": "The signing key is missing, so nothing can be signed. Set GitHub or the Home up again."}
+    if is_publisher() and not (pub.get("public") or {}).get("postbox_key"):
         return {"ok": False, "error": "Make your Home again first (Reports → Make it), so copies can seal what they send you."}
     if not updates.is_git_copy():
         return {"ok": False, "error": "A version is put out from the publisher's own git copy of the program."}
-    say("Asking your Home which version is out")
-    home = check_home()
-    if not home.get("ok"):
-        return home
-    plans = licence_key_from_home()
-    if not plans.get("ok"):
-        return plans
     ver = product.version()
-    if home.get("latest") and product.parse_version(home["latest"]) >= product.parse_version(ver):
-        return {"ok": False, "error": (f"Version {home['latest']} is already out, and this copy is {ver}. "
-                                       "A new version needs a higher number first.")}
+    home = {}
+    if is_publisher():
+        say("Asking your Home which version is out")
+        home = check_home()
+        if not home.get("ok"):
+            return home
+        plans = licence_key_from_home()
+        if not plans.get("ok"):
+            return plans
+        if not gh["on"] and home.get("latest") and product.parse_version(home["latest"]) >= product.parse_version(ver):
+            return {"ok": False, "error": (f"Version {home['latest']} is already out, and this copy is {ver}. "
+                                           "A new version needs a higher number first.")}
+    if gh["on"]:
+        say("Asking GitHub which version is out")
+        out = gh_latest(gh)
+        if not out.get("ok"):
+            return out
+        if out.get("version") and product.parse_version(out["version"]) >= product.parse_version(ver):
+            return {"ok": False, "error": (f"Version {out['version']} is already out on GitHub, and this copy is {ver}. "
+                                           "A new version needs a higher number first.")}
     tmp = Path(tempfile.mkdtemp(prefix="release-"))
     try:
         exe = None
@@ -606,18 +629,33 @@ def publish(notes="", installer=False, say=None) -> dict:
         rel = make_release(tmp / "out", pub["signing_key"], notes=notes, installer=exe)
         if not rel.get("ok"):
             return rel
-        for f in [rel["zip"]] + ([rel["installer"]] if exe else []):
-            say(f"Sending {Path(f).name} to your Home")
-            up = upload(f, progress=lambda n, i, k: say(f"Sending {n}", part=i, of=k))
-            if not up.get("ok"):
-                return up
-        say("Putting the new version out")
-        r = _ask("release", "POST", {"manifest": json.loads(Path(rel["manifest"]).read_text(encoding="utf-8"))})
-        if not r.get("ok"):
-            return {"ok": False, "error": "The Home would not put it out: " + str(r.get("error") or "no answer")}
-        return {"ok": True, "version": ver, "installer": bool(exe), "download_page": r.get("download_page"),
-                "why": (f"Version {ver} is out. Everyone using the program is told the next time it opens"
-                        + (", and new people can download the installer from your Home." if exe else "."))}
+        manifest = json.loads(Path(rel["manifest"]).read_text(encoding="utf-8"))
+        page, where = "", []
+        if gh["on"]:
+            g = gh_release(gh, rel, manifest, notes, say)
+            if not g.get("ok"):
+                return g
+            page = g.get("url") or ""
+            where.append("GitHub")
+        if is_publisher():
+            for f in [rel["zip"]] + ([rel["installer"]] if exe else []):
+                say(f"Sending {Path(f).name} to your Home")
+                up = upload(f, progress=lambda n, i, k: say(f"Sending {n}", part=i, of=k))
+                if not up.get("ok"):
+                    return {**up, "error": ("It is out on GitHub, but the Home did not take it: " if gh["on"] else "")
+                            + str(up.get("error"))}
+            say("Putting the new version out on your Home")
+            r = _ask("release", "POST", {"manifest": manifest})
+            if not r.get("ok"):
+                return {"ok": False, "error": ("It is out on GitHub, but the Home would not put it out: " if gh["on"]
+                                               else "The Home would not put it out: ") + str(r.get("error") or "no answer")}
+            page = page or r.get("download_page") or ""
+            where.append("your Home")
+        return {"ok": True, "version": ver, "installer": bool(exe), "download_page": page,
+                "why": (f"Version {ver} is out on {' and '.join(where)}. Everyone using the program is told the next "
+                        "time it opens, and presses Update now"
+                        + ("; GitHub adds the Windows installer to the release in a few minutes." if gh["on"] and not exe
+                           else ".") )}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -634,6 +672,198 @@ def _build_installer(tmp: Path) -> dict:
     except Exception:
         return {"ok": False, "error": "the installer build said: " + ((p.stderr or p.stdout or "nothing")[-400:])}
 
+
+
+# ---------------------------------------------------------------------------
+# GitHub: where versions go out, and where every copy looks for them
+# ---------------------------------------------------------------------------
+#
+# "make the program as if the user is using the program directly from github
+#  and when i will update here the user must be able to get the update
+#  notification on the program and user will press update button"
+#
+# A version is a GitHub Release on the program's own repository: the signed
+# update zip, its manifest, and (added by GitHub's own Windows machine, see
+# .github/workflows/windows-installer.yml) the installer for new people. Every
+# copy asks github.com/<repo>/releases/latest/download/manifest.json, the same
+# question it asks a Home, and installs only what HIS key signed.
+#
+# THE SIGNING KEY NEVER LEAVES THIS COMPUTER. The zip is signed here and only
+# then sent; GitHub holds nothing that can sign. The token he gives (a
+# fine-grained token, this one repository, Contents: read and write) lets this
+# copy make releases and nothing else; it is kept in his publisher file and
+# never sent back to a browser.
+
+GH_API = "https://api.github.com"
+GH_UPLOADS = "https://uploads.github.com"
+_REPO = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
+
+
+def gh_manifest_url(repo: str) -> str:
+    return f"https://github.com/{repo}/releases/latest/download/manifest.json"
+
+
+def _github(p=None) -> dict:
+    p = _pub() if p is None else p
+    repo = str(p.get("github_repo") or product.info().get("github") or "").strip()
+    repo = repo if _REPO.match(repo) else ""
+    token = str(p.get("github_token") or "")
+    return {"repo": repo, "token": token, "on": bool(repo and token)}
+
+
+def _gh_bases():
+    """The API and uploads addresses: GitHub's own, or a stand-in on this computer for the tests."""
+    test = os.environ.get("GLASSWORK_GITHUB_API", "").rstrip("/")
+    if test and test.startswith(("http://127.0.0.1", "http://localhost")):
+        return test, test + "/uploads"
+    return GH_API, GH_UPLOADS
+
+
+def _gh(gh, method, path, body=None, data=None, ctype="application/json", uploads=False, timeout=60):
+    api, up = _gh_bases()
+    url = (up if uploads else api) + path
+    payload = data if data is not None else (json.dumps(body).encode("utf-8") if body is not None else None)
+    req = urllib.request.Request(url, data=payload, method=method, headers={
+        "Authorization": "Bearer " + gh["token"], "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": f"{product.name()}-publisher"})
+    if payload is not None:
+        req.add_header("Content-Type", ctype)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read(8 * 1024 * 1024)
+            return r.status, (json.loads(raw.decode("utf-8")) if raw.strip() else {})
+    except urllib.error.HTTPError as e:
+        try:
+            j = json.loads(e.read(65536).decode("utf-8"))
+        except Exception:
+            j = {}
+        return e.code, (j if isinstance(j, dict) else {})
+    except Exception as e:
+        return 0, {"message": f"GitHub could not be reached ({type(e).__name__})"}
+
+
+def _gh_error(code, j, what) -> dict:
+    if code in (401, 403):
+        why = ("GitHub refused the token. Make a fine-grained token for this one repository with "
+               "Contents: read and write, and save it again.")
+    elif code == 404:
+        why = "GitHub does not know that repository, or the token cannot see it."
+    else:
+        why = str(j.get("message") or f"GitHub answered {code}")[:300]
+    return {"ok": False, "error": f"{what}: {why}", "status": code}
+
+
+def github_setup(repo, token) -> dict:
+    """Versions go out on GitHub. Checks the token can write to the repository before keeping it."""
+    repo = str(repo or "").strip().removeprefix("https://github.com/").strip("/")
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if not _REPO.match(repo):
+        return {"ok": False, "error": "Give the repository as owner/name, for example techduo/botix."}
+    p = _pub()
+    token = str(token or "").strip() or str(p.get("github_token") or "")
+    if not token:
+        return {"ok": False, "error": "Paste the GitHub token too."}
+    code, j = _gh({"token": token}, "GET", f"/repos/{repo}")
+    if code != 200:
+        return _gh_error(code, j, "Not saved")
+    if not (j.get("permissions") or {}).get("push", True):
+        return {"ok": False, "error": "Not saved: that token can read the repository but not make releases on it."}
+    if j.get("private"):
+        return {"ok": False, "error": ("Not saved: that repository is private, so the people using the program "
+                                       "could not download its updates. Use a public one — it can be a second "
+                                       "repository that holds only the releases, with your code kept private.")}
+    keyfile = _signing_key_path()
+    if not keyfile.exists():
+        made = new_key(str(keyfile))
+        if not made.get("ok"):
+            return made
+    p["github_repo"], p["github_token"], p["signing_key"] = repo, token, str(keyfile)
+    public = p.setdefault("public", {})
+    public["update_url"] = gh_manifest_url(repo)
+    public["update_key"] = _public_key(keyfile)
+    _save_pub(p)
+    return {"ok": True, "repo": repo, "releases_url": f"https://github.com/{repo}/releases",
+            "head": (f"Versions now go out on github.com/{repo}. Every copy installed from the next one looks "
+                     "there for updates.")}
+
+
+def gh_latest(gh) -> dict:
+    code, j = _gh(gh, "GET", f"/repos/{gh['repo']}/releases/latest")
+    if code == 404:
+        return {"ok": True, "version": ""}
+    if code != 200:
+        return _gh_error(code, j, "GitHub did not say which version is out")
+    return {"ok": True, "version": str(j.get("tag_name") or "").lstrip("vV"), "url": j.get("html_url") or ""}
+
+
+def _head_commit() -> str:
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True,
+                           encoding="utf-8", timeout=30)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def release_body(name, ver, notes) -> str:
+    """What a person sees on the release page: which file is theirs, and that they need nothing else."""
+    lines = [notes.strip(), ""] if notes and notes.strip() else []
+    lines += [f"**New to {name}?** Download `{name.lower()}-{ver}-setup.exe` below and run it. "
+              "That one file installs everything the program needs.",
+              "",
+              f"**Already using {name}?** You do not need anything from this page: the program shows "
+              "\"Update now\" by itself.",
+              "",
+              f"The other files are for the program's own updater (`{name.lower()}-{ver}.zip` and "
+              "`manifest.json`) and GitHub's copy of the source code. You can ignore them."]
+    return "\n".join(lines)
+
+
+def gh_release(gh, rel, manifest, notes, say) -> dict:
+    """A draft release, its files, then published: 'latest' never points at a half-made one."""
+    ver = str(manifest.get("version"))
+    tag = "v" + ver
+    repo = gh["repo"]
+    code, j = _gh(gh, "GET", f"/repos/{repo}/releases/tags/{tag}")
+    if code == 200:
+        if not j.get("draft"):
+            return {"ok": False, "error": f"Version {ver} is already out on GitHub. A new version needs a higher number first."}
+        _gh(gh, "DELETE", f"/repos/{repo}/releases/{j.get('id')}")      # a draft left by a try that stopped
+    say("Making the release on GitHub")
+    body = {"tag_name": tag, "name": f"{product.name()} {ver}", "draft": True,
+            "body": release_body(product.name(), ver, notes)}
+    # On the program's own repository the release is this exact commit. On a
+    # separate, public repository kept only for releases (his code private),
+    # that commit does not exist: GitHub tags its default branch instead.
+    head = _head_commit()
+    if head and repo == str(product.info().get("github") or ""):
+        body["target_commitish"] = head
+    code, made = _gh(gh, "POST", f"/repos/{repo}/releases", body)
+    if code not in (200, 201):
+        return _gh_error(code, made, "GitHub would not make the release")
+    rid = made.get("id")
+    base = f"https://github.com/{repo}/releases/download/{tag}/"
+    online = dict(manifest)
+    online["zip"] = base + Path(rel["zip"]).name
+    if rel.get("installer"):
+        online["installer"] = base + Path(rel["installer"]).name
+    files = [(Path(rel["zip"]).name, Path(rel["zip"]).read_bytes(), "application/zip")]
+    if rel.get("installer"):
+        files.append((Path(rel["installer"]).name, Path(rel["installer"]).read_bytes(), "application/octet-stream"))
+    files.append(("manifest.json", json.dumps(online, indent=1).encode("utf-8"), "application/json"))
+    for name, data, ctype in files:
+        say(f"Sending {name} to GitHub")
+        code, j = _gh(gh, "POST", f"/repos/{repo}/releases/{rid}/assets?name={name}", data=data, ctype=ctype,
+                      uploads=True, timeout=600)
+        if code not in (200, 201):
+            _gh(gh, "DELETE", f"/repos/{repo}/releases/{rid}")
+            return _gh_error(code, j, f"GitHub did not take {name}")
+    say("Putting the new version out on GitHub")
+    code, j = _gh(gh, "PATCH", f"/repos/{repo}/releases/{rid}", {"draft": False, "make_latest": "true"})
+    if code != 200:
+        return _gh_error(code, j, "GitHub would not publish the release")
+    return {"ok": True, "url": j.get("html_url") or f"https://github.com/{repo}/releases/tag/{tag}"}
 
 
 # ---------------------------------------------------------------------------
@@ -668,13 +898,14 @@ def licence_key_from_home() -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="The publisher's side: reports, answers, versions.")
-    for f in ("view", "setup", "home-zip", "check-home", "collect", "inbox", "answer", "publish", "installer", "online"):
+    for f in ("view", "setup", "home-zip", "check-home", "collect", "inbox", "answer", "publish", "installer", "online",
+              "github"):
         ap.add_argument("--" + f, action="store_true")
     for f in ("read", "remove", "notes", "job", "new-key", "make-release", "key", "base-url"):
         ap.add_argument("--" + f, default=None)
     a = ap.parse_args(argv)
     body = {}
-    if a.setup or a.answer or a.online:
+    if a.setup or a.answer or a.online or a.github:
         try:
             body = json.loads(sys.stdin.read() or "{}")
         except Exception:
@@ -697,6 +928,8 @@ def main(argv=None) -> int:
                                encoding="utf-8")
         elif a.setup:
             r = setup(body.get("site"), body.get("email"))
+        elif a.github:
+            r = github_setup(body.get("repo"), body.get("token"))
         elif a.online:
             r = online(body["url"], body.get("key")) if "url" in body else online()
         elif a.home_zip:

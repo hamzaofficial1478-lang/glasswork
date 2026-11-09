@@ -838,6 +838,102 @@ _SEC_HEADERS = (("strict-transport-security", "Strict-Transport-Security (forces
                 ("referrer-policy", "Referrer-Policy"))
 
 
+# CDNs that serve a fixed file, so a page can pin it with integrity="sha…".
+_PINNABLE = ("cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "code.jquery.com", "stackpath.bootstrapcdn.com",
+             "maxcdn.bootstrapcdn.com", "ajax.googleapis.com", "cdn.datatables.net")
+
+
+def browser_factors(home, pages, secure) -> list:
+    """
+    "check this security audit repo that will help you out to measure ... the
+     security factors" — the factors a visitor's browser relies on, from the
+    security-audit skill's client-side and web-protocol guides, measured the way
+    any visitor could: from the answer the website already gave. Nothing extra
+    is requested, nothing is tried.
+
+      cookies      Secure (never over plain http), HttpOnly (out of reach of a
+                   page's scripts), SameSite (not sent by other websites' forms)
+      CSP          a policy that still allows any inline script or eval() stops
+                   very little
+      HSTS         a remembered "always HTTPS" shorter than six months
+      CORS         every website allowed to read its answers WITH the visitor's cookies
+      scripts      code from a public CDN with no integrity pin: if the CDN copy
+                   changes, the website runs whatever it now is
+    """
+    out = []
+    h = {k.lower(): str(v) for k, v in (home.get("headers") or {}).items()}
+    if not home.get("status"):
+        return out
+    cookies = home.get("set_cookies") or []
+    flags = {"Secure": [], "HttpOnly": [], "SameSite": []}
+    for ck in cookies:
+        name = ck.split("=", 1)[0].strip()
+        low = ck.lower()
+        if secure and not re.search(r";\s*secure\b", low):
+            flags["Secure"].append(name)
+        if not re.search(r";\s*httponly\b", low):
+            flags["HttpOnly"].append(name)
+        if not re.search(r";\s*samesite=", low):
+            flags["SameSite"].append(name)
+    if flags["Secure"]:
+        out.append(_f("security", "cookies_not_secure", "medium", 1, "Cookies are not marked Secure",
+                      "They can be sent over an insecure connection, where anyone on the same network can read them.",
+                      "Mark every cookie Secure in the site's settings (most hosts and WordPress plugins have a switch).",
+                      ["/"], "cookies: " + ", ".join(flags["Secure"][:5])))
+    soft = sorted(set(flags["HttpOnly"]) | set(flags["SameSite"]))
+    if soft:
+        miss = [f for f in ("HttpOnly", "SameSite") if flags[f]]
+        out.append(_f("security", "cookies_open", "low", 1, "Cookies are missing " + " and ".join(miss),
+                      "HttpOnly keeps a cookie out of reach of the page's scripts; SameSite stops other websites' "
+                      "forms sending it. Without them, one bad script or a forged form goes further.",
+                      "Add HttpOnly and SameSite=Lax to the site's cookies (a setting with most hosts and plugins).",
+                      ["/"], "; ".join(f"{f}: " + ", ".join(flags[f][:4]) for f in miss)))
+    csp = h.get("content-security-policy", "")
+    if csp:
+        script = re.search(r"(?:^|;)\s*script-src\s+([^;]*)", csp) or re.search(r"(?:^|;)\s*default-src\s+([^;]*)", csp)
+        src = (script.group(1) if script else "").lower()
+        loose = []
+        if "'unsafe-inline'" in src and not re.search(r"'(?:nonce|sha256|sha384|sha512)-", src):
+            loose.append("'unsafe-inline'")
+        if "'unsafe-eval'" in src:
+            loose.append("'unsafe-eval'")
+        if re.search(r"(?:^|\s)(?:\*|https?:|data:)(?:\s|$)", src):
+            loose.append("any website (*)")
+        if loose:
+            out.append(_f("security", "csp_loose", "low", 2, "The content security policy still lets any script run",
+                          "A policy that allows " + " and ".join(loose) + " does little to stop injected code.",
+                          "Remove the loose parts, using nonces or hashes for the inline scripts the site needs.",
+                          ["/"], "script sources: " + src[:160]))
+    hsts = h.get("strict-transport-security", "")
+    m = re.search(r"max-age\s*=\s*\"?(\d+)", hsts, re.I)
+    if secure and hsts and (not m or int(m.group(1)) < 15552000):
+        out.append(_f("security", "hsts_short", "low", 1, "Browsers are told to insist on HTTPS for only a short time",
+                      "After it runs out, a visitor's first visit can be sent to the insecure address again.",
+                      "Set Strict-Transport-Security max-age to at least six months (15552000), a year is usual.",
+                      ["/"], "Strict-Transport-Security: " + hsts[:120]))
+    if h.get("access-control-allow-credentials", "").strip().lower() == "true" and \
+            h.get("access-control-allow-origin", "").strip() not in ("", "null"):
+        out.append(_f("security", "cors_credentials", "medium", 2,
+                      "Other websites may read this site's answers with the visitor's login",
+                      "It allows another website, opened in the same browser, to read what this one shows a signed-in visitor.",
+                      "Allow credentials only for the site's own addresses, or switch it off.", ["/"],
+                      "Access-Control-Allow-Origin: " + h.get("access-control-allow-origin", "")[:80]
+                      + "; Access-Control-Allow-Credentials: true"))
+    unpinned = []
+    for p in pages[:5]:
+        for tagm in re.finditer(r"<script\b[^>]*>", p.get("html") or "", re.I):
+            t = tagm.group(0)
+            hm = re.search(r"\bsrc=[\"'](?:https?:)?//([^/\"']+)", t, re.I)
+            if hm and hm.group(1).lower() in _PINNABLE and not re.search(r"\bintegrity=", t, re.I):
+                unpinned.append(hm.group(1).lower())
+    if unpinned:
+        out.append(_f("security", "script_unpinned", "low", 1, "Scripts from a public CDN are not pinned",
+                      "If the copy on the CDN were ever changed, every visitor would run the changed code.",
+                      "Add the integrity=\"sha384-…\" and crossorigin attributes the CDN gives for each file.",
+                      ["/"], "from: " + ", ".join(sorted(set(unpinned))[:5])))
+    return out
+
+
 def check_security(c) -> tuple:
     out, good = [], []
     pages = c["pages"]
@@ -897,12 +993,7 @@ def check_security(c) -> tuple:
         out.append(_f("security", "form_insecure", "high", 1, "A form sends what visitors type insecurely",
                       "Names and phone numbers typed into it travel unprotected.",
                       "Point the form at an https:// address.", insecure_forms, "form action starts with http://"))
-    cookies = home.get("set_cookies") or []
-    weak = [ck.split("=", 1)[0] for ck in cookies if final.startswith("https://") and "secure" not in ck.lower()]
-    if weak:
-        out.append(_f("security", "cookies_not_secure", "low", 1, "Cookies are not marked secure",
-                      "They could be sent over an insecure connection.",
-                      "Mark cookies Secure and HttpOnly in the site's settings.", ["/"], "cookies: " + ", ".join(weak[:5])))
+    out += browser_factors(home, _usable(pages), final.startswith("https://"))
     old = []
     for p in _usable(pages)[:5]:
         for m in re.finditer(r"jquery[.-]?(\d)\.(\d+)(?:\.\d+)?(?:\.min)?\.js", p.get("html") or "", re.I):

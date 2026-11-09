@@ -370,6 +370,35 @@ def test_a_good_website_scores_well(poor):
           [p for p in paths if p.startswith(("/.env", "/.git", "/wp-config", "/admin", "/backup"))], [])
 
 
+def test_the_browser_side_security_factors():
+    """
+    "check this security audit repo that will help you out to measure ... the
+     security factors" — cookies, the content security policy, HSTS, CORS and
+    pinned scripts, read from the answer the site already gave.
+    """
+    print("\nThe security factors a visitor's browser relies on are measured, from what the site already sent:")
+    bad = {"status": 200, "headers": {"Strict-Transport-Security": "max-age=3600",
+                                      "Content-Security-Policy": "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+                                      "Access-Control-Allow-Origin": "https://other.example",
+                                      "Access-Control-Allow-Credentials": "true"},
+           "set_cookies": ["sid=1; Path=/", "pref=2; Secure; HttpOnly; SameSite=Lax"],
+           "html": '<script src="https://cdn.jsdelivr.net/npm/x@1/x.js"></script>'}
+    codes = {f["code"]: f for f in wc.browser_factors(bad, [bad], True)}
+    for code, what in (("cookies_not_secure", "a cookie without Secure"), ("cookies_open", "no HttpOnly or SameSite"),
+                       ("csp_loose", "a policy that allows inline scripts and eval"), ("hsts_short", "HSTS for an hour"),
+                       ("cors_credentials", "other sites reading answers with the visitor's cookies"),
+                       ("script_unpinned", "a CDN script with no integrity pin")):
+        check(f"  found: {what}", code in codes, True)
+    check("  each says which cookie, header or host", "sid" in codes["cookies_not_secure"]["evidence"], True)
+    good = {"status": 200, "headers": {"Strict-Transport-Security": "max-age=31536000",
+                                       "Content-Security-Policy": "default-src 'self'"},
+            "set_cookies": ["sid=1; Secure; HttpOnly; SameSite=Lax"],
+            "html": '<script src="https://cdn.jsdelivr.net/npm/x@1/x.js" integrity="sha384-abc" crossorigin></script>'}
+    check("a site that sets them well is not marked down", wc.browser_factors(good, [good], True), [])
+    check("Secure is not asked of a site that has no HTTPS (that is its own, bigger finding)",
+          "cookies_not_secure" in {f["code"] for f in wc.browser_factors(bad, [bad], False)}, False)
+
+
 def test_progress_since_last_time():
     print("\nA second check of the same website says what changed:")
     _clear_checks()
@@ -444,7 +473,9 @@ def test_the_report_page():
         r = wc.save_brand(remove_logo=True)
         check("and it can be taken off", (r["ok"], r["has_logo"], "Clearview" in wc.brand().get("name", "")),
               (True, False, True))
-        if wc.find_browser():
+        if wc.find_browser() and not _browser_prints():
+            print("  SKIP  the browser on this computer cannot print to PDF at all (not the program)")
+        elif wc.find_browser():
             out = Path(tempfile.mkdtemp(prefix="check-pdf-")) / "report.pdf"
             got = wc.pdf(cid, out)
             check("the browser on this computer makes the PDF",
@@ -453,6 +484,33 @@ def test_the_report_page():
         else:
             print("  SKIP  no Chrome or Edge on this computer to make a PDF")
             check("without a browser it says what to do instead", "Print" in wc.pdf(cid, "x.pdf").get("error", ""), True)
+
+
+_PRINTS = {}
+
+
+def _browser_prints() -> bool:
+    """Can the browser on this computer print a page to PDF at all? Asked once.
+    A browser that is there but cannot print (some containers: no system bus, so
+    headless printing never finishes) is this computer's limit, not the program's."""
+    if "ok" not in _PRINTS:
+        exe = wc.find_browser()
+        ok = False
+        if exe:
+            tmp = Path(tempfile.mkdtemp(prefix="can-print-"))
+            page, out = tmp / "p.html", tmp / "p.pdf"
+            page.write_text("<p>" + "x " * 400 + "</p>", encoding="utf-8")
+            cmd = [exe, "--headless=new", "--disable-gpu", f"--user-data-dir={tmp / 'profile'}",
+                   f"--print-to-pdf={out}", page.resolve().as_uri()]
+            if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
+                cmd.insert(1, "--no-sandbox")
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=40)
+            except Exception:
+                pass
+            ok = out.exists() and out.stat().st_size > 500
+        _PRINTS["ok"] = ok
+    return _PRINTS["ok"]
 
 
 def _free_port():
@@ -528,7 +586,9 @@ def test_the_office_runs_a_check():
         except urllib.error.HTTPError as e:
             got = e.code
         check("a report that is not a number is not found", got, 404)
-        if wc.find_browser():
+        if wc.find_browser() and not _browser_prints():
+            print("  SKIP  the browser on this computer cannot print to PDF at all (not the program)")
+        elif wc.find_browser():
             code, ctype, body = _get(f"{base}/api/check/{cid}/pdf", 150)
             check("the PDF downloads", (code, "pdf" in ctype, body[:5]), (200, True, b"%PDF-"))
         else:
@@ -549,6 +609,7 @@ def main():
     test_robots_txt_is_followed()
     poor = test_the_desks_find_what_is_wrong()
     test_a_good_website_scores_well(poor)
+    test_the_browser_side_security_factors()
     test_progress_since_last_time()
     test_one_at_a_time_and_stopping()
     test_the_report_page()

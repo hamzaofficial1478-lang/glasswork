@@ -21,7 +21,7 @@ It is careful about it, on your server:
 
 **How (this once):** Website screen → *Get the new connector*, unzip, upload the
 `agency-api` folder over the old one, then *Test the connection*: it should say
-"connector version 10, updates itself".
+"connector version 11, updates itself".
 
 ---
 

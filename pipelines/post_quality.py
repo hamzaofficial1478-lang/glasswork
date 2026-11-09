@@ -99,9 +99,9 @@ def sentence_variety(text) -> list:
 
 
 def human_voice(page, kind="blog") -> dict:
-    from . import content_write
+    from . import content_write, humanize
     problems = list(content_write.voice_problems(page, kind)) + sentence_variety(text_of((page or {}).get("html")))
-    return {"ok": not problems, "problems": problems}
+    return {"ok": not problems, "problems": problems, "score": humanize.score((page or {}).get("html"))}
 
 
 def report(page, pack=None, others=None, kind="blog") -> dict:

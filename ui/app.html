@@ -111,7 +111,7 @@ h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-.015em;line-height:1.
 .act-rooms{display:flex;flex-wrap:wrap;gap:8px}
 .act-shown{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;font-size:14px;color:var(--muted);
   padding:8px 8px 8px 14px;border:1px dashed var(--line-strong);border-radius:10px}
-textarea,input[type=text],input[type=url],input[type=email],input:not([type]),.dr-sec select{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;
+textarea,input[type=text],input[type=url],input[type=email],input[type=password],input:not([type]),.dr-sec select{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--line-strong);border-radius:10px;
   background:var(--surface);color:var(--ink);font-size:16px}
 textarea{min-height:96px;resize:vertical;line-height:1.5}
 .say{padding:10px 12px;background:var(--sunken);border-radius:8px;font-size:14px}
@@ -1371,6 +1371,7 @@ async function post(main) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${d.on_website ? pill('done', 'On your website') : pill('wait', d.status === 'in_review' ? 'Held by the checks' : 'Not on your website yet')}
         ${d.url ? `<a class="btn quiet small" href="${esc(d.url)}" target="_blank" rel="noopener">View it</a>` : ''}
         ${d.on_website ? '<button class="btn quiet small" type="button" id="edUnpublish">Delete from website</button>' : ''}
+        <button class="btn ghost" type="button" id="edPolish" title="Rewrites what reads as machine-made, keeping every fact. Nothing is saved until you press Save.">Polish the writing</button>
         <button class="btn" type="button" id="edSave">${d.on_website ? 'Save and update the website' : 'Save'}</button></div></div>
     <div class="ed-grid">
       <section class="card ed-main">
@@ -1415,6 +1416,7 @@ async function post(main) {
     } catch (err) { toast(err.message); }
   };
   $('#edSave').onclick = edSave;
+  $('#edPolish').onclick = edPolish;
   $('#edBack').onclick = (e) => { if (ED.dirty && !confirm('Leave without saving your changes?')) e.preventDefault(); else ED.dirty = false; };
   const un = $('#edUnpublish');
   if (un) un.onclick = async () => {
@@ -1486,6 +1488,23 @@ async function edSave() {
   ED.dirty = false; toast(j.head || 'Saved.');
   if (j.report && $('#edSide')) $('#edSide').innerHTML = scorePanel(j.report, (ED.data || {}).keyword);
 }
+/* "add that skill into program that will write and polish the content so it
+   will not looks like the ai generated" — the humanizer's pass over what is in
+   the editor (pipelines/humanize.py). It keeps every fact; nothing is saved
+   until he has read it and pressed Save. */
+async function edPolish() {
+  edNormalise();
+  const b = $('#edPolish'); if (!b || !$('#edBody')) return;
+  b.disabled = true; const label = b.textContent; b.textContent = 'Polishing…';
+  const j = await api(`/api/content/post/${ED.id}/polish`, {title: $('#edTitle').value, meta: $('#edMeta').value, html: $('#edBody').innerHTML});
+  b.disabled = false; b.textContent = label;
+  if (!j.ok) { toast(j.error || 'It could not be polished.'); return; }
+  if (j.same || !j.html) { toast(j.head || 'It already reads well.'); return; }
+  $('#edBody').innerHTML = j.html;
+  ED.dirty = true;
+  if (j.report && $('#edSide')) $('#edSide').innerHTML = scorePanel(j.report, (ED.data || {}).keyword);
+  toast(j.head || 'Polished. Read it, then Save.');
+}
 function scorePanel(rep, keyword) {
   rep = rep || {};
   const seo = rep.seo || {}, o = rep.original || {}, h = rep.human || {};
@@ -1505,8 +1524,8 @@ function scorePanel(rep, keyword) {
       <span class="muted" style="font-size:13.5px">${o.ok === false ? 'Word for word from ' + esc(o.like || 'another page') + '. Say it in your own words.' : 'Nothing copied from your other posts or the pages Google ranks for it.'}</span>
     </section>
     <section class="card" style="padding:16px 20px;display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><b style="font-weight:600">Reads like a person</b>${h.ok === false ? pill('wait', (h.problems || []).length + ' to fix') : pill('done', 'Yes')}</div>
-      ${(h.problems || []).length ? `<ul class="plain-list">${h.problems.map((x) => `<li>${esc(sentence(x))}</li>`).join('')}</ul>` : '<span class="muted" style="font-size:13.5px">No machine-sounding phrases; sentences vary; headings and bold words in place.</span>'}
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><b style="font-weight:600">Reads like a person</b>${h.ok === false ? pill('wait', (h.score != null ? h.score + '/100 · ' : '') + (h.problems || []).length + ' to fix') : pill('done', h.score != null ? h.score + '/100' : 'Yes')}</div>
+      ${(h.problems || []).length ? `<ul class="plain-list">${h.problems.map((x) => `<li>${esc(sentence(x))}</li>`).join('')}</ul><span class="muted" style="font-size:13.5px">Polish the writing (at the top) rewrites these for you, keeping every fact.</span>` : '<span class="muted" style="font-size:13.5px">No machine-sounding phrases; sentences vary; headings and bold words in place.</span>'}
     </section>
     <p class="muted" style="margin:0;font-size:13px">Google rewards pages that are original, useful and written for people. These three checks look at exactly that.</p>`;
 }
@@ -2755,6 +2774,10 @@ async function help(main) {
   const mine = (m && m.reports) || [];
   main.innerHTML = `<div class="page narrow">${head('Help and reports',
     'Something not working? Tell us. Only we can read your report, and our answer appears here.')}
+    <section class="card" style="padding:16px 20px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between">
+      <span class="grow" style="display:flex;flex-direction:column"><b style="font-weight:600">New here, or forgotten where something is?</b>
+        <span class="muted" style="font-size:14px">A short tour of every section: what it is for and what to press. It changes nothing.</span></span>
+      <button class="btn ghost small" type="button" id="tourAgain">Take the tour</button></section>
     <section class="card" style="padding:20px 22px;display:flex;flex-direction:column;gap:12px">
       <h2 style="margin:0;font-size:18px">Report a problem</h2>
       ${m && m.home === false ? '<div class="note">This copy cannot send reports by itself yet. Write it below and press Send — you get a support report to copy into an email instead.</div>' : ''}
@@ -2788,6 +2811,7 @@ async function help(main) {
     pre.textContent = 'Making it…'; const p = await api('/api/support/preview');
     pre.textContent = (p && p.support) || 'Nothing could be gathered.';
   };
+  $('#tourAgain').onclick = () => { if (window.startTour) window.startTour(); };
   $('#repSend').onclick = async () => {
     const title = $('#repTitle').value.trim(), text = $('#repText').value.trim();
     if (!title && !text) { toast('Say what went wrong first.'); return; }
@@ -2873,8 +2897,9 @@ function settings(main) {
     <section style="display:flex;flex-direction:column;gap:8px"><h2 class="label" style="margin:0">This program</h2>
       <div class="card">
         <div class="row" style="align-items:center"><span class="grow"><b style="font-weight:600" id="prodName">${esc((S.brand && S.brand.product) || 'Botix')}</b>
-          <span class="muted" style="font-size:14px" id="prodVer">Version ${esc((S.brand && S.brand.version) || '')}</span></span>
+          <span class="muted" style="font-size:14px" id="prodVer">Version ${esc((S.brand && S.brand.version) || '')} · Built by TECH DUO</span></span>
           <button class="btn ghost small" type="button" id="updCheck">Check for a new version</button>
+          <button class="btn quiet small" type="button" id="tourSettings">Take the tour</button>
           <button class="btn quiet small" type="button" id="quitApp" hidden>Close the program</button></div>
         <div class="row" id="updRow" hidden><span class="grow" id="updSay"></span><span style="display:flex;gap:8px;flex-wrap:wrap" id="updBtns"></span></div>
         <div class="row" id="appRow" hidden style="align-items:center"><span class="grow"><b style="font-weight:600">Install the app</b>
@@ -2900,6 +2925,7 @@ function settings(main) {
       if (j.ok) setTimeout(() => { document.body.innerHTML = '<main style="max-width:520px;margin:20vh auto;font:17px system-ui;padding:0 16px">The program is closed. You can close this tab.</main>'; }, 800); }; });
   main.querySelectorAll('[data-theme-pick]').forEach((b) => b.onclick = () => { theme(b.dataset.themePick); buildSiteMenu(); settings(main); });
   $('#updCheck').onclick = () => checkUpdate();
+  $('#tourSettings').onclick = () => { if (window.startTour) window.startTour(); };
   installRow();
   if (planOn()) { planCard(); licence(true).then(() => { if (VIEW.r === 'settings') planCard(); }); }
 }
@@ -2915,15 +2941,17 @@ async function checkUpdate() {
     : esc(u.error || 'Could not look for a new version.');
   if (u.can_install) {
     $('#updBtns').innerHTML = `<button class="btn small" type="button" id="updGo">Install version ${esc(u.latest)}</button>`;
-    $('#updGo').onclick = () => installUpdate(u.latest, $('#updGo'), $('#updSay'));
+    $('#updGo').onclick = () => installUpdate(u.latest, $('#updGo'), $('#updSay'), u.notes);
   } else if (u.ok && !u.git) {
     $('#updBtns').innerHTML = '<button class="btn quiet small" type="button" id="updBack">Go back to the previous version</button>';
     $('#updBack').onclick = undoUpdate;
   }
 }
-async function installUpdate(version, btn, say) {
+async function installUpdate(version, btn, say, notes) {
   if (!confirm(`Install version ${version}? Your data and settings are not touched, and you can go back afterwards.`)) return;
   btn.disabled = true; say.textContent = 'Downloading, checking its signature and installing — a minute or two…';
+  // Remembered across the reload, so the office can say what it is on now.
+  try { localStorage.setItem('botix-updated', JSON.stringify({to: version, notes: notes || ''})); } catch (e) { /* private window */ }
   const j = await api('/api/update/apply', {});
   say.textContent = j.ok ? (j.why || 'Installed.') + (j.installed ? ' The page reloads in a moment.' : '') : (j.error || 'It was not installed.');
   if (j.ok && j.installed) setTimeout(() => location.reload(), 6000); else btn.disabled = false;
@@ -2942,7 +2970,25 @@ async function updateBanner() {
       <button class="btn quiet small" type="button" id="updLater">Later</button><span class="muted" id="updNowSay" style="font-size:13.5px"></span></div>`;
   b.hidden = false;
   $('#updLater').onclick = () => { try { localStorage.setItem('gw-upd-later', u.latest); } catch (e) { /* fine */ } b.hidden = true; };
-  $('#updNow').onclick = () => installUpdate(u.latest, $('#updNow'), $('#updNowSay'));
+  $('#updNow').onclick = () => installUpdate(u.latest, $('#updNow'), $('#updNowSay'), u.notes);
+}
+/* "will mention the newer updated version" — once, the first time the office
+   opens after an update: which version it is on now, and what changed. */
+async function afterUpdate() {
+  let done = null;
+  try { done = JSON.parse(localStorage.getItem('botix-updated') || 'null'); } catch (e) { return; }
+  if (!done || !done.to) return;
+  const p = await ask('/api/product');
+  if (!(p && p.ok)) return;
+  if (p.version !== done.to) return;           // not installed (yet): say nothing
+  try { localStorage.removeItem('botix-updated'); } catch (e) { /* fine */ }
+  const b = $('#updBanner'); if (!b) return;
+  b.innerHTML = `<b style="font-weight:600">Updated: you are on version ${esc(p.version)}</b>
+    ${done.notes ? `<span class="muted" style="font-size:14px">What is new: ${esc(done.notes)}</span>` : ''}
+    <span class="muted" style="font-size:13.5px">Your data, websites and settings are as you left them. Settings → This program shows the version any time.</span>
+    <div><button class="btn small" type="button" id="updOk">Good</button></div>`;
+  b.hidden = false;
+  $('#updOk').onclick = () => { b.hidden = true; };
 }
 async function undoUpdate() {
   if (!confirm('Go back to the version before the last update?')) return;
@@ -3215,7 +3261,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   state();
   route();
   loadPublisher();
-  updateBanner();
+  afterUpdate().then(() => { if ($('#updBanner') && $('#updBanner').hidden) updateBanner(); });
   ask('/api/product').then((p) => { if (p && p.hosted && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {}); });
   setInterval(updateBanner, 6 * 3600 * 1000);
   setInterval(async () => { const e = await ask('/api/engine-state'); if (e && e.ok) { S.engine = e; paintEngine(); } }, 60000);
@@ -3229,5 +3275,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintSite)
   }, 4 * 60000);
 })();
 </script>
+<script src="/tour.js"></script>
+<script src="/madeby.js"></script>
 </body>
 </html>

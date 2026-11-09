@@ -55,6 +55,9 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile={#SourceDir}\installer\glasswork.ico
+; The wizard's own pictures are Botix's (coordination/mark.py), not Inno Setup's stock ones.
+WizardImageFile={#SourceDir}\installer\wizard-large.bmp,{#SourceDir}\installer\wizard-large-2x.bmp
+WizardSmallImageFile={#SourceDir}\installer\wizard-small.bmp,{#SourceDir}\installer\wizard-small-2x.bmp
 UninstallDisplayIcon={app}\installer\glasswork.ico
 UninstallDisplayName={#AppName}
 LicenseFile={#SourceDir}\installer\LICENSE.txt

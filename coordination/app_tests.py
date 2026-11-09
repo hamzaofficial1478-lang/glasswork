@@ -242,6 +242,37 @@ def test_what_the_website_is_missing():
     check("  escaped", "${esc(g.title)}" in card and "${esc(g.why || '')}" in card, True)
 
 
+def test_the_tour_and_the_credit():
+    """
+    "when user will create a new account the program should have a tour ... on
+     each section" and "mention build by tech duo on the program end on each section"
+    """
+    print("\nA new account gets a tour of every section, and every screen says who built it:")
+    tour = (ROOT / "ui" / "tour.js").read_text(encoding="utf-8")
+    acct = (ROOT / "ui" / "account.html").read_text(encoding="utf-8")
+    made = (ROOT / "ui" / "madeby.js").read_text(encoding="utf-8")
+    check("the office loads the tour and the credit line", ('<script src="/tour.js">' in APP, '<script src="/madeby.js">' in APP),
+          (True, True))
+    check("signing up asks the office to show the tour the first time it opens",
+          "localStorage.setItem('botix-tour', 'start')" in acct, True)
+    menu = set(re.findall(r'<a href="#([a-z]+)" data-r="\1"', APP.split('<nav class="tabs"')[0]))
+    stops = set(re.findall(r"\{r: '([a-z]+)'", tour))
+    check("the tour stops at every section in the menu", sorted(menu - stops), [])
+    check("  it can be taken again from Help and from Settings",
+          ("id=\"tourAgain\"" in APP and "id=\"tourSettings\"" in APP and "window.startTour" in APP), True)
+    check("  Esc or Skip ends it, and it never presses anything for the person",
+          ("e.key === 'Escape'" in tour and "Skip the tour" in tour and ".click()" not in tour), True)
+    check("  its words are set as text, never as markup", ("innerHTML" in tour, "textContent" in tour), (False, True))
+    check("the version and Built by TECH DUO are at the foot of every screen",
+          "Built by " in made and "MutationObserver" in made and "innerHTML" not in made, True)
+    for page in ("engine.html", "setup.html"):
+        check(f"  on {page} too", '<script src="/madeby.js">' in (ROOT / "ui" / page).read_text(encoding="utf-8"), True)
+    check("  and on the sign-in page", "Built by" in acct and "footVer" in acct, True)
+    check("  which may load before anyone signs in", '"/madeby.js"' in SERVER.split("ACCOUNT_OPEN")[1][:900], True)
+    check("after an update the office says which version it is on now",
+          ("function afterUpdate()" in APP and "Updated: you are on version" in APP), True)
+
+
 def main():
     test_the_front_door()
     test_every_address_it_asks_for_exists()
@@ -254,6 +285,7 @@ def main():
     test_mail_content_and_the_shelf()
     test_alerts_wait_in_the_app()
     test_what_the_website_is_missing()
+    test_the_tour_and_the_credit()
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: " + ", ".join(_fail))

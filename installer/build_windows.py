@@ -232,10 +232,12 @@ def node_libraries(app: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def write_icon(path: Path) -> None:
-    """The BT tile (coordination/mark.py) at the sizes Windows asks for."""
+    """The Botix tile (coordination/mark.py) at the sizes Windows asks for — BOTIX
+    written on it from 48 pixels up — and the wizard's own pictures beside it."""
     from coordination import mark
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(mark.ico())
+    mark.installer_pictures(path.parent)
 
 
 # ---------------------------------------------------------------------------

@@ -317,7 +317,9 @@ ILLUSTRATIVE = "Illustrative photo"
 # agent writes prose and markup; it does not write behaviour.
 CODE_IN_A_PAGE = (
     r"<script\b", r"<iframe\b", r"<object\b", r"<embed\b", r"<form\b",
-    r"\bon(?:click|load|error|mouseover)\s*=", r"javascript\s*:",
+    # ANY event attribute, not four of them: ontoggle, onfocus, onanimationstart
+    # and the rest run as surely as onclick (docs/SECURITY-AUDIT.md, finding 1).
+    r"<[a-z][^>]*?\s(?:on[a-z]+|formaction|srcdoc)\s*=", r"javascript\s*:",
     r"<link\b[^>]*stylesheet", r"<style\b",
 )
 

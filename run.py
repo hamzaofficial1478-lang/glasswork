@@ -521,7 +521,8 @@ def tests():
             "pipelines.it_tests", "pipelines.fix_tests",
             "pipelines.heal_tests",
             "pipelines.release_tests",
-            "pipelines.site_tests", "pipelines.seo_tests", "pipelines.audit_tests",
+            "pipelines.site_tests", "pipelines.seo_tests", "pipelines.audit_tests", "pipelines.humanize_tests",
+            "coordination.hardening_tests",
             "pipelines.answers_tests", "pipelines.intel_tests",
             "pipelines.report_tests", "pipelines.run_tests",
             "pipelines.keepgoing_tests", "pipelines.index_tests"]

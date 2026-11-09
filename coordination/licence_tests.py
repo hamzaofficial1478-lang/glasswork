@@ -643,7 +643,10 @@ def test_bought_twice(w):
         # the second purchase, its messages in the other order
         w.stripe({"type": "customer.subscription.created", "data": {"object": _sub("sub_d2", "cus_d2", "price_starter")}})
         w.stripe(checkout("cs_d2", "cus_d2", "sub_d2", 3000))
-        mine = sorted((x for x in dash.list()["licences"] if x["email"] == mail), key=lambda x: x["bought_at"])
+        # Both bought in the same second here, so the time alone cannot order them;
+        # which one is the mistake is checked below by its own payment's page (cs_d2).
+        mine = sorted((x for x in dash.list()["licences"] if x["email"] == mail),
+                      key=lambda x: (x["bought_at"], bool(x.get("duplicate_of"))))
         check("one plan, not two: the second is marked as bought by mistake", [x["status"] for x in mine], ["active", "duplicate"])
         first, second = mine[0], mine[1]
         check("  and points at the first", second.get("duplicate_of"), first["id"])

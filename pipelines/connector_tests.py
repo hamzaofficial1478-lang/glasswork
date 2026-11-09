@@ -110,6 +110,10 @@ class Site:
         self.real_db = board.DB
         board.DB = str(self.dir / "agency.db")
         board.ensure_schema()
+        # What the connection last said is kept in this test's folder, never in
+        # the program's own config/ (a copy with no account keeps it there).
+        from . import connect
+        self.real_state, connect.STATE = connect.STATE, str(self.dir / "connect.local.json")
         S._SEEN.clear()
         S._VERSION.clear()
         return self
@@ -121,6 +125,8 @@ class Site:
         except Exception:
             self.proc.kill()
         board.DB = self.real_db
+        from . import connect
+        connect.STATE = self.real_state
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def file(self, name):
@@ -143,7 +149,7 @@ def test_one_request_reads_many_pages():
     print("\nMany pages come back in one request:")
     with Site() as w:
         h = S.health(s=w.s)
-        check("the connector says it is version 10", h.get("connector"), 10)
+        check(f"the connector says it is version {S.CONNECTOR_NEWEST}", h.get("connector"), S.CONNECTOR_NEWEST)
         check("  and what the host allows", bool((h.get("limits") or {}).get("post_max_size")), True)
         sent, undo = _counting()
         try:
@@ -409,11 +415,12 @@ def test_a_busy_page_answers_quickly():
         check("  and busy is something the agency tries again", r.get("_passing"), True)
 
 
-def _newer(v=11, extra=""):
+def _newer(v=None, extra=""):
     """The bundled connector, numbered as a newer version (optionally with a line added)."""
     from . import connect
+    v = v or S.CONNECTOR_NEWEST + 1
     src = connect.connector_source("127.0.0.1")
-    src = src.replace("const CONNECTOR = 10;", f"const CONNECTOR = {v};", 1)
+    src = src.replace(f"const CONNECTOR = {S.CONNECTOR_NEWEST};", f"const CONNECTOR = {v};", 1)
     if extra:
         src = src.replace("@ini_set('display_errors', '0');", extra + "\n@ini_set('display_errors', '0');", 1)
     return src
@@ -431,6 +438,7 @@ def test_it_updates_itself():
     print("\nThe connector updates itself, carefully:")
     from . import connect
     real = (connect.connector_source, S.CONNECTOR_NEWEST)
+    now_v, next_v = S.CONNECTOR_NEWEST, S.CONNECTOR_NEWEST + 1
     with Site() as w:
         idx = w.web / "agency-api" / "index.php"
         mine = idx.read_text(encoding="utf-8").replace(
@@ -439,21 +447,21 @@ def test_it_updates_itself():
         idx.write_text(mine, encoding="utf-8")
         token_before = (w.web / "agency-api" / "token.php").read_bytes()
         h = S.health(s=w.s)
-        check("version 10 says it can update itself", ("self-update" in h.get("can", []), h.get("self_update")), (True, ""))
+        check(f"version {now_v} says it can update itself", ("self-update" in h.get("can", []), h.get("self_update")), (True, ""))
         try:
-            newer = _newer(11)
+            newer = _newer(next_v)
             connect.connector_source = lambda host: newer
-            S.CONNECTOR_NEWEST = 11
+            S.CONNECTOR_NEWEST = next_v
             r = S.update_connector(agent=S.AGENT, s=w.s)
         finally:
             connect.connector_source, S.CONNECTOR_NEWEST = real
-        check("it took the newer copy", (r.get("ok"), r.get("from"), r.get("connector")), (True, 10, 11))
+        check("it took the newer copy", (r.get("ok"), r.get("from"), r.get("connector")), (True, now_v, next_v))
         check("  and checked it answered", r.get("checked"), "new")
         now = idx.read_text(encoding="utf-8")
-        check("the new copy is in", "const CONNECTOR = 11;" in now, True)
+        check("the new copy is in", f"const CONNECTOR = {next_v};" in now, True)
         check("  with his own SITE_ROOT line kept", "// his own line" in now, True)
         check("his token was not touched", (w.web / "agency-api" / "token.php").read_bytes(), token_before)
-        kept = sorted((w.web / "agency-api" / "backups").glob("connector-v10-*.php.bak"))
+        kept = sorted((w.web / "agency-api" / "backups").glob(f"connector-v{now_v}-*.php.bak"))
         check("the old copy is kept", len(kept), 1)
         from coordination import changelog
         rows = [x for x in changelog.recent(20).get("changes", []) if x.get("action") == "connector"]
@@ -470,31 +478,32 @@ def test_it_refuses_anything_else():
         before = idx.read_bytes()
         import base64
         import hashlib as _h
-        raw = _newer(11).encode()
-        r = S.call("/self-update", "POST", {"version": 11, "code": base64.b64encode(raw).decode(),
+        nv = S.CONNECTOR_NEWEST + 1
+        raw = _newer(nv).encode()
+        r = S.call("/self-update", "POST", {"version": nv, "code": base64.b64encode(raw).decode(),
                                             "sha256": "0" * 64}, s=w.s)
         check("a damaged copy", (r.get("ok"), "damaged" in str(r.get("error"))), (False, True))
         r = _push(w, _newer(9), 9)
         check("an older copy changes nothing", (r.get("ok"), r.get("unchanged")), (True, True))
-        r = _push(w, "<?php\nconst CONNECTOR = 11;\necho 'hello';\n", 11)
+        r = _push(w, f"<?php\nconst CONNECTOR = {nv};\necho 'hello';\n", nv)
         check("something that is not this connector", (r.get("ok"), "not a newer copy" in str(r.get("error"))), (False, True))
-        r = _push(w, _newer(11, "function broken( {"), 11)
+        r = _push(w, _newer(nv, "function broken( {"), nv)
         check("a copy that would not run", (r.get("ok"), "would not run" in str(r.get("error"))), (False, True))
-        r = _push(w, _newer(11).replace("const NEEDS_PHP = '8.0';", "const NEEDS_PHP = '99.0';"), 11)
+        r = _push(w, _newer(nv).replace("const NEEDS_PHP = '8.0';", "const NEEDS_PHP = '99.0';"), nv)
         check("a copy needing a newer PHP than the site has", (r.get("ok"), "needs PHP 99.0" in str(r.get("error"))), (False, True))
         check("  and through all of that the connector never changed", idx.read_bytes(), before)
-        r = _push(w, _newer(11, "throw new \\RuntimeException('boom');"), 11)
+        r = _push(w, _newer(nv, "throw new \\RuntimeException('boom');"), nv)
         check("a copy that breaks once it is in is put straight back",
               (r.get("ok"), "put straight back" in str(r.get("error"))), (False, True))
         check("  so the old one is there again", idx.read_bytes(), before)
-        check("  and it still answers", S.health(s=w.s).get("connector"), 10)
+        check("  and it still answers", S.health(s=w.s).get("connector"), S.CONNECTOR_NEWEST)
 
 
 def test_too_old_to_update_itself():
     print("\nA connector too old to update itself is told apart, with the fix:")
     with Site() as w:
         idx = w.web / "agency-api" / "index.php"
-        old = idx.read_text(encoding="utf-8").replace("const CONNECTOR = 10;", "const CONNECTOR = 9;") \
+        old = idx.read_text(encoding="utf-8").replace(f"const CONNECTOR = {S.CONNECTOR_NEWEST};", "const CONNECTOR = 9;") \
             .replace(", 'self-update'],", "],")
         idx.write_text(old, encoding="utf-8")
         r = S.update_connector(agent=S.AGENT, s=w.s)
@@ -506,6 +515,8 @@ def main():
     if not shutil.which("php"):
         print("SKIPPED: PHP is not installed here, so the connector cannot be run.")
         return 0
+    stray = ROOT / "config" / "connect.local.json"
+    was_there = stray.exists()
     for t in (test_one_request_reads_many_pages, test_a_change_is_whole_and_never_overwrites_his,
               test_two_changes_at_once_both_land, test_too_big_is_said_and_changes_nothing,
               test_an_old_encoding_is_read_but_not_garbled, test_a_dropped_line_is_tried_again,
@@ -513,6 +524,7 @@ def main():
               test_listing_is_remembered_but_never_stale, test_a_busy_page_answers_quickly,
               test_it_updates_itself, test_it_refuses_anything_else, test_too_old_to_update_itself):
         t()
+    check("the tests wrote nothing into the program's own config folder", stray.exists() and not was_there, False)
     print()
     if _fail:
         print(f"{len(_fail)} FAILED: " + ", ".join(_fail))

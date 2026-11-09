@@ -99,7 +99,7 @@ header('X-Robots-Tag: noindex, nofollow');   // never let Google index the door
 //                         answer. Your token and your settings are untouched,
 //                         and so is the SITE_ROOT line below if you changed it.
 //                         This is the last time anybody uploads this by hand.
-const CONNECTOR = 10;
+const CONNECTOR = 11;
 // The oldest PHP this file runs on. A newer copy that needs more than your
 // server has is refused before it is put in, rather than breaking the door.
 const NEEDS_PHP = '8.0';
@@ -1467,24 +1467,63 @@ function save_record(array $r): void {
     @file_put_contents(BLOG_RECORD, json_encode(array_values($r), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 }
 
-function fetch_picture(string $url): string {
+/** The public address a picture's host has now, or '' (not http(s), or not on the public internet). */
+function public_ip_of(string $url): string {
+    if (!preg_match('#^https?://#i', $url)) { return ''; }
     $host = (string)parse_url($url, PHP_URL_HOST);
     $ip = $host !== '' ? gethostbyname($host) : '';
-    if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-        return '';
+    return ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) ? $ip : '';
+}
+
+/** Where a redirect points, made whole against the address that sent it. */
+function next_address(string $from, string $loc): string {
+    $loc = trim($loc);
+    if (preg_match('#^https?://#i', $loc)) { return $loc; }
+    if ($loc === '' || $loc[0] !== '/' || strncmp($loc, '//', 2) === 0) { return ''; }
+    $p = parse_url($from);
+    return ($p['scheme'] ?? 'https') . '://' . ($p['host'] ?? '') . (isset($p['port']) ? ':' . $p['port'] : '') . $loc;
+}
+
+/**
+ * A picture from the internet, for a post. EVERY hop is checked, not only the
+ * first: a public address that answers "moved to http://127.0.0.1/" or to the
+ * hosting's internal network is refused, and the address checked is the one
+ * connected to (no second DNS answer). Security audit, docs/SECURITY-AUDIT.md.
+ */
+function fetch_picture(string $url): string {
+    for ($hop = 0; $hop <= 3; $hop++) {
+        $ip = public_ip_of($url);
+        if ($ip === '') { return ''; }
+        if (function_exists('curl_init')) {
+            $host = (string)parse_url($url, PHP_URL_HOST);
+            $port = (int)(parse_url($url, PHP_URL_PORT) ?: (stripos($url, 'https://') === 0 ? 443 : 80));
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false,
+                                    CURLOPT_TIMEOUT => 25, CURLOPT_RESOLVE => ["$host:$port:$ip"],
+                                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                                    CURLOPT_USERAGENT => 'agency-api (saving a blog picture)']);
+            $data = curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $next = (string)curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+            curl_close($ch);
+        } else {
+            $ctx = stream_context_create(['http' => ['timeout' => 25, 'follow_location' => 0, 'ignore_errors' => true]]);
+            $data = @file_get_contents($url, false, $ctx, 0, IMAGE_MAX + 1);
+            $code = 0;
+            $next = '';
+            foreach ((array)($http_response_header ?? []) as $h) {
+                if (preg_match('#^HTTP/\S+\s+(\d{3})#', (string)$h, $m)) { $code = (int)$m[1]; $next = ''; }
+                elseif (stripos((string)$h, 'Location:') === 0) { $next = next_address($url, substr((string)$h, 9)); }
+            }
+        }
+        if ($code >= 300 && $code < 400) {
+            if ($next === '') { return ''; }
+            $url = $next;
+            continue;
+        }
+        return ($code >= 200 && $code < 300 && is_string($data)) ? $data : '';
     }
-    if (function_exists('curl_init')) {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true,
-                                CURLOPT_MAXREDIRS => 3, CURLOPT_TIMEOUT => 25,
-                                CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-                                CURLOPT_USERAGENT => 'agency-api (saving a blog picture)']);
-        $data = curl_exec($ch);
-        curl_close($ch);
-        return is_string($data) ? $data : '';
-    }
-    $ctx = stream_context_create(['http' => ['timeout' => 25, 'follow_location' => 1, 'max_redirects' => 3]]);
-    return (string)@file_get_contents($url, false, $ctx, 0, IMAGE_MAX + 1);
+    return '';
 }
 
 /**

@@ -165,8 +165,15 @@ if ($do === '' && $method === 'GET') {
     $name = htmlspecialchars((string)(config()['product'] ?? 'Botix'), ENT_QUOTES);
     $m = manifest();
     $ver = $m ? htmlspecialchars((string)($m['version'] ?? ''), ENT_QUOTES) : '';
-    $exe = $m && !empty($m['installer']) ? htmlspecialchars(here() . '/updates/' . basename((string)$m['installer']), ENT_QUOTES) : '';
+    // A link relative to this page, never built from the Host header the
+    // visitor's request carried: a forged Host could otherwise point the
+    // download button at another server, and a cache in front of the website
+    // could keep that page for everyone (docs/SECURITY-AUDIT.md).
+    $exe = $m && !empty($m['installer']) ? htmlspecialchars('updates/' . rawurlencode(basename((string)$m['installer'])), ENT_QUOTES) : '';
     header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+    header('X-Content-Type-Options: nosniff');
+    header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'");
     echo "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
        . "<title>$name — download</title><style>body{font:16px/1.5 system-ui,sans-serif;margin:0;background:#f4f6f5;color:#16201c}"
        . "main{max-width:560px;margin:10vh auto;padding:28px;background:#fff;border:1px solid #d9e0dc;border-radius:14px}"

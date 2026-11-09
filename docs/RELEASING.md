@@ -2,9 +2,18 @@
 
 This guide is for your own copy only. It is left out of every copy you give
 people, along with the rest of your side of the program (see *What people get*
-below). The program is closed source: the repository is private and the
-`LICENSE` file says nobody may copy, share or change it without your written
-permission.
+below). The program is closed source: the `LICENSE` file says nobody may copy,
+share or change it without your written permission.
+
+**Your GitHub repository is public at the moment**, so anyone can read the
+code, even though the licence forbids copying it. Updates from GitHub need a
+public repository (people download from it without a GitHub account). If you
+want the code private: make this repository private, make a second, empty,
+public one (for example `botix-releases`), and give that one in
+**Settings → Publisher → Updates on GitHub**. Versions then go out there and
+the code stays private. (A releases-only repository has no Windows machine of
+its own, so tick *Build the Windows installer here too* when you put a version
+out.)
 
 ---
 
@@ -69,6 +78,24 @@ your Windows user folder (`C:\Users\<you>\.glasswork-publisher`):
 Your records are in the program's `data/publisher` folder; copy that too if you
 want a backup of the reports and your answers.
 
+## 1b. Once: updates on GitHub (about three minutes)
+
+Versions can go out as **releases on GitHub**: people download the installer
+from the release page, and every copy looks there for updates.
+
+1. On GitHub: your picture → **Settings → Developer settings → Personal access
+   tokens → Fine-grained tokens → Generate new token**. Name it *Botix
+   releases*, give it an expiry, choose **Only select repositories** and pick
+   the program's repository. Under **Repository permissions** set
+   **Contents: Read and write**. Nothing else. Generate, and copy it.
+2. In your program: **Settings → Publisher → Updates on GitHub**. The
+   repository is filled in; paste the token; press **Use GitHub**. It checks
+   the token with GitHub before keeping it, and never shows it again.
+
+The signing key never leaves your computer: each version is signed here and
+only then sent. The token can make releases and nothing else. If it leaks,
+delete it on GitHub and make another.
+
 ## 2. Each new version
 
 When a round of work is finished, the version number goes up (it is in
@@ -77,14 +104,23 @@ When a round of work is finished, the version number goes up (it is in
 1. Open your program as usual — it brings itself up to date first.
 2. **Settings → Publisher → Put out version 0.x.0.** Write a line about what is
    new — people read it in the update message.
-3. Tick **Build the Windows installer too** (on your Windows computer; the first
-   time it installs Inno Setup and takes ten minutes or so, after that two or three).
+3. With GitHub set up, leave **Build the Windows installer here too** unticked:
+   GitHub's own Windows machine builds the installer from the release, installs
+   it, opens it, removes it again, and only then adds it to the release page (a
+   few minutes after). Without GitHub, tick it (on your Windows computer; the
+   first time it installs Inno Setup and takes ten minutes or so).
 4. Press **Put it out**.
 
 Every copy shows *"Version 0.x.0 is ready — Update now"* the next time it opens
-(and every six hours while it stays open). Only a version signed with your key
-is installed. Their data, websites and settings are never touched, and they can
-go back to the previous version from Settings.
+(and every six hours while it stays open). One press downloads it, checks your
+signature, installs it and reloads; the office then says *"Updated: you are on
+version 0.x.0"* with your line about what is new. Only a version signed with
+your key is installed. Their data, websites and settings are never touched, and
+they can go back to the previous version from Settings.
+
+Copies installed before GitHub was set up look for updates on your Botix Home,
+so a version goes out on both while you have both; from the first GitHub
+release on, new copies look on GitHub.
 
 A version can only go out once; the next one needs a higher number.
 
@@ -109,10 +145,15 @@ helper needs something new, its version goes up (`const BOTIX_HELPER` in
 `paste-into-your-site/botix-helper.php` and `WP_HELPER_NEWEST` in
 `pipelines/site_api.py`) so every WordPress site takes it by itself.
 
-## 3. New people: one link
+## 3. New people: one link, one file
 
-Send them your download page (section 1). They press **Download for Windows**,
-open the file, and follow the steps: the terms, where to install the program,
+Send them your download page (section 1), or the GitHub release page
+(`github.com/<your repository>/releases/latest`). **They download one file:
+`botix-<version>-setup.exe`.** Not the zip, not the source code: the zip on a
+release is for the program's own updater, and *Source code (zip)* is added by
+GitHub to every release and cannot be removed; the release page says so. On
+your download page they press **Download for Windows**. They open the file
+and follow the steps: the terms, where to install the program,
 where to keep their work, a desktop shortcut. Everything it needs is inside
 that one file — its own Python, its own Node and every library — so nothing
 else downloads and no administrator password is needed.

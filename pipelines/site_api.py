@@ -63,7 +63,7 @@ TIMEOUT = 25
 # 9: everything packed (gzip) both ways, up to 25 page changes in one request
 # and all-or-nothing, robots.txt and llms.txt, and gentler on the host — a busy
 # page answers "busy" in seconds instead of holding one of its workers.
-CONNECTOR_NEWEST = 10
+CONNECTOR_NEWEST = 11
 # The Botix helper plugin for WordPress (paste-into-your-site/botix-helper.php):
 # the version in this copy of the program, sent to a site with an older one.
 WP_HELPER_NEWEST = 1
